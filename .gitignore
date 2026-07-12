@@ -1,0 +1,40 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+
+# Virtual environment
+.venv/
+venv/
+
+# IDE
+.vscode/
+.idea/
+
+# Qt
+*.qrc~
+
+# Cache
+cache/
+*.cache
+
+# Logs
+*.log
+
+# Build
+build/
+dist/
+
+# PyInstaller
+*.spec.bak
+
+# Backup files
+*.bak
+*.backup
+
+# Temporary
+*.tmp
+
+# OS
+Thumbs.db
+.DS_Store
