@@ -24,6 +24,7 @@ from app.services.online_download_manager import OnlineDownloadManager
 from app.services.online_source_client import OnlineSourceClient
 from app.services.remote_track_store import RemoteTrackStore
 from app.services.source_registry import SourceRegistryManager
+from app.services.unified_search_service import UnifiedSearchService
 from app.ui.online_source_pages import OnlineSearchPage
 
 
@@ -46,6 +47,7 @@ def prepare_fixture() -> Path:
     plugin_path = TEST_ROOT / "open_fixture.js"
     plugin_path.write_text(
         """module.exports = {
+            search: async (keyword) => [{ id: `open-${keyword}`, title: `Open ${keyword}`, artist: "Fixture", album: "Tests", duration: 120 }],
             resolvePlayback: async (track) => {
                 await new Promise((resolve) => setTimeout(resolve, Number(track.delay || 0)));
                 if (track.fail) throw new Error("fixture failure");
@@ -57,6 +59,7 @@ def prepare_fixture() -> Path:
     independent_path = TEST_ROOT / "independent_fixture.js"
     independent_path.write_text(
         """module.exports = {
+            search: async (keyword) => [{ id: `independent-${keyword}`, title: `Independent ${keyword}`, artist: "Fixture", album: "Tests", duration: 150 }],
             resolvePlayback: async () => ({ url: "http://127.0.0.1/fallback.wav" }),
             resolveDownload: async () => ({ url: "http://127.0.0.1/independent.flac", filename: "independent.flac" })
         };\n""",
@@ -77,6 +80,7 @@ def prepare_fixture() -> Path:
                         "sourceUrl": "https://example.invalid/open_fixture.js",
                         "contentPolicy": "open",
                         "capabilities": {
+                            "search": True,
                             "playback": True,
                             "download": True,
                             "downloadViaPlayback": True,
@@ -91,6 +95,7 @@ def prepare_fixture() -> Path:
                         "sourceUrl": "https://example.invalid/independent_fixture.js",
                         "contentPolicy": "open",
                         "capabilities": {
+                            "search": True,
                             "playback": True,
                             "download": True,
                             "downloadViaPlayback": False,
@@ -150,6 +155,28 @@ def test_qprocess_client(app: QApplication, registry_path: Path) -> None:
     client.stop()
     assert wait_until(lambda: bool(stopped))
     assert not client.is_running()
+    client.deleteLater()
+    app.processEvents()
+
+
+def test_unified_qprocess_search(app: QApplication, registry_path: Path) -> None:
+    os.environ["HUSHPLAYER_SOURCE_REGISTRY"] = str(registry_path)
+    client = OnlineSourceClient(PROJECT_ROOT)
+    service = UnifiedSearchService(client, debounce_ms=500)
+    emissions: list[tuple[list, dict]] = []
+    service.resultsChanged.connect(
+        lambda _generation, _keyword, results, summary:
+        emissions.append((list(results), dict(summary)))
+    )
+    service.schedule_search("fixture")
+    service.start_pending_search()
+    assert wait_until(lambda: bool(emissions) and emissions[-1][1].get("final"), 12000)
+    assert {item["sourceId"] for item in emissions[-1][0]} == {
+        "open_fixture",
+        "independent_fixture",
+    }
+    service.shutdown()
+    client.stop()
     client.deleteLater()
     app.processEvents()
 
@@ -407,6 +434,42 @@ def test_main_window_online_entry() -> None:
     try:
         window = MainWindow()
         assert not hasattr(window, "source_manager_page")
+        assert hasattr(window, "custom_source_manager_page")
+        assert hasattr(window, "unified_search_service")
+        assert hasattr(window, "unified_search_panel")
+        local_fixture_item = window.create_song_list_item(
+            {
+                "title": "q",
+                "artist": "Local fixture",
+                "album": "Local album",
+                "path": "C:/Music/local-search-fixture.flac",
+                "added_at": 1,
+                "demo": False,
+            }
+        )
+        window.song_list.addItem(local_fixture_item)
+        window.search_input.setText("q")
+        assert local_fixture_item.isHidden() is False
+        assert "输入至少 2 个字符" in window.unified_search_panel.status_label.text()
+        window.unified_search_panel.set_results(
+            "q",
+            [
+                {
+                    "sourceId": "open_fixture",
+                    "sourceName": "Fixture",
+                    "id": "search-fixture",
+                    "title": "Search fixture",
+                    "artist": "Artist",
+                    "album": "Album",
+                    "availability": "available",
+                    "capabilities": {"playback": True, "download": True},
+                }
+            ],
+            {"final": True},
+        )
+        window.search_input.clear()
+        assert window.unified_search_panel.isHidden() is True
+        assert local_fixture_item.isHidden() is False
         track = {
             "sourceId": "open_fixture",
             "id": "fixture",
@@ -469,6 +532,19 @@ def test_main_window_online_entry() -> None:
             assert saved_playlists["liked"]["remoteSongs"] == [stable_id]
             assert saved_playlists["custom"]["remoteSongs"] == [stable_id]
             assert RemoteTrackStore(window.remote_tracks_file).load_tracks()[stable_id]["title"] == "Remote fixture"
+            downloaded_path = root / "downloaded.wav"
+            downloaded_path.write_bytes(b"RIFF")
+            downloaded_record = dict(window.remote_tracks[stable_id])
+            downloaded_record["local_path"] = str(downloaded_path)
+            window.remote_tracks[stable_id] = downloaded_record
+            played_local: list[dict] = []
+            window.load_song_for_playback = lambda song: played_local.append(dict(song))
+            window.play_current_song = lambda: None
+            window.play_unified_search_track(
+                {**remote_track, "remoteStableId": stable_id, "availability": "available"}
+            )
+            assert played_local
+            assert played_local[-1]["path"] == str(downloaded_path.resolve())
         window.media_player.stop()
         window.online_source_client.stop()
         window.deleteLater()
@@ -483,6 +559,7 @@ def main() -> int:
     registry_path = prepare_fixture()
     try:
         test_qprocess_client(app, registry_path)
+        test_unified_qprocess_search(app, registry_path)
         test_search_page_signals()
         test_download_manager()
         test_js_and_json_import_capabilities()

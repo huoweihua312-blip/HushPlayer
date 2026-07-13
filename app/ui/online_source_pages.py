@@ -46,6 +46,7 @@ class OnlineSearchPage(QFrame):
     unlike_requested = Signal(dict)
     add_to_playlist_requested = Signal(dict, str)
     info_requested = Signal(dict)
+    sources_changed = Signal(str)
 
     def __init__(
         self,
@@ -265,6 +266,7 @@ class OnlineSearchPage(QFrame):
                 except SourceRegistryError as error:
                     self.status_label.setText(f"更新来源授权失败：{error}")
                     return
+                self.sources_changed.emit(source_id)
                 self._reload_then_search(source_id, keyword, "正在重载已注册来源…")
                 return
             self._start_source_download(source_url, keyword)
@@ -385,6 +387,7 @@ class OnlineSearchPage(QFrame):
             if update_source_id
             else f"已安全注册“{installed.get('name') or installed.get('id')}”。"
         )
+        self.sources_changed.emit(str(installed.get("id") or update_source_id or ""))
         self._pending_reload_completion = completion
         self._reload_then_search(
             str(installed.get("id") or ""),

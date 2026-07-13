@@ -119,6 +119,21 @@ class SourceRegistryManager:
 
         raise SourceRegistryError(f"没有找到音源：{source_id}")
 
+    def set_name(self, source_id: str, name: str) -> dict:
+        display_name = " ".join(str(name or "").strip().split())
+        if not display_name:
+            raise SourceRegistryError("来源名称不能为空")
+        if len(display_name) > 80:
+            raise SourceRegistryError("来源名称不能超过 80 个字符")
+        document = self.load_registry_document()
+        for source in document["sources"]:
+            if isinstance(source, dict) and source.get("id") == source_id:
+                source["name"] = display_name
+                source["nameCustomized"] = True
+                self._save_registry_document(document)
+                return dict(source)
+        raise SourceRegistryError(f"没有找到音源：{source_id}")
+
     def authorize_user_source(self, source_id: str, content_policy: str) -> dict:
         policy = str(content_policy or "").strip().lower()
         if policy not in ALLOWED_CONTENT_POLICIES:
@@ -555,6 +570,7 @@ class SourceRegistryManager:
         entry = {
             "id": source_id,
             "name": str(candidate.get("name") or source_id),
+            "nameCustomized": False,
             "platform": str(candidate.get("platform") or candidate.get("name") or source_id),
             "author": str(candidate.get("author") or ""),
             "version": str(candidate.get("version") or ""),
@@ -633,7 +649,11 @@ class SourceRegistryManager:
             shutil.move(str(staging_path), str(target_path))
             source.update(
                 {
-                    "name": str(candidate.get("name") or source.get("name") or source_id),
+                    "name": str(
+                        source.get("name")
+                        if source.get("nameCustomized")
+                        else candidate.get("name") or source.get("name") or source_id
+                    ),
                     "platform": str(candidate.get("platform") or source.get("platform") or source_id),
                     "author": str(candidate.get("author") or ""),
                     "version": str(candidate.get("version") or ""),

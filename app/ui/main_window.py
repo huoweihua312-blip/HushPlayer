@@ -14,7 +14,10 @@ from app.services.online_download_manager import OnlineDownloadManager
 from app.services.online_source_client import OnlineSourceClient
 from app.services.remote_track_store import RemoteTrackStore, RemoteTrackStoreError
 from app.services.source_registry import SourceRegistryManager
+from app.services.unified_search_service import UnifiedSearchService
+from app.ui.custom_source_manager_page import CustomSourceManagerPage
 from app.ui.online_source_pages import OnlineSearchPage
+from app.ui.unified_search_panel import UnifiedSearchResultsPanel
 from PySide6.QtCore import QEasingCurve, QEvent, QItemSelectionModel, QObject, QPropertyAnimation, QRectF, QRunnable, QSize, Qt, QThread, QThreadPool, QTimer, QUrl, Signal
 from PySide6.QtGui import QColor, QFont, QFontMetrics, QIcon, QKeySequence, QPainter, QPainterPath, QPalette, QPen, QPixmap, QShortcut
 from PySide6.QtMultimedia import QAudioOutput, QMediaDevices, QMediaPlayer
@@ -3547,6 +3550,17 @@ class MainWindow(QMainWindow):
         settings = self.measure_startup_step("设置 JSON", self.load_settings)
         self.current_volume = int(settings.get("volume", 65))
         self.play_mode = settings.get("play_mode", "list_loop")
+        self.unified_search_local_only = bool(
+            settings.get("online_search_local_only", False)
+        )
+        self.unified_search_results: list[dict] = []
+        self.unified_search_summary: dict = {}
+        self.unified_search_service = UnifiedSearchService(
+            self.online_source_client,
+            self,
+            debounce_ms=settings.get("online_search_debounce_ms", 500),
+            cache_ttl_seconds=180,
+        )
         self.playlists = self.measure_startup_step("歌单与收藏 JSON", self.load_playlists)
         self.song_stats = self.measure_startup_step("播放统计 JSON", self.load_song_stats)
         self.lyrics_bindings = self.measure_startup_step("歌词绑定 JSON", self.load_lyrics_bindings)
@@ -3640,7 +3654,40 @@ class MainWindow(QMainWindow):
         online_search_page.unlike_requested.connect(self.unlike_online_track)
         online_search_page.add_to_playlist_requested.connect(self.add_online_track_to_playlist)
         online_search_page.info_requested.connect(self.show_online_track_info)
+        online_search_page.sources_changed.connect(self.on_custom_sources_changed)
         online_search_page.set_collection_providers(
+            self.get_online_track_collection_state,
+            self.get_online_playlist_choices,
+        )
+        custom_source_manager_page = self.measure_startup_step(
+            "自定义来源管理页面 UI（无网络请求）",
+            lambda: CustomSourceManagerPage(
+                self.source_registry_manager,
+                self.online_source_client,
+                self,
+            ),
+        )
+        self.custom_source_manager_page = custom_source_manager_page
+        custom_source_manager_page.sourcesChanged.connect(self.on_custom_sources_changed)
+        custom_source_manager_page.backRequested.connect(self.show_library_page)
+        self.unified_search_service.statusChanged.connect(
+            self.unified_search_panel.set_status
+        )
+        self.unified_search_service.resultsChanged.connect(
+            self.on_unified_search_results_changed
+        )
+        self.unified_search_panel.playRequested.connect(self.play_unified_search_track)
+        self.unified_search_panel.downloadRequested.connect(self.request_online_download)
+        self.unified_search_panel.likeRequested.connect(self.like_online_track)
+        self.unified_search_panel.unlikeRequested.connect(self.unlike_online_track)
+        self.unified_search_panel.addToPlaylistRequested.connect(
+            self.add_online_track_to_playlist
+        )
+        self.unified_search_panel.removeFromCurrentPlaylistRequested.connect(
+            self.remove_unified_track_from_current_playlist
+        )
+        self.unified_search_panel.infoRequested.connect(self.show_online_track_info)
+        self.unified_search_panel.set_collection_providers(
             self.get_online_track_collection_state,
             self.get_online_playlist_choices,
         )
@@ -3648,7 +3695,7 @@ class MainWindow(QMainWindow):
         self.online_source_client.downloadResolved.connect(self.on_online_download_resolved)
         self.online_source_client.requestFailed.connect(self.on_online_source_request_failed)
         self.online_download_manager.started.connect(
-            lambda _path: self.online_search_page.set_online_status("正在下载…")
+            lambda _path: self.set_online_status_message("正在下载…")
         )
         self.online_download_manager.progress.connect(self.on_online_download_progress)
         self.online_download_manager.finished.connect(self.on_online_download_finished)
@@ -3661,6 +3708,7 @@ class MainWindow(QMainWindow):
         self.content_stack.addWidget(full_lyrics_page)
         self.content_stack.addWidget(pending_imports_page)
         self.content_stack.addWidget(online_search_page)
+        self.content_stack.addWidget(custom_source_manager_page)
 
         body_layout.addWidget(sidebar)
         body_layout.addWidget(self.content_stack, 1)
@@ -4193,9 +4241,18 @@ class MainWindow(QMainWindow):
 
     def get_online_track_collection_state(self, track: dict) -> dict:
         stable_id = RemoteTrackStore.stable_id_for_track(track)
+        current_playlist_id = ""
+        if self.current_library_view == "liked":
+            current_playlist_id = "liked"
+        elif self.current_library_view.startswith("playlist:"):
+            current_playlist_id = self.current_library_view.split("playlist:", 1)[1]
         return {
             "stableId": stable_id,
             "liked": stable_id in self.get_playlist_remote_ids("liked"),
+            "inCurrentPlaylist": bool(
+                current_playlist_id
+                and stable_id in self.get_playlist_remote_ids(current_playlist_id)
+            ),
         }
 
     def like_online_track(self, track: dict) -> None:
@@ -4205,18 +4262,18 @@ class MainWindow(QMainWindow):
         stable_id = RemoteTrackStore.stable_id_for_track(track)
         liked_ids = self.get_playlist_remote_ids("liked")
         if stable_id not in liked_ids:
-            self.online_search_page.set_online_status("该在线歌曲尚未收藏。")
+            self.set_online_status_message("该在线歌曲尚未收藏。")
             return
         liked_ids.remove(stable_id)
         if not self.save_playlists():
             liked_ids.append(stable_id)
             return
         self.refresh_remote_collection_views()
-        self.online_search_page.set_online_status("已取消收藏该在线歌曲。")
+        self.set_online_status_message("已取消收藏该在线歌曲。")
 
     def add_online_track_to_playlist(self, track: dict, playlist_id: str) -> None:
         if playlist_id not in self.playlists or not isinstance(self.playlists.get(playlist_id), dict):
-            self.online_search_page.set_online_status("目标歌单不存在。")
+            self.set_online_status_message("目标歌单不存在。")
             return
         try:
             stable_id, _record = self.persist_remote_track(track)
@@ -4225,7 +4282,7 @@ class MainWindow(QMainWindow):
             return
         remote_ids = self.get_playlist_remote_ids(playlist_id)
         if stable_id in remote_ids:
-            self.online_search_page.set_online_status(
+            self.set_online_status_message(
                 f"该歌曲已经在“{self.get_playlist_name(playlist_id)}”中。"
             )
             return
@@ -4234,7 +4291,7 @@ class MainWindow(QMainWindow):
             remote_ids.remove(stable_id)
             return
         self.refresh_remote_collection_views()
-        self.online_search_page.set_online_status(
+        self.set_online_status_message(
             f"已加入“{self.get_playlist_name(playlist_id)}”。"
         )
 
@@ -4305,6 +4362,7 @@ class MainWindow(QMainWindow):
         if self.current_library_view == "liked" or self.current_library_view.startswith("playlist:"):
             self.sort_song_list_for_current_view()
             self.filter_song_list(self.search_input.text())
+        self.refresh_unified_search_result_states()
 
     def get_custom_playlist_ids(self) -> list[str]:
         playlist_ids = []
@@ -5749,6 +5807,7 @@ class MainWindow(QMainWindow):
             "lyrics": getattr(self, "lyrics_nav_button", None),
             "pending": getattr(self, "pending_nav_button", None),
             "online_search": getattr(self, "online_search_nav_button", None),
+            "custom_sources": getattr(self, "custom_sources_nav_button", None),
             "settings": getattr(self, "settings_nav_button", None),
         }
 
@@ -5825,6 +5884,15 @@ class MainWindow(QMainWindow):
         self.set_right_panel_mode("info")
         self.refresh_full_lyrics_page()
 
+    def set_online_status_message(self, message: str) -> None:
+        text = str(message or "")
+        page = getattr(self, "online_search_page", None)
+        if page is not None:
+            page.set_online_status(text)
+        panel = getattr(self, "unified_search_panel", None)
+        if panel is not None:
+            panel.set_status(text)
+
     def initialize_online_source_framework(self) -> None:
         client = getattr(self, "online_source_client", None)
 
@@ -5839,7 +5907,7 @@ class MainWindow(QMainWindow):
             return
         source_id = str(track.get("sourceId") or "").strip()
         if not source_id:
-            self.online_search_page.set_online_status("播放请求缺少音源标识。")
+            self.set_online_status_message("播放请求缺少音源标识。")
             return
 
         previous_request = int(getattr(self, "pending_online_playback_request", 0) or 0)
@@ -5869,14 +5937,14 @@ class MainWindow(QMainWindow):
         if track.get("remoteStableId"):
             self.sync_remote_song_items()
         if resolution.get("headers"):
-            self.online_search_page.set_online_status(
+            self.set_online_status_message(
                 "该音源需要附加请求头，当前播放模式暂不支持。"
             )
             return
 
         url = QUrl(str(resolution.get("url") or ""))
         if not url.isValid() or url.scheme().lower() not in {"http", "https"}:
-            self.online_search_page.set_online_status("音源返回了无效的播放地址。")
+            self.set_online_status_message("音源返回了无效的播放地址。")
             return
 
         self.flush_current_listen_time()
@@ -5907,7 +5975,7 @@ class MainWindow(QMainWindow):
         self.update_like_button()
         self.lyrics_view.set_placeholder("在线歌曲", "本阶段暂不接入在线歌词显示。")
 
-        self.online_search_page.set_online_status("正在加载在线歌曲…")
+        self.set_online_status_message("正在加载在线歌曲…")
         self.media_player.stop()
         self.media_player.setSource(url)
         self.progress_slider.setValue(0)
@@ -5918,11 +5986,11 @@ class MainWindow(QMainWindow):
         if not isinstance(track, dict):
             return
         if self.online_download_manager.is_active():
-            self.online_search_page.set_online_status("已有在线下载正在进行，请等待完成。")
+            self.set_online_status_message("已有在线下载正在进行，请等待完成。")
             return
         source_id = str(track.get("sourceId") or "").strip()
         if not source_id:
-            self.online_search_page.set_online_status("下载请求缺少音源标识。")
+            self.set_online_status_message("下载请求缺少音源标识。")
             return
         previous_request = int(getattr(self, "pending_online_download_request", 0) or 0)
         if previous_request:
@@ -5932,7 +6000,7 @@ class MainWindow(QMainWindow):
                 and RemoteTrackStore.stable_id_for_track(previous_track)
                 == RemoteTrackStore.stable_id_for_track(track)
             ):
-                self.online_search_page.set_online_status("这首歌曲的下载地址正在解析，请勿重复操作。")
+                self.set_online_status_message("这首歌曲的下载地址正在解析，请勿重复操作。")
                 return
             self.online_source_client.cancel_request(previous_request)
         self.pending_online_download_track = dict(track)
@@ -5970,7 +6038,7 @@ class MainWindow(QMainWindow):
             "音频文件 (*.mp3 *.flac *.wav *.m4a *.ogg *.opus *.aac);;所有文件 (*.*)",
         )
         if not target_path:
-            self.online_search_page.set_online_status("已取消下载。")
+            self.set_online_status_message("已取消下载。")
             return
         if self.online_download_manager.start_download(resolution, target_path):
             self.active_online_download_track = dict(track)
@@ -5980,19 +6048,19 @@ class MainWindow(QMainWindow):
         if action == "resolvePlayback" and request_id == self.pending_online_playback_request:
             self.pending_online_playback_request = 0
             self.pending_online_track = None
-            self.online_search_page.set_online_status(f"获取播放地址失败：{message}")
+            self.set_online_status_message(f"获取播放地址失败：{message}")
             self.sync_remote_song_items()
         elif action == "resolveDownload" and request_id == self.pending_online_download_request:
             self.pending_online_download_request = 0
             self.pending_online_download_track = None
-            self.online_search_page.set_online_status(f"获取下载地址失败：{message}")
+            self.set_online_status_message(f"获取下载地址失败：{message}")
 
     def on_online_download_progress(self, received: int, total: int) -> None:
         if total > 0:
             percent = min(100, max(0, int(received * 100 / total)))
-            self.online_search_page.set_online_status(f"正在下载… {percent}%")
+            self.set_online_status_message(f"正在下载… {percent}%")
         else:
-            self.online_search_page.set_online_status(
+            self.set_online_status_message(
                 f"正在下载… {received / (1024 * 1024):.1f} MB"
             )
 
@@ -6002,7 +6070,7 @@ class MainWindow(QMainWindow):
         self.active_online_download_track = None
         record = self.remote_tracks.get(stable_id)
         if not isinstance(record, dict):
-            self.online_search_page.set_online_status(f"下载完成：{target_path}")
+            self.set_online_status_message(f"下载完成：{target_path}")
             return
         updated_record = dict(record)
         updated_record["local_path"] = str(Path(target_path).resolve())
@@ -6012,25 +6080,26 @@ class MainWindow(QMainWindow):
         try:
             self.remote_track_store.save_tracks(updated_tracks)
         except RemoteTrackStoreError as error:
-            self.online_search_page.set_online_status(f"文件已下载，但保存关联失败：{error}")
+            self.set_online_status_message(f"文件已下载，但保存关联失败：{error}")
             return
         self.remote_tracks = updated_tracks
         self.add_music_paths([Path(target_path)])
         local_song = self.find_song_data_by_path(target_path)
         self.sync_remote_song_items()
+        self.refresh_unified_search_result_states()
         if isinstance(local_song, dict) and local_song.get("recordKind") != "remote":
-            self.online_search_page.set_online_status(
+            self.set_online_status_message(
                 f"下载完成并已关联本地音乐库：{target_path}"
             )
         else:
-            self.online_search_page.set_online_status(
+            self.set_online_status_message(
                 f"下载完成，但文件扩展名未被本地音乐库识别：{target_path}"
             )
 
     def on_online_download_failed(self, message: str) -> None:
         self.active_online_download_remote_id = ""
         self.active_online_download_track = None
-        self.online_search_page.set_online_status(message)
+        self.set_online_status_message(message)
 
     def show_online_search_page(self) -> None:
         self.set_sidebar_active("online_search")
@@ -6040,6 +6109,21 @@ class MainWindow(QMainWindow):
             self.online_search_page.refresh_sources()
 
         self.set_right_panel_mode("info")
+
+    def show_custom_source_manager_page(self) -> None:
+        self.set_sidebar_active("custom_sources")
+        page = getattr(self, "custom_source_manager_page", None)
+        if hasattr(self, "content_stack") and page is not None:
+            self.content_stack.setCurrentWidget(page)
+            page.refresh_sources()
+        self.set_right_panel_mode("info")
+
+    def on_custom_sources_changed(self, source_id: str) -> None:
+        service = getattr(self, "unified_search_service", None)
+        if service is not None:
+            service.invalidate_source(str(source_id or ""))
+        self.sync_remote_song_items()
+        self.refresh_unified_search_result_states()
 
     def find_song_data_by_path(self, song_path: str | None) -> dict | None:
         normalized_path = self.normalize_song_path(song_path)
@@ -6189,6 +6273,11 @@ class MainWindow(QMainWindow):
         self.online_search_nav_button = NavButton("在线搜索")
         self.online_search_nav_button.clicked.connect(self.show_online_search_page)
 
+        self.custom_sources_nav_button = NavButton("自定义来源")
+        self.custom_sources_nav_button.clicked.connect(
+            self.show_custom_source_manager_page
+        )
+
         self.settings_nav_button = NavButton("设置")
         self.settings_nav_button.clicked.connect(self.open_settings_dialog)
 
@@ -6197,6 +6286,7 @@ class MainWindow(QMainWindow):
         layout.addWidget(self.lyrics_nav_button)
         layout.addWidget(self.pending_nav_button)
         layout.addWidget(self.online_search_nav_button)
+        layout.addWidget(self.custom_sources_nav_button)
 
         layout.addSpacing(12)
 
@@ -6310,12 +6400,20 @@ class MainWindow(QMainWindow):
         self.search_input.setPlaceholderText("搜索歌曲、歌手或专辑")
         self.search_input.textChanged.connect(self.request_search_filter)
 
+        self.local_only_search_checkbox = QCheckBox("仅搜索本地")
+        self.local_only_search_checkbox.setChecked(self.unified_search_local_only)
+        self.local_only_search_checkbox.setToolTip("关闭所有自定义来源的在线搜索请求")
+        self.local_only_search_checkbox.toggled.connect(
+            self.on_unified_local_only_toggled
+        )
+
         clear_search_btn = QPushButton("清空")
         clear_search_btn.setObjectName("secondaryButton")
         clear_search_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         clear_search_btn.clicked.connect(self.clear_search)
 
         search_layout.addWidget(self.search_input, 1)
+        search_layout.addWidget(self.local_only_search_checkbox)
         search_layout.addWidget(clear_search_btn)
 
         self.view_layout = QHBoxLayout()
@@ -6416,12 +6514,19 @@ class MainWindow(QMainWindow):
         self.update_category_filter_controls()
         self.update_library_sort_headers()
 
+        self.local_search_group_label = QLabel("本地音乐")
+        self.local_search_group_label.setObjectName("settingsCardTitle")
+        self.local_search_group_label.setVisible(False)
+        self.unified_search_panel = UnifiedSearchResultsPanel(self)
+
         layout.addLayout(header_layout)
         layout.addLayout(search_layout)
         layout.addLayout(self.view_layout)
+        layout.addWidget(self.local_search_group_label)
         layout.addWidget(self.song_table_header)
         layout.addWidget(self.song_list_empty_hint)
         layout.addWidget(self.song_list, 1)
+        layout.addWidget(self.unified_search_panel)
 
         return panel
 
@@ -6898,10 +7003,126 @@ class MainWindow(QMainWindow):
         event.acceptProposedAction()
 
     def request_search_filter(self, *_args) -> None:
-        self.search_debounce_timer.start()
+        self.search_debounce_timer.stop()
+        keyword = self.search_input.text().strip()
+        if keyword and hasattr(self, "local_search_group_label"):
+            self.local_search_group_label.setText("本地音乐 · 正在搜索…")
+        self.apply_search_filter()
+        if hasattr(self, "local_search_group_label"):
+            self.local_search_group_label.setVisible(bool(keyword))
+        local_only = bool(
+            getattr(self, "local_only_search_checkbox", None)
+            and self.local_only_search_checkbox.isChecked()
+        )
+        service = getattr(self, "unified_search_service", None)
+        if service is not None:
+            service.schedule_search(keyword, local_only=local_only)
+        if not keyword and hasattr(self, "unified_search_panel"):
+            self.unified_search_results = []
+            self.unified_search_summary = {}
+            self.unified_search_panel.clear_results()
 
     def apply_search_filter(self) -> None:
         self.filter_song_list(self.search_input.text())
+
+    def on_unified_local_only_toggled(self, checked: bool) -> None:
+        self.unified_search_local_only = bool(checked)
+        self.save_hush_settings({"online_search_local_only": bool(checked)})
+        self.request_search_filter()
+
+    def on_unified_search_results_changed(
+        self,
+        _generation: int,
+        keyword: str,
+        results: list,
+        summary: dict,
+    ) -> None:
+        current_keyword = self.search_input.text().strip()
+        if current_keyword != str(keyword or "").strip():
+            return
+        if not current_keyword:
+            self.unified_search_results = []
+            self.unified_search_summary = {}
+            self.unified_search_panel.clear_results()
+            return
+        self.unified_search_results = [
+            self.decorate_unified_search_result(result)
+            for result in results
+            if isinstance(result, dict)
+        ]
+        self.unified_search_summary = dict(summary or {})
+        self.unified_search_panel.set_results(
+            current_keyword,
+            self.unified_search_results,
+            self.unified_search_summary,
+        )
+
+    def decorate_unified_search_result(self, track: dict) -> dict:
+        decorated = dict(track)
+        stable_id = RemoteTrackStore.stable_id_for_track(decorated)
+        record = self.remote_tracks.get(stable_id)
+        if isinstance(record, dict):
+            decorated["remoteStableId"] = stable_id
+        local_path = str((record or {}).get("local_path") or "")
+        downloaded = bool(local_path and Path(local_path).is_file())
+        decorated["downloaded"] = downloaded
+        decorated["localPath"] = str(Path(local_path).resolve()) if downloaded else ""
+        decorated["localExisting"] = downloaded or self.has_matching_local_song(decorated)
+        return decorated
+
+    def has_matching_local_song(self, track: dict) -> bool:
+        title = " ".join(str(track.get("title") or "").casefold().split())
+        artist = " ".join(str(track.get("artist") or "").casefold().split())
+        album = " ".join(str(track.get("album") or "").casefold().split())
+        if not title or not artist:
+            return False
+        for row in range(self.song_list.count()):
+            item = self.song_list.item(row)
+            song = item.data(Qt.ItemDataRole.UserRole) if item is not None else None
+            if not isinstance(song, dict) or song.get("recordKind") == "remote":
+                continue
+            song_title = " ".join(str(song.get("title") or "").casefold().split())
+            song_artist = " ".join(str(song.get("artist") or "").casefold().split())
+            song_album = " ".join(str(song.get("album") or "").casefold().split())
+            if song_title == title and song_artist == artist and song_album == album:
+                return True
+        return False
+
+    def refresh_unified_search_result_states(self) -> None:
+        panel = getattr(self, "unified_search_panel", None)
+        if panel is None or not self.unified_search_results:
+            return
+        self.unified_search_results = [
+            self.decorate_unified_search_result(result)
+            for result in self.unified_search_results
+        ]
+        panel.set_results(
+            self.search_input.text().strip(),
+            self.unified_search_results,
+            self.unified_search_summary,
+        )
+
+    def play_unified_search_track(self, track: dict) -> None:
+        stable_id = str(track.get("remoteStableId") or "").strip()
+        record = self.remote_tracks.get(stable_id)
+        if isinstance(record, dict):
+            local_path = str(record.get("local_path") or "")
+            if local_path and Path(local_path).is_file():
+                self.play_remote_song_data(
+                    {"recordKind": "remote", "remoteStableId": stable_id}
+                )
+                return
+        if track.get("availability") != "available":
+            self.set_online_status_message("该在线来源当前不可用。")
+            return
+        self.request_online_playback(track)
+
+    def remove_unified_track_from_current_playlist(self, track: dict) -> None:
+        stable_id = str(track.get("remoteStableId") or "").strip()
+        if not stable_id:
+            stable_id = RemoteTrackStore.stable_id_for_track(track)
+        self.remove_remote_from_current_playlist(stable_id)
+        self.refresh_unified_search_result_states()
 
     def clear_search(self) -> None:
         self.search_input.clear()
@@ -7074,7 +7295,8 @@ class MainWindow(QMainWindow):
                 song_data = item.data(Qt.ItemDataRole.UserRole)
 
                 if not isinstance(song_data, dict):
-                    item.setHidden(False)
+                    if item.isHidden():
+                        item.setHidden(False)
                     visible_count += 1
                     continue
 
@@ -7088,7 +7310,9 @@ class MainWindow(QMainWindow):
                 matches_view = self.song_matches_current_view(song_data, liked_paths_cache, playlist_paths_cache)
                 should_show = matches_keyword and matches_view
 
-                item.setHidden(not should_show)
+                should_hide = not should_show
+                if item.isHidden() != should_hide:
+                    item.setHidden(should_hide)
 
                 if should_show:
                     visible_count += 1
@@ -7121,6 +7345,8 @@ class MainWindow(QMainWindow):
 
                 self.schedule_visible_library_durations()
         elapsed_ms = (time.perf_counter() - started_at) * 1000
+        if keyword and hasattr(self, "local_search_group_label"):
+            self.local_search_group_label.setText(f"本地音乐 · {visible_count} 条")
         print(f"搜索关键词：{keyword or '无'}，显示歌曲数量：{visible_count}")
         print(f"[perf] filter_song_list: {elapsed_ms:.1f} ms, songs={self.song_list.count()}")
 
@@ -11969,9 +12195,9 @@ class MainWindow(QMainWindow):
                 QMediaPlayer.MediaStatus.LoadedMedia,
                 QMediaPlayer.MediaStatus.BufferedMedia,
             }:
-                self.online_search_page.set_online_status("在线歌曲正在播放。")
+                self.set_online_status_message("在线歌曲正在播放。")
             elif status == QMediaPlayer.MediaStatus.EndOfMedia:
-                self.online_search_page.set_online_status("在线试播已结束。")
+                self.set_online_status_message("在线试播已结束。")
             return
 
         if status in {
@@ -11991,7 +12217,7 @@ class MainWindow(QMainWindow):
         print("错误信息：", real_error_text)
 
         if real_error_text and getattr(self, "current_track_kind", "local") == "online":
-            self.online_search_page.set_online_status(f"在线播放失败：{real_error_text}")
+            self.set_online_status_message(f"在线播放失败：{real_error_text}")
         elif real_error_text:
             self.lyrics_view.set_placeholder("播放失败", real_error_text)
 
@@ -12340,11 +12566,15 @@ class MainWindow(QMainWindow):
             self.immersive_lyrics_window = None
 
         online_source_client = getattr(self, "online_source_client", None)
+        unified_search_service = getattr(self, "unified_search_service", None)
 
         online_download_manager = getattr(self, "online_download_manager", None)
 
         if online_download_manager is not None:
             online_download_manager.cancel()
+
+        if unified_search_service is not None:
+            unified_search_service.shutdown()
 
         if online_source_client is not None:
             online_source_client.stop()
