@@ -210,7 +210,8 @@ def test_result_panel_requires_explicit_play(app: QApplication) -> None:
     panel.browse_result(result_item)
     assert played == []
     panel.request_playback(result_item)
-    assert played and played[0]["id"] == "track-1"
+    assert played and played[0]["track_id"] == "track-1"
+    assert played[0]["media_type"] == "online"
 
 
 def main() -> int:

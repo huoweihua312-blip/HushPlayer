@@ -7,6 +7,7 @@ import sys
 import tempfile
 import threading
 import time
+import wave
 from functools import partial
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -17,9 +18,10 @@ if str(PROJECT_ROOT) not in sys.path:
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QUrl, Qt
 from PySide6.QtWidgets import QApplication, QListWidgetItem
 
+from app.models.media_item import MediaItem
 from app.services.online_download_manager import OnlineDownloadManager
 from app.services.online_source_client import OnlineSourceClient
 from app.services.remote_track_store import RemoteTrackStore
@@ -433,10 +435,74 @@ def test_main_window_online_entry() -> None:
     MainWindow.restore_playback_session = lambda self: None
     try:
         window = MainWindow()
+        window.show_pending_playback_restore(
+            {
+                "title": "Local restore fixture",
+                "artist": "Local artist",
+                "album": "Local album",
+                "path": "C:/Music/local-restore.flac",
+            },
+            12000,
+        )
+        assert window.now_open_folder_btn.text() == "打开文件位置"
+        assert window.now_open_folder_btn.isEnabled()
         assert not hasattr(window, "source_manager_page")
         assert hasattr(window, "custom_source_manager_page")
         assert hasattr(window, "unified_search_service")
         assert hasattr(window, "unified_search_panel")
+        with tempfile.TemporaryDirectory(prefix="hushplayer_local_regression_") as temp_dir:
+            root = Path(temp_dir)
+            paths = [root / "first.wav", root / "second.wav"]
+            for path in paths:
+                with wave.open(str(path), "wb") as output:
+                    output.setnchannels(1)
+                    output.setsampwidth(2)
+                    output.setframerate(8000)
+                    output.writeframes(b"\x00\x00" * 800)
+            lrc_path = paths[0].with_suffix(".lrc")
+            lrc_path.write_text("[00:00.00]本地第一行\n[00:01.00]本地第二行", encoding="utf-8")
+            assert window.parse_lrc_file(lrc_path) == [
+                (0, "本地第一行"),
+                (1000, "本地第二行"),
+            ]
+            local_items = []
+            for index, path in enumerate(paths, start=1):
+                item = window.create_song_list_item(
+                    {
+                        "title": f"Local regression {index}",
+                        "artist": "Local artist",
+                        "album": "Local album",
+                        "path": str(path),
+                        "added_at": index,
+                        "demo": False,
+                    }
+                )
+                window.song_list.addItem(item)
+                local_items.append(item)
+            window.play_queue.clear()
+            window.online_play_queue.clear()
+            window.queue_return_state = None
+            window.play_mode = "list_loop"
+            original_load_lyrics = window.load_lyrics_for_song
+            original_update_cover = window.update_cover
+            window.load_lyrics_for_song = lambda *args, **kwargs: None
+            window.update_cover = lambda *args, **kwargs: None
+            source_before_browse = window.media_player.source().toString()
+            window.select_song(local_items[0])
+            assert window.media_player.source().toString() == source_before_browse
+            assert window.current_song_path is None
+            window.play_selected_song(local_items[0])
+            assert window.current_song_path == window.normalize_song_path(str(paths[0]))
+            window.play_next_song()
+            assert window.current_song_path == window.normalize_song_path(str(paths[1]))
+            window.play_previous_song()
+            assert window.current_song_path == window.normalize_song_path(str(paths[0]))
+            window.media_player.stop()
+            window.media_player.setSource(QUrl())
+            QApplication.processEvents()
+            window.load_lyrics_for_song = original_load_lyrics
+            window.update_cover = original_update_cover
+
         local_fixture_item = window.create_song_list_item(
             {
                 "title": "q",
@@ -468,7 +534,8 @@ def test_main_window_online_entry() -> None:
             {"final": True},
         )
         window.search_input.clear()
-        assert window.unified_search_panel.isHidden() is True
+        assert window.content_stack.currentWidget() is window.library_panel
+        assert window.unified_search_panel.result_list.count() == 0
         assert local_fixture_item.isHidden() is False
         track = {
             "sourceId": "open_fixture",
@@ -478,6 +545,8 @@ def test_main_window_online_entry() -> None:
             "album": "Test album",
         }
         preserved_context = {"kind": "library", "ordered_paths": ["C:/music/local.mp3"]}
+        window.online_lyrics_service.request_lyrics = lambda _track: 1
+        window.online_artwork_service.request = lambda _key, _url: 1
         window.current_song_path = "C:/music/local.mp3"
         window.playback_context = preserved_context
         window.pending_online_track = dict(track)
@@ -500,9 +569,32 @@ def test_main_window_online_entry() -> None:
         )
         assert window.current_track_kind == "online"
         assert window.current_song_path is None
-        assert window.current_online_track == track
+        assert window.current_online_track["title"] == track["title"]
+        assert window.current_media_item.source_id == "open_fixture"
         assert window.playback_context is preserved_context
         assert window.media_player.source().toString().startswith("http://127.0.0.1:8765/")
+        assert window.now_open_folder_btn.text() == "查看在线歌曲信息"
+        assert window.now_open_folder_btn.isEnabled()
+        assert window.like_btn.isEnabled()
+        window.current_duration = 5000
+        window.current_lyrics = [(0, "第一行"), (2000, "第二行")]
+        window.displayed_lyrics_track_key = window.current_media_item.key
+        window.lyrics_view.set_lyrics(window.current_lyrics)
+        window.on_position_changed(2500)
+        assert window.lyrics_view.current_index == 1
+
+        window.online_play_queue.clear()
+        queued_requests = []
+        window.queue_media_item_next(track)
+        assert len(window.online_play_queue) == 1
+        window.request_online_playback = lambda value: queued_requests.append(value)
+        assert window.play_next_queued_online_song() is True
+        assert queued_requests[0]["sourceId"] == "open_fixture"
+        assert window.online_play_queue == []
+        assert window.parse_lrc_text("[00:01.25]第一行\n[00:02.500]第二行") == [
+            (1250, "第一行"),
+            (2500, "第二行"),
+        ]
 
         with tempfile.TemporaryDirectory(prefix="hushplayer_remote_playlist_") as temp_dir:
             root = Path(temp_dir)
@@ -527,6 +619,14 @@ def test_main_window_online_entry() -> None:
             window.like_online_track(remote_track)
             window.add_online_track_to_playlist(remote_track, "custom")
             stable_id = RemoteTrackStore.stable_id_for_track(remote_track)
+            window.current_media_item = MediaItem.from_online(remote_track)
+            window.current_track_kind = "online"
+            window.update_like_button()
+            assert window.like_btn.text() == "♥ 已收藏"
+            window.toggle_like_current_song()
+            assert stable_id not in window.get_playlist_remote_ids("liked")
+            window.toggle_like_current_song()
+            assert stable_id in window.get_playlist_remote_ids("liked")
             saved_playlists = json.loads(window.playlists_file.read_text(encoding="utf-8"))
             assert saved_playlists["liked"]["songs"] == ["C:/Music/local.flac"]
             assert saved_playlists["liked"]["remoteSongs"] == [stable_id]

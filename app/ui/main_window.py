@@ -10,14 +10,20 @@ from pathlib import Path
 
 import requests
 from mutagen import File as MutagenFile
+from app.models.media_item import MediaItem
+from app.services.lyrics_cache import LyricsCache
+from app.services.online_artwork_service import OnlineArtworkService
 from app.services.online_download_manager import OnlineDownloadManager
+from app.services.online_lyrics_service import OnlineLyricsService
 from app.services.online_source_client import OnlineSourceClient
 from app.services.remote_track_store import RemoteTrackStore, RemoteTrackStoreError
 from app.services.source_registry import SourceRegistryManager
 from app.services.unified_search_service import UnifiedSearchService
 from app.ui.custom_source_manager_page import CustomSourceManagerPage
-from app.ui.online_source_pages import OnlineSearchPage
-from app.ui.unified_search_panel import UnifiedSearchResultsPanel
+from app.ui.library_page import LibraryPage
+from app.ui.media_interaction_controller import MediaInteractionController
+from app.ui.search_page import SearchPage
+from app.ui.track_list_view import SearchEntryLineEdit
 from PySide6.QtCore import QEasingCurve, QEvent, QItemSelectionModel, QObject, QPropertyAnimation, QRectF, QRunnable, QSize, Qt, QThread, QThreadPool, QTimer, QUrl, Signal
 from PySide6.QtGui import QColor, QFont, QFontMetrics, QIcon, QKeySequence, QPainter, QPainterPath, QPalette, QPen, QPixmap, QShortcut
 from PySide6.QtMultimedia import QAudioOutput, QMediaDevices, QMediaPlayer
@@ -625,7 +631,6 @@ class MultiLineElidedLabel(QLabel):
 
 SONG_TABLE_MARKER_WIDTH = 18
 SONG_TABLE_DURATION_WIDTH = 58
-SONG_TABLE_ADDED_WIDTH = 88
 SONG_TABLE_COLUMN_GAP = 14
 
 
@@ -635,7 +640,6 @@ def configure_song_table_columns(layout: QGridLayout) -> None:
     layout.setColumnStretch(2, 2)
     layout.setColumnStretch(3, 2)
     layout.setColumnMinimumWidth(4, SONG_TABLE_DURATION_WIDTH)
-    layout.setColumnMinimumWidth(5, SONG_TABLE_ADDED_WIDTH)
 
 
 class SongLibraryDelegate(QStyledItemDelegate):
@@ -651,16 +655,12 @@ class SongLibraryDelegate(QStyledItemDelegate):
         row_rect = QRectF(rect.adjusted(2, 2, -2, -2))
         content = row_rect.adjusted(12, 0, -12, 0)
         available_width = max(0, int(content.width()))
-        fixed_width = (
-            SONG_TABLE_MARKER_WIDTH
-            + SONG_TABLE_DURATION_WIDTH
-            + SONG_TABLE_ADDED_WIDTH
-        )
+        fixed_width = SONG_TABLE_MARKER_WIDTH + SONG_TABLE_DURATION_WIDTH
         gap = min(
             SONG_TABLE_COLUMN_GAP,
-            max(0, (available_width - fixed_width) // 5),
+            max(0, (available_width - fixed_width) // 4),
         )
-        flexible_width = max(0, available_width - fixed_width - gap * 5)
+        flexible_width = max(0, available_width - fixed_width - gap * 4)
         title_width = int(flexible_width * 0.5)
         artist_width = int(flexible_width * 0.25)
         album_width = max(0, flexible_width - title_width - artist_width)
@@ -676,8 +676,6 @@ class SongLibraryDelegate(QStyledItemDelegate):
         result["album"] = QRectF(x, content.top(), album_width, content.height())
         x += album_width + gap
         result["duration"] = QRectF(x, content.top(), SONG_TABLE_DURATION_WIDTH, content.height())
-        x += SONG_TABLE_DURATION_WIDTH + gap
-        result["added_at"] = QRectF(x, content.top(), SONG_TABLE_ADDED_WIDTH, content.height())
         return result
 
     def paint(self, painter: QPainter, option, index) -> None:
@@ -725,8 +723,6 @@ class SongLibraryDelegate(QStyledItemDelegate):
             if duration_seconds > 0
             else "—"
         )
-        added_text = self.main_window.format_library_added_date(song_data.get("added_at", 0))
-
         self._draw_text(painter, option, rects["marker"], "▶" if is_playing else "", "#4c8dff", True)
         self._draw_text(
             painter,
@@ -739,7 +735,6 @@ class SongLibraryDelegate(QStyledItemDelegate):
         self._draw_text(painter, option, rects["artist"], str(song_data.get("artist") or "未知艺术家"), "#b5bbc7")
         self._draw_text(painter, option, rects["album"], str(song_data.get("album") or "未知专辑"), "#b5bbc7")
         self._draw_text(painter, option, rects["duration"], duration_text, "#8a92a3", align_right=True)
-        self._draw_text(painter, option, rects["added_at"], added_text, "#8a92a3", align_right=True)
         painter.restore()
 
     def helpEvent(self, event, view, option, index) -> bool:
@@ -915,6 +910,7 @@ class LyricsView(QScrollArea):
 
         self.labels: list[QLabel] = []
         self.current_index = -1
+        self.plain_text_mode = False
 
         self.scroll_animation = QPropertyAnimation(self.verticalScrollBar(), b"value", self)
         self.scroll_animation.setDuration(520)
@@ -932,6 +928,7 @@ class LyricsView(QScrollArea):
 
         self.labels = []
         self.current_index = -1
+        self.plain_text_mode = False
 
     def set_placeholder(self, title: str, subtitle: str = "") -> None:
         self.clear_content()
@@ -984,8 +981,28 @@ class LyricsView(QScrollArea):
         self.current_index = -1
         self.verticalScrollBar().setValue(0)
 
+    def set_plain_text(self, text: str) -> None:
+        self.clear_content()
+        lines = [line.strip() for line in str(text or "").splitlines() if line.strip()]
+        if not lines:
+            self.set_placeholder("暂无歌词", "歌曲来源没有提供可显示的歌词")
+            return
+        self.plain_text_mode = True
+        self.lyrics_layout.setContentsMargins(18, 60, 18, 80)
+        self.lyrics_layout.setSpacing(16)
+        for line in lines:
+            label = QLabel(line)
+            label.setObjectName("lyricLine")
+            label.setProperty("lyricState", "normal")
+            label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            label.setWordWrap(True)
+            label.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)
+            self.lyrics_layout.addWidget(label)
+            self.labels.append(label)
+        self.verticalScrollBar().setValue(0)
+
     def update_by_position(self, position: int, lyrics: list[tuple[int, str]]) -> None:
-        if not lyrics or not self.labels:
+        if self.plain_text_mode or not lyrics or not self.labels:
             return
 
         new_index = -1
@@ -3347,6 +3364,9 @@ class ImmersiveLyricsWindow(QWidget):
                 "可以右键歌曲手动绑定歌词，或者重新搜索歌词",
             )
 
+    def set_plain_text(self, text: str) -> None:
+        self.lyrics_view.set_plain_text(text)
+
     def update_position(self, position: int, lyrics: list[tuple[int, str]]) -> None:
         self.lyrics_view.update_by_position(position, lyrics)
 
@@ -3493,6 +3513,7 @@ class MainWindow(QMainWindow):
         self.session_save_timer.start(5000)
         self.current_duration = 0
         self.current_track_kind = "local"
+        self.current_media_item: MediaItem | None = None
         self.current_online_track: dict | None = None
         self.pending_online_track: dict | None = None
         self.pending_online_playback_request = 0
@@ -3500,6 +3521,9 @@ class MainWindow(QMainWindow):
         self.pending_online_download_request = 0
         self.active_online_download_track: dict | None = None
         self.active_online_download_remote_id = ""
+        self.online_play_queue: list[dict] = []
+        self.current_plain_lyrics = ""
+        self.displayed_lyrics_track_key = ""
         self.is_seeking = False
         self.pending_restore_position = 0
         self.pending_lazy_restore_song_data: dict | None = None
@@ -3553,6 +3577,11 @@ class MainWindow(QMainWindow):
         self.unified_search_local_only = bool(
             settings.get("online_search_local_only", False)
         )
+        self.initial_library_content_view = str(
+            settings.get("library_content_view", "tracks") or "tracks"
+        )
+        if self.initial_library_content_view not in {"tracks", "artists", "albums"}:
+            self.initial_library_content_view = "tracks"
         self.unified_search_results: list[dict] = []
         self.unified_search_summary: dict = {}
         self.unified_search_service = UnifiedSearchService(
@@ -3560,6 +3589,18 @@ class MainWindow(QMainWindow):
             self,
             debounce_ms=settings.get("online_search_debounce_ms", 500),
             cache_ttl_seconds=180,
+        )
+        self.online_lyrics_cache = LyricsCache(
+            self.lyrics_cache_dir / "online_lyrics.json"
+        )
+        self.online_lyrics_service = OnlineLyricsService(
+            self.online_source_client,
+            self.online_lyrics_cache,
+            self,
+        )
+        self.online_artwork_service = OnlineArtworkService(
+            self.cover_cache_dir / "online",
+            self,
         )
         self.playlists = self.measure_startup_step("歌单与收藏 JSON", self.load_playlists)
         self.song_stats = self.measure_startup_step("播放统计 JSON", self.load_song_stats)
@@ -3577,10 +3618,12 @@ class MainWindow(QMainWindow):
         self.play_count_marked = False
 
         self.current_library_view = "all"
+        self.library_data_revision = 0
         self.library_list_dirty = True
         self.last_library_view_key = None
         self.view_buttons = {}
         self.custom_view_buttons = []
+        self.media_interactions = MediaInteractionController(self)
 
         self.http_headers = {
             "User-Agent": "HushPlayer/0.5.4.3 (local music player prototype)",
@@ -3639,26 +3682,36 @@ class MainWindow(QMainWindow):
         self.full_lyrics_page = full_lyrics_page
         pending_imports_page = self.measure_startup_step("待导入页面 UI", self._create_pending_imports_page)
         self.pending_imports_page = pending_imports_page
-        online_search_page = self.measure_startup_step(
-            "在线搜索页面 UI（无网络请求）",
-            lambda: OnlineSearchPage(
-                self.online_source_client,
-                self.source_registry_manager,
-                self,
-            ),
+        search_page = self.measure_startup_step(
+            "独立搜索页面 UI（无网络请求）",
+            lambda: SearchPage(self.unified_search_local_only, self),
         )
-        self.online_search_page = online_search_page
-        online_search_page.play_requested.connect(self.request_online_playback)
-        online_search_page.download_requested.connect(self.request_online_download)
-        online_search_page.like_requested.connect(self.like_online_track)
-        online_search_page.unlike_requested.connect(self.unlike_online_track)
-        online_search_page.add_to_playlist_requested.connect(self.add_online_track_to_playlist)
-        online_search_page.info_requested.connect(self.show_online_track_info)
-        online_search_page.sources_changed.connect(self.on_custom_sources_changed)
-        online_search_page.set_collection_providers(
-            self.get_online_track_collection_state,
+        self.search_page = search_page
+        # Keep this alias for existing status helpers while the old standalone
+        # online page remains available as a compatibility module.
+        self.online_search_page = search_page
+        self.unified_search_panel = search_page.online_results
+        search_page.backRequested.connect(self.return_to_library_view)
+        search_page.localOnlyChanged.connect(self.on_unified_local_only_toggled)
+        search_page.localBrowseRequested.connect(self.browse_media_item)
+        search_page.localPlayRequested.connect(self.play_media_item)
+        search_page.localQueueNextRequested.connect(self.queue_media_item_next)
+        search_page.localLikeRequested.connect(self.media_interactions.like_local)
+        search_page.localUnlikeRequested.connect(self.media_interactions.unlike_local)
+        search_page.localAddToPlaylistRequested.connect(
+            self.media_interactions.add_local_to_playlist
+        )
+        search_page.localRemoveFromCurrentPlaylistRequested.connect(
+            self.media_interactions.remove_local_from_current_playlist
+        )
+        search_page.localOpenFolderRequested.connect(self.media_interactions.open_local_folder)
+        search_page.localRemoveRequested.connect(self.media_interactions.remove_local)
+        search_page.localInfoRequested.connect(self.media_interactions.show_info)
+        search_page.set_collection_providers(
+            self.media_interactions.get_local_state,
             self.get_online_playlist_choices,
         )
+        search_page.set_playing_key_provider(self.current_media_key)
         custom_source_manager_page = self.measure_startup_step(
             "自定义来源管理页面 UI（无网络请求）",
             lambda: CustomSourceManagerPage(
@@ -3669,14 +3722,16 @@ class MainWindow(QMainWindow):
         )
         self.custom_source_manager_page = custom_source_manager_page
         custom_source_manager_page.sourcesChanged.connect(self.on_custom_sources_changed)
-        custom_source_manager_page.backRequested.connect(self.show_library_page)
+        custom_source_manager_page.backRequested.connect(self.return_to_library_view)
         self.unified_search_service.statusChanged.connect(
-            self.unified_search_panel.set_status
+            search_page.set_online_status
         )
         self.unified_search_service.resultsChanged.connect(
             self.on_unified_search_results_changed
         )
         self.unified_search_panel.playRequested.connect(self.play_unified_search_track)
+        self.unified_search_panel.queueNextRequested.connect(self.queue_media_item_next)
+        self.unified_search_panel.browseRequested.connect(self.browse_media_item)
         self.unified_search_panel.downloadRequested.connect(self.request_online_download)
         self.unified_search_panel.likeRequested.connect(self.like_online_track)
         self.unified_search_panel.unlikeRequested.connect(self.unlike_online_track)
@@ -3691,6 +3746,11 @@ class MainWindow(QMainWindow):
             self.get_online_track_collection_state,
             self.get_online_playlist_choices,
         )
+        self.online_lyrics_service.statusChanged.connect(
+            self.on_online_lyrics_status_changed
+        )
+        self.online_lyrics_service.lyricsReady.connect(self.on_online_lyrics_ready)
+        self.online_artwork_service.imageReady.connect(self.on_online_artwork_ready)
         self.online_source_client.playbackResolved.connect(self.on_online_playback_resolved)
         self.online_source_client.downloadResolved.connect(self.on_online_download_resolved)
         self.online_source_client.requestFailed.connect(self.on_online_source_request_failed)
@@ -3707,7 +3767,7 @@ class MainWindow(QMainWindow):
         self.content_stack.addWidget(library_panel)
         self.content_stack.addWidget(full_lyrics_page)
         self.content_stack.addWidget(pending_imports_page)
-        self.content_stack.addWidget(online_search_page)
+        self.content_stack.addWidget(search_page)
         self.content_stack.addWidget(custom_source_manager_page)
 
         body_layout.addWidget(sidebar)
@@ -3735,6 +3795,7 @@ class MainWindow(QMainWindow):
         library_started_at = time.perf_counter()
         self.load_music_library()
         self.sync_remote_song_items()
+        self.library_page.show_mode(self.initial_library_content_view)
         print(f"[perf] 音乐库初始化：{(time.perf_counter() - library_started_at) * 1000:.1f} ms")
         initial_ui_started_at = time.perf_counter()
         self.update_play_mode_button()
@@ -4227,6 +4288,7 @@ class MainWindow(QMainWindow):
     def persist_remote_track(self, track: dict) -> tuple[str, dict]:
         if self.remote_tracks_error:
             raise RemoteTrackStoreError(self.remote_tracks_error)
+        track = MediaItem.from_mapping(track).to_legacy_online()
         stable_id = RemoteTrackStore.stable_id_for_track(track)
         stable_id, record = RemoteTrackStore.build_record(
             track,
@@ -4240,6 +4302,7 @@ class MainWindow(QMainWindow):
         return stable_id, record
 
     def get_online_track_collection_state(self, track: dict) -> dict:
+        track = MediaItem.from_mapping(track).to_legacy_online()
         stable_id = RemoteTrackStore.stable_id_for_track(track)
         current_playlist_id = ""
         if self.current_library_view == "liked":
@@ -4259,6 +4322,7 @@ class MainWindow(QMainWindow):
         self.add_online_track_to_playlist(track, "liked")
 
     def unlike_online_track(self, track: dict) -> None:
+        track = MediaItem.from_mapping(track).to_legacy_online()
         stable_id = RemoteTrackStore.stable_id_for_track(track)
         liked_ids = self.get_playlist_remote_ids("liked")
         if stable_id not in liked_ids:
@@ -4272,6 +4336,7 @@ class MainWindow(QMainWindow):
         self.set_online_status_message("已取消收藏该在线歌曲。")
 
     def add_online_track_to_playlist(self, track: dict, playlist_id: str) -> None:
+        track = MediaItem.from_mapping(track).to_legacy_online()
         if playlist_id not in self.playlists or not isinstance(self.playlists.get(playlist_id), dict):
             self.set_online_status_message("目标歌单不存在。")
             return
@@ -4296,18 +4361,7 @@ class MainWindow(QMainWindow):
         )
 
     def show_online_track_info(self, track: dict) -> None:
-        capabilities = track.get("capabilities") if isinstance(track.get("capabilities"), dict) else {}
-        source = str(track.get("sourceName") or track.get("sourceId") or "未知来源")
-        QMessageBox.information(
-            self,
-            "在线歌曲信息",
-            f"歌曲：{track.get('title') or '未知歌曲'}\n"
-            f"歌手：{track.get('artist') or '未知艺术家'}\n"
-            f"专辑：{track.get('album') or '未知专辑'}\n"
-            f"来源：{source}\n"
-            f"可播放：{'是' if capabilities.get('playback') else '否'}\n"
-            f"可下载：{'是' if capabilities.get('download') else '否'}",
-        )
+        self.show_media_item_info(MediaItem.from_mapping(track).to_dict())
 
     def is_remote_source_available(self, record: dict) -> bool:
         source = self.get_registered_source_safely(str(record.get("source_id") or ""))
@@ -4363,6 +4417,7 @@ class MainWindow(QMainWindow):
             self.sort_song_list_for_current_view()
             self.filter_song_list(self.search_input.text())
         self.refresh_unified_search_result_states()
+        self.update_like_button()
 
     def get_custom_playlist_ids(self) -> list[str]:
         playlist_ids = []
@@ -4608,7 +4663,6 @@ class MainWindow(QMainWindow):
         started_at = time.perf_counter()
         fixed_views = {"all", "liked", "recent_played", "frequent", "recent_added"}
         previous_view = getattr(self, "current_library_view", "all")
-
         if view_name in fixed_views:
             target_view = view_name
         elif view_name.startswith("playlist:"):
@@ -4616,11 +4670,8 @@ class MainWindow(QMainWindow):
             target_view = view_name if playlist_id in self.playlists else "all"
         else:
             target_view = "all"
-
         self.current_library_view = target_view
-
         current_key = self.current_library_view_key() if hasattr(self, "song_list") else None
-
         if (
             previous_view == target_view
             and not getattr(self, "library_list_dirty", True)
@@ -4628,27 +4679,14 @@ class MainWindow(QMainWindow):
         ):
             self.show_library_container()
             self.update_view_buttons()
-
-            if self.current_library_view == "liked" or self.current_library_view.startswith("playlist:"):
-                self.set_sidebar_active("playlists")
-            else:
-                self.set_sidebar_active("library")
-
-            elapsed_ms = (time.perf_counter() - started_at) * 1000
-            print(f"[perf] set_library_view skip: {elapsed_ms:.1f} ms, view={self.current_library_view}")
+            self.set_sidebar_active("library")
             return
-
         self.show_library_container()
         self.sort_song_list_for_current_view()
-        self.filter_song_list(self.search_input.text())
+        self.filter_song_list("")
         self.update_view_buttons()
         self.remember_library_view_key()
-
-        if self.current_library_view == "liked" or self.current_library_view.startswith("playlist:"):
-            self.set_sidebar_active("playlists")
-        else:
-            self.set_sidebar_active("library")
-
+        self.set_sidebar_active("library")
         view_titles = {
             "all": "全部歌曲",
             "liked": "我喜欢",
@@ -4656,13 +4694,13 @@ class MainWindow(QMainWindow):
             "frequent": "常听歌曲",
             "recent_added": "最近添加",
         }
-
         if self.current_library_view.startswith("playlist:"):
             playlist_id = self.current_library_view.split("playlist:", 1)[1]
             view_title = self.get_playlist_name(playlist_id)
         else:
             view_title = view_titles.get(self.current_library_view, "全部歌曲")
-
+        if hasattr(self, "library_page"):
+            self.library_page.page_title.setText(view_title)
         elapsed_ms = (time.perf_counter() - started_at) * 1000
         print(f"当前音乐库视图：{view_title}")
         print(f"[perf] set_library_view: {elapsed_ms:.1f} ms, view={self.current_library_view}, songs={self.song_list.count() if hasattr(self, 'song_list') else 0}")
@@ -5088,6 +5126,10 @@ class MainWindow(QMainWindow):
             self.remember_library_view_key()
 
         self.last_playing_indicator_path = self.normalize_song_path(getattr(self, "current_song_path", ""))
+        if hasattr(self, "library_page"):
+            self.library_page.refresh_playing_indicator()
+        if hasattr(self, "search_page"):
+            self.search_page.refresh_playing_indicator()
         elapsed_ms = (time.perf_counter() - started_at) * 1000
         print(f"[perf] refresh_playing_song_indicators: {elapsed_ms:.1f} ms, refreshed={refreshed_count}, songs={self.song_list.count()}")
     def create_song_list_item(self, song_data: dict) -> QListWidgetItem:
@@ -5615,6 +5657,22 @@ class MainWindow(QMainWindow):
         self.activateWindow()
 
     def get_playing_song_display_data(self) -> tuple[str, str, str]:
+        media_item = getattr(self, "current_media_item", None)
+        if isinstance(media_item, MediaItem):
+            if hasattr(self, "lyrics_status_label"):
+                status = self.lyrics_status_label.text().replace("歌词：", "").strip()
+            else:
+                status = "歌词状态未知"
+            source_suffix = (
+                f" · {media_item.source_name} · 在线"
+                if media_item.media_type == "online"
+                else ""
+            )
+            return (
+                media_item.title,
+                f"{media_item.artist} · {media_item.album}{source_suffix}",
+                status or "歌词状态未知",
+            )
         playing_path = self.normalize_song_path(self.current_song_path)
 
         if not playing_path:
@@ -5639,6 +5697,13 @@ class MainWindow(QMainWindow):
         return str(title), f"{artist} · {album}", status or "歌词状态未知"
 
     def get_immersive_background_pixmap(self, playing_path: str | None):
+        current = getattr(self, "current_media_item", None)
+        if isinstance(current, MediaItem) and current.media_type == "online":
+            try:
+                pixmap = self.cover_label.pixmap()
+                return pixmap if pixmap and not pixmap.isNull() else None
+            except Exception:
+                return None
         normalized_path = self.normalize_song_path(playing_path)
 
         if not normalized_path:
@@ -5699,25 +5764,36 @@ class MainWindow(QMainWindow):
     def sync_immersive_lyrics(self) -> None:
         if self.immersive_lyrics_window is None:
             return
-
         title, artist_album, status = self.get_playing_song_display_data()
         self.immersive_lyrics_window.update_song_info(title, artist_album, status)
-
         playing_path = self.normalize_song_path(self.current_song_path)
-        background_pixmap = self.get_immersive_background_pixmap(playing_path)
-        self.immersive_lyrics_window.update_background_cover(background_pixmap)
-
-        displayed_path = self.normalize_song_path(getattr(self, "displayed_lyrics_song_path", ""))
-
+        self.immersive_lyrics_window.update_background_cover(
+            self.get_immersive_background_pixmap(playing_path)
+        )
+        current = getattr(self, "current_media_item", None)
+        if isinstance(current, MediaItem) and current.media_type == "online":
+            if self.displayed_lyrics_track_key != current.key:
+                self.immersive_lyrics_window.set_lyrics([])
+            elif self.current_plain_lyrics:
+                self.immersive_lyrics_window.set_plain_text(self.current_plain_lyrics)
+            elif self.current_lyrics:
+                self.immersive_lyrics_window.set_lyrics(self.current_lyrics)
+                self.immersive_lyrics_window.update_position(
+                    self.media_player.position(), self.current_lyrics
+                )
+            else:
+                self.immersive_lyrics_window.set_lyrics([])
+            return
+        displayed_path = self.normalize_song_path(
+            getattr(self, "displayed_lyrics_song_path", "")
+        )
         if playing_path and displayed_path == playing_path and self.current_lyrics:
             self.immersive_lyrics_window.set_lyrics(self.current_lyrics)
             self.immersive_lyrics_window.update_position(
-                self.media_player.position(),
-                self.current_lyrics,
+                self.media_player.position(), self.current_lyrics
             )
         else:
             self.immersive_lyrics_window.set_lyrics([])
-
     def _create_full_lyrics_page(self) -> QFrame:
         panel = QFrame()
         panel.setObjectName("fullLyricsPage")
@@ -5802,11 +5878,10 @@ class MainWindow(QMainWindow):
 
     def set_sidebar_active(self, active_key: str) -> None:
         nav_buttons = {
-            "library": getattr(self, "library_nav_button", None),
             "playlists": getattr(self, "playlist_nav_button", None),
             "lyrics": getattr(self, "lyrics_nav_button", None),
             "pending": getattr(self, "pending_nav_button", None),
-            "online_search": getattr(self, "online_search_nav_button", None),
+            "search": getattr(self, "search_nav_button", None),
             "custom_sources": getattr(self, "custom_sources_nav_button", None),
             "settings": getattr(self, "settings_nav_button", None),
         }
@@ -5819,21 +5894,28 @@ class MainWindow(QMainWindow):
             button.style().unpolish(button)
             button.style().polish(button)
             button.update()
+        if active_key == "library":
+            self.update_view_buttons()
+        else:
+            for button in getattr(self, "view_buttons", {}).values():
+                button.setProperty("active", False)
+                button.style().unpolish(button)
+                button.style().polish(button)
+                button.update()
 
     def current_library_view_key(self) -> tuple:
-        search_keyword = ""
-
-        if hasattr(self, "search_input"):
-            search_keyword = self.search_input.text().strip().lower()
-
         song_count = self.song_list.count() if hasattr(self, "song_list") else 0
         playing_path = self.normalize_song_path(getattr(self, "current_song_path", ""))
         category_type = getattr(self, "library_category_filter_type", None)
         category_value = getattr(self, "library_category_filter_value", "")
-        return (self.current_library_view, search_keyword, song_count, playing_path, category_type, category_value)
+        return (self.current_library_view, song_count, playing_path, category_type, category_value)
 
     def mark_library_list_dirty(self) -> None:
         self.library_list_dirty = True
+        self.library_data_revision = int(getattr(self, "library_data_revision", 0)) + 1
+        page = getattr(self, "library_page", None)
+        if page is not None:
+            page.invalidate_group_cache()
 
     def remember_library_view_key(self) -> None:
         self.last_library_view_key = self.current_library_view_key()
@@ -5868,9 +5950,27 @@ class MainWindow(QMainWindow):
         elapsed_ms = (time.perf_counter() - started_at) * 1000
         print(f"[perf] show_library_page: {elapsed_ms:.1f} ms, dirty={getattr(self, 'library_list_dirty', False)}, key={self.current_library_view_key() if hasattr(self, 'song_list') else None}")
 
+    def show_library_category(self, view_name: str) -> None:
+        self.set_sidebar_active("library")
+        self.show_library_container()
+        self.set_library_view(view_name)
+
+    def return_to_library_view(self) -> None:
+        self.set_sidebar_active("library")
+        self.show_library_container()
+        self.filter_song_list("")
+        self.update_view_buttons()
+
+    def show_search_page(self) -> None:
+        self.set_sidebar_active("search")
+        if hasattr(self, "content_stack") and hasattr(self, "search_page"):
+            self.content_stack.setCurrentWidget(self.search_page)
+            self.search_page.set_keyword(self.search_input.text())
+        self.set_right_panel_mode("info")
+
     def show_liked_playlist_page(self) -> None:
         started_at = time.perf_counter()
-        self.set_sidebar_active("playlists")
+        self.set_sidebar_active("library")
         self.show_library_container()
         self.set_library_view("liked")
         elapsed_ms = (time.perf_counter() - started_at) * 1000
@@ -5905,7 +6005,9 @@ class MainWindow(QMainWindow):
     def request_online_playback(self, track: dict) -> None:
         if not isinstance(track, dict):
             return
-        source_id = str(track.get("sourceId") or "").strip()
+        media_item = MediaItem.from_mapping(track)
+        track = media_item.to_legacy_online()
+        source_id = media_item.source_id
         if not source_id:
             self.set_online_status_message("播放请求缺少音源标识。")
             return
@@ -5948,20 +6050,24 @@ class MainWindow(QMainWindow):
             return
 
         self.flush_current_listen_time()
+        media_item = MediaItem.from_online(track).with_resolution(resolution)
         self.current_track_kind = "online"
-        self.current_online_track = dict(track)
+        self.current_media_item = media_item
+        self.current_online_track = media_item.to_legacy_online()
         self.pending_lazy_restore_song_data = None
         self.current_song_path = None
         self.current_duration = 0
         self.pending_restore_position = 0
         self.reset_playback_stats_session()
         self.current_lyrics = []
+        self.current_plain_lyrics = ""
+        self.displayed_lyrics_track_key = ""
         self.displayed_lyrics_song_path = None
         self.refresh_playing_song_indicators()
 
-        title = str(track.get("title") or "未知歌曲")
-        artist = str(track.get("artist") or "未知艺术家")
-        album = str(track.get("album") or "未知专辑")
+        title = media_item.title
+        artist = media_item.artist
+        album = media_item.album
         self.bottom_song_title.setText(title)
         self.bottom_song_artist.setText(artist)
         self.bottom_song_title.setToolTip(title)
@@ -5969,11 +6075,24 @@ class MainWindow(QMainWindow):
         self.now_song_title.setText(title)
         self.now_artist.setText(f"{artist} · {album}")
         if hasattr(self, "now_stats"):
-            self.now_stats.setText("在线单曲试播")
+            details = [media_item.source_name, "在线"]
+            if media_item.quality:
+                details.append(media_item.quality)
+            if media_item.format:
+                details.append(media_item.format.upper())
+            self.now_stats.setText(" · ".join(details))
+            self.now_stats.show()
         if hasattr(self, "now_open_folder_btn"):
-            self.now_open_folder_btn.setEnabled(False)
+            self.now_open_folder_btn.setText("查看在线歌曲信息")
+            self.now_open_folder_btn.setEnabled(True)
         self.update_like_button()
-        self.lyrics_view.set_placeholder("在线歌曲", "本阶段暂不接入在线歌词显示。")
+        if hasattr(self, "bottom_source_badge"):
+            self.bottom_source_badge.setText(media_item.source_name or "在线")
+            self.bottom_source_badge.show()
+        self.reset_cover()
+        self.lyrics_view.set_placeholder("正在加载歌词", "优先使用歌曲来源，其次联网匹配")
+        self.online_lyrics_service.request_lyrics(media_item)
+        self.online_artwork_service.request(media_item.key, media_item.cover_url)
 
         self.set_online_status_message("正在加载在线歌曲…")
         self.media_player.stop()
@@ -5985,10 +6104,12 @@ class MainWindow(QMainWindow):
     def request_online_download(self, track: dict) -> None:
         if not isinstance(track, dict):
             return
+        media_item = MediaItem.from_mapping(track)
+        track = media_item.to_legacy_online()
         if self.online_download_manager.is_active():
             self.set_online_status_message("已有在线下载正在进行，请等待完成。")
             return
-        source_id = str(track.get("sourceId") or "").strip()
+        source_id = media_item.source_id
         if not source_id:
             self.set_online_status_message("下载请求缺少音源标识。")
             return
@@ -6102,13 +6223,9 @@ class MainWindow(QMainWindow):
         self.set_online_status_message(message)
 
     def show_online_search_page(self) -> None:
-        self.set_sidebar_active("online_search")
-
-        if hasattr(self, "content_stack") and hasattr(self, "online_search_page"):
-            self.content_stack.setCurrentWidget(self.online_search_page)
-            self.online_search_page.refresh_sources()
-
-        self.set_right_panel_mode("info")
+        self.show_search_page()
+        if hasattr(self, "search_page"):
+            self.search_page.show_tab("online")
 
     def show_custom_source_manager_page(self) -> None:
         self.set_sidebar_active("custom_sources")
@@ -6151,6 +6268,21 @@ class MainWindow(QMainWindow):
 
     def refresh_full_lyrics_page(self) -> None:
         if not hasattr(self, "full_lyrics_view"):
+            return
+
+        current = getattr(self, "current_media_item", None)
+        if isinstance(current, MediaItem) and current.media_type == "online":
+            self.full_lyrics_title.setText(current.title)
+            self.full_lyrics_artist.setText(
+                f"{current.artist} · {current.album} · {current.source_name} · 在线"
+            )
+            if self.displayed_lyrics_track_key == current.key:
+                self.sync_full_lyrics_from_current()
+            else:
+                self.full_lyrics_status.setText("正在加载在线歌词")
+                self.full_lyrics_view.set_placeholder(
+                    "正在加载歌词", "优先歌曲来源，其次使用联网歌词匹配"
+                )
             return
 
         playing_path = self.normalize_song_path(self.current_song_path)
@@ -6199,6 +6331,29 @@ class MainWindow(QMainWindow):
 
     def sync_full_lyrics_from_current(self) -> None:
         if not hasattr(self, "full_lyrics_view"):
+            return
+
+        current = getattr(self, "current_media_item", None)
+        if isinstance(current, MediaItem) and current.media_type == "online":
+            if self.displayed_lyrics_track_key != current.key:
+                return
+            self.full_lyrics_title.setText(current.title)
+            self.full_lyrics_artist.setText(
+                f"{current.artist} · {current.album} · {current.source_name} · 在线"
+            )
+            if self.current_plain_lyrics:
+                self.full_lyrics_view.set_plain_text(self.current_plain_lyrics)
+            elif self.current_lyrics:
+                self.full_lyrics_view.set_lyrics(self.current_lyrics)
+                self.full_lyrics_view.update_by_position(
+                    self.media_player.position(), self.current_lyrics
+                )
+            else:
+                self.full_lyrics_view.set_placeholder("暂无歌词", "歌曲来源没有提供歌词")
+            if hasattr(self, "lyrics_status_label"):
+                self.full_lyrics_status.setText(
+                    self.lyrics_status_label.text().replace("歌词：", "").strip()
+                )
             return
 
         playing_path = self.normalize_song_path(self.current_song_path)
@@ -6252,14 +6407,65 @@ class MainWindow(QMainWindow):
 
         layout.addWidget(title)
         layout.addWidget(subtitle)
-        layout.addSpacing(20)
+        layout.addSpacing(12)
 
+        self.search_input = SearchEntryLineEdit()
+        self.search_input.setObjectName("sidebarSearchInput")
+        self.search_input.setPlaceholderText("搜索音乐")
+        self.search_input.setStyleSheet(
+            "QLineEdit#sidebarSearchInput { background: #151922; color: #f3f4f6; border: 1px solid #2a303b; "
+            "border-radius: 11px; padding: 9px 11px; selection-background-color: #4c8dff; }"
+            "QLineEdit#sidebarSearchInput:focus { border-color: #4c8dff; background: #1a1f2b; }"
+        )
+        self.search_input.focused.connect(self.show_search_page)
+        self.search_input.textChanged.connect(self.request_search_filter)
+        layout.addWidget(self.search_input)
+
+        layout.addSpacing(12)
+        library_title = QLabel("音乐库")
+        library_title.setObjectName("sidebarSectionTitle")
+        layout.addWidget(library_title)
+
+        self.library_nav_button = NavButton("全部歌曲", active=True)
+        self.library_nav_button.clicked.connect(
+            lambda checked=False: self.show_library_category("all")
+        )
+        self.recent_nav_button = NavButton("最近播放")
+        self.recent_nav_button.clicked.connect(
+            lambda checked=False: self.show_library_category("recent_played")
+        )
+        self.frequent_nav_button = NavButton("常听")
+        self.frequent_nav_button.clicked.connect(
+            lambda checked=False: self.show_library_category("frequent")
+        )
+        self.liked_playlist_button = NavButton("我喜欢")
+        self.liked_playlist_button.clicked.connect(self.show_liked_playlist_page)
+        self.recent_added_nav_button = NavButton("最近添加")
+        self.recent_added_nav_button.clicked.connect(
+            lambda checked=False: self.show_library_category("recent_added")
+        )
+        self.view_buttons.update(
+            {
+                "all": self.library_nav_button,
+                "recent_played": self.recent_nav_button,
+                "frequent": self.frequent_nav_button,
+                "liked": self.liked_playlist_button,
+                "recent_added": self.recent_added_nav_button,
+            }
+        )
+        layout.addWidget(self.library_nav_button)
+        layout.addWidget(self.recent_nav_button)
+        layout.addWidget(self.frequent_nav_button)
+        layout.addWidget(self.liked_playlist_button)
+        layout.addWidget(self.recent_added_nav_button)
+
+        layout.addSpacing(12)
         nav_title = QLabel("浏览")
         nav_title.setObjectName("sidebarSectionTitle")
         layout.addWidget(nav_title)
 
-        self.library_nav_button = NavButton("音乐库", active=True)
-        self.library_nav_button.clicked.connect(self.show_library_page)
+        self.search_nav_button = NavButton("搜索")
+        self.search_nav_button.clicked.connect(self.show_search_page)
 
         self.playlist_nav_button = NavButton("播放列表")
         self.playlist_nav_button.clicked.connect(self.show_play_queue)
@@ -6270,9 +6476,6 @@ class MainWindow(QMainWindow):
         self.pending_nav_button = NavButton("待导入")
         self.pending_nav_button.clicked.connect(self.show_pending_imports_page)
 
-        self.online_search_nav_button = NavButton("在线搜索")
-        self.online_search_nav_button.clicked.connect(self.show_online_search_page)
-
         self.custom_sources_nav_button = NavButton("自定义来源")
         self.custom_sources_nav_button.clicked.connect(
             self.show_custom_source_manager_page
@@ -6281,11 +6484,10 @@ class MainWindow(QMainWindow):
         self.settings_nav_button = NavButton("设置")
         self.settings_nav_button.clicked.connect(self.open_settings_dialog)
 
-        layout.addWidget(self.library_nav_button)
+        layout.addWidget(self.search_nav_button)
         layout.addWidget(self.playlist_nav_button)
         layout.addWidget(self.lyrics_nav_button)
         layout.addWidget(self.pending_nav_button)
-        layout.addWidget(self.online_search_nav_button)
         layout.addWidget(self.custom_sources_nav_button)
 
         layout.addSpacing(12)
@@ -6293,16 +6495,6 @@ class MainWindow(QMainWindow):
         playlist_title = QLabel("歌单")
         playlist_title.setObjectName("sidebarSectionTitle")
         layout.addWidget(playlist_title)
-
-        liked_btn = QPushButton("♥ 我喜欢")
-        liked_btn.setObjectName("playlistSidebarButton")
-        liked_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        liked_btn.setProperty("active", self.current_library_view == "liked")
-        liked_btn.clicked.connect(self.show_liked_playlist_page)
-
-        self.liked_playlist_button = liked_btn
-        self.view_buttons["liked"] = liked_btn
-        layout.addWidget(liked_btn)
 
         self.sidebar_playlist_box = QFrame()
         self.sidebar_playlist_box.setObjectName("sidebarPlaylistBox")
@@ -6337,199 +6529,33 @@ class MainWindow(QMainWindow):
         return sidebar
 
     def _create_library_panel(self) -> QFrame:
-        panel = QFrame()
-        panel.setObjectName("libraryPanel")
-        panel.setAcceptDrops(True)
-
-        layout = QVBoxLayout(panel)
-        layout.setContentsMargins(28, 26, 28, 24)
-        layout.setSpacing(16)
-
-        header_layout = QHBoxLayout()
-
-        title_box = QVBoxLayout()
-
-        page_title = QLabel("音乐库")
-        page_title.setObjectName("pageTitle")
-
-        page_subtitle = QLabel("可以导入、搜索，也可以直接拖拽音乐文件或文件夹到窗口。")
-        page_subtitle.setObjectName("pageSubtitle")
-
-        title_box.addWidget(page_title)
-        title_box.addWidget(page_subtitle)
-
-        import_btn = QPushButton("导入音乐")
-        import_btn.setObjectName("primaryButton")
-        import_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        import_btn.clicked.connect(self.import_music_files)
-
-        import_folder_btn = QPushButton("导入文件夹")
-        import_folder_btn.setObjectName("secondaryButton")
-        import_folder_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        import_folder_btn.clicked.connect(self.import_music_folder)
-
-        random_play_btn = QPushButton("随机播放全部")
-        random_play_btn.setObjectName("secondaryButton")
-        random_play_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        random_play_btn.setToolTip("从当前音乐库中随机播放一首，不改变搜索和筛选状态")
-        random_play_btn.clicked.connect(self.play_random_library_song)
-
-        more_btn = QPushButton("更多")
-        more_btn.setObjectName("libraryMoreButton")
-        more_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        more_menu = QMenu(more_btn)
-        remove_selected_action = more_menu.addAction("从音乐库移除选中歌曲")
-        remove_selected_action.triggered.connect(self.remove_selected_song)
-        clean_missing_action = more_menu.addAction("清理失效歌曲")
-        clean_missing_action.triggered.connect(self.clean_missing_songs)
-        more_btn.setMenu(more_menu)
-
-        header_layout.addLayout(title_box)
-        header_layout.addStretch()
-        header_layout.addWidget(random_play_btn)
-        header_layout.addWidget(more_btn)
-        header_layout.addWidget(import_folder_btn)
-        header_layout.addWidget(import_btn)
-
-        search_layout = QHBoxLayout()
-        search_layout.setContentsMargins(0, 0, 0, 0)
-        search_layout.setSpacing(10)
-
-        self.search_input = QLineEdit()
-        self.search_input.setObjectName("searchInput")
-        self.search_input.setPlaceholderText("搜索歌曲、歌手或专辑")
-        self.search_input.textChanged.connect(self.request_search_filter)
-
-        self.local_only_search_checkbox = QCheckBox("仅搜索本地")
-        self.local_only_search_checkbox.setChecked(self.unified_search_local_only)
-        self.local_only_search_checkbox.setToolTip("关闭所有自定义来源的在线搜索请求")
-        self.local_only_search_checkbox.toggled.connect(
-            self.on_unified_local_only_toggled
-        )
-
-        clear_search_btn = QPushButton("清空")
-        clear_search_btn.setObjectName("secondaryButton")
-        clear_search_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        clear_search_btn.clicked.connect(self.clear_search)
-
-        search_layout.addWidget(self.search_input, 1)
-        search_layout.addWidget(self.local_only_search_checkbox)
-        search_layout.addWidget(clear_search_btn)
-
-        self.view_layout = QHBoxLayout()
-        self.view_layout.setContentsMargins(0, 0, 0, 0)
-        self.view_layout.setSpacing(8)
-
-        self.view_layout.addWidget(self._create_view_button("全部歌曲", "all"))
-        self.view_layout.addWidget(self._create_view_button("最近播放", "recent_played"))
-        self.view_layout.addWidget(self._create_view_button("常听歌曲", "frequent"))
-        self.view_layout.addWidget(self._create_view_button("最近添加", "recent_added"))
-
-        self.category_all_btn = QPushButton("全部")
-        self.category_all_btn.setObjectName("categoryFilterButton")
-        self.category_all_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.category_all_btn.clicked.connect(lambda checked=False: self.clear_library_category_filter())
-
-        self.artist_filter_btn = QPushButton("歌手")
-        self.artist_filter_btn.setObjectName("categoryFilterButton")
-        self.artist_filter_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.artist_filter_btn.clicked.connect(self.show_artist_filter_menu)
-
-        self.album_filter_btn = QPushButton("专辑")
-        self.album_filter_btn.setObjectName("categoryFilterButton")
-        self.album_filter_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.album_filter_btn.clicked.connect(self.show_album_filter_menu)
-
-        self.category_filter_label = QLabel("当前筛选：全部")
-        self.category_filter_label.setObjectName("categoryFilterLabel")
-
-        self.view_layout.addWidget(self.category_all_btn)
-        self.view_layout.addWidget(self.artist_filter_btn)
-        self.view_layout.addWidget(self.album_filter_btn)
-        self.view_layout.addWidget(self.category_filter_label)
-        self.view_layout.addStretch()
-
-        self.song_table_header = QFrame()
-        self.song_table_header.setObjectName("songTableHeader")
-        table_header_layout = QGridLayout(self.song_table_header)
-        table_header_layout.setContentsMargins(14, 0, 14, 0)
-        table_header_layout.setHorizontalSpacing(SONG_TABLE_COLUMN_GAP)
-        table_header_layout.setVerticalSpacing(0)
-        configure_song_table_columns(table_header_layout)
-
-        self.library_sort_headers: dict[str, QPushButton] = {}
-
-        def add_sort_header(text: str, field: str, column: int) -> None:
-            button = QPushButton(text)
-            button.setObjectName("songTableHeaderButton")
-            button.setCursor(Qt.CursorShape.PointingHandCursor)
-            button.setProperty("sortActive", False)
-            button.setProperty("alignRight", field == "added_at")
-            button.setMinimumWidth(0)
-
-            if field == "added_at":
-                button.setFixedWidth(SONG_TABLE_ADDED_WIDTH)
-            else:
-                button.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
-
-            button.clicked.connect(lambda checked=False, name=field: self.sort_library_by_column(name))
-            self.library_sort_headers[field] = button
-            table_header_layout.addWidget(button, 0, column)
-
-        marker_header = QLabel("")
-        marker_header.setFixedWidth(SONG_TABLE_MARKER_WIDTH)
-        table_header_layout.addWidget(marker_header, 0, 0)
-        add_sort_header("歌曲标题", "title", 1)
-        add_sort_header("歌手", "artist", 2)
-        add_sort_header("专辑", "album", 3)
-
-        duration_header = QLabel("时长")
-        duration_header.setObjectName("songTableHeaderLabel")
-        duration_header.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
-        duration_header.setFixedWidth(SONG_TABLE_DURATION_WIDTH)
-        duration_header.setToolTip("时长暂不参与排序")
-        table_header_layout.addWidget(duration_header, 0, 4)
-        add_sort_header("添加时间", "added_at", 5)
-
-        self.song_list_empty_hint = QLabel("音乐库还是空的\n导入本地音乐后，就可以在这里浏览和播放。")
-        self.song_list_empty_hint.setObjectName("listEmptyHint")
-        self.song_list_empty_hint.setWordWrap(True)
-        self.song_list_empty_hint.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.song_list_empty_hint.setMinimumHeight(180)
-        self.song_list_empty_hint.setVisible(False)
-
-        self.song_list = QListWidget()
-        self.song_list.setObjectName("songList")
+        page = LibraryPage(self)
+        self.library_page = page
+        self.song_list = page.track_view.list_widget
         self.song_list.setItemDelegate(SongLibraryDelegate(self, self.song_list))
-        self.song_list.setWordWrap(False)
-        self.song_list.setUniformItemSizes(True)
-        self.song_list.setSpacing(2)
-        self.song_list.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
-        self.song_list.setAcceptDrops(False)
         self.song_list.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.song_list.customContextMenuRequested.connect(self.show_song_context_menu)
         self.song_list.itemClicked.connect(self.select_song)
         self.song_list.itemDoubleClicked.connect(self.play_selected_song)
-        self.song_list.verticalScrollBar().valueChanged.connect(self.schedule_visible_library_durations)
-        self.update_category_filter_controls()
+        self.song_list.verticalScrollBar().valueChanged.connect(
+            self.schedule_visible_library_durations
+        )
+        self.song_table_header = page.track_view.header
+        self.song_list_empty_hint = page.track_view.empty_label
+        self.library_sort_headers = page.track_view.sort_buttons
+        page.track_view.sortRequested.connect(self.sort_library_by_column)
+        page.importFilesRequested.connect(self.import_music_files)
+        page.importFolderRequested.connect(self.import_music_folder)
+        page.randomPlayRequested.connect(self.play_random_library_song)
+        page.removeSelectedRequested.connect(self.remove_selected_song)
+        page.cleanMissingRequested.connect(self.clean_missing_songs)
+        page.trackBrowsed.connect(self.browse_media_item)
+        page.trackPlayRequested.connect(self.play_media_item)
+        page.trackContextRequested.connect(self.media_interactions.show_context_menu)
+        page.viewChanged.connect(self.on_library_content_view_changed)
+        page.set_playing_key_provider(self.current_media_key)
         self.update_library_sort_headers()
-
-        self.local_search_group_label = QLabel("本地音乐")
-        self.local_search_group_label.setObjectName("settingsCardTitle")
-        self.local_search_group_label.setVisible(False)
-        self.unified_search_panel = UnifiedSearchResultsPanel(self)
-
-        layout.addLayout(header_layout)
-        layout.addLayout(search_layout)
-        layout.addLayout(self.view_layout)
-        layout.addWidget(self.local_search_group_label)
-        layout.addWidget(self.song_table_header)
-        layout.addWidget(self.song_list_empty_hint)
-        layout.addWidget(self.song_list, 1)
-        layout.addWidget(self.unified_search_panel)
-
-        return panel
-
+        return page
     def _create_pending_imports_page(self) -> QFrame:
         page = QFrame()
         page.setObjectName("pendingImportsPage")
@@ -6782,9 +6808,21 @@ class MainWindow(QMainWindow):
         self.bottom_song_artist.setObjectName("bottomSongArtist")
         self.bottom_song_artist.setFixedWidth(280)
 
+        self.bottom_source_badge = QLabel("")
+        self.bottom_source_badge.setObjectName("bottomSourceBadge")
+        self.bottom_source_badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.bottom_source_badge.setMaximumWidth(128)
+        self.bottom_source_badge.setStyleSheet(
+            "QLabel#bottomSourceBadge { background: rgba(76,141,255,0.18); color: #9fc1ff; "
+            "border: 1px solid rgba(76,141,255,0.38); border-radius: 8px; padding: 2px 7px; "
+            "font-size: 11px; font-weight: 700; }"
+        )
+        self.bottom_source_badge.hide()
+
         left_layout.addStretch()
         left_layout.addWidget(self.bottom_song_title)
         left_layout.addWidget(self.bottom_song_artist)
+        left_layout.addWidget(self.bottom_source_badge, alignment=Qt.AlignmentFlag.AlignLeft)
         left_layout.addStretch()
 
         center_box = QFrame()
@@ -7003,27 +7041,57 @@ class MainWindow(QMainWindow):
         event.acceptProposedAction()
 
     def request_search_filter(self, *_args) -> None:
-        self.search_debounce_timer.stop()
         keyword = self.search_input.text().strip()
-        if keyword and hasattr(self, "local_search_group_label"):
-            self.local_search_group_label.setText("本地音乐 · 正在搜索…")
-        self.apply_search_filter()
-        if hasattr(self, "local_search_group_label"):
-            self.local_search_group_label.setVisible(bool(keyword))
+        local_results = self.collect_local_search_results(keyword)
+        if hasattr(self, "search_page"):
+            self.search_page.set_local_results(keyword, local_results)
         local_only = bool(
-            getattr(self, "local_only_search_checkbox", None)
-            and self.local_only_search_checkbox.isChecked()
+            getattr(self, "search_page", None)
+            and self.search_page.local_only_checkbox.isChecked()
         )
         service = getattr(self, "unified_search_service", None)
         if service is not None:
             service.schedule_search(keyword, local_only=local_only)
-        if not keyword and hasattr(self, "unified_search_panel"):
+        if keyword:
+            self.show_search_page()
+        else:
             self.unified_search_results = []
             self.unified_search_summary = {}
-            self.unified_search_panel.clear_results()
+            if hasattr(self, "search_page"):
+                self.search_page.clear_online_results()
+            if (
+                hasattr(self, "content_stack")
+                and hasattr(self, "search_page")
+                and self.content_stack.currentWidget() is self.search_page
+            ):
+                self.return_to_library_view()
 
     def apply_search_filter(self) -> None:
-        self.filter_song_list(self.search_input.text())
+        self.request_search_filter()
+
+    def collect_local_search_results(self, keyword: str) -> list[dict]:
+        normalized = " ".join(str(keyword or "").casefold().split())
+        if not normalized or not hasattr(self, "song_list"):
+            return []
+        results: list[dict] = []
+        seen_paths: set[str] = set()
+        for row in range(self.song_list.count()):
+            item = self.song_list.item(row)
+            song_data = item.data(Qt.ItemDataRole.UserRole) if item is not None else None
+            if not isinstance(song_data, dict) or song_data.get("recordKind") == "remote":
+                continue
+            search_text = " ".join(
+                str(song_data.get(field) or "").casefold()
+                for field in ("title", "artist", "album")
+            )
+            if normalized not in " ".join(search_text.split()):
+                continue
+            media_item = MediaItem.from_local(song_data)
+            if media_item.local_file_path in seen_paths:
+                continue
+            seen_paths.add(media_item.local_file_path)
+            results.append(media_item.to_dict())
+        return results
 
     def on_unified_local_only_toggled(self, checked: bool) -> None:
         self.unified_search_local_only = bool(checked)
@@ -7043,7 +7111,7 @@ class MainWindow(QMainWindow):
         if not current_keyword:
             self.unified_search_results = []
             self.unified_search_summary = {}
-            self.unified_search_panel.clear_results()
+            self.search_page.clear_online_results()
             return
         self.unified_search_results = [
             self.decorate_unified_search_result(result)
@@ -7051,24 +7119,31 @@ class MainWindow(QMainWindow):
             if isinstance(result, dict)
         ]
         self.unified_search_summary = dict(summary or {})
-        self.unified_search_panel.set_results(
+        self.search_page.set_online_results(
             current_keyword,
             self.unified_search_results,
             self.unified_search_summary,
         )
 
     def decorate_unified_search_result(self, track: dict) -> dict:
-        decorated = dict(track)
-        stable_id = RemoteTrackStore.stable_id_for_track(decorated)
+        media_item = MediaItem.from_online(track)
+        legacy = media_item.to_legacy_online()
+        source = self.get_registered_source_safely(media_item.source_id)
+        if not source or not source.get("enabled") or not source.get("sourceUrl"):
+            media_item.availability = "unavailable"
+            media_item.can_play = bool(media_item.local_file_path)
+            media_item.can_download = False
+        stable_id = RemoteTrackStore.stable_id_for_track(legacy)
         record = self.remote_tracks.get(stable_id)
-        if isinstance(record, dict):
-            decorated["remoteStableId"] = stable_id
         local_path = str((record or {}).get("local_path") or "")
         downloaded = bool(local_path and Path(local_path).is_file())
-        decorated["downloaded"] = downloaded
-        decorated["localPath"] = str(Path(local_path).resolve()) if downloaded else ""
-        decorated["localExisting"] = downloaded or self.has_matching_local_song(decorated)
-        return decorated
+        media_item.local_file_path = str(Path(local_path).resolve()) if downloaded else ""
+        media_item.can_play = bool(media_item.can_play or downloaded)
+        media_item.extra["remote_stable_id"] = stable_id if isinstance(record, dict) else ""
+        media_item.extra["local_existing"] = downloaded or self.has_matching_local_song(
+            media_item.to_dict()
+        )
+        return media_item.to_dict()
 
     def has_matching_local_song(self, track: dict) -> bool:
         title = " ".join(str(track.get("title") or "").casefold().split())
@@ -7089,21 +7164,22 @@ class MainWindow(QMainWindow):
         return False
 
     def refresh_unified_search_result_states(self) -> None:
-        panel = getattr(self, "unified_search_panel", None)
-        if panel is None or not self.unified_search_results:
+        page = getattr(self, "search_page", None)
+        if page is None or not self.unified_search_results:
             return
         self.unified_search_results = [
             self.decorate_unified_search_result(result)
             for result in self.unified_search_results
         ]
-        panel.set_results(
+        page.set_online_results(
             self.search_input.text().strip(),
             self.unified_search_results,
             self.unified_search_summary,
         )
 
     def play_unified_search_track(self, track: dict) -> None:
-        stable_id = str(track.get("remoteStableId") or "").strip()
+        media_item = MediaItem.from_mapping(track)
+        stable_id = str(media_item.extra.get("remote_stable_id") or "").strip()
         record = self.remote_tracks.get(stable_id)
         if isinstance(record, dict):
             local_path = str(record.get("local_path") or "")
@@ -7112,21 +7188,116 @@ class MainWindow(QMainWindow):
                     {"recordKind": "remote", "remoteStableId": stable_id}
                 )
                 return
-        if track.get("availability") != "available":
+        if media_item.availability != "available":
             self.set_online_status_message("该在线来源当前不可用。")
             return
-        self.request_online_playback(track)
+        self.request_online_playback(media_item.to_legacy_online())
 
     def remove_unified_track_from_current_playlist(self, track: dict) -> None:
-        stable_id = str(track.get("remoteStableId") or "").strip()
+        media_item = MediaItem.from_mapping(track)
+        stable_id = str(media_item.extra.get("remote_stable_id") or "").strip()
         if not stable_id:
-            stable_id = RemoteTrackStore.stable_id_for_track(track)
+            stable_id = RemoteTrackStore.stable_id_for_track(
+                media_item.to_legacy_online()
+            )
         self.remove_remote_from_current_playlist(stable_id)
         self.refresh_unified_search_result_states()
 
     def clear_search(self) -> None:
         self.search_input.clear()
 
+    def current_media_key(self) -> str:
+        item = getattr(self, "current_media_item", None)
+        return item.key if isinstance(item, MediaItem) else ""
+
+    def browse_media_item(self, value: dict) -> None:
+        try:
+            media_item = MediaItem.from_mapping(value)
+        except (TypeError, ValueError):
+            return
+        self.browsing_song_data = media_item.to_dict()
+        self.browsing_song_path = (
+            self.normalize_song_path(media_item.local_file_path)
+            if media_item.local_file_path
+            else None
+        )
+        print(f"你正在浏览：{media_item.title} - {media_item.artist}")
+
+    def play_media_item(self, value: dict) -> None:
+        try:
+            media_item = MediaItem.from_mapping(value)
+        except (TypeError, ValueError):
+            return
+        self.browse_media_item(media_item.to_dict())
+        if media_item.media_type == "online" and not media_item.is_local_available:
+            if media_item.availability != "available" or not media_item.can_play:
+                self.set_online_status_message("该在线来源当前不可播放。")
+                return
+            self.request_online_playback(media_item.to_legacy_online())
+            return
+        song_data = self.find_song_data_by_path(media_item.local_file_path)
+        if not isinstance(song_data, dict) or song_data.get("recordKind") == "remote":
+            song_data = media_item.to_legacy_local()
+        song_path = self.normalize_song_path(song_data.get("path", ""))
+        if not song_path or not Path(song_path).is_file():
+            QMessageBox.information(self, "无法播放", "本地音乐文件已经不存在。")
+            return
+        self.create_playback_context(song_path)
+        self.load_song_for_playback(song_data)
+        self.play_current_song()
+
+    def queue_media_item_next(self, value: dict) -> None:
+        media_item = MediaItem.from_mapping(value)
+        if media_item.media_type == "online" and not media_item.is_local_available:
+            queued = media_item.to_dict()
+            queued["play_url"] = ""
+            self.online_play_queue.insert(0, queued)
+            self.update_play_queue_nav_badge()
+            if hasattr(self, "play_queue_page_list"):
+                self.refresh_play_queue_page()
+            self.set_online_status_message(f"已将“{media_item.title}”设为下一首播放。")
+            return
+        self.queue_song_path(media_item.local_file_path, insert_next=True)
+
+    def play_next_queued_online_song(self) -> bool:
+        while self.online_play_queue:
+            value = self.online_play_queue.pop(0)
+            try:
+                media_item = MediaItem.from_mapping(value)
+            except (TypeError, ValueError):
+                continue
+            self.update_play_queue_nav_badge()
+            self.remember_queue_return_state()
+            self.request_online_playback(media_item.to_legacy_online())
+            return True
+        return False
+
+    def get_local_media_item_collection_state(self, value: dict) -> dict:
+        return self.media_interactions.get_local_state(value)
+
+    def like_local_media_item(self, value: dict) -> None:
+        self.media_interactions.like_local(value)
+
+    def unlike_local_media_item(self, value: dict) -> None:
+        self.media_interactions.unlike_local(value)
+
+    def add_local_media_item_to_playlist(self, value: dict, playlist_id: str) -> None:
+        self.media_interactions.add_local_to_playlist(value, playlist_id)
+
+    def remove_local_media_item_from_current_playlist(self, value: dict) -> None:
+        self.media_interactions.remove_local_from_current_playlist(value)
+
+    def open_local_media_item_folder(self, value: dict) -> None:
+        self.media_interactions.open_local_folder(value)
+
+    def remove_local_media_item(self, value: dict) -> None:
+        self.media_interactions.remove_local(value)
+
+    def show_media_item_info(self, value: dict) -> None:
+        self.media_interactions.show_info(value)
+
+    def show_media_item_context_menu(self, value: dict, global_position) -> None:
+        self.media_interactions.show_context_menu(value, global_position)
     def get_category_display_value(self, song_data: dict, field: str) -> str:
         if field == "artist":
             return str(song_data.get("artist") or "未知艺术家")
@@ -7275,7 +7446,9 @@ class MainWindow(QMainWindow):
         return [current_item] if self.get_song_data_from_item(current_item) else []
     def filter_song_list(self, keyword: str) -> None:
         started_at = time.perf_counter()
-        keyword = keyword.strip().lower()
+        # Search lives on its own page. The library list only applies its active
+        # category/playlist scope and therefore keeps its scroll and selection.
+        keyword = ""
         visible_count = 0
         liked_paths_cache = None
         playlist_paths_cache = None
@@ -7345,10 +7518,72 @@ class MainWindow(QMainWindow):
 
                 self.schedule_visible_library_durations()
         elapsed_ms = (time.perf_counter() - started_at) * 1000
-        if keyword and hasattr(self, "local_search_group_label"):
-            self.local_search_group_label.setText(f"本地音乐 · {visible_count} 条")
+        self.update_library_page_scope()
         print(f"搜索关键词：{keyword or '无'}，显示歌曲数量：{visible_count}")
         print(f"[perf] filter_song_list: {elapsed_ms:.1f} ms, songs={self.song_list.count()}")
+
+    def media_item_from_song_data(self, song_data: dict) -> MediaItem:
+        if song_data.get("recordKind") != "remote":
+            return MediaItem.from_local(song_data)
+        remote = self.get_remote_record_from_song_data(song_data)
+        if remote is None:
+            return MediaItem.from_online(
+                {
+                    "track_id": str(song_data.get("remoteStableId") or "missing"),
+                    "source_id": "missing",
+                    "source_name": "来源不可用",
+                    "title": song_data.get("title"),
+                    "artist": song_data.get("artist"),
+                    "album": song_data.get("album"),
+                    "availability": "unavailable",
+                }
+            )
+        stable_id, record = remote
+        track = RemoteTrackStore.to_online_track(stable_id, record)
+        source = self.get_registered_source_safely(str(record.get("source_id") or "")) or {}
+        track["sourceName"] = str(source.get("name") or record.get("source_id") or "来源不可用")
+        track["capabilities"] = dict(source.get("capabilities") or {})
+        track["availability"] = "available" if self.is_remote_source_available(record) else "unavailable"
+        local_path = str(record.get("local_path") or "")
+        if local_path and Path(local_path).is_file():
+            track["localPath"] = str(Path(local_path).resolve())
+        return MediaItem.from_online(track)
+
+    def update_library_page_scope(self) -> None:
+        page = getattr(self, "library_page", None)
+        if page is None or not hasattr(self, "song_list"):
+            return
+        tracks = []
+        for row in range(self.song_list.count()):
+            item = self.song_list.item(row)
+            data = item.data(Qt.ItemDataRole.UserRole) if item is not None else None
+            if item is None or item.isHidden() or not isinstance(data, dict) or data.get("demo"):
+                continue
+            tracks.append(self.media_item_from_song_data(data).to_dict())
+        view_titles = {
+            "all": "全部歌曲",
+            "liked": "我喜欢",
+            "recent_played": "最近播放",
+            "frequent": "常听歌曲",
+            "recent_added": "最近添加",
+        }
+        if self.current_library_view.startswith("playlist:"):
+            playlist_id = self.current_library_view.split("playlist:", 1)[1]
+            title = self.get_playlist_name(playlist_id)
+        else:
+            title = view_titles.get(self.current_library_view, "音乐库")
+        cache_key = (
+            f"{self.current_library_view}:{self.library_data_revision}:"
+            f"{len(tracks)}"
+        )
+        page.set_scope(title, tracks, cache_key)
+
+    def on_library_content_view_changed(self, mode: str) -> None:
+        mode = str(mode)
+        if mode == getattr(self, "initial_library_content_view", "tracks"):
+            return
+        self.initial_library_content_view = mode
+        self.save_hush_settings({"library_content_view": mode})
 
     def get_visible_rows(self) -> list[int]:
         visible_rows = []
@@ -8805,6 +9040,19 @@ class MainWindow(QMainWindow):
         if window is None or not window.isVisible():
             return
 
+        current = getattr(self, "current_media_item", None)
+        if isinstance(current, MediaItem) and current.media_type == "online":
+            if self.displayed_lyrics_track_key == current.key and self.current_lyrics:
+                previous_line, current_line, next_line = self.get_lyric_context_by_position(
+                    self.media_player.position(), self.current_lyrics
+                )
+                window.set_lines(previous_line, current_line, next_line)
+            elif self.current_plain_lyrics:
+                window.set_lines("", current.title, "纯文本歌词请在歌词页查看")
+            else:
+                window.set_lines("", current.title, "当前在线歌曲暂无同步歌词")
+            return
+
         current_song_path = self.normalize_song_path(getattr(self, "current_song_path", ""))
         displayed_lyrics_path = self.normalize_song_path(getattr(self, "displayed_lyrics_song_path", ""))
 
@@ -8850,6 +9098,9 @@ class MainWindow(QMainWindow):
 
         queue = getattr(self, "play_queue", [])
         count = len(queue) if isinstance(queue, list) else 0
+        online_queue = getattr(self, "online_play_queue", [])
+        if isinstance(online_queue, list):
+            count += len(online_queue)
 
         if count > 0:
             button.setText(f"播放列表 ({count})")
@@ -9178,109 +9429,141 @@ class MainWindow(QMainWindow):
     def refresh_play_queue_page(self) -> None:
         if not hasattr(self, "play_queue_page_list"):
             return
-
         if not hasattr(self, "play_queue"):
             self.play_queue = []
-
         valid_queue = []
-
         for song_path in self.play_queue:
             normalized_path = self.normalize_song_path(song_path)
-
             if normalized_path and Path(normalized_path).exists():
                 valid_queue.append(normalized_path)
-
         if valid_queue != self.play_queue:
             self.play_queue = valid_queue
             self.save_play_queue()
-
         self.play_queue_page_list.clear()
-
-        for index, song_path in enumerate(self.play_queue, start=1):
-            song_title = self.get_song_title_for_queue(song_path)
-            item = QListWidgetItem(f"{index}. {song_title}")
-            item.setData(Qt.ItemDataRole.UserRole, song_path)
+        index = 1
+        for track in self.online_play_queue:
+            media_item = MediaItem.from_mapping(track)
+            item = QListWidgetItem(
+                f"{index}. {media_item.title} - {media_item.artist}  [{media_item.source_name} · 在线]"
+            )
+            item.setData(
+                Qt.ItemDataRole.UserRole,
+                {"kind": "online", "track": media_item.to_dict()},
+            )
             self.play_queue_page_list.addItem(item)
-
+            index += 1
+        for song_path in self.play_queue:
+            song_title = self.get_song_title_for_queue(song_path)
+            item = QListWidgetItem(f"{index}. {song_title}  [本地]")
+            item.setData(
+                Qt.ItemDataRole.UserRole,
+                {"kind": "local", "path": song_path},
+            )
+            self.play_queue_page_list.addItem(item)
+            index += 1
         if self.play_queue_page_list.count() > 0 and self.play_queue_page_list.currentRow() < 0:
             self.play_queue_page_list.setCurrentRow(0)
-
         count = self.play_queue_page_list.count()
-
         if count == 0:
-            self.play_queue_page_hint.setText("播放队列是空的。可以在音乐库里右键歌曲，选择“下一首播放”或“加入播放队列”。")
+            self.play_queue_page_hint.setText(
+                "播放队列是空的。可在本地或在线歌曲右键菜单选择“下一首播放”。"
+            )
         else:
-            self.play_queue_page_hint.setText(f"队列里有 {count} 首歌。双击歌曲可以立即播放。")
-
-        try:
-            self.update_play_queue_nav_badge()
-        except Exception:
-            pass
+            self.play_queue_page_hint.setText(
+                f"队列里有 {count} 首歌。在线项目只在本次运行期间保留。"
+            )
+        self.update_play_queue_nav_badge()
 
     def get_selected_queue_page_index(self) -> int:
         if not hasattr(self, "play_queue_page_list"):
             return -1
-
         row = self.play_queue_page_list.currentRow()
-
-        if row < 0 or row >= len(self.play_queue):
+        total = len(self.online_play_queue) + len(self.play_queue)
+        if row < 0 or row >= total:
             QMessageBox.information(self, "播放列表", "请先选择播放列表里的一首歌。")
             return -1
-
         return row
 
     def play_selected_queue_page_song(self) -> None:
         row = self.get_selected_queue_page_index()
-
         if row < 0:
             return
-
-        song_path = self.play_queue.pop(row)
+        online_count = len(self.online_play_queue)
+        if row < online_count:
+            value = self.online_play_queue.pop(row)
+            self.update_play_queue_nav_badge()
+            self.play_media_item(value)
+            self.refresh_play_queue_page()
+            return
+        local_index = row - online_count
+        song_path = self.play_queue.pop(local_index)
         self.save_play_queue()
-
-        if self.play_song_from_queue_path(song_path):
-            self.refresh_play_queue_page()
-        else:
+        if not self.play_song_from_queue_path(song_path):
             QMessageBox.information(self, "播放列表", "这首歌无法播放，可能文件已经不存在。")
-            self.refresh_play_queue_page()
+        self.refresh_play_queue_page()
 
     def remove_selected_queue_page_song(self) -> None:
         row = self.get_selected_queue_page_index()
-
         if row < 0:
             return
-
-        self.play_queue.pop(row)
-        self.save_play_queue()
+        online_count = len(self.online_play_queue)
+        if row < online_count:
+            self.online_play_queue.pop(row)
+            self.update_play_queue_nav_badge()
+        else:
+            self.play_queue.pop(row - online_count)
+            self.save_play_queue()
         self.refresh_play_queue_page()
-
         if self.play_queue_page_list.count() > 0:
-            self.play_queue_page_list.setCurrentRow(min(row, self.play_queue_page_list.count() - 1))
+            self.play_queue_page_list.setCurrentRow(
+                min(row, self.play_queue_page_list.count() - 1)
+            )
 
     def move_selected_queue_page_song_up(self) -> None:
         row = self.get_selected_queue_page_index()
-
         if row <= 0:
             return
-
-        self.play_queue[row - 1], self.play_queue[row] = self.play_queue[row], self.play_queue[row - 1]
-        self.save_play_queue()
+        online_count = len(self.online_play_queue)
+        if row < online_count:
+            self.online_play_queue[row - 1], self.online_play_queue[row] = (
+                self.online_play_queue[row],
+                self.online_play_queue[row - 1],
+            )
+        elif row > online_count:
+            local_index = row - online_count
+            self.play_queue[local_index - 1], self.play_queue[local_index] = (
+                self.play_queue[local_index],
+                self.play_queue[local_index - 1],
+            )
+            self.save_play_queue()
+        else:
+            return
         self.refresh_play_queue_page()
         self.play_queue_page_list.setCurrentRow(row - 1)
 
     def move_selected_queue_page_song_down(self) -> None:
         row = self.get_selected_queue_page_index()
-
-        if row < 0 or row >= len(self.play_queue) - 1:
+        if row < 0:
             return
-
-        self.play_queue[row + 1], self.play_queue[row] = self.play_queue[row], self.play_queue[row + 1]
-        self.save_play_queue()
+        online_count = len(self.online_play_queue)
+        if row < online_count - 1:
+            self.online_play_queue[row + 1], self.online_play_queue[row] = (
+                self.online_play_queue[row],
+                self.online_play_queue[row + 1],
+            )
+        elif row >= online_count and row < online_count + len(self.play_queue) - 1:
+            local_index = row - online_count
+            self.play_queue[local_index + 1], self.play_queue[local_index] = (
+                self.play_queue[local_index],
+                self.play_queue[local_index + 1],
+            )
+            self.save_play_queue()
+        else:
+            return
         self.refresh_play_queue_page()
         self.play_queue_page_list.setCurrentRow(row + 1)
-
     def clear_queue_from_page(self) -> None:
-        if not self.play_queue:
+        if not self.play_queue and not self.online_play_queue:
             QMessageBox.information(self, "播放列表", "播放列表已经是空的。")
             return
 
@@ -9296,6 +9579,7 @@ class MainWindow(QMainWindow):
             return
 
         self.play_queue.clear()
+        self.online_play_queue.clear()
         self.save_play_queue()
         self.refresh_play_queue_page()
 
@@ -9306,12 +9590,13 @@ class MainWindow(QMainWindow):
         if not hasattr(self, "play_queue"):
             self.play_queue = []
 
-        if not self.play_queue:
+        if not self.play_queue and not self.online_play_queue:
             QMessageBox.information(self, "播放队列", "播放队列已经是空的。")
             self.save_play_queue()
             return
 
         self.play_queue.clear()
+        self.online_play_queue.clear()
         self.save_play_queue()
         QMessageBox.information(self, "播放队列", "播放队列已清空。")
         print("播放队列已清空")
@@ -9729,7 +10014,8 @@ class MainWindow(QMainWindow):
             self.now_stats.setText(f"等待播放 · 上次进度 {progress_text}")
 
         if hasattr(self, "now_open_folder_btn"):
-            self.now_open_folder_btn.setEnabled(False)
+            self.now_open_folder_btn.setText("打开文件位置")
+            self.now_open_folder_btn.setEnabled(True)
 
         self.progress_slider.setValue(0)
         self.update_current_time_display(position)
@@ -9916,6 +10202,19 @@ class MainWindow(QMainWindow):
         if not hasattr(self, "like_btn"):
             return
 
+        current = getattr(self, "current_media_item", None)
+        if isinstance(current, MediaItem) and current.media_type == "online":
+            liked = bool(
+                self.get_online_track_collection_state(current.to_dict()).get("liked")
+            )
+            self.like_btn.setText("♥ 已收藏" if liked else "♡ 收藏")
+            self.like_btn.setProperty("liked", liked)
+            self.like_btn.setEnabled(True)
+            self.like_btn.style().unpolish(self.like_btn)
+            self.like_btn.style().polish(self.like_btn)
+            self.like_btn.update()
+            return
+
         target_path = self.normalize_song_path(self.current_song_path)
 
         if not target_path:
@@ -9936,6 +10235,16 @@ class MainWindow(QMainWindow):
         self.like_btn.update()
 
     def toggle_like_current_song(self) -> None:
+        current = getattr(self, "current_media_item", None)
+        if isinstance(current, MediaItem) and current.media_type == "online":
+            state = self.get_online_track_collection_state(current.to_dict())
+            if state.get("liked"):
+                self.unlike_online_track(current.to_dict())
+            else:
+                self.like_online_track(current.to_dict())
+            self.update_like_button()
+            return
+
         target_path = self.normalize_song_path(self.current_song_path)
 
         if not target_path:
@@ -10410,6 +10719,7 @@ class MainWindow(QMainWindow):
         self.now_artist.setText(f"{artist} · {album}")
 
         if hasattr(self, "now_open_folder_btn"):
+            self.now_open_folder_btn.setText("打开文件位置")
             self.now_open_folder_btn.setEnabled(True)
 
         self.update_cover(
@@ -10442,6 +10752,70 @@ class MainWindow(QMainWindow):
 
         QApplication.processEvents()
 
+    def on_online_lyrics_status_changed(
+        self,
+        _generation: int,
+        track_key: str,
+        message: str,
+    ) -> None:
+        current = getattr(self, "current_media_item", None)
+        if not isinstance(current, MediaItem) or current.key != track_key:
+            return
+        self.set_lyrics_status(message)
+
+    def on_online_lyrics_ready(
+        self,
+        _generation: int,
+        track_key: str,
+        payload: dict,
+    ) -> None:
+        current = getattr(self, "current_media_item", None)
+        if (
+            not isinstance(current, MediaItem)
+            or current.media_type != "online"
+            or current.key != track_key
+        ):
+            print("已忽略过期在线歌词：", track_key)
+            return
+        text = str(payload.get("text") or "").strip()
+        lyrics_type = str(payload.get("type") or "none")
+        source = str(payload.get("source") or "在线来源")
+        self.current_lyrics = []
+        self.current_plain_lyrics = ""
+        self.displayed_lyrics_song_path = None
+        self.displayed_lyrics_track_key = track_key
+        if not text or payload.get("not_found"):
+            self.lyrics_view.set_placeholder("暂无歌词", source)
+            self.set_lyrics_status("暂无歌词")
+        elif lyrics_type == "lrc":
+            parsed = self.parse_lrc_text(text)
+            if parsed:
+                self.current_lyrics = parsed
+                self.lyrics_view.set_lyrics(parsed)
+                self.set_lyrics_status(f"时间轴歌词 · {source}")
+            else:
+                self.current_plain_lyrics = text
+                self.lyrics_view.set_plain_text(text)
+                self.set_lyrics_status(f"纯文本歌词 · {source}")
+        else:
+            self.current_plain_lyrics = text
+            self.lyrics_view.set_plain_text(text)
+            self.set_lyrics_status(f"纯文本歌词 · {source}")
+        self.sync_full_lyrics_from_current()
+        self.sync_immersive_lyrics()
+
+    def on_online_artwork_ready(
+        self,
+        _generation: int,
+        track_key: str,
+        data: bytes,
+    ) -> None:
+        current = getattr(self, "current_media_item", None)
+        if not isinstance(current, MediaItem) or current.key != track_key:
+            return
+        if self.show_cover_from_bytes(data):
+            self.sync_immersive_lyrics()
+
     def load_song_for_playback(self, song_data: dict | None) -> None:
         if not isinstance(song_data, dict):
             return
@@ -10468,6 +10842,15 @@ class MainWindow(QMainWindow):
         self.pending_online_track = None
         self.current_track_kind = "local"
         self.current_online_track = None
+        self.current_media_item = MediaItem.from_local(song_data)
+        self.current_plain_lyrics = ""
+        self.displayed_lyrics_track_key = ""
+        self.online_lyrics_service.cancel()
+        self.online_artwork_service.cancel()
+        if hasattr(self, "bottom_source_badge"):
+            self.bottom_source_badge.hide()
+        if hasattr(self, "now_stats"):
+            self.now_stats.show()
 
         if not getattr(self, "restoring_playback_session", False):
             self.pending_lazy_restore_song_data = None
@@ -10538,6 +10921,11 @@ class MainWindow(QMainWindow):
         self.flush_current_listen_time()
 
         self.current_song_path = None
+        self.current_media_item = None
+        self.current_track_kind = "local"
+        self.current_online_track = None
+        self.online_lyrics_service.cancel()
+        self.online_artwork_service.cancel()
         self.pending_lazy_restore_song_data = None
         self.pending_restore_position = 0
         self.browsing_song_path = None
@@ -10547,6 +10935,8 @@ class MainWindow(QMainWindow):
 
         self.current_duration = 0
         self.current_lyrics = []
+        self.current_plain_lyrics = ""
+        self.displayed_lyrics_track_key = ""
 
         self.reset_playback_stats_session()
 
@@ -10564,10 +10954,13 @@ class MainWindow(QMainWindow):
             self.lyrics_status_label.setText("歌词：等待选择歌曲")
 
         if hasattr(self, "now_open_folder_btn"):
+            self.now_open_folder_btn.setText("打开文件位置")
             self.now_open_folder_btn.setEnabled(False)
 
         self.bottom_song_title.setText("未播放")
         self.bottom_song_artist.setText("请选择一首音乐")
+        if hasattr(self, "bottom_source_badge"):
+            self.bottom_source_badge.hide()
         self.lyrics_view.set_placeholder("这里会显示歌词", "支持本地 .lrc 和联网同步歌词")
         self.reset_cover()
         self.update_like_button()
@@ -11437,6 +11830,9 @@ class MainWindow(QMainWindow):
             return
 
         self.current_lyrics = []
+        self.current_plain_lyrics = ""
+        current = getattr(self, "current_media_item", None)
+        self.displayed_lyrics_track_key = current.key if isinstance(current, MediaItem) else ""
         self.displayed_lyrics_song_path = normalized_file_path
         self.lyrics_view.set_placeholder("正在查找歌词", "优先手动绑定，其次本地歌词，然后缓存和联网")
         self.set_lyrics_status("正在查找歌词")
@@ -11507,7 +11903,6 @@ class MainWindow(QMainWindow):
 
     def parse_lrc_file(self, lrc_path: Path) -> list[tuple[int, str]]:
         content = None
-
         for encoding in ("utf-8", "utf-8-sig", "gbk", "gb18030"):
             try:
                 content = lrc_path.read_text(encoding=encoding)
@@ -11517,47 +11912,34 @@ class MainWindow(QMainWindow):
             except Exception as error:
                 print("读取歌词文件失败：", error)
                 return []
+        return self.parse_lrc_text(content or "")
 
-        if content is None:
-            return []
-
+    @staticmethod
+    def parse_lrc_text(content: str) -> list[tuple[int, str]]:
         lyrics: list[tuple[int, str]] = []
         time_pattern = re.compile(r"\[(\d{1,2}):(\d{1,2})(?:\.(\d{1,3}))?\]")
-
-        for raw_line in content.splitlines():
+        for raw_line in str(content or "").splitlines():
             line = raw_line.strip()
-
             if not line:
                 continue
-
             matches = list(time_pattern.finditer(line))
-
             if not matches:
                 continue
-
-            lyric_text = time_pattern.sub("", line).strip()
-
-            if not lyric_text:
-                lyric_text = "♪"
-
+            lyric_text = time_pattern.sub("", line).strip() or "♪"
             for match in matches:
                 minute = int(match.group(1))
                 second = int(match.group(2))
                 millisecond_text = match.group(3) or "0"
-
                 if len(millisecond_text) == 1:
                     millisecond = int(millisecond_text) * 100
                 elif len(millisecond_text) == 2:
                     millisecond = int(millisecond_text) * 10
                 else:
                     millisecond = int(millisecond_text[:3])
-
                 timestamp = minute * 60 * 1000 + second * 1000 + millisecond
                 lyrics.append((timestamp, lyric_text))
-
         lyrics.sort(key=lambda item: item[0])
         return lyrics
-
     def get_visible_playback_paths(self) -> list[str]:
         ordered_paths = []
 
@@ -11943,6 +12325,10 @@ class MainWindow(QMainWindow):
         self.play_song_by_row(random.choice(candidates))
 
     def open_current_song_folder(self) -> None:
+        current = getattr(self, "current_media_item", None)
+        if isinstance(current, MediaItem) and current.media_type == "online":
+            self.show_media_item_info(current.to_dict())
+            return
         song_path = self.normalize_song_path(self.current_song_path)
 
         if not song_path:
@@ -11963,6 +12349,8 @@ class MainWindow(QMainWindow):
         self.play_from_playback_context(-1)
 
     def play_next_with_queue_priority(self) -> bool:
+        if self.play_next_queued_online_song():
+            return True
         if self.play_next_queued_song():
             return True
 
@@ -12156,6 +12544,19 @@ class MainWindow(QMainWindow):
         self.progress_slider.setValue(progress)
 
         self.record_listen_progress(position)
+
+        current = getattr(self, "current_media_item", None)
+        if (
+            isinstance(current, MediaItem)
+            and current.media_type == "online"
+            and self.displayed_lyrics_track_key == current.key
+        ):
+            self.lyrics_view.update_by_position(position, self.current_lyrics)
+            if hasattr(self, "full_lyrics_view"):
+                self.full_lyrics_view.update_by_position(position, self.current_lyrics)
+            if self.immersive_lyrics_window is not None:
+                self.immersive_lyrics_window.update_position(position, self.current_lyrics)
+            return
 
         current_playing_path = self.normalize_song_path(self.current_song_path)
         displayed_lyrics_path = self.normalize_song_path(self.displayed_lyrics_song_path)
@@ -12383,15 +12784,20 @@ class MainWindow(QMainWindow):
         play_action.triggered.connect(
             lambda checked=False, selected_item=item: self.play_selected_song(selected_item)
         )
-        download_action = menu.addAction("下载")
-        download_action.setEnabled(
-            self.is_remote_source_available(record)
-            and (track.get("capabilities") or {}).get("download") is True
-            and not self.online_download_manager.is_active()
+        next_action = menu.addAction("下一首播放")
+        next_action.setEnabled(play_action.isEnabled())
+        next_action.triggered.connect(
+            lambda checked=False, current_track=track: self.queue_media_item_next(current_track)
         )
-        download_action.triggered.connect(
-            lambda checked=False, current_track=track: self.request_online_download(current_track)
-        )
+        if (track.get("capabilities") or {}).get("download") is True:
+            download_action = menu.addAction("下载")
+            download_action.setEnabled(
+                self.is_remote_source_available(record)
+                and not self.online_download_manager.is_active()
+            )
+            download_action.triggered.connect(
+                lambda checked=False, current_track=track: self.request_online_download(current_track)
+            )
         menu.addSeparator()
         liked_ids = self.get_playlist_remote_ids("liked")
         if stable_id in liked_ids:
@@ -12421,11 +12827,6 @@ class MainWindow(QMainWindow):
                 lambda checked=False, target_id=stable_id: self.remove_remote_from_current_playlist(target_id)
             )
         menu.addSeparator()
-        open_folder_action = menu.addAction("打开文件夹")
-        open_folder_action.setEnabled(local_exists)
-        open_folder_action.triggered.connect(
-            lambda checked=False, path=local_path: self.open_remote_song_folder(path)
-        )
         info_action = menu.addAction("查看歌曲信息")
         info_action.triggered.connect(
             lambda checked=False, current_track=track: self.show_online_track_info(current_track)
@@ -12507,41 +12908,10 @@ class MainWindow(QMainWindow):
     def show_selected_song_info(self) -> None:
         item = self.song_list.currentItem()
         song_data = self.get_song_data_from_item(item)
-
         if not song_data:
             QMessageBox.information(self, "提示", "请先选择一首真实歌曲。")
             return
-
-        title = song_data.get("title", "未知歌曲")
-        artist = song_data.get("artist", "未知艺术家")
-        album = song_data.get("album", "未知专辑")
-        path = self.normalize_song_path(song_data.get("path", ""))
-
-        stats = self.song_stats.get(
-            path,
-            {
-                "play_count": 0,
-                "total_listen_time": 0,
-                "last_played": 0,
-            },
-        )
-
-        play_count = int(stats.get("play_count", 0))
-        total_time = self.format_listen_time(int(stats.get("total_listen_time", 0)))
-        liked_text = "是" if self.is_song_liked(path) else "否"
-
-        info = (
-            f"歌曲：{title}\\n"
-            f"歌手：{artist}\\n"
-            f"专辑：{album}\\n"
-            f"已收藏：{liked_text}\\n"
-            f"播放次数：{play_count}\\n"
-            f"累计时长：{total_time}\\n\\n"
-            f"文件路径：\\n{path}"
-        )
-
-        QMessageBox.information(self, "歌曲信息", info)
-
+        self.show_media_item_info(self.media_item_from_song_data(song_data).to_dict())
     def closeEvent(self, event) -> None:
         self.flush_current_listen_time()
         self.save_song_stats()

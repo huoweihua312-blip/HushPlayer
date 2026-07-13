@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections import OrderedDict
 
 from PySide6.QtCore import QSize, Qt, Signal
+from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (
     QFrame,
     QHBoxLayout,
@@ -13,9 +14,13 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
 )
 
+from app.models.media_item import MediaItem
+
 
 class UnifiedSearchResultsPanel(QFrame):
+    browseRequested = Signal(dict)
     playRequested = Signal(dict)
+    queueNextRequested = Signal(dict)
     downloadRequested = Signal(dict)
     likeRequested = Signal(dict)
     unlikeRequested = Signal(dict)
@@ -23,13 +28,15 @@ class UnifiedSearchResultsPanel(QFrame):
     removeFromCurrentPlaylistRequested = Signal(dict)
     infoRequested = Signal(dict)
 
-    def __init__(self, parent=None) -> None:
+    def __init__(self, parent=None, standalone: bool = False) -> None:
         super().__init__(parent)
+        self.standalone = bool(standalone)
         self._keyword = ""
         self._results: list[dict] = []
         self._summary: dict = {}
         self.collection_state_provider = lambda _track: {}
         self.playlist_provider = lambda: []
+        self.playing_key_provider = lambda: ""
         self._build_ui()
 
     def _build_ui(self) -> None:
@@ -55,7 +62,8 @@ class UnifiedSearchResultsPanel(QFrame):
         self.result_list.itemClicked.connect(self.browse_result)
         self.result_list.itemDoubleClicked.connect(self.request_playback)
         self.result_list.setMinimumHeight(160)
-        self.result_list.setMaximumHeight(285)
+        if not self.standalone:
+            self.result_list.setMaximumHeight(285)
         self.detail_label = QLabel("单击在线歌曲可查看详情；双击才会解析播放地址。")
         self.detail_label.setObjectName("pageSubtitle")
         self.detail_label.setWordWrap(True)
@@ -69,11 +77,34 @@ class UnifiedSearchResultsPanel(QFrame):
             "QListWidget#unifiedSearchResultList::item:hover { background: rgba(255,255,255,0.06); }"
             "QListWidget#unifiedSearchResultList::item:selected { background: rgba(59,130,246,0.20); border: 1px solid rgba(96,165,250,0.42); }"
         )
-        self.setVisible(False)
+        self.setVisible(self.standalone)
 
     def set_collection_providers(self, state_provider, playlist_provider) -> None:
         self.collection_state_provider = state_provider or (lambda _track: {})
         self.playlist_provider = playlist_provider or (lambda: [])
+
+    def set_playing_key_provider(self, provider) -> None:
+        self.playing_key_provider = provider or (lambda: "")
+        self.refresh_playing_indicator()
+
+    def refresh_playing_indicator(self) -> None:
+        playing_key = str(self.playing_key_provider() or "")
+        for row in range(self.result_list.count()):
+            item = self.result_list.item(row)
+            track = item.data(Qt.ItemDataRole.UserRole) if item is not None else None
+            if not isinstance(track, dict):
+                continue
+            try:
+                is_playing = MediaItem.from_mapping(track).key == playing_key
+            except (TypeError, ValueError):
+                is_playing = False
+            font = self.result_list.font()
+            font.setBold(is_playing)
+            item.setFont(font)
+            item.setData(
+                Qt.ItemDataRole.ForegroundRole,
+                QColor("#8fbcff") if is_playing else None,
+            )
 
     def set_status(self, message: str) -> None:
         self.status_label.setText(str(message or ""))
@@ -85,7 +116,7 @@ class UnifiedSearchResultsPanel(QFrame):
         self.result_list.clear()
         self.status_label.clear()
         self.detail_label.setText("单击在线歌曲可查看详情；双击才会解析播放地址。")
-        if hide:
+        if hide and not self.standalone:
             self.setVisible(False)
 
     def set_results(
@@ -95,7 +126,11 @@ class UnifiedSearchResultsPanel(QFrame):
         summary: dict | None = None,
     ) -> None:
         self._keyword = str(keyword or "")
-        self._results = [dict(item) for item in results if isinstance(item, dict)]
+        self._results = [
+            MediaItem.from_mapping(item).to_dict()
+            for item in results
+            if isinstance(item, dict)
+        ]
         self._summary = dict(summary or {})
         self.setVisible(bool(self._keyword))
         previous_key = self._track_key(self.current_track())
@@ -104,8 +139,8 @@ class UnifiedSearchResultsPanel(QFrame):
         self.result_list.clear()
         groups: OrderedDict[tuple[str, str], list[dict]] = OrderedDict()
         for result in self._results:
-            source_id = str(result.get("sourceId") or "")
-            source_name = str(result.get("sourceName") or source_id or "未知来源")
+            source_id = str(result.get("source_id") or "")
+            source_name = str(result.get("source_name") or source_id or "未知来源")
             groups.setdefault((source_id, source_name), []).append(result)
         selected_item = None
         for (_source_id, source_name), tracks in groups.items():
@@ -124,6 +159,7 @@ class UnifiedSearchResultsPanel(QFrame):
                     selected_item = item
         self.result_list.blockSignals(False)
         self.result_list.setUpdatesEnabled(True)
+        self.refresh_playing_indicator()
         if selected_item is not None:
             self.result_list.setCurrentItem(selected_item)
         errors = self._summary.get("errors")
@@ -142,15 +178,15 @@ class UnifiedSearchResultsPanel(QFrame):
         track = item.data(Qt.ItemDataRole.UserRole)
         if not isinstance(track, dict):
             return
-        capabilities = self._capabilities(track)
         status = self._local_status(track)
         self.detail_label.setText(
             f"{track.get('title') or '未知歌曲'} · {track.get('artist') or '未知艺术家'} · "
             f"{track.get('album') or '未知专辑'}\n"
-            f"来源：{track.get('sourceName') or track.get('sourceId') or '未知来源'} · "
-            f"播放：{'可用' if capabilities.get('playback') else '不可用'} · "
-            f"下载：{'可用' if capabilities.get('download') else '不可用'} · {status}"
+            f"来源：{track.get('source_name') or track.get('source_id') or '未知来源'} · "
+            f"播放：{'可用' if track.get('can_play') else '不可用'} · "
+            f"下载：{'可用' if track.get('can_download') else '不可用'} · {status}"
         )
+        self.browseRequested.emit(dict(track))
 
     def request_playback(self, item: QListWidgetItem) -> None:
         track = item.data(Qt.ItemDataRole.UserRole)
@@ -159,7 +195,7 @@ class UnifiedSearchResultsPanel(QFrame):
         if track.get("availability") != "available":
             self.set_status("该在线来源当前不可用。")
             return
-        if self._capabilities(track).get("playback") is not True and not track.get("downloaded"):
+        if not track.get("can_play") and not track.get("local_file_path"):
             self.set_status("该来源没有可用的播放能力。")
             return
         self.playRequested.emit(dict(track))
@@ -172,7 +208,6 @@ class UnifiedSearchResultsPanel(QFrame):
         if not isinstance(track, dict):
             return
         self.result_list.setCurrentItem(item)
-        capabilities = self._capabilities(track)
         available = track.get("availability") == "available"
         try:
             state = self.collection_state_provider(track) or {}
@@ -180,12 +215,18 @@ class UnifiedSearchResultsPanel(QFrame):
             state = {}
         menu = QMenu(self)
         play_action = menu.addAction("播放")
-        play_action.setEnabled(bool(track.get("downloaded")) or (available and capabilities.get("playback") is True))
+        play_action.setEnabled(bool(track.get("local_file_path")) or (available and bool(track.get("can_play"))))
         play_action.triggered.connect(
             lambda checked=False, current_item=item: self.request_playback(current_item)
         )
+        queue_action = menu.addAction("下一首播放")
+        queue_action.setEnabled(bool(track.get("local_file_path")) or (available and bool(track.get("can_play"))))
+        queue_action.triggered.connect(
+            lambda checked=False, current_track=dict(track): self.queueNextRequested.emit(current_track)
+        )
         download_action = menu.addAction("下载")
-        download_action.setEnabled(available and capabilities.get("download") is True)
+        download_action.setVisible(bool(track.get("can_download")))
+        download_action.setEnabled(available and bool(track.get("can_download")))
         download_action.triggered.connect(
             lambda checked=False, current_track=dict(track): self.downloadRequested.emit(current_track)
         )
@@ -227,22 +268,17 @@ class UnifiedSearchResultsPanel(QFrame):
         )
         menu.exec(self.result_list.mapToGlobal(position))
 
-    @staticmethod
-    def _capabilities(track: dict) -> dict:
-        capabilities = track.get("capabilities")
-        return capabilities if isinstance(capabilities, dict) else {}
-
     @classmethod
     def _result_text(cls, track: dict) -> str:
         title = str(track.get("title") or "未知歌曲")
         artist = str(track.get("artist") or "未知艺术家")
         album = str(track.get("album") or "未知专辑")
         duration = cls._format_duration(track.get("duration"))
-        capabilities = cls._capabilities(track)
         flags = [cls._local_status(track)]
-        flags.append("可播放" if capabilities.get("playback") else "不可播放")
-        flags.append("可下载" if capabilities.get("download") else "不可下载")
-        return f"{title}\n{artist} · {album} · {duration}   |   {' · '.join(flags)}"
+        flags.append("可播放" if track.get("can_play") else "不可播放")
+        flags.append("可下载" if track.get("can_download") else "不可下载")
+        source = str(track.get("source_name") or track.get("source_id") or "未知来源")
+        return f"{title}\n{artist} · {album} · {duration}   [{source}]   {' · '.join(flags)}"
 
     @classmethod
     def _result_tooltip(cls, track: dict) -> str:
@@ -250,7 +286,7 @@ class UnifiedSearchResultsPanel(QFrame):
             f"歌曲：{track.get('title') or '未知歌曲'}\n"
             f"歌手：{track.get('artist') or '未知艺术家'}\n"
             f"专辑：{track.get('album') or '未知专辑'}\n"
-            f"来源：{track.get('sourceName') or track.get('sourceId') or '未知来源'}\n"
+            f"来源：{track.get('source_name') or track.get('source_id') or '未知来源'}\n"
             f"状态：{cls._local_status(track)}"
         )
 
@@ -258,9 +294,10 @@ class UnifiedSearchResultsPanel(QFrame):
     def _local_status(track: dict) -> str:
         if track.get("availability") != "available":
             return "来源不可用"
-        if track.get("downloaded"):
+        if track.get("local_file_path"):
             return "已下载"
-        if track.get("localExisting"):
+        extra = track.get("extra") if isinstance(track.get("extra"), dict) else {}
+        if extra.get("local_existing"):
             return "本地已有"
         return "在线"
 
@@ -269,10 +306,8 @@ class UnifiedSearchResultsPanel(QFrame):
         if not isinstance(track, dict):
             return ()
         return (
-            str(track.get("sourceId") or ""),
-            str(track.get("id") or track.get("songmid") or ""),
-            str(track.get("title") or ""),
-            str(track.get("artist") or ""),
+            str(track.get("source_id") or ""),
+            str(track.get("track_id") or ""),
         )
 
     @staticmethod
