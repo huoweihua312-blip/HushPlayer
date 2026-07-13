@@ -1,0 +1,24 @@
+ .gitignore                                    |   51 [32m+[m[31m-[m
+ AGENTS.md                                     | 1080 [32m++++++++++++++[m[31m-[m
+ app/services/__init__.py                      |    1 [32m+[m
+ app/services/online_download_manager.py       |  135 [32m++[m
+ app/services/online_source_client.py          |  343 [32m+++++[m
+ app/services/source_registry.py               |  465 [32m+++++++[m
+ app/ui/main_window.py                         | 1795 [32m++++++++++++++++++++++[m[31m---[m
+ app/ui/online_source_pages.py                 |  725 [32m++++++++++[m
+ inspect_qq_source.py                          |   41 [32m+[m
+ main.py                                       |   25 [32m+[m
+ requirements.txt                              |  Bin [31m0[m -> [32m398[m bytes
+ source_runtime/README.md                      |   77 [32m++[m
+ source_runtime/package-lock.json              |  669 [32m+++++++++[m
+ source_runtime/package.json                   |   19 [32m+[m
+ source_runtime/playback_protocol_self_test.js |  150 [32m+++[m
+ source_runtime/plugin_host.js                 |  804 [32m+++++++++++[m
+ source_runtime/runner.js                      |  204 [32m+++[m
+ source_runtime/source_registry.json           |    4 [32m+[m
+ source_runtime/source_test_worker.js          |   98 [32m++[m
+ test_musicfree_source.py                      |  154 [32m+++[m
+ test_quickjs.py                               |   14 [32m+[m
+ tests/online_playback_smoke.py                |  286 [32m++++[m
+ tests/source_removal_smoke.py                 |  163 [32m+++[m
+ 23 files changed, 7063 insertions(+), 240 deletions(-)
