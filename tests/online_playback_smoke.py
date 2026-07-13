@@ -11,6 +11,10 @@ from functools import partial
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PySide6.QtCore import Qt
@@ -18,11 +22,11 @@ from PySide6.QtWidgets import QApplication, QListWidgetItem
 
 from app.services.online_download_manager import OnlineDownloadManager
 from app.services.online_source_client import OnlineSourceClient
+from app.services.remote_track_store import RemoteTrackStore
 from app.services.source_registry import SourceRegistryManager
 from app.ui.online_source_pages import OnlineSearchPage
 
 
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
 STAGING_ROOT = PROJECT_ROOT / "source_runtime" / "sources" / "staging"
 TEST_ROOT = STAGING_ROOT / f"hushplayer_qprocess_{os.getpid()}"
 
@@ -50,6 +54,14 @@ def prepare_fixture() -> Path:
         };\n""",
         encoding="utf-8",
     )
+    independent_path = TEST_ROOT / "independent_fixture.js"
+    independent_path.write_text(
+        """module.exports = {
+            resolvePlayback: async () => ({ url: "http://127.0.0.1/fallback.wav" }),
+            resolveDownload: async () => ({ url: "http://127.0.0.1/independent.flac", filename: "independent.flac" })
+        };\n""",
+        encoding="utf-8",
+    )
     registry_path = TEST_ROOT / "registry.json"
     registry_path.write_text(
         json.dumps(
@@ -61,8 +73,28 @@ def prepare_fixture() -> Path:
                         "name": "Open fixture",
                         "filename": plugin_path.relative_to(PROJECT_ROOT / "source_runtime").as_posix(),
                         "enabled": True,
+                        "userInstalled": True,
+                        "sourceUrl": "https://example.invalid/open_fixture.js",
                         "contentPolicy": "open",
-                        "capabilities": {"playback": True, "download": False},
+                        "capabilities": {
+                            "playback": True,
+                            "download": True,
+                            "downloadViaPlayback": True,
+                        },
+                    },
+                    {
+                        "id": "independent_fixture",
+                        "name": "Independent fixture",
+                        "filename": independent_path.relative_to(PROJECT_ROOT / "source_runtime").as_posix(),
+                        "enabled": True,
+                        "userInstalled": True,
+                        "sourceUrl": "https://example.invalid/independent_fixture.js",
+                        "contentPolicy": "open",
+                        "capabilities": {
+                            "playback": True,
+                            "download": True,
+                            "downloadViaPlayback": False,
+                        },
                     }
                 ],
             }
@@ -90,6 +122,20 @@ def test_qprocess_client(app: QApplication, registry_path: Path) -> None:
     assert wait_until(lambda: any(item[0] == current_id for item in resolved))
     assert not any(item[0] == old_id for item in resolved)
     assert resolved[-1][1]["url"].endswith("/current.mp3")
+
+    downloads: list[tuple[int, dict]] = []
+    client.downloadResolved.connect(lambda request_id, _source, data: downloads.append((request_id, data)))
+    fallback_download_id = client.resolve_download("open_fixture", {"id": "fallback"})
+    assert wait_until(lambda: any(item[0] == fallback_download_id for item in downloads))
+    fallback_resolution = next(item[1] for item in downloads if item[0] == fallback_download_id)
+    assert fallback_resolution["viaPlayback"] is True
+    assert fallback_resolution["url"].endswith("/fallback.mp3")
+
+    independent_id = client.resolve_download("independent_fixture", {"id": "independent"})
+    assert wait_until(lambda: any(item[0] == independent_id for item in downloads))
+    independent = next(item[1] for item in downloads if item[0] == independent_id)
+    assert independent["viaPlayback"] is False
+    assert independent["filename"] == "independent.flac"
 
     error_id = client.resolve_playback("open_fixture", {"id": "error", "fail": True})
     assert wait_until(lambda: any(item[0] == error_id for item in failures))
@@ -131,6 +177,20 @@ def test_search_page_signals() -> None:
     page.request_playback(supported)
     assert len(emitted) == 1
     assert "正在获取播放地址" in page.status_label.text()
+
+    page.result_list.addItem(unsupported)
+    page.result_list.setCurrentItem(unsupported)
+    page.update_detail_buttons()
+    assert not page.download_button.isEnabled()
+    downloadable = QListWidgetItem("downloadable")
+    downloadable.setData(
+        Qt.ItemDataRole.UserRole,
+        {"sourceId": "open", "id": "3", "capabilities": {"download": True}},
+    )
+    page.result_list.addItem(downloadable)
+    page.result_list.setCurrentItem(downloadable)
+    page.update_detail_buttons()
+    assert page.download_button.isEnabled()
     page.deleteLater()
     client.deleteLater()
 
@@ -141,9 +201,17 @@ def test_download_manager() -> None:
         payload = b"RIFF" + b"\x00" * 4092
         (root / "fixture.wav").write_bytes(payload)
 
+        (root / "error.html").write_text("<!doctype html><html>error</html>", encoding="utf-8")
+
         class QuietHandler(SimpleHTTPRequestHandler):
             def log_message(self, _format: str, *args) -> None:
                 pass
+
+            def do_GET(self) -> None:
+                if self.path.endswith("fixture.wav") and self.headers.get("Referer") != "https://example.invalid/":
+                    self.send_error(403)
+                    return
+                super().do_GET()
 
         server = ThreadingHTTPServer(
             ("127.0.0.1", 0),
@@ -159,12 +227,30 @@ def test_download_manager() -> None:
             manager.failed.connect(failures.append)
             target = root / "saved.wav"
             assert manager.start_download(
-                {"url": f"http://127.0.0.1:{server.server_port}/fixture.wav", "headers": {}},
+                {
+                    "url": f"http://127.0.0.1:{server.server_port}/fixture.wav",
+                    "headers": {
+                        "Referer": "https://example.invalid/",
+                        "User-Agent": "HushPlayer test",
+                    },
+                },
                 str(target),
             )
             assert wait_until(lambda: bool(finished or failures))
             assert not failures
             assert target.read_bytes() == payload
+
+            inferred_target = root / "inferred"
+            assert manager.start_download(
+                {
+                    "url": f"http://127.0.0.1:{server.server_port}/fixture.wav",
+                    "headers": {"Referer": "https://example.invalid/"},
+                },
+                str(inferred_target),
+            )
+            assert wait_until(lambda: len(finished) >= 2 or bool(failures))
+            assert not failures
+            assert (root / "inferred.wav").read_bytes() == payload
 
             assert not manager.start_download(
                 {
@@ -173,8 +259,33 @@ def test_download_manager() -> None:
                 },
                 str(root / "blocked.wav"),
             )
-            assert "附加请求头" in failures[-1]
+            assert "不受支持" in failures[-1]
             assert not (root / "blocked.wav").exists()
+            assert not manager.start_download(
+                {
+                    "url": f"http://127.0.0.1:{server.server_port}/fixture.wav",
+                    "headers": {"Referer": "safe\r\nInjected: value"},
+                },
+                str(root / "injected.wav"),
+            )
+            assert "换行" in failures[-1]
+            assert not manager.start_download(
+                {
+                    "url": f"http://127.0.0.1:{server.server_port}/fixture.wav",
+                    "headers": {"Proxy-Authorization": "secret"},
+                },
+                str(root / "proxy.wav"),
+            )
+            assert "不受支持" in failures[-1]
+
+            html_target = root / "html_error"
+            assert manager.start_download(
+                {"url": f"http://127.0.0.1:{server.server_port}/error.html", "headers": {}},
+                str(html_target),
+            )
+            assert wait_until(lambda: not manager.is_active())
+            assert any("text/html" in failure or "HTML" in failure for failure in failures)
+            assert not html_target.exists()
             manager.deleteLater()
         finally:
             server.shutdown()
@@ -194,6 +305,79 @@ def test_js_and_json_import_capabilities() -> None:
         assert raw_candidate["contentPolicy"] == "unknown"
         assert raw_candidate["capabilities"]["playback"] is False
         assert raw_candidate["capabilities"]["download"] is False
+
+        custom_url = "HTTPS://Example.Invalid:443/sources/open.js#fragment"
+        custom_candidate = manager.stage_bytes(
+            code,
+            "open.js",
+            source_url=custom_url,
+            content_policy="user_owned",
+            user_installed=True,
+        )
+        assert custom_candidate["capabilities"]["playback"] is True
+        assert custom_candidate["capabilities"]["download"] is True
+        assert custom_candidate["capabilities"]["downloadViaPlayback"] is False
+        installed = manager.install_candidate(custom_candidate, enabled=True)
+        assert installed["enabled"] is True
+        assert manager.find_by_source_url("https://example.invalid/sources/open.js")["id"] == installed["id"]
+        update_candidate = manager.stage_bytes(
+            code + b"\n// safe update",
+            "open.js",
+            source_url="https://example.invalid/sources/open.js",
+            content_policy="user_owned",
+            user_installed=True,
+        )
+        updated = manager.update_candidate(installed["id"], update_candidate)
+        assert updated["id"] == installed["id"]
+        assert updated["sha256"] != installed["sha256"]
+        assert Path(updated["backupPath"]).is_file()
+
+        playback_only = b"module.exports = { search: async () => [], getMediaSource: async () => ({url: 'https://example.invalid/a.mp3'}) };"
+        first = manager.stage_bytes(
+            playback_only,
+            "playback_only.js",
+            source_url="https://example.invalid/playback_only.js",
+            content_policy="open",
+            user_installed=True,
+        )
+        second = manager.stage_bytes(
+            playback_only + b"\n// changed",
+            "playback_only.js",
+            source_url="https://example.invalid/playback_only.js",
+            content_policy="open",
+            user_installed=True,
+        )
+        assert first["id"] == second["id"]
+        assert first["capabilities"]["playback"] is True
+        assert first["capabilities"]["download"] is True
+        assert first["capabilities"]["downloadViaPlayback"] is True
+
+        no_media = manager.stage_bytes(
+            b"module.exports = { search: async () => [] };",
+            "no_media.js",
+            source_url="https://example.invalid/no_media.js",
+            content_policy="open",
+            user_installed=True,
+        )
+        assert no_media["capabilities"]["playback"] is False
+        assert no_media["capabilities"]["download"] is False
+
+        json_candidate = manager.stage_bytes(
+            json.dumps(
+                {
+                    "id": "json-track",
+                    "title": "JSON track",
+                    "url": "https://example.invalid/track.ogg",
+                }
+            ).encode("utf-8"),
+            "track.json",
+            source_url="https://example.invalid/track.json",
+            content_policy="open",
+            user_installed=True,
+        )
+        json_installed = manager.install_candidate(json_candidate, enabled=True)
+        restarted = SourceRegistryManager(root)
+        assert restarted.get_source(json_installed["id"])["sourceUrl"] == "https://example.invalid/track.json"
 
         user_sources = root / "user_sources"
         user_sources.mkdir(parents=True)
@@ -222,6 +406,7 @@ def test_main_window_online_entry() -> None:
     MainWindow.restore_playback_session = lambda self: None
     try:
         window = MainWindow()
+        assert not hasattr(window, "source_manager_page")
         track = {
             "sourceId": "open_fixture",
             "id": "fixture",
@@ -255,6 +440,35 @@ def test_main_window_online_entry() -> None:
         assert window.current_online_track == track
         assert window.playback_context is preserved_context
         assert window.media_player.source().toString().startswith("http://127.0.0.1:8765/")
+
+        with tempfile.TemporaryDirectory(prefix="hushplayer_remote_playlist_") as temp_dir:
+            root = Path(temp_dir)
+            window.playlists_file = root / "playlists.json"
+            window.remote_tracks_file = root / "remote_tracks.json"
+            window.remote_track_store = RemoteTrackStore(window.remote_tracks_file)
+            window.remote_tracks = {}
+            window.remote_tracks_error = ""
+            window.playlists = {
+                "liked": {"name": "我喜欢", "songs": ["C:/Music/local.flac"], "fixed": True},
+                "custom": {"name": "测试歌单", "songs": [], "fixed": False},
+            }
+            remote_track = {
+                "sourceId": "open_fixture",
+                "sourceUrl": "https://example.invalid/open_fixture.js",
+                "id": "remote-1",
+                "title": "Remote fixture",
+                "artist": "Remote artist",
+                "album": "Remote album",
+                "raw": {"id": "remote-1", "url": "https://temporary.invalid/track.mp3"},
+            }
+            window.like_online_track(remote_track)
+            window.add_online_track_to_playlist(remote_track, "custom")
+            stable_id = RemoteTrackStore.stable_id_for_track(remote_track)
+            saved_playlists = json.loads(window.playlists_file.read_text(encoding="utf-8"))
+            assert saved_playlists["liked"]["songs"] == ["C:/Music/local.flac"]
+            assert saved_playlists["liked"]["remoteSongs"] == [stable_id]
+            assert saved_playlists["custom"]["remoteSongs"] == [stable_id]
+            assert RemoteTrackStore(window.remote_tracks_file).load_tracks()[stable_id]["title"] == "Remote fixture"
         window.media_player.stop()
         window.online_source_client.stop()
         window.deleteLater()

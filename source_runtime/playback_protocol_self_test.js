@@ -12,6 +12,7 @@ const testRoot = path.resolve(stagingRoot, `hushplayer_protocol_${process.pid}`)
 async function main() {
     fs.mkdirSync(testRoot, { recursive: true });
     const pluginPath = path.join(testRoot, "open_fixture.js");
+    const fallbackPluginPath = path.join(testRoot, "fallback_fixture.js");
     const registryPath = path.join(testRoot, "registry.json");
     fs.writeFileSync(
         pluginPath,
@@ -28,7 +29,18 @@ async function main() {
         };\n`,
         "utf8"
     );
+    fs.writeFileSync(
+        fallbackPluginPath,
+        `module.exports = {
+            search: async () => [{ id: "fallback", title: "Fallback" }],
+            getMediaSource: async () => ({
+                url: "http://127.0.0.1:8765/fallback.ogg", headers: { Referer: "https://example.invalid/" }
+            })
+        };\n`,
+        "utf8"
+    );
     const relativePlugin = path.relative(runtimeDir, pluginPath).replaceAll("\\", "/");
+    const relativeFallbackPlugin = path.relative(runtimeDir, fallbackPluginPath).replaceAll("\\", "/");
     fs.writeFileSync(
         registryPath,
         JSON.stringify({
@@ -41,6 +53,21 @@ async function main() {
                     enabled: true,
                     contentPolicy: "open",
                     capabilities: { search: true, playback: true, download: true },
+                },
+                {
+                    id: "fallback_fixture",
+                    name: "Fallback fixture",
+                    filename: relativeFallbackPlugin,
+                    enabled: true,
+                    userInstalled: true,
+                    sourceUrl: "https://example.invalid/fallback.js",
+                    contentPolicy: "open",
+                    capabilities: {
+                        search: true,
+                        playback: true,
+                        download: true,
+                        downloadViaPlayback: true,
+                    },
                 },
                 {
                     id: "unknown_fixture",
@@ -91,7 +118,10 @@ async function main() {
     assert.equal(sources.success, true);
     assert.equal(sources.data[0].capabilities.playback, true);
     assert.equal(sources.data[0].capabilities.download, true);
-    assert.equal(sources.data[1].capabilities.playback, false);
+    assert.equal(sources.data[1].capabilities.playback, true);
+    assert.equal(sources.data[1].capabilities.download, true);
+    assert.equal(sources.data[1].capabilities.downloadViaPlayback, true);
+    assert.equal(sources.data[2].capabilities.playback, false);
 
     const playback = await request("resolvePlayback", {
         sourceId: "open_fixture",
@@ -129,6 +159,21 @@ async function main() {
     });
     assert.equal(download.success, true);
     assert.equal(download.data.filename, "fixture.mp3");
+
+    const fallbackDownload = await request("resolveDownload", {
+        sourceId: "fallback_fixture",
+        track: { id: "fallback" },
+    });
+    assert.equal(fallbackDownload.success, true);
+    assert.equal(fallbackDownload.data.viaPlayback, true);
+    assert.equal(fallbackDownload.data.headers.Referer, "https://example.invalid/");
+
+    const directUrl = await request("search", {
+        sourceId: "https://example.invalid/unsafe.js",
+        keyword: "fixture",
+    });
+    assert.equal(directUrl.success, false);
+    assert.match(directUrl.error.message, /必须先通过注册/);
 
     const shutdown = await request("shutdown");
     assert.equal(shutdown.success, true);

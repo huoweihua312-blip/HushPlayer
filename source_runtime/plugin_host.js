@@ -4,9 +4,6 @@ const crypto = require("node:crypto");
 const fs = require("node:fs");
 const Module = require("node:module");
 const path = require("node:path");
-const https = require("node:https");
-const http = require("node:http");
-const vm = require("node:vm");
 
 const RUNTIME_DIR = __dirname;
 const PROJECT_ROOT = path.resolve(RUNTIME_DIR, "..");
@@ -58,80 +55,6 @@ function redirectConsoleToStderr() {
     console.debug = (...values) => log(...values);
 }
 
-// ===== 远程音源加载支持 =====
-
-function fetchRemote(url, timeoutMs = REQUEST_TIMEOUT_MS) {
-    return new Promise((resolve, reject) => {
-        const parsed = new URL(url);
-        const transport = parsed.protocol === "https:" ? https : http;
-        const req = transport.get(url, { timeout: timeoutMs }, (res) => {
-            if (res.statusCode !== 200) {
-                reject(new Error(`下载失败：HTTP ${res.statusCode}`));
-                return;
-            }
-            const chunks = [];
-            res.on("data", (chunk) => chunks.push(chunk));
-            res.on("end", () => resolve(Buffer.concat(chunks).toString("utf8")));
-        });
-        req.on("error", reject);
-        req.on("timeout", () => {
-            req.destroy();
-            reject(new Error(`下载超时（${timeoutMs}ms）`));
-        });
-    });
-}
-
-//const SAFE_REQUIRE_MODULES = new Set([
-//     "crypto", "node:crypto", "path", "node:path", "url", "node:url",
-//     "querystring", "node:querystring", "stream", "node:stream",
-//     "util", "node:util", "buffer", "node:buffer", "events", "node:events",
-// ]);
-
-// function createSafeRequire() {
-//     return function safeRequire(id) {
-//         if (!SAFE_REQUIRE_MODULES.has(id)) {
-//             throw new Error(`远程插件禁止加载模块：${id}`);
-//         }
-//         return require(id);
-//     };
-// }
-
-function executeRemotePlugin(code, sourceUrl) {
-    installHostGuards();
-    installMusicFreeEnvironment();   // 确保 global.env 已初始化
-
-    const beginning = code.slice(0, 1200).toLowerCase();
-    if (beginning.includes("<html") || beginning.includes("<!doctype html")) {
-        throw new Error("远程内容是 HTML 页面，不是音源代码");
-    }
-    const suspiciousPatterns = [
-        /process\s*\.\s*mainModule/i,
-        /process\s*\.\s*binding\s*\(/i,
-        /process\s*\.\s*kill\s*\(/i,
-        /(?:node:)?child_process/i,
-        /(?:node:)?worker_threads/i,
-    ];
-    if (suspiciousPatterns.some(p => p.test(code))) {
-        throw new Error("远程代码包含敏感进程或模块访问");
-    }
-
-    const moduleObj = { exports: {} };
-    const sandbox = {
-        module: moduleObj,
-        exports: moduleObj.exports,
-        require: require,
-        env: global.env,            // ★ 注入 env 对象
-        console,
-        Buffer,
-        setTimeout,
-        clearTimeout,
-    };
-    const context = vm.createContext(sandbox);
-    const script = new vm.Script(code, { filename: sourceUrl });
-    script.runInContext(context);
-    return moduleObj.exports.default || moduleObj.exports;
-}
-
 function jsonToPlugin(data) {
     const url = String(data.url || "").trim();
     if (!url) throw new Error("JSON 中缺少 url 字段");
@@ -156,47 +79,6 @@ function jsonToPlugin(data) {
             return { title: data.title, artist: data.artist };
         },
     };
-}
-
-const remoteSourceCache = new Map();
-
-async function loadRemotePlugin(url, options = {}) {
-    const remoteId = `__remote__${url}`;
-    if (remoteSourceCache.has(remoteId)) {
-        return remoteSourceCache.get(remoteId);
-    }
-
-    const code = await fetchRemote(url);
-    const isJson = url.split("?")[0].endsWith(".json");
-
-    let plugin;
-    if (isJson) {
-        const data = JSON.parse(code);
-        plugin = jsonToPlugin(data);
-    } else {
-        plugin = executeRemotePlugin(code, url);
-    }
-
-    const virtualSource = {
-        id: remoteId,
-        name: `远程: ${new URL(url).hostname}`,
-        platform: 'remote',
-        enabled: true,
-        contentPolicy: 'open',
-        capabilities: { playback: true, download: true },   // ★ 新增这一行
-    };
-
-    const cached = {
-        source: virtualSource,
-        plugin,
-        filePath: null,
-        resolvedModule: null,
-        sha256: crypto.createHash("sha256").update(code).digest("hex"),
-        requiredModules: [],
-        capabilities: capabilityMap(plugin, virtualSource),
-    };
-    remoteSourceCache.set(remoteId, cached);
-    return cached;
 }
 
 function installHostGuards() {
@@ -430,6 +312,18 @@ function isContentPolicyAllowed(source) {
 function capabilityMap(plugin, source) {
     const declared = source?.capabilities || {};
     const policyAllowed = isContentPolicyAllowed(source);
+    const playbackMethod =
+        typeof plugin?.resolvePlayback === "function" ||
+        typeof plugin?.getMediaSource === "function";
+    const downloadMethod =
+        typeof plugin?.resolveDownload === "function" ||
+        typeof plugin?.getDownloadSource === "function";
+    const downloadViaPlayback =
+        policyAllowed &&
+        source?.userInstalled === true &&
+        declared.downloadViaPlayback === true &&
+        playbackMethod &&
+        !downloadMethod;
     return {
         search: typeof plugin?.search === "function",
         metadata:
@@ -439,13 +333,12 @@ function capabilityMap(plugin, source) {
         playback:
             policyAllowed &&
             declared.playback === true &&
-            (typeof plugin?.resolvePlayback === "function" ||
-                typeof plugin?.getMediaSource === "function"),
+            playbackMethod,
         download:
             policyAllowed &&
             declared.download === true &&
-            (typeof plugin?.resolveDownload === "function" ||
-                typeof plugin?.getDownloadSource === "function"),
+            (downloadMethod || downloadViaPlayback),
+        downloadViaPlayback,
     };
 }
 
@@ -534,13 +427,8 @@ async function unloadAllSources() {
 }
 
 async function loadPlugin(sourceId, options = {}) {
-    if (remoteSourceCache.has(sourceId)) {
-        return remoteSourceCache.get(sourceId);
-    }
-
-    // 如果是完整 URL，直接走远程加载
     if (typeof sourceId === "string" && (sourceId.startsWith("http://") || sourceId.startsWith("https://"))) {
-        return loadRemotePlugin(sourceId, options);
+        throw new Error("自定义 URL 必须先通过注册、静态扫描和受管理目录安装");
     }
 
     const source = findSource(sourceId);
@@ -562,13 +450,17 @@ async function loadPlugin(sourceId, options = {}) {
     installHostGuards();
     installMusicFreeEnvironment();
 
-    let resolvedModule;
+    let resolvedModule = null;
     let plugin;
 
     try {
-        resolvedModule = require.resolve(filePath);
-        const exported = require(resolvedModule);
-        plugin = exported?.default ?? exported;
+        if (path.extname(filePath).toLowerCase() === ".json") {
+            plugin = jsonToPlugin(JSON.parse(scan.code));
+        } else {
+            resolvedModule = require.resolve(filePath);
+            const exported = require(resolvedModule);
+            plugin = exported?.default ?? exported;
+        }
     } catch (error) {
         throw new Error(`加载音源失败：${error.message}`);
     }
@@ -627,6 +519,7 @@ function normalizeMusicItem(source, item, capabilities = {}) {
     return {
         sourceId: source.id,
         sourceName: source.name || source.platform || source.id,
+        sourceUrl: String(source.sourceUrl || ""),
         id: displayText(item?.id || item?.musicId || item?.songId),
         songmid: displayText(item?.songmid || item?.mid),
         title: displayText(item?.title || item?.name, "未知歌曲"),
@@ -637,6 +530,7 @@ function normalizeMusicItem(source, item, capabilities = {}) {
         capabilities: {
             playback: capabilities.playback === true,
             download: capabilities.download === true,
+            downloadViaPlayback: capabilities.downloadViaPlayback === true,
         },
         albumid: displayText(item?.albumid || item?.albumId),
         albummid: displayText(item?.albummid || item?.albumMid),
@@ -733,11 +627,42 @@ async function resolveDownload(sourceId, musicItem, options = {}) {
     }
 
     const rawItem = musicItem?.raw || musicItem || {};
-    const method = loaded.plugin.resolveDownload || loaded.plugin.getDownloadSource;
-    const result = loaded.plugin.resolveDownload
-        ? await withTimeout(method.call(loaded.plugin, rawItem, options), `音源 ${sourceId} 下载解析`)
-        : await withTimeout(method.call(loaded.plugin, rawItem, options.quality || "standard"), `音源 ${sourceId} 下载解析`);
-    return normalizeResolvedResource(result, options.quality);
+    let method;
+    let result;
+    let viaPlayback = false;
+    if (typeof loaded.plugin.resolveDownload === "function") {
+        method = loaded.plugin.resolveDownload;
+        result = await withTimeout(
+            method.call(loaded.plugin, rawItem, options),
+            `音源 ${sourceId} 下载解析`
+        );
+    } else if (typeof loaded.plugin.getDownloadSource === "function") {
+        method = loaded.plugin.getDownloadSource;
+        result = await withTimeout(
+            method.call(loaded.plugin, rawItem, options.quality || "standard"),
+            `音源 ${sourceId} 下载解析`
+        );
+    } else if (loaded.capabilities.downloadViaPlayback && typeof loaded.plugin.resolvePlayback === "function") {
+        viaPlayback = true;
+        method = loaded.plugin.resolvePlayback;
+        result = await withTimeout(
+            method.call(loaded.plugin, rawItem, options),
+            `音源 ${sourceId} 下载回退解析`
+        );
+    } else if (loaded.capabilities.downloadViaPlayback && typeof loaded.plugin.getMediaSource === "function") {
+        viaPlayback = true;
+        method = loaded.plugin.getMediaSource;
+        result = await withTimeout(
+            method.call(loaded.plugin, rawItem, options.quality || "standard"),
+            `音源 ${sourceId} 下载回退解析`
+        );
+    } else {
+        throw new Error("该音源没有可用的下载解析接口");
+    }
+    return {
+        ...normalizeResolvedResource(result, options.quality),
+        viaPlayback,
+    };
 }
 
 function listSources() {
@@ -753,8 +678,14 @@ function listSources() {
             fileExists = true;
             const scan = staticScanSource(filePath);
             requiredModules = scan.requiredModules;
-            detectedPlayback = /\b(?:resolvePlayback|getMediaSource)\b/.test(scan.code);
-            detectedDownload = /\b(?:resolveDownload|getDownloadSource)\b/.test(scan.code);
+            if (path.extname(filePath).toLowerCase() === ".json") {
+                const descriptor = JSON.parse(scan.code);
+                detectedPlayback = Boolean(descriptor?.url);
+                detectedDownload = Boolean(descriptor?.url);
+            } else {
+                detectedPlayback = /\b(?:resolvePlayback|getMediaSource)\b/.test(scan.code);
+                detectedDownload = /\b(?:resolveDownload|getDownloadSource)\b/.test(scan.code);
+            }
         } catch (error) {
             scanError = error.message;
         }
@@ -762,6 +693,12 @@ function listSources() {
         const cached = pluginCache.get(source.id);
         const declared = source?.capabilities || {};
         const allowed = isContentPolicyAllowed(source);
+        const detectedDownloadViaPlayback =
+            allowed &&
+            source?.userInstalled === true &&
+            declared.downloadViaPlayback === true &&
+            detectedPlayback &&
+            !detectedDownload;
         return {
             ...serializable(source),
             capabilities: {
@@ -773,7 +710,10 @@ function listSources() {
                     (allowed && declared.playback === true && detectedPlayback),
                 download:
                     cached?.capabilities?.download === true ||
-                    (allowed && declared.download === true && detectedDownload),
+                    (allowed && declared.download === true && (detectedDownload || detectedDownloadViaPlayback)),
+                downloadViaPlayback:
+                    cached?.capabilities?.downloadViaPlayback === true ||
+                    detectedDownloadViaPlayback,
             },
             fileExists,
             scanError,

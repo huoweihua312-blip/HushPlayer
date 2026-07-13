@@ -12,8 +12,9 @@ import requests
 from mutagen import File as MutagenFile
 from app.services.online_download_manager import OnlineDownloadManager
 from app.services.online_source_client import OnlineSourceClient
+from app.services.remote_track_store import RemoteTrackStore, RemoteTrackStoreError
 from app.services.source_registry import SourceRegistryManager
-from app.ui.online_source_pages import OnlineSearchPage, SourceManagerPage
+from app.ui.online_source_pages import OnlineSearchPage
 from PySide6.QtCore import QEasingCurve, QEvent, QItemSelectionModel, QObject, QPropertyAnimation, QRectF, QRunnable, QSize, Qt, QThread, QThreadPool, QTimer, QUrl, Signal
 from PySide6.QtGui import QColor, QFont, QFontMetrics, QIcon, QKeySequence, QPainter, QPainterPath, QPalette, QPen, QPixmap, QShortcut
 from PySide6.QtMultimedia import QAudioOutput, QMediaDevices, QMediaPlayer
@@ -3494,6 +3495,8 @@ class MainWindow(QMainWindow):
         self.pending_online_playback_request = 0
         self.pending_online_download_track: dict | None = None
         self.pending_online_download_request = 0
+        self.active_online_download_track: dict | None = None
+        self.active_online_download_remote_id = ""
         self.is_seeking = False
         self.pending_restore_position = 0
         self.pending_lazy_restore_song_data: dict | None = None
@@ -3507,6 +3510,7 @@ class MainWindow(QMainWindow):
         self.library_file = self.project_root / "data" / "library.json"
         self.settings_file = self.project_root / "data" / "settings.json"
         self.playlists_file = self.project_root / "data" / "playlists.json"
+        self.remote_tracks_file = self.project_root / "data" / "remote_tracks.json"
         self.stats_file = self.project_root / "data" / "stats.json"
         self.cover_cache_dir = self.project_root / "cache" / "covers"
         self.lyrics_cache_dir = self.project_root / "cache" / "lyrics"
@@ -3528,6 +3532,17 @@ class MainWindow(QMainWindow):
             "下载管理器对象（无网络请求）",
             lambda: OnlineDownloadManager(self),
         )
+        self.remote_track_store = RemoteTrackStore(self.remote_tracks_file)
+        try:
+            self.remote_tracks = self.measure_startup_step(
+                "远程歌曲 JSON",
+                self.remote_track_store.load_tracks,
+            )
+            self.remote_tracks_error = ""
+        except RemoteTrackStoreError as error:
+            self.remote_tracks = {}
+            self.remote_tracks_error = str(error)
+            print(self.remote_tracks_error)
 
         settings = self.measure_startup_step("设置 JSON", self.load_settings)
         self.current_volume = int(settings.get("volume", 65))
@@ -3612,11 +3627,23 @@ class MainWindow(QMainWindow):
         self.pending_imports_page = pending_imports_page
         online_search_page = self.measure_startup_step(
             "在线搜索页面 UI（无网络请求）",
-            lambda: OnlineSearchPage(self.online_source_client, self),
+            lambda: OnlineSearchPage(
+                self.online_source_client,
+                self.source_registry_manager,
+                self,
+            ),
         )
         self.online_search_page = online_search_page
         online_search_page.play_requested.connect(self.request_online_playback)
         online_search_page.download_requested.connect(self.request_online_download)
+        online_search_page.like_requested.connect(self.like_online_track)
+        online_search_page.unlike_requested.connect(self.unlike_online_track)
+        online_search_page.add_to_playlist_requested.connect(self.add_online_track_to_playlist)
+        online_search_page.info_requested.connect(self.show_online_track_info)
+        online_search_page.set_collection_providers(
+            self.get_online_track_collection_state,
+            self.get_online_playlist_choices,
+        )
         self.online_source_client.playbackResolved.connect(self.on_online_playback_resolved)
         self.online_source_client.downloadResolved.connect(self.on_online_download_resolved)
         self.online_source_client.requestFailed.connect(self.on_online_source_request_failed)
@@ -3626,15 +3653,6 @@ class MainWindow(QMainWindow):
         self.online_download_manager.progress.connect(self.on_online_download_progress)
         self.online_download_manager.finished.connect(self.on_online_download_finished)
         self.online_download_manager.failed.connect(self.on_online_download_failed)
-        source_manager_page = self.measure_startup_step(
-            "音源管理页面 UI（未读取旧音源）",
-            lambda: SourceManagerPage(
-                self.online_source_client,
-                self.source_registry_manager,
-                self,
-            ),
-        )
-        self.source_manager_page = source_manager_page
         now_playing_panel = self.measure_startup_step("正在播放侧栏 UI", self._create_now_playing_panel)
 
         self.content_stack = QStackedWidget()
@@ -3643,7 +3661,6 @@ class MainWindow(QMainWindow):
         self.content_stack.addWidget(full_lyrics_page)
         self.content_stack.addWidget(pending_imports_page)
         self.content_stack.addWidget(online_search_page)
-        self.content_stack.addWidget(source_manager_page)
 
         body_layout.addWidget(sidebar)
         body_layout.addWidget(self.content_stack, 1)
@@ -3669,6 +3686,7 @@ class MainWindow(QMainWindow):
         print(f"[perf] 样式初始化：{(time.perf_counter() - style_started_at) * 1000:.1f} ms")
         library_started_at = time.perf_counter()
         self.load_music_library()
+        self.sync_remote_song_items()
         print(f"[perf] 音乐库初始化：{(time.perf_counter() - library_started_at) * 1000:.1f} ms")
         initial_ui_started_at = time.perf_counter()
         self.update_play_mode_button()
@@ -3937,6 +3955,15 @@ class MainWindow(QMainWindow):
         if song_data.get("demo"):
             return self.current_library_view == "all"
 
+        if song_data.get("recordKind") == "remote":
+            stable_id = str(song_data.get("remoteStableId") or "")
+            if self.current_library_view == "liked":
+                return stable_id in self.get_playlist_remote_ids("liked")
+            if self.current_library_view.startswith("playlist:"):
+                playlist_id = self.current_library_view.split("playlist:", 1)[1]
+                return stable_id in self.get_playlist_remote_ids(playlist_id)
+            return False
+
         path = song_data.get("path", "")
         normalized_path = self.normalize_song_path(path)
 
@@ -4103,6 +4130,181 @@ class MainWindow(QMainWindow):
 
         playlist["songs"] = normalized_songs
         return playlist["songs"]
+
+    def get_playlist_remote_ids(self, playlist_id: str) -> list[str]:
+        if playlist_id not in self.playlists or not isinstance(self.playlists.get(playlist_id), dict):
+            self.playlists[playlist_id] = {
+                "name": "未命名歌单",
+                "songs": [],
+                "remoteSongs": [],
+                "fixed": False,
+            }
+        playlist = self.playlists[playlist_id]
+        remote_ids = playlist.setdefault("remoteSongs", [])
+        if not isinstance(remote_ids, list):
+            playlist["remoteSongs"] = []
+            remote_ids = playlist["remoteSongs"]
+        normalized_ids = []
+        for stable_id in remote_ids:
+            value = str(stable_id or "").strip()
+            if value and value not in normalized_ids:
+                normalized_ids.append(value)
+        playlist["remoteSongs"] = normalized_ids
+        return playlist["remoteSongs"]
+
+    def get_online_playlist_choices(self) -> list[tuple[str, str]]:
+        return [
+            (playlist_id, self.get_playlist_name(playlist_id))
+            for playlist_id in self.get_custom_playlist_ids()
+        ]
+
+    def get_registered_source_safely(self, source_id: str) -> dict | None:
+        source_id = str(source_id or "").strip()
+        if not source_id:
+            return None
+        try:
+            source = self.source_registry_manager.get_source(source_id)
+        except Exception as error:
+            print(f"读取在线来源失败：{error}")
+            return None
+        return source if isinstance(source, dict) else None
+
+    def get_remote_track_source_url(self, track: dict) -> str:
+        source_url = str(track.get("sourceUrl") or track.get("source_url") or "").strip()
+        if source_url:
+            return source_url
+        source = self.get_registered_source_safely(str(track.get("sourceId") or ""))
+        return str((source or {}).get("sourceUrl") or "").strip()
+
+    def persist_remote_track(self, track: dict) -> tuple[str, dict]:
+        if self.remote_tracks_error:
+            raise RemoteTrackStoreError(self.remote_tracks_error)
+        stable_id = RemoteTrackStore.stable_id_for_track(track)
+        stable_id, record = RemoteTrackStore.build_record(
+            track,
+            self.get_remote_track_source_url(track),
+            self.remote_tracks.get(stable_id),
+        )
+        updated = dict(self.remote_tracks)
+        updated[stable_id] = record
+        self.remote_track_store.save_tracks(updated)
+        self.remote_tracks = updated
+        return stable_id, record
+
+    def get_online_track_collection_state(self, track: dict) -> dict:
+        stable_id = RemoteTrackStore.stable_id_for_track(track)
+        return {
+            "stableId": stable_id,
+            "liked": stable_id in self.get_playlist_remote_ids("liked"),
+        }
+
+    def like_online_track(self, track: dict) -> None:
+        self.add_online_track_to_playlist(track, "liked")
+
+    def unlike_online_track(self, track: dict) -> None:
+        stable_id = RemoteTrackStore.stable_id_for_track(track)
+        liked_ids = self.get_playlist_remote_ids("liked")
+        if stable_id not in liked_ids:
+            self.online_search_page.set_online_status("该在线歌曲尚未收藏。")
+            return
+        liked_ids.remove(stable_id)
+        if not self.save_playlists():
+            liked_ids.append(stable_id)
+            return
+        self.refresh_remote_collection_views()
+        self.online_search_page.set_online_status("已取消收藏该在线歌曲。")
+
+    def add_online_track_to_playlist(self, track: dict, playlist_id: str) -> None:
+        if playlist_id not in self.playlists or not isinstance(self.playlists.get(playlist_id), dict):
+            self.online_search_page.set_online_status("目标歌单不存在。")
+            return
+        try:
+            stable_id, _record = self.persist_remote_track(track)
+        except RemoteTrackStoreError as error:
+            QMessageBox.warning(self, "保存在线歌曲失败", str(error))
+            return
+        remote_ids = self.get_playlist_remote_ids(playlist_id)
+        if stable_id in remote_ids:
+            self.online_search_page.set_online_status(
+                f"该歌曲已经在“{self.get_playlist_name(playlist_id)}”中。"
+            )
+            return
+        remote_ids.append(stable_id)
+        if not self.save_playlists():
+            remote_ids.remove(stable_id)
+            return
+        self.refresh_remote_collection_views()
+        self.online_search_page.set_online_status(
+            f"已加入“{self.get_playlist_name(playlist_id)}”。"
+        )
+
+    def show_online_track_info(self, track: dict) -> None:
+        capabilities = track.get("capabilities") if isinstance(track.get("capabilities"), dict) else {}
+        source = str(track.get("sourceName") or track.get("sourceId") or "未知来源")
+        QMessageBox.information(
+            self,
+            "在线歌曲信息",
+            f"歌曲：{track.get('title') or '未知歌曲'}\n"
+            f"歌手：{track.get('artist') or '未知艺术家'}\n"
+            f"专辑：{track.get('album') or '未知专辑'}\n"
+            f"来源：{source}\n"
+            f"可播放：{'是' if capabilities.get('playback') else '否'}\n"
+            f"可下载：{'是' if capabilities.get('download') else '否'}",
+        )
+
+    def is_remote_source_available(self, record: dict) -> bool:
+        source = self.get_registered_source_safely(str(record.get("source_id") or ""))
+        return bool(source and source.get("enabled") and source.get("sourceUrl"))
+
+    def sync_remote_song_items(self) -> None:
+        if not hasattr(self, "song_list"):
+            return
+        previous_signal_state = self.song_list.blockSignals(True)
+        self.song_list.setUpdatesEnabled(False)
+        try:
+            for row in range(self.song_list.count() - 1, -1, -1):
+                item = self.song_list.item(row)
+                data = item.data(Qt.ItemDataRole.UserRole) if item is not None else None
+                if isinstance(data, dict) and data.get("recordKind") == "remote":
+                    self.song_list.takeItem(row)
+            pending_track = getattr(self, "pending_online_track", None)
+            pending_id = (
+                RemoteTrackStore.stable_id_for_track(pending_track)
+                if isinstance(pending_track, dict)
+                else ""
+            )
+            try:
+                registered_sources = self.source_registry_manager.list_sources()
+            except Exception as error:
+                print("读取远程歌曲来源状态失败：", error)
+                registered_sources = []
+            available_source_ids = {
+                str(source.get("id") or "")
+                for source in registered_sources
+                if isinstance(source, dict)
+                and source.get("enabled")
+                and source.get("sourceUrl")
+            }
+            for stable_id, record in self.remote_tracks.items():
+                song_data = RemoteTrackStore.to_song_data(
+                    stable_id,
+                    record,
+                    str(record.get("source_id") or "") in available_source_ids,
+                    resolving=stable_id == pending_id,
+                )
+                self.song_list.addItem(self.create_song_list_item(song_data))
+        finally:
+            self.song_list.blockSignals(previous_signal_state)
+            self.song_list.setUpdatesEnabled(True)
+        self.mark_library_list_dirty()
+        self.filter_song_list(self.search_input.text())
+
+    def refresh_remote_collection_views(self) -> None:
+        self.sync_remote_song_items()
+        self.refresh_playlist_view_buttons()
+        if self.current_library_view == "liked" or self.current_library_view.startswith("playlist:"):
+            self.sort_song_list_for_current_view()
+            self.filter_song_list(self.search_input.text())
 
     def get_custom_playlist_ids(self) -> list[str]:
         playlist_ids = []
@@ -4504,13 +4706,20 @@ class MainWindow(QMainWindow):
         title = str(song_data.get("title") or "未知歌曲")
         artist = str(song_data.get("artist") or "未知艺术家")
         album = str(song_data.get("album") or "未知专辑")
-        prefix = "▶ " if is_playing else ""
+        remote_prefix = ""
+        if song_data.get("recordKind") == "remote":
+            status = str(song_data.get("onlineStatus") or "在线")
+            remote_prefix = f"☁ {status} · "
+        prefix = "▶ " if is_playing else remote_prefix
         return f"{prefix}{title}\n{artist} · {album}"
 
     def get_song_item_display_text(self, song_data: dict) -> str:
         song_path = self.normalize_song_path(song_data.get("path", ""))
         playing_path = self.normalize_song_path(self.current_song_path)
         is_playing = bool(song_path and playing_path and song_path == playing_path)
+        if song_data.get("recordKind") == "remote" and self.current_track_kind == "online":
+            current_remote_id = RemoteTrackStore.stable_id_for_track(self.current_online_track or {})
+            is_playing = current_remote_id == str(song_data.get("remoteStableId") or "")
         return self.format_song_list_item_text(song_data, is_playing=is_playing)
 
     def refresh_song_item_display(self, item: QListWidgetItem, song_data: dict) -> None:
@@ -4522,6 +4731,11 @@ class MainWindow(QMainWindow):
             f"歌曲：{title}\n"
             f"歌手：{artist}\n"
             f"专辑：{album}"
+            + (
+                f"\n状态：{song_data.get('onlineStatus') or '在线'}"
+                if song_data.get("recordKind") == "remote"
+                else ""
+            )
         )
         item.setSizeHint(QSize(0, 58))
         item.setData(Qt.ItemDataRole.UserRole, song_data)
@@ -4590,6 +4804,9 @@ class MainWindow(QMainWindow):
             song_data = item.data(Qt.ItemDataRole.UserRole)
 
             if not isinstance(song_data, dict):
+                continue
+
+            if song_data.get("recordKind") == "remote":
                 continue
 
             try:
@@ -4873,15 +5090,27 @@ class MainWindow(QMainWindow):
         song_count = self.song_list.count() if hasattr(self, "song_list") else 0
         view_name = getattr(self, "current_library_view", "all")
 
-        if view_name in {"all", "liked"}:
+        if view_name == "all":
             return ("library_default", song_count)
+
+        if view_name == "liked":
+            return (
+                "library_default",
+                song_count,
+                tuple(self.get_playlist_remote_ids("liked")),
+            )
 
         if view_name in {"recent_played", "frequent", "recent_added"}:
             return (view_name, song_count, len(getattr(self, "song_stats", {})))
 
         if view_name.startswith("playlist:"):
             playlist_id = view_name.split("playlist:", 1)[1]
-            return ("playlist", playlist_id, tuple(self.get_playlist_song_paths(playlist_id)))
+            return (
+                "playlist",
+                playlist_id,
+                tuple(self.get_playlist_song_paths(playlist_id)),
+                tuple(self.get_playlist_remote_ids(playlist_id)),
+            )
 
         return ("library_default", song_count)
 
@@ -4938,13 +5167,22 @@ class MainWindow(QMainWindow):
         elif self.current_library_view.startswith("playlist:"):
             playlist_id = self.current_library_view.split("playlist:", 1)[1]
             playlist_songs = self.get_playlist_song_paths(playlist_id)
+            playlist_remote_ids = self.get_playlist_remote_ids(playlist_id)
             playlist_order = {
                 path: index
                 for index, path in enumerate(playlist_songs)
             }
+            remote_order = {
+                stable_id: len(playlist_songs) + index
+                for index, stable_id in enumerate(playlist_remote_ids)
+            }
 
             songs.sort(
-                key=lambda song: playlist_order.get(normalized_path(song), 999999),
+                key=lambda song: (
+                    remote_order.get(str(song.get("remoteStableId") or ""), 999999)
+                    if song.get("recordKind") == "remote"
+                    else playlist_order.get(normalized_path(song), 999999)
+                ),
             )
 
         else:
@@ -4978,6 +5216,7 @@ class MainWindow(QMainWindow):
         self.playlists[playlist_id] = {
             "name": name,
             "songs": [],
+            "remoteSongs": [],
             "fixed": False,
             "created_at": int(time.time()),
         }
@@ -5510,7 +5749,6 @@ class MainWindow(QMainWindow):
             "lyrics": getattr(self, "lyrics_nav_button", None),
             "pending": getattr(self, "pending_nav_button", None),
             "online_search": getattr(self, "online_search_nav_button", None),
-            "source_manager": getattr(self, "source_manager_nav_button", None),
             "settings": getattr(self, "settings_nav_button", None),
         }
 
@@ -5612,6 +5850,8 @@ class MainWindow(QMainWindow):
             source_id,
             track,
         )
+        if track.get("remoteStableId"):
+            self.sync_remote_song_items()
 
     def on_online_playback_resolved(
         self,
@@ -5626,6 +5866,8 @@ class MainWindow(QMainWindow):
         self.pending_online_track = None
         if not isinstance(track, dict) or str(track.get("sourceId") or "") != source_id:
             return
+        if track.get("remoteStableId"):
+            self.sync_remote_song_items()
         if resolution.get("headers"):
             self.online_search_page.set_online_status(
                 "该音源需要附加请求头，当前播放模式暂不支持。"
@@ -5670,9 +5912,13 @@ class MainWindow(QMainWindow):
         self.media_player.setSource(url)
         self.progress_slider.setValue(0)
         self.media_player.play()
+        self.sync_remote_song_items()
 
     def request_online_download(self, track: dict) -> None:
         if not isinstance(track, dict):
+            return
+        if self.online_download_manager.is_active():
+            self.online_search_page.set_online_status("已有在线下载正在进行，请等待完成。")
             return
         source_id = str(track.get("sourceId") or "").strip()
         if not source_id:
@@ -5680,6 +5926,14 @@ class MainWindow(QMainWindow):
             return
         previous_request = int(getattr(self, "pending_online_download_request", 0) or 0)
         if previous_request:
+            previous_track = getattr(self, "pending_online_download_track", None)
+            if (
+                isinstance(previous_track, dict)
+                and RemoteTrackStore.stable_id_for_track(previous_track)
+                == RemoteTrackStore.stable_id_for_track(track)
+            ):
+                self.online_search_page.set_online_status("这首歌曲的下载地址正在解析，请勿重复操作。")
+                return
             self.online_source_client.cancel_request(previous_request)
         self.pending_online_download_track = dict(track)
         self.pending_online_download_request = self.online_source_client.resolve_download(
@@ -5700,35 +5954,34 @@ class MainWindow(QMainWindow):
         self.pending_online_download_track = None
         if not isinstance(track, dict) or str(track.get("sourceId") or "") != source_id:
             return
-        if resolution.get("headers"):
-            self.online_search_page.set_online_status(
-                "该音源需要附加请求头，当前下载模式暂不支持。"
-            )
+        try:
+            stable_id, _record = self.persist_remote_track(track)
+        except RemoteTrackStoreError as error:
+            QMessageBox.warning(self, "准备下载失败", str(error))
             return
-
-        suggested = str(resolution.get("filename") or "").strip()
-        if not suggested:
-            suffix = Path(QUrl(str(resolution.get("url") or "")).path()).suffix.lower()
-            if suffix not in {".mp3", ".flac", ".wav", ".m4a", ".ogg", ".opus", ".aac"}:
-                suffix = ".mp3"
-            suggested = f"{track.get('title') or 'online_track'}{suffix}"
-        suggested = re.sub(r'[<>:"/\\|?*\x00-\x1f]', "_", Path(suggested).name).strip(" .")
+        suggested = self.online_download_manager.suggest_filename(
+            resolution,
+            str(track.get("title") or "online_track"),
+        )
         target_path, _ = QFileDialog.getSaveFileName(
             self,
             "保存在线音乐",
-            suggested or "online_track.mp3",
+            suggested or "online_track",
             "音频文件 (*.mp3 *.flac *.wav *.m4a *.ogg *.opus *.aac);;所有文件 (*.*)",
         )
         if not target_path:
             self.online_search_page.set_online_status("已取消下载。")
             return
-        self.online_download_manager.start_download(resolution, target_path)
+        if self.online_download_manager.start_download(resolution, target_path):
+            self.active_online_download_track = dict(track)
+            self.active_online_download_remote_id = stable_id
 
     def on_online_source_request_failed(self, request_id: int, action: str, message: str) -> None:
         if action == "resolvePlayback" and request_id == self.pending_online_playback_request:
             self.pending_online_playback_request = 0
             self.pending_online_track = None
             self.online_search_page.set_online_status(f"获取播放地址失败：{message}")
+            self.sync_remote_song_items()
         elif action == "resolveDownload" and request_id == self.pending_online_download_request:
             self.pending_online_download_request = 0
             self.pending_online_download_track = None
@@ -5744,9 +5997,39 @@ class MainWindow(QMainWindow):
             )
 
     def on_online_download_finished(self, target_path: str) -> None:
-        self.online_search_page.set_online_status(f"下载完成：{target_path}")
+        stable_id = self.active_online_download_remote_id
+        self.active_online_download_remote_id = ""
+        self.active_online_download_track = None
+        record = self.remote_tracks.get(stable_id)
+        if not isinstance(record, dict):
+            self.online_search_page.set_online_status(f"下载完成：{target_path}")
+            return
+        updated_record = dict(record)
+        updated_record["local_path"] = str(Path(target_path).resolve())
+        updated_record["downloaded_at"] = int(time.time())
+        updated_tracks = dict(self.remote_tracks)
+        updated_tracks[stable_id] = updated_record
+        try:
+            self.remote_track_store.save_tracks(updated_tracks)
+        except RemoteTrackStoreError as error:
+            self.online_search_page.set_online_status(f"文件已下载，但保存关联失败：{error}")
+            return
+        self.remote_tracks = updated_tracks
+        self.add_music_paths([Path(target_path)])
+        local_song = self.find_song_data_by_path(target_path)
+        self.sync_remote_song_items()
+        if isinstance(local_song, dict) and local_song.get("recordKind") != "remote":
+            self.online_search_page.set_online_status(
+                f"下载完成并已关联本地音乐库：{target_path}"
+            )
+        else:
+            self.online_search_page.set_online_status(
+                f"下载完成，但文件扩展名未被本地音乐库识别：{target_path}"
+            )
 
     def on_online_download_failed(self, message: str) -> None:
+        self.active_online_download_remote_id = ""
+        self.active_online_download_track = None
         self.online_search_page.set_online_status(message)
 
     def show_online_search_page(self) -> None:
@@ -5755,15 +6038,6 @@ class MainWindow(QMainWindow):
         if hasattr(self, "content_stack") and hasattr(self, "online_search_page"):
             self.content_stack.setCurrentWidget(self.online_search_page)
             self.online_search_page.refresh_sources()
-
-        self.set_right_panel_mode("info")
-
-    def show_source_manager_page(self) -> None:
-        self.set_sidebar_active("source_manager")
-
-        if hasattr(self, "content_stack") and hasattr(self, "source_manager_page"):
-            self.content_stack.setCurrentWidget(self.source_manager_page)
-            self.source_manager_page.refresh_sources()
 
         self.set_right_panel_mode("info")
 
@@ -5915,9 +6189,6 @@ class MainWindow(QMainWindow):
         self.online_search_nav_button = NavButton("在线搜索")
         self.online_search_nav_button.clicked.connect(self.show_online_search_page)
 
-        self.source_manager_nav_button = NavButton("音源管理")
-        self.source_manager_nav_button.clicked.connect(self.show_source_manager_page)
-
         self.settings_nav_button = NavButton("设置")
         self.settings_nav_button.clicked.connect(self.open_settings_dialog)
 
@@ -5926,7 +6197,6 @@ class MainWindow(QMainWindow):
         layout.addWidget(self.lyrics_nav_button)
         layout.addWidget(self.pending_nav_button)
         layout.addWidget(self.online_search_nav_button)
-        layout.addWidget(self.source_manager_nav_button)
 
         layout.addSpacing(12)
 
@@ -6892,7 +7162,7 @@ class MainWindow(QMainWindow):
             if not isinstance(song_data, dict):
                 continue
 
-            if song_data.get("demo"):
+            if song_data.get("demo") or song_data.get("recordKind") == "remote":
                 continue
 
             path = song_data.get("path", "")
@@ -7445,7 +7715,7 @@ class MainWindow(QMainWindow):
             if not isinstance(song_data, dict):
                 continue
 
-            if song_data.get("demo"):
+            if song_data.get("demo") or song_data.get("recordKind") == "remote":
                 continue
 
             path = song_data.get("path", "")
@@ -9056,6 +9326,9 @@ class MainWindow(QMainWindow):
             if not isinstance(song_data, dict):
                 continue
 
+            if song_data.get("recordKind") == "remote":
+                continue
+
             library_path = self.normalize_song_path(song_data.get("path", ""))
 
             if library_path:
@@ -9305,11 +9578,13 @@ class MainWindow(QMainWindow):
             "liked": {
                 "name": "我喜欢",
                 "songs": [],
+                "remoteSongs": [],
                 "fixed": True,
             }
         }
 
         if not self.playlists_file.exists():
+            self.playlists_load_error = ""
             return default_playlists
 
         try:
@@ -9317,7 +9592,7 @@ class MainWindow(QMainWindow):
                 playlists = json.load(file)
 
             if not isinstance(playlists, dict):
-                return default_playlists
+                raise ValueError("歌单文件根节点不是对象")
 
             if "liked" not in playlists:
                 playlists["liked"] = default_playlists["liked"]
@@ -9327,31 +9602,52 @@ class MainWindow(QMainWindow):
 
             playlists["liked"].setdefault("name", "我喜欢")
             playlists["liked"].setdefault("songs", [])
+            playlists["liked"].setdefault("remoteSongs", [])
             playlists["liked"]["fixed"] = True
 
             if not isinstance(playlists["liked"]["songs"], list):
                 playlists["liked"]["songs"] = []
 
+            for playlist in playlists.values():
+                if not isinstance(playlist, dict):
+                    continue
+                playlist.setdefault("remoteSongs", [])
+                if not isinstance(playlist["remoteSongs"], list):
+                    playlist["remoteSongs"] = []
+
+            self.playlists_load_error = ""
             return playlists
 
         except Exception as error:
-            print("读取歌单失败：", error)
+            self.playlists_load_error = f"读取歌单失败，已禁止覆盖原文件：{error}"
+            print(self.playlists_load_error)
             return default_playlists
 
-    def save_playlists(self) -> None:
+    def save_playlists(self) -> bool:
+        if getattr(self, "playlists_load_error", ""):
+            print(self.playlists_load_error)
+            if hasattr(self, "content_stack"):
+                QMessageBox.warning(self, "歌单未保存", self.playlists_load_error)
+            return False
         self.playlists_file.parent.mkdir(parents=True, exist_ok=True)
 
         if "liked" not in self.playlists:
             self.playlists["liked"] = {
                 "name": "我喜欢",
                 "songs": [],
+                "remoteSongs": [],
                 "fixed": True,
             }
 
-        with self.playlists_file.open("w", encoding="utf-8") as file:
-            json.dump(self.playlists, file, ensure_ascii=False, indent=2)
+        temporary_path = self.playlists_file.with_suffix(".json.tmp")
+        temporary_path.write_text(
+            json.dumps(self.playlists, ensure_ascii=False, indent=2) + "\n",
+            encoding="utf-8",
+        )
+        temporary_path.replace(self.playlists_file)
 
         print("歌单已保存：", self.playlists_file)
+        return True
 
     def normalize_song_path(self, path: str | None) -> str:
         if not path:
@@ -9368,6 +9664,7 @@ class MainWindow(QMainWindow):
             {
                 "name": "我喜欢",
                 "songs": [],
+                "remoteSongs": [],
                 "fixed": True,
             },
         )
@@ -9992,6 +10289,12 @@ class MainWindow(QMainWindow):
 
         print(f"你正在浏览：{title} - {artist}")
 
+        if song_data.get("recordKind") == "remote":
+            self.browsing_song_path = self.normalize_song_path(file_path) if file_path else None
+            self.browsing_song_data = song_data
+            print(f"在线歌曲状态：{song_data.get('onlineStatus') or '在线'}")
+            return
+
         if file_path:
             self.browsing_song_path = self.normalize_song_path(file_path)
             self.browsing_song_data = song_data if isinstance(song_data, dict) else None
@@ -10176,7 +10479,7 @@ class MainWindow(QMainWindow):
             if not isinstance(song_data, dict):
                 continue
 
-            if song_data.get("demo"):
+            if song_data.get("demo") or song_data.get("recordKind") == "remote":
                 continue
 
             path_text = song_data.get("path", "")
@@ -11040,7 +11343,11 @@ class MainWindow(QMainWindow):
 
             song_data = item.data(Qt.ItemDataRole.UserRole)
 
-            if not isinstance(song_data, dict) or song_data.get("demo"):
+            if (
+                not isinstance(song_data, dict)
+                or song_data.get("demo")
+                or song_data.get("recordKind") == "remote"
+            ):
                 continue
 
             song_path = self.normalize_song_path(song_data.get("path", ""))
@@ -11257,6 +11564,10 @@ class MainWindow(QMainWindow):
         if not isinstance(song_data, dict):
             return
 
+        if song_data.get("recordKind") == "remote":
+            self.play_remote_song_data(song_data)
+            return
+
         song_path = self.normalize_song_path(song_data.get("path", ""))
 
         if not song_path:
@@ -11265,6 +11576,48 @@ class MainWindow(QMainWindow):
         self.create_playback_context(song_path)
         self.load_song_for_playback(song_data)
         self.play_current_song()
+
+    def get_remote_record_from_song_data(self, song_data: dict) -> tuple[str, dict] | None:
+        stable_id = str(song_data.get("remoteStableId") or "").strip()
+        record = self.remote_tracks.get(stable_id)
+        if not stable_id or not isinstance(record, dict):
+            return None
+        return stable_id, record
+
+    def play_remote_song_data(self, song_data: dict) -> None:
+        remote = self.get_remote_record_from_song_data(song_data)
+        if remote is None:
+            QMessageBox.warning(self, "在线歌曲不可用", "没有找到这首在线歌曲的持久化记录。")
+            return
+        stable_id, record = remote
+        local_path = str(record.get("local_path") or "").strip()
+        if local_path and Path(local_path).is_file():
+            local_song = self.find_song_data_by_path(local_path)
+            if not isinstance(local_song, dict) or local_song.get("recordKind") == "remote":
+                local_song = {
+                    "title": str(record.get("title") or "未知歌曲"),
+                    "artist": str(record.get("artist") or "未知艺术家"),
+                    "album": str(record.get("album") or "未知专辑"),
+                    "path": str(Path(local_path).resolve()),
+                    "added_at": int(record.get("downloaded_at") or record.get("added_at") or 0),
+                    "demo": False,
+                }
+            self.load_song_for_playback(local_song)
+            self.play_current_song()
+            return
+        if not self.is_remote_source_available(record):
+            QMessageBox.information(
+                self,
+                "在线来源不可用",
+                "保存的歌曲记录仍会保留，但对应的自定义 URL 来源当前未注册或已不可用。",
+            )
+            return
+        track = RemoteTrackStore.to_online_track(stable_id, record)
+        source = self.get_registered_source_safely(str(record.get("source_id") or "")) or {}
+        track["sourceName"] = str(source.get("name") or record.get("source_id") or "在线来源")
+        track["capabilities"] = dict(source.get("capabilities") or {})
+        self.request_online_playback(track)
+        self.sync_remote_song_items()
 
     def play_current_song(self) -> None:
         if not self.current_song_path:
@@ -11654,6 +12007,9 @@ class MainWindow(QMainWindow):
         if song_data.get("demo"):
             return None
 
+        if song_data.get("recordKind") == "remote":
+            return song_data
+
         path = self.normalize_song_path(song_data.get("path", ""))
 
         if not path:
@@ -11684,6 +12040,10 @@ class MainWindow(QMainWindow):
         song_data = self.get_song_data_from_item(item)
 
         if not song_data:
+            return
+
+        if song_data.get("recordKind") == "remote":
+            self.show_remote_song_context_menu(item, song_data, position)
             return
 
         song_path = self.normalize_song_path(song_data.get("path", ""))
@@ -11774,6 +12134,102 @@ class MainWindow(QMainWindow):
         remove_selected_action.triggered.connect(self.remove_selected_songs_from_library)
 
         menu.exec(self.song_list.mapToGlobal(position))
+
+    def show_remote_song_context_menu(
+        self,
+        item: QListWidgetItem,
+        song_data: dict,
+        position,
+    ) -> None:
+        remote = self.get_remote_record_from_song_data(song_data)
+        if remote is None:
+            return
+        stable_id, record = remote
+        track = RemoteTrackStore.to_online_track(stable_id, record)
+        source = self.get_registered_source_safely(str(record.get("source_id") or "")) or {}
+        track["sourceName"] = str(source.get("name") or record.get("source_id") or "在线来源")
+        track["capabilities"] = dict(source.get("capabilities") or {})
+        local_path = str(record.get("local_path") or "")
+        local_exists = bool(local_path and Path(local_path).is_file())
+        menu = QMenu(self)
+        play_action = menu.addAction("播放")
+        play_action.setEnabled(local_exists or self.is_remote_source_available(record))
+        play_action.triggered.connect(
+            lambda checked=False, selected_item=item: self.play_selected_song(selected_item)
+        )
+        download_action = menu.addAction("下载")
+        download_action.setEnabled(
+            self.is_remote_source_available(record)
+            and (track.get("capabilities") or {}).get("download") is True
+            and not self.online_download_manager.is_active()
+        )
+        download_action.triggered.connect(
+            lambda checked=False, current_track=track: self.request_online_download(current_track)
+        )
+        menu.addSeparator()
+        liked_ids = self.get_playlist_remote_ids("liked")
+        if stable_id in liked_ids:
+            like_action = menu.addAction("取消收藏")
+            like_action.triggered.connect(
+                lambda checked=False, current_track=track: self.unlike_online_track(current_track)
+            )
+        else:
+            like_action = menu.addAction("添加到我喜欢")
+            like_action.triggered.connect(
+                lambda checked=False, current_track=track: self.like_online_track(current_track)
+            )
+        playlist_menu = menu.addMenu("添加到歌单")
+        playlists = self.get_online_playlist_choices()
+        if not playlists:
+            empty_action = playlist_menu.addAction("暂无自定义歌单")
+            empty_action.setEnabled(False)
+        for playlist_id, playlist_name in playlists:
+            action = playlist_menu.addAction(playlist_name)
+            action.triggered.connect(
+                lambda checked=False, current_track=track, target_id=playlist_id:
+                self.add_online_track_to_playlist(current_track, target_id)
+            )
+        if self.current_library_view == "liked" or self.current_library_view.startswith("playlist:"):
+            remove_action = menu.addAction("从当前歌单移除")
+            remove_action.triggered.connect(
+                lambda checked=False, target_id=stable_id: self.remove_remote_from_current_playlist(target_id)
+            )
+        menu.addSeparator()
+        open_folder_action = menu.addAction("打开文件夹")
+        open_folder_action.setEnabled(local_exists)
+        open_folder_action.triggered.connect(
+            lambda checked=False, path=local_path: self.open_remote_song_folder(path)
+        )
+        info_action = menu.addAction("查看歌曲信息")
+        info_action.triggered.connect(
+            lambda checked=False, current_track=track: self.show_online_track_info(current_track)
+        )
+        menu.exec(self.song_list.mapToGlobal(position))
+
+    def remove_remote_from_current_playlist(self, stable_id: str) -> None:
+        if self.current_library_view == "liked":
+            playlist_id = "liked"
+        elif self.current_library_view.startswith("playlist:"):
+            playlist_id = self.current_library_view.split("playlist:", 1)[1]
+        else:
+            return
+        remote_ids = self.get_playlist_remote_ids(playlist_id)
+        if stable_id in remote_ids:
+            remote_ids.remove(stable_id)
+            if not self.save_playlists():
+                remote_ids.append(stable_id)
+                return
+            self.refresh_remote_collection_views()
+
+    def open_remote_song_folder(self, local_path: str) -> None:
+        path = Path(str(local_path or ""))
+        if not path.is_file():
+            QMessageBox.information(self, "打开文件夹", "这首在线歌曲还没有有效的本地文件。")
+            return
+        try:
+            os.startfile(str(path.parent))
+        except Exception as error:
+            QMessageBox.warning(self, "打开失败", str(error))
 
     def toggle_like_selected_song(self, item: QListWidgetItem | None) -> None:
         song_data = self.get_song_data_from_item(item)

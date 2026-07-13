@@ -6,28 +6,14 @@ import sys
 import tempfile
 from pathlib import Path
 
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PySide6.QtCore import QObject, Signal
-from PySide6.QtWidgets import QApplication, QMessageBox
-
 from app.services.source_registry import SourceRegistryError, SourceRegistryManager
-from app.ui.online_source_pages import SourceManagerPage
-
-
-class FakeClient(QObject):
-    sourceListReceived = Signal(list)
-    sourceTestFinished = Signal(int, str, dict)
-    requestFailed = Signal(int, str, str)
-    processError = Signal(str)
-
-    def __init__(self) -> None:
-        super().__init__()
-        self.reloaded: list[str] = []
-
-    def reload_sources(self, source_id: str = "") -> int:
-        self.reloaded.append(source_id)
-        return 1
+import app.ui.online_source_pages as online_source_pages
 
 
 def write_registry(manager: SourceRegistryManager, sources: list[dict]) -> None:
@@ -120,41 +106,16 @@ def test_registry_rollback(root: Path) -> None:
     assert manager.list_sources()[0]["id"] == "rollback"
 
 
-def test_manager_button(root: Path, app: QApplication) -> None:
-    manager = SourceRegistryManager(root)
-    source_path = manager.sources_dir / "ui_source.js"
-    source_path.parent.mkdir(parents=True, exist_ok=True)
-    source_path.write_text("module.exports = {};", encoding="utf-8")
-    source = source_entry("ui_source", "sources/ui_source.js")
-    write_registry(manager, [source])
-    client = FakeClient()
-    page = SourceManagerPage(client, manager)
-    page.on_source_list_received([{**source, "fileExists": True, "scanError": ""}])
-    page.source_tree.setCurrentItem(page.source_tree.topLevelItem(0))
-    assert page.delete_button.isEnabled()
-
-    original_warning = QMessageBox.warning
-    QMessageBox.warning = staticmethod(lambda *_args, **_kwargs: QMessageBox.StandardButton.Yes)
-    try:
-        page.delete_selected_source()
-    finally:
-        QMessageBox.warning = original_warning
-    assert manager.list_sources() == []
-    assert client.reloaded == ["ui_source"]
-    assert not source_path.exists()
-    assert any(manager.backups_dir.iterdir())
-    page.deleteLater()
-    client.deleteLater()
-    app.processEvents()
+def test_manager_ui_removed() -> None:
+    assert not hasattr(online_source_pages, "SourceManagerPage")
 
 
 def main() -> int:
-    app = QApplication.instance() or QApplication(sys.argv)
     with tempfile.TemporaryDirectory(prefix="hushplayer_remove_source_") as temp_dir:
         root = Path(temp_dir)
         test_registry_removal(root / "registry")
         test_registry_rollback(root / "rollback")
-        test_manager_button(root / "ui", app)
+        test_manager_ui_removed()
     print("source removal smoke: OK")
     return 0
 

@@ -6,7 +6,7 @@ import re
 import shutil
 import time
 from pathlib import Path
-from urllib.parse import urlparse
+from urllib.parse import urlparse, urlsplit, urlunsplit
 
 
 MAX_SOURCE_BYTES = 2 * 1024 * 1024
@@ -79,6 +79,26 @@ class SourceRegistryManager:
     def list_sources(self) -> list[dict]:
         return [dict(source) for source in self.load_registry_document()["sources"] if isinstance(source, dict)]
 
+    def get_source(self, source_id: str) -> dict | None:
+        target = str(source_id or "").strip()
+        for source in self.list_sources():
+            if str(source.get("id") or "").strip() == target:
+                return source
+        return None
+
+    def find_by_source_url(self, source_url: str) -> dict | None:
+        normalized = self.normalize_source_url(source_url)
+        if not normalized:
+            return None
+        for source in self.list_sources():
+            try:
+                current = self.normalize_source_url(str(source.get("sourceUrl") or ""))
+            except SourceRegistryError:
+                current = ""
+            if current == normalized:
+                return source
+        return None
+
     def _save_registry_document(self, document: dict) -> None:
         self.runtime_dir.mkdir(parents=True, exist_ok=True)
         temporary_path = self.registry_path.with_suffix(".json.tmp")
@@ -97,6 +117,43 @@ class SourceRegistryManager:
                 self._save_registry_document(document)
                 return dict(source)
 
+        raise SourceRegistryError(f"没有找到音源：{source_id}")
+
+    def authorize_user_source(self, source_id: str, content_policy: str) -> dict:
+        policy = str(content_policy or "").strip().lower()
+        if policy not in ALLOWED_CONTENT_POLICIES:
+            raise SourceRegistryError("自定义来源必须明确标记为开放内容或用户自有内容")
+        document = self.load_registry_document()
+        for source in document["sources"]:
+            if not isinstance(source, dict) or source.get("id") != source_id:
+                continue
+            filename = str(source.get("filename") or "").strip()
+            source_file = self._resolve_registered_source_file(filename)
+            text = self._decode_source(source_file)
+            if source_file.suffix.lower() == ".json":
+                try:
+                    descriptor = json.loads(text)
+                except json.JSONDecodeError as error:
+                    raise SourceRegistryError(f"JSON 音源描述文件无效：{error}") from error
+                playback_method = bool(isinstance(descriptor, dict) and descriptor.get("url"))
+                download_method = playback_method
+            else:
+                playback_method = bool(re.search(r"\b(?:resolvePlayback|getMediaSource)\b", text))
+                download_method = bool(re.search(r"\b(?:resolveDownload|getDownloadSource)\b", text))
+            capabilities = dict(source.get("capabilities") or {})
+            capabilities.update(
+                {
+                    "playback": playback_method,
+                    "download": bool(download_method or playback_method),
+                    "downloadViaPlayback": bool(playback_method and not download_method),
+                }
+            )
+            source["contentPolicy"] = policy
+            source["userInstalled"] = True
+            source["enabled"] = True
+            source["capabilities"] = capabilities
+            self._save_registry_document(document)
+            return dict(source)
         raise SourceRegistryError(f"没有找到音源：{source_id}")
 
     def remove_source(self, source_id: str) -> dict:
@@ -180,7 +237,14 @@ class SourceRegistryManager:
 
         return self.stage_bytes(path.read_bytes(), path.name, source_url="")
 
-    def stage_bytes(self, content: bytes, suggested_name: str, source_url: str = "") -> dict:
+    def stage_bytes(
+        self,
+        content: bytes,
+        suggested_name: str,
+        source_url: str = "",
+        content_policy: str = "unknown",
+        user_installed: bool = False,
+    ) -> dict:
         self.ensure_runtime_dirs()
 
         if not content:
@@ -189,7 +253,11 @@ class SourceRegistryManager:
         if len(content) > MAX_SOURCE_BYTES:
             raise SourceRegistryError("音源文件超过 2 MB，已拒绝导入")
 
-        extension = Path(urlparse(source_url).path or suggested_name).suffix.lower()
+        normalized_source_url = self.normalize_source_url(source_url) if source_url else ""
+        normalized_policy = str(content_policy or "unknown").strip().lower()
+        if normalized_policy not in ALLOWED_CONTENT_POLICIES:
+            normalized_policy = "unknown"
+        extension = Path(urlparse(normalized_source_url).path or suggested_name).suffix.lower()
 
         if extension not in {".js", ".json"}:
             stripped = content.lstrip()
@@ -202,9 +270,21 @@ class SourceRegistryManager:
         staging_path.write_bytes(content)
 
         if extension == ".json":
-            return self._analyze_json_manifest(staging_path, source_url, sha256)
+            return self._analyze_json_manifest(
+                staging_path,
+                normalized_source_url,
+                sha256,
+                normalized_policy,
+                bool(user_installed),
+            )
 
-        return self._analyze_javascript(staging_path, source_url, sha256)
+        return self._analyze_javascript(
+            staging_path,
+            normalized_source_url,
+            sha256,
+            normalized_policy,
+            bool(user_installed),
+        )
 
     def _decode_source(self, path: Path) -> str:
         try:
@@ -219,7 +299,14 @@ class SourceRegistryManager:
 
         return text
 
-    def _analyze_javascript(self, staging_path: Path, source_url: str, sha256: str) -> dict:
+    def _analyze_javascript(
+        self,
+        staging_path: Path,
+        source_url: str,
+        sha256: str,
+        content_policy: str = "unknown",
+        user_installed: bool = False,
+    ) -> dict:
         code = self._decode_source(staging_path)
         required_modules = sorted(
             set(re.findall(r"require\s*\(\s*[\"']([^\"']+)[\"']\s*\)", code))
@@ -247,14 +334,36 @@ class SourceRegistryManager:
         author = self._extract_js_string(code, "author")
         version = self._extract_js_string(code, "version")
         embedded_url = self._extract_js_string(code, "srcUrl")
-        name = platform or staging_path.stem
-        source_id = f"{self._slug(name)}_{sha256[:8]}"
+        staged_name = re.sub(r"^\d+_", "", staging_path.stem)
+        staged_name = re.sub(r"_[0-9a-f]{8}$", "", staged_name, flags=re.I)
+        name = platform or staged_name or "source"
+        normalized_url = source_url
+        if not normalized_url and embedded_url:
+            try:
+                normalized_url = self.normalize_source_url(embedded_url)
+            except SourceRegistryError:
+                normalized_url = ""
+        stable_hash = (
+            hashlib.sha256(normalized_url.encode("utf-8")).hexdigest()
+            if normalized_url
+            else sha256
+        )
+        source_id = f"custom_source_{stable_hash[:12]}" if normalized_url else f"{self._slug(name)}_{sha256[:8]}"
+        policy_allowed = content_policy in ALLOWED_CONTENT_POLICIES
+        playback_method = bool(re.search(r"\b(?:resolvePlayback|getMediaSource)\b", code))
+        download_method = bool(re.search(r"\b(?:resolveDownload|getDownloadSource)\b", code))
+        download_via_playback = bool(
+            user_installed and policy_allowed and playback_method and not download_method
+        )
         capabilities = {
             "search": bool(re.search(r"\bsearch\b", code)),
             "metadata": bool(re.search(r"\bgetMusic(?:Info|Detail)\b", code)),
             "lyrics": bool(re.search(r"\bgetLyric\b", code)),
-            "playback": False,
-            "download": False,
+            "playback": bool(user_installed and policy_allowed and playback_method),
+            "download": bool(
+                user_installed and policy_allowed and (download_method or playback_method)
+            ),
+            "downloadViaPlayback": download_via_playback,
         }
         return {
             "kind": "javascript",
@@ -264,7 +373,7 @@ class SourceRegistryManager:
             "platform": platform or name,
             "author": author,
             "version": version,
-            "sourceUrl": source_url or embedded_url,
+            "sourceUrl": normalized_url,
             "sha256": sha256,
             "requiredModules": required_modules,
             "missingModules": missing_modules,
@@ -272,10 +381,18 @@ class SourceRegistryManager:
             "capabilities": capabilities,
             "experimental": True,
             "trusted": False,
-            "contentPolicy": "unknown",
+            "userInstalled": bool(user_installed),
+            "contentPolicy": content_policy,
         }
 
-    def _analyze_json_manifest(self, staging_path: Path, source_url: str, sha256: str) -> dict:
+    def _analyze_json_manifest(
+        self,
+        staging_path: Path,
+        source_url: str,
+        sha256: str,
+        content_policy: str = "unknown",
+        user_installed: bool = False,
+    ) -> dict:
         text = self._decode_source(staging_path)
 
         try:
@@ -286,29 +403,89 @@ class SourceRegistryManager:
         if not isinstance(manifest, dict):
             raise SourceRegistryError("第一阶段仅支持单个 JSON 音源描述对象")
 
+        manifest_policy = str(manifest.get("contentPolicy") or content_policy or "unknown").strip().lower()
+        if manifest_policy not in ALLOWED_CONTENT_POLICIES:
+            manifest_policy = "unknown"
         filename = str(manifest.get("filename") or "").strip()
 
         if not filename:
-            raise SourceRegistryError("JSON 音源描述必须提供 filename")
+            media_url = str(manifest.get("url") or "").strip()
+            if not media_url:
+                raise SourceRegistryError("JSON 音源描述必须提供 filename 或直接媒体 url")
+            parsed_media = urlparse(media_url)
+            if parsed_media.scheme not in {"http", "https"} or not parsed_media.netloc:
+                raise SourceRegistryError("JSON 音源的媒体 url 仅支持 HTTP 或 HTTPS")
+            if parsed_media.username or parsed_media.password:
+                raise SourceRegistryError("JSON 音源的媒体 url 不允许包含登录凭据")
+            policy_allowed = manifest_policy in ALLOWED_CONTENT_POLICIES
+            name = str(
+                manifest.get("name")
+                or manifest.get("title")
+                or Path(urlparse(source_url).path).stem
+                or "JSON 音源"
+            )
+            stable_hash = hashlib.sha256((source_url or sha256).encode("utf-8")).hexdigest()
+            return {
+                "kind": "json_track",
+                "stagingPath": str(staging_path),
+                "id": f"custom_source_{stable_hash[:12]}",
+                "name": name,
+                "platform": str(manifest.get("platform") or name),
+                "author": str(manifest.get("author") or ""),
+                "version": str(manifest.get("version") or ""),
+                "sourceUrl": source_url,
+                "sha256": sha256,
+                "requiredModules": [],
+                "missingModules": [],
+                "securityStatus": "passed",
+                "capabilities": {
+                    "search": True,
+                    "metadata": True,
+                    "lyrics": False,
+                    "playback": bool(user_installed and policy_allowed),
+                    "download": bool(user_installed and policy_allowed),
+                    "downloadViaPlayback": False,
+                },
+                "experimental": True,
+                "trusted": False,
+                "userInstalled": bool(user_installed),
+                "contentPolicy": manifest_policy,
+            }
 
         source_file = self._resolve_registered_source_file(filename)
-        analyzed = self._analyze_javascript(source_file, source_url or str(manifest.get("sourceUrl") or ""), sha256)
+        manifest_source_url = source_url or str(manifest.get("sourceUrl") or "")
+        analyzed = self._analyze_javascript(
+            source_file,
+            manifest_source_url,
+            sha256,
+            manifest_policy,
+            user_installed,
+        )
         declared_capabilities = manifest.get("capabilities") or {}
 
         if not isinstance(declared_capabilities, dict):
             raise SourceRegistryError("JSON 音源描述的 capabilities 必须是对象")
 
-        content_policy = str(manifest.get("contentPolicy") or "unknown").strip().lower()
-        policy_allowed = content_policy in ALLOWED_CONTENT_POLICIES
+        policy_allowed = manifest_policy in ALLOWED_CONTENT_POLICIES
         code = self._decode_source(source_file)
         playback_method = bool(re.search(r"\b(?:resolvePlayback|getMediaSource)\b", code))
         download_method = bool(re.search(r"\b(?:resolveDownload|getDownloadSource)\b", code))
-        analyzed["capabilities"]["playback"] = (
-            policy_allowed and declared_capabilities.get("playback") is True and playback_method
-        )
-        analyzed["capabilities"]["download"] = (
-            policy_allowed and declared_capabilities.get("download") is True and download_method
-        )
+        if user_installed:
+            analyzed["capabilities"]["playback"] = policy_allowed and playback_method
+            analyzed["capabilities"]["download"] = policy_allowed and (
+                download_method or playback_method
+            )
+            analyzed["capabilities"]["downloadViaPlayback"] = (
+                policy_allowed and playback_method and not download_method
+            )
+        else:
+            analyzed["capabilities"]["playback"] = (
+                policy_allowed and declared_capabilities.get("playback") is True and playback_method
+            )
+            analyzed["capabilities"]["download"] = (
+                policy_allowed and declared_capabilities.get("download") is True and download_method
+            )
+            analyzed["capabilities"]["downloadViaPlayback"] = False
         analyzed.update(
             {
                 "kind": "manifest",
@@ -320,12 +497,13 @@ class SourceRegistryManager:
                 "version": str(manifest.get("version") or analyzed["version"]),
                 "filename": filename.replace("\\", "/"),
                 "sha256": hashlib.sha256(source_file.read_bytes()).hexdigest(),
-                "contentPolicy": content_policy,
+                "userInstalled": bool(user_installed),
+                "contentPolicy": manifest_policy,
             }
         )
         return analyzed
 
-    def install_candidate(self, candidate: dict) -> dict:
+    def install_candidate(self, candidate: dict, enabled: bool = False) -> dict:
         if candidate.get("securityStatus") != "passed":
             raise SourceRegistryError("音源尚未通过安全扫描")
 
@@ -341,8 +519,13 @@ class SourceRegistryManager:
             if sha256 and str(source.get("sha256") or "").lower() == sha256:
                 raise SourceRegistryError("相同 SHA-256 的音源已经安装")
 
-            if source_url and str(source.get("sourceUrl") or "").strip() == source_url:
-                raise SourceRegistryError("相同 URL 的音源已经安装")
+            if source_url:
+                try:
+                    registered_url = self.normalize_source_url(str(source.get("sourceUrl") or ""))
+                except SourceRegistryError:
+                    registered_url = ""
+                if registered_url == source_url:
+                    raise SourceRegistryError("相同 URL 的音源已经安装")
 
         self.ensure_runtime_dirs()
         source_id = self._unique_source_id(str(candidate.get("id") or "source"), document["sources"])
@@ -355,11 +538,15 @@ class SourceRegistryManager:
             if not staging_path.exists() or staging_path.parent.resolve() != self.staging_dir.resolve():
                 raise SourceRegistryError("暂存音源文件不存在或路径无效")
 
-            target_path = self.active_dir / f"{source_id}.js"
+            staging_suffix = staging_path.suffix.lower()
+            target_suffix = ".json" if candidate.get("kind") == "json_track" else ".js"
+            if staging_suffix in {".js", ".json"}:
+                target_suffix = staging_suffix
+            target_path = self.active_dir / f"{source_id}{target_suffix}"
             suffix = 2
 
             while target_path.exists():
-                target_path = self.active_dir / f"{source_id}_{suffix}.js"
+                target_path = self.active_dir / f"{source_id}_{suffix}{target_suffix}"
                 suffix += 1
 
             shutil.move(str(staging_path), str(target_path))
@@ -373,10 +560,10 @@ class SourceRegistryManager:
             "version": str(candidate.get("version") or ""),
             "filename": filename,
             "sourceUrl": source_url,
-            "enabled": False,
+            "enabled": bool(enabled),
             "experimental": True,
             "trusted": False,
-            "userInstalled": True,
+            "userInstalled": bool(candidate.get("userInstalled", True)),
             "contentPolicy": str(candidate.get("contentPolicy") or "unknown"),
             "sha256": sha256,
             "capabilities": {
@@ -388,6 +575,122 @@ class SourceRegistryManager:
         document["sources"].append(entry)
         self._save_registry_document(document)
         return dict(entry)
+
+    def update_candidate(self, source_id: str, candidate: dict) -> dict:
+        if candidate.get("securityStatus") != "passed":
+            raise SourceRegistryError("更新内容尚未通过安全扫描")
+        if candidate.get("missingModules"):
+            modules = ", ".join(candidate["missingModules"])
+            raise SourceRegistryError(f"更新内容需要未安装依赖：{modules}")
+        document = self.load_registry_document()
+        source = next(
+            (
+                item
+                for item in document["sources"]
+                if isinstance(item, dict) and item.get("id") == source_id
+            ),
+            None,
+        )
+        if source is None:
+            raise SourceRegistryError(f"没有找到音源：{source_id}")
+        candidate_url = self.normalize_source_url(str(candidate.get("sourceUrl") or ""))
+        registered_url = self.normalize_source_url(str(source.get("sourceUrl") or ""))
+        if not candidate_url or candidate_url != registered_url:
+            raise SourceRegistryError("更新内容与已注册 URL 不一致")
+        candidate_sha = str(candidate.get("sha256") or "").casefold()
+        if candidate_sha and candidate_sha == str(source.get("sha256") or "").casefold():
+            return {**dict(source), "unchanged": True}
+        if candidate.get("kind") == "manifest":
+            raise SourceRegistryError("引用外部文件的 JSON manifest 暂不支持自动更新")
+
+        staging_path = Path(str(candidate.get("stagingPath") or ""))
+        if not staging_path.exists() or staging_path.parent.resolve() != self.staging_dir.resolve():
+            raise SourceRegistryError("暂存更新文件不存在或路径无效")
+        self.ensure_runtime_dirs()
+        current_filename = str(source.get("filename") or "").strip()
+        current_path = (self.runtime_dir / current_filename).resolve() if current_filename else None
+        managed_current = bool(
+            current_path
+            and self._is_inside(current_path, self.active_dir.resolve())
+            and current_path.is_file()
+        )
+        target_suffix = ".json" if candidate.get("kind") == "json_track" else ".js"
+        target_path = self.active_dir / f"{source_id}{target_suffix}"
+        if target_path.exists() and (current_path is None or target_path.resolve() != current_path):
+            target_path = self.active_dir / f"{source_id}_{candidate_sha[:8]}{target_suffix}"
+        backup_path: Path | None = None
+        try:
+            if managed_current and current_path is not None:
+                stamp = time.strftime("%Y%m%d_%H%M%S")
+                backup_path = self.backups_dir / f"{self._slug(source_id)}_{stamp}{current_path.suffix}"
+                suffix = 2
+                while backup_path.exists():
+                    backup_path = self.backups_dir / (
+                        f"{self._slug(source_id)}_{stamp}_{suffix}{current_path.suffix}"
+                    )
+                    suffix += 1
+                shutil.move(str(current_path), str(backup_path))
+            shutil.move(str(staging_path), str(target_path))
+            source.update(
+                {
+                    "name": str(candidate.get("name") or source.get("name") or source_id),
+                    "platform": str(candidate.get("platform") or source.get("platform") or source_id),
+                    "author": str(candidate.get("author") or ""),
+                    "version": str(candidate.get("version") or ""),
+                    "filename": target_path.relative_to(self.runtime_dir).as_posix(),
+                    "sourceUrl": candidate_url,
+                    "enabled": True,
+                    "userInstalled": True,
+                    "contentPolicy": str(candidate.get("contentPolicy") or "unknown"),
+                    "sha256": candidate_sha,
+                    "capabilities": dict(candidate.get("capabilities") or {}),
+                    "lastTestStatus": "not_tested",
+                    "lastTestedAt": "",
+                }
+            )
+            self._save_registry_document(document)
+        except Exception as error:
+            if target_path.exists():
+                try:
+                    shutil.move(str(target_path), str(staging_path))
+                except OSError:
+                    pass
+            if backup_path is not None and current_path is not None and backup_path.exists():
+                try:
+                    shutil.move(str(backup_path), str(current_path))
+                except OSError:
+                    pass
+            if isinstance(error, SourceRegistryError):
+                raise
+            raise SourceRegistryError(f"更新音源失败，已尝试回滚：{error}") from error
+        return {**dict(source), "backupPath": str(backup_path or ""), "unchanged": False}
+
+    @staticmethod
+    def normalize_source_url(source_url: str) -> str:
+        text = str(source_url or "").strip()
+        if not text:
+            return ""
+        try:
+            parsed = urlsplit(text)
+        except ValueError as error:
+            raise SourceRegistryError(f"音源 URL 无效：{error}") from error
+        scheme = parsed.scheme.lower()
+        if scheme not in {"http", "https"} or not parsed.hostname:
+            raise SourceRegistryError("音源 URL 仅支持 HTTP 或 HTTPS")
+        if parsed.username or parsed.password:
+            raise SourceRegistryError("音源 URL 不允许包含用户名或密码")
+        hostname = parsed.hostname.casefold()
+        host_token = f"[{hostname}]" if ":" in hostname else hostname
+        try:
+            port = parsed.port
+        except ValueError as error:
+            raise SourceRegistryError(f"音源 URL 端口无效：{error}") from error
+        if port and not ((scheme == "http" and port == 80) or (scheme == "https" and port == 443)):
+            netloc = f"{host_token}:{port}"
+        else:
+            netloc = host_token
+        path = parsed.path or "/"
+        return urlunsplit((scheme, netloc, path, parsed.query, ""))
 
     def describe_candidate(self, candidate: dict) -> str:
         capabilities = candidate.get("capabilities") or {}
@@ -414,7 +717,7 @@ class SourceRegistryManager:
             f"缺少依赖：{', '.join(missing) or '无'}\n"
             f"SHA-256：{candidate.get('sha256') or ''}\n"
             f"内容策略：{candidate.get('contentPolicy') or 'unknown'}\n"
-            "播放/下载仅对明确声明为开放内容或用户自有内容的 JSON 音源启用。\n"
+            "播放/下载仅对用户明确确认的开放内容或用户自有内容来源启用。\n"
             "安全提示：静态扫描不能替代完整沙箱，请只启用你信任的音源。"
         )
 
