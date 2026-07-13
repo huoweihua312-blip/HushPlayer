@@ -5,7 +5,15 @@ __pycache__/
 
 # Virtual environment
 .venv/
+.venv312/
 venv/
+
+# User-installed online source runtime content
+source_runtime/node_modules/
+source_runtime/sources/
+source_runtime/qq.js
+source_runtime/test_*.js
+user_sources/
 
 # IDE
 .vscode/
@@ -38,3 +46,44 @@ dist/
 # OS
 Thumbs.db
 .DS_Store
+
+# Python virtual environments
+.venv/
+.venv*/
+venv/
+env/
+
+# Python cache
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+
+# IDE and temporary files
+.vscode/
+.idea/
+*.log
+
+# Virtual environments
+.venv/
+.venv*/
+venv/
+env/
+
+# Python cache
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+
+# Local backups
+backups/
+
+# Runtime user data
+data/*.json
+
+# Node dependencies
+source_runtime/node_modules/
+
+# Logs and temporary files
+*.log
