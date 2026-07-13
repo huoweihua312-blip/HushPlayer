@@ -52,6 +52,7 @@ from PySide6.QtWidgets import (
     QScrollArea,
     QSizePolicy,
     QSlider,
+    QSplitter,
     QStackedWidget,
     QStyle,
     QStyledItemDelegate,
@@ -388,6 +389,11 @@ class NavButton(QPushButton):
         self.setObjectName("sidebarButton")
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         self.setProperty("active", active)
+        self.setMinimumHeight(self.fontMetrics().height() + 18)
+        self.setSizePolicy(
+            QSizePolicy.Policy.Expanding,
+            QSizePolicy.Policy.Preferred,
+        )
 
 
 class PlayerIconButton(QPushButton):
@@ -3652,8 +3658,11 @@ class MainWindow(QMainWindow):
         self.setWindowTitle("HushPlayer")
         self.install_window_icon()
         self.resize(1400, 860)
-        self.setMinimumSize(1100, 720)
+        self.setMinimumSize(900, 640)
         self.setAcceptDrops(True)
+        self._responsive_mode = ""
+        self._screen_signal_connected = False
+        self._responsive_screen = None
 
         layout_started_at = time.perf_counter()
         root = QWidget()
@@ -3661,6 +3670,7 @@ class MainWindow(QMainWindow):
         root.setAcceptDrops(True)
 
         root_layout = QVBoxLayout(root)
+        self.root_layout = root_layout
         root_layout.setContentsMargins(18, 18, 18, 18)
 
         shell = QFrame()
@@ -3671,11 +3681,14 @@ class MainWindow(QMainWindow):
         shell_layout.setContentsMargins(0, 0, 0, 0)
         shell_layout.setSpacing(0)
 
-        body_layout = QHBoxLayout()
-        body_layout.setContentsMargins(0, 0, 0, 0)
-        body_layout.setSpacing(0)
+        body_splitter = QSplitter(Qt.Orientation.Horizontal)
+        body_splitter.setObjectName("bodySplitter")
+        body_splitter.setChildrenCollapsible(False)
+        body_splitter.setHandleWidth(2)
+        self.body_splitter = body_splitter
 
         sidebar = self.measure_startup_step("侧边栏 UI", self._create_sidebar)
+        self.sidebar_panel = sidebar
         library_panel = self.measure_startup_step("音乐库页面 UI", self._create_library_panel)
         self.library_panel = library_panel
         full_lyrics_page = self.measure_startup_step("歌词页面 UI", self._create_full_lyrics_page)
@@ -3761,6 +3774,7 @@ class MainWindow(QMainWindow):
         self.online_download_manager.finished.connect(self.on_online_download_finished)
         self.online_download_manager.failed.connect(self.on_online_download_failed)
         now_playing_panel = self.measure_startup_step("正在播放侧栏 UI", self._create_now_playing_panel)
+        self.now_playing_panel = now_playing_panel
 
         self.content_stack = QStackedWidget()
         self.content_stack.setObjectName("contentStack")
@@ -3770,17 +3784,27 @@ class MainWindow(QMainWindow):
         self.content_stack.addWidget(search_page)
         self.content_stack.addWidget(custom_source_manager_page)
 
-        body_layout.addWidget(sidebar)
-        body_layout.addWidget(self.content_stack, 1)
-        body_layout.addWidget(now_playing_panel)
+        self.content_stack.setMinimumWidth(0)
+        self.content_stack.setSizePolicy(
+            QSizePolicy.Policy.Expanding,
+            QSizePolicy.Policy.Expanding,
+        )
+        body_splitter.addWidget(sidebar)
+        body_splitter.addWidget(self.content_stack)
+        body_splitter.addWidget(now_playing_panel)
+        body_splitter.setStretchFactor(0, 0)
+        body_splitter.setStretchFactor(1, 1)
+        body_splitter.setStretchFactor(2, 0)
 
         player_bar = self.measure_startup_step("底部播放栏 UI", self._create_player_bar)
+        self.player_bar = player_bar
 
-        shell_layout.addLayout(body_layout, 1)
+        shell_layout.addWidget(body_splitter, 1)
         shell_layout.addWidget(player_bar)
 
         root_layout.addWidget(shell)
         self.setCentralWidget(root)
+        self._update_responsive_layout(force=True)
         print(f"[startup] 主界面布局装配：{(time.perf_counter() - layout_started_at) * 1000:.1f} ms")
 
         self.measure_startup_step("播放器信号连接", self._connect_player_signals)
@@ -3957,6 +3981,8 @@ class MainWindow(QMainWindow):
         started_at = time.perf_counter()
         super().showEvent(event)
         self.apply_windows_dark_title_bar()
+        self._connect_responsive_screen_signals()
+        QTimer.singleShot(0, lambda: self._update_responsive_layout(force=True))
 
         if not self.startup_show_reported:
             self.startup_show_reported = True
@@ -3964,6 +3990,145 @@ class MainWindow(QMainWindow):
             process_elapsed_ms = (time.perf_counter() - self.process_started_at) * 1000
             print(f"[startup] MainWindow.showEvent：{elapsed_ms:.1f} ms")
             print(f"[startup] 进程启动到 showEvent：{process_elapsed_ms:.1f} ms")
+
+    def resizeEvent(self, event) -> None:
+        super().resizeEvent(event)
+        if hasattr(self, "body_splitter"):
+            self._update_responsive_layout()
+
+    @staticmethod
+    def responsive_mode_for_width(width: int) -> str:
+        logical_width = max(0, int(width or 0))
+        if logical_width >= 1450:
+            return "full"
+        if logical_width >= 1100:
+            return "compact"
+        return "narrow"
+
+    def _connect_responsive_screen_signals(self) -> None:
+        handle = self.windowHandle()
+        if handle is None:
+            return
+        if not self._screen_signal_connected:
+            handle.screenChanged.connect(self._on_responsive_screen_changed)
+            self._screen_signal_connected = True
+        self._on_responsive_screen_changed(handle.screen())
+
+    def _on_responsive_screen_changed(self, screen) -> None:
+        previous = getattr(self, "_responsive_screen", None)
+        if previous is screen:
+            self._update_responsive_layout(force=True)
+            return
+        if previous is not None:
+            try:
+                previous.logicalDotsPerInchChanged.disconnect(
+                    self._on_responsive_dpi_changed
+                )
+            except (RuntimeError, TypeError):
+                pass
+        self._responsive_screen = screen
+        if screen is not None:
+            try:
+                screen.logicalDotsPerInchChanged.connect(
+                    self._on_responsive_dpi_changed
+                )
+            except (RuntimeError, TypeError):
+                pass
+        self._update_responsive_layout(force=True)
+
+    def _on_responsive_dpi_changed(self, _dpi: float) -> None:
+        self._update_responsive_layout(force=True)
+
+    def _update_responsive_layout(self, force: bool = False) -> None:
+        splitter = getattr(self, "body_splitter", None)
+        sidebar = getattr(self, "sidebar_panel", None)
+        content = getattr(self, "content_stack", None)
+        now_panel = getattr(self, "now_playing_panel", None)
+        if splitter is None or sidebar is None or content is None or now_panel is None:
+            return
+
+        mode = self.responsive_mode_for_width(self.width())
+        if mode == self._responsive_mode and not force:
+            return
+        self._responsive_mode = mode
+
+        if mode == "full":
+            root_margin = 18
+            sidebar_limits = (180, 230, 220)
+            now_limits = (280, 340, 330)
+            content_minimum = 600
+            cover_size = 236
+            player_margins = (24, 16, 24, 16)
+            player_spacing = 20
+            player_limits = ((200, 280), 340, (250, 320))
+        elif mode == "compact":
+            root_margin = 12
+            sidebar_limits = (170, 205, 196)
+            now_limits = (220, 270, 250)
+            content_minimum = 480
+            cover_size = 184
+            player_margins = (18, 14, 18, 14)
+            player_spacing = 14
+            player_limits = ((170, 230), 300, (210, 260))
+        else:
+            root_margin = 8
+            sidebar_limits = (160, 185, 178)
+            now_limits = (0, 0, 0)
+            content_minimum = 520
+            cover_size = 0
+            player_margins = (12, 12, 12, 12)
+            player_spacing = 10
+            player_limits = ((130, 190), 260, (190, 220))
+
+        self.root_layout.setContentsMargins(
+            root_margin, root_margin, root_margin, root_margin
+        )
+        sidebar.setMinimumWidth(sidebar_limits[0])
+        sidebar.setMaximumWidth(sidebar_limits[1])
+        content.setMinimumWidth(content_minimum)
+        self.sidebar_subtitle.setVisible(mode != "narrow")
+        self.sidebar_playlist_hint.setVisible(mode != "narrow")
+
+        show_now_panel = mode != "narrow"
+        now_panel.setVisible(show_now_panel)
+        if show_now_panel:
+            now_panel.setMinimumWidth(now_limits[0])
+            now_panel.setMaximumWidth(now_limits[1])
+            self.cover_label.setFixedSize(cover_size, cover_size)
+
+        available = max(0, splitter.width() or self.width() - root_margin * 2)
+        right_width = now_limits[2] if show_now_panel else 0
+        center_width = max(
+            360,
+            available - sidebar_limits[2] - right_width - splitter.handleWidth() * 2,
+        )
+        splitter.setSizes([sidebar_limits[2], center_width, right_width])
+
+        if hasattr(self, "library_page"):
+            self.library_page.set_responsive_mode(mode)
+        if hasattr(self, "search_page"):
+            self.search_page.set_responsive_mode(mode)
+
+        left_limits, center_minimum, right_limits = player_limits
+        self.player_bar_layout.setContentsMargins(*player_margins)
+        self.player_bar_layout.setSpacing(player_spacing)
+        self.player_left_box.setMinimumWidth(left_limits[0])
+        self.player_left_box.setMaximumWidth(left_limits[1])
+        self.player_center_box.setMinimumWidth(center_minimum)
+        self.player_right_box.setMinimumWidth(right_limits[0])
+        self.player_right_box.setMaximumWidth(right_limits[1])
+        self.floating_lyrics_button.setVisible(mode == "full")
+        self.player_more_button.setVisible(mode != "full")
+        current = getattr(self, "current_media_item", None)
+        self.bottom_source_badge.setVisible(
+            mode == "full"
+            and isinstance(current, MediaItem)
+            and current.media_type == "online"
+            and bool(self.bottom_source_badge.text())
+        )
+
+        self.updateGeometry()
+        content.updateGeometry()
 
     def paintEvent(self, event) -> None:
         started_at = time.perf_counter()
@@ -4483,6 +4648,12 @@ class MainWindow(QMainWindow):
             button = QPushButton(playlist_name)
             button.setObjectName("playlistSidebarButton")
             button.setCursor(Qt.CursorShape.PointingHandCursor)
+            button.setToolTip(playlist_name)
+            button.setMinimumHeight(button.fontMetrics().height() + 16)
+            button.setSizePolicy(
+                QSizePolicy.Policy.Expanding,
+                QSizePolicy.Policy.Preferred,
+            )
             button.setProperty("active", view_name == self.current_library_view)
             button.clicked.connect(lambda checked=False, view=view_name: self.set_library_view(view))
             button.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
@@ -6088,7 +6259,9 @@ class MainWindow(QMainWindow):
         self.update_like_button()
         if hasattr(self, "bottom_source_badge"):
             self.bottom_source_badge.setText(media_item.source_name or "在线")
-            self.bottom_source_badge.show()
+            self.bottom_source_badge.setVisible(
+                getattr(self, "_responsive_mode", "full") == "full"
+            )
         self.reset_cover()
         self.lyrics_view.set_placeholder("正在加载歌词", "优先使用歌曲来源，其次联网匹配")
         self.online_lyrics_service.request_lyrics(media_item)
@@ -6393,17 +6566,40 @@ class MainWindow(QMainWindow):
     def _create_sidebar(self) -> QFrame:
         sidebar = QFrame()
         sidebar.setObjectName("sidebar")
-        sidebar.setFixedWidth(250)
+        sidebar.setSizePolicy(
+            QSizePolicy.Policy.Preferred,
+            QSizePolicy.Policy.Expanding,
+        )
 
-        layout = QVBoxLayout(sidebar)
+        outer_layout = QVBoxLayout(sidebar)
+        outer_layout.setContentsMargins(0, 0, 0, 0)
+        outer_layout.setSpacing(0)
+        scroll = QScrollArea(sidebar)
+        scroll.setObjectName("sidebarScroll")
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        scroll.setSizePolicy(
+            QSizePolicy.Policy.Expanding,
+            QSizePolicy.Policy.Expanding,
+        )
+        content = QWidget()
+        content.setObjectName("sidebarContent")
+        self.sidebar_scroll = scroll
+        self.sidebar_content = content
+
+        layout = QVBoxLayout(content)
         layout.setContentsMargins(18, 22, 18, 18)
         layout.setSpacing(10)
 
         title = QLabel("HushPlayer")
         title.setObjectName("appTitle")
+        self.sidebar_title = title
 
         subtitle = QLabel("安静地听本地音乐")
         subtitle.setObjectName("appSubtitle")
+        self.sidebar_subtitle = subtitle
 
         layout.addWidget(title)
         layout.addWidget(subtitle)
@@ -6411,6 +6607,10 @@ class MainWindow(QMainWindow):
 
         self.search_input = SearchEntryLineEdit()
         self.search_input.setObjectName("sidebarSearchInput")
+        self.search_input.setSizePolicy(
+            QSizePolicy.Policy.Expanding,
+            QSizePolicy.Policy.Preferred,
+        )
         self.search_input.setPlaceholderText("搜索音乐")
         self.search_input.setStyleSheet(
             "QLineEdit#sidebarSearchInput { background: #151922; color: #f3f4f6; border: 1px solid #2a303b; "
@@ -6512,7 +6712,13 @@ class MainWindow(QMainWindow):
         new_playlist_btn = QPushButton("+ 新建歌单")
         new_playlist_btn.setObjectName("sidebarWideButton")
         new_playlist_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        new_playlist_btn.setMinimumHeight(new_playlist_btn.fontMetrics().height() + 16)
+        new_playlist_btn.setSizePolicy(
+            QSizePolicy.Policy.Expanding,
+            QSizePolicy.Policy.Preferred,
+        )
         new_playlist_btn.clicked.connect(self.create_new_playlist)
+        self.new_playlist_button = new_playlist_btn
 
         layout.addWidget(new_playlist_btn)
 
@@ -6525,6 +6731,9 @@ class MainWindow(QMainWindow):
 
         layout.addStretch()
         layout.addWidget(self.settings_nav_button)
+
+        scroll.setWidget(content)
+        outer_layout.addWidget(scroll)
 
         return sidebar
 
@@ -6658,7 +6867,12 @@ class MainWindow(QMainWindow):
     def _create_now_playing_panel(self) -> QFrame:
         panel = QFrame()
         panel.setObjectName("nowPlayingPanel")
-        panel.setFixedWidth(360)
+        panel.setMinimumWidth(220)
+        panel.setMaximumWidth(340)
+        panel.setSizePolicy(
+            QSizePolicy.Policy.Preferred,
+            QSizePolicy.Policy.Expanding,
+        )
 
         layout = QVBoxLayout(panel)
         layout.setContentsMargins(22, 24, 22, 22)
@@ -6667,6 +6881,7 @@ class MainWindow(QMainWindow):
         title = QLabel("正在播放")
         title.setObjectName("sectionTitle")
         title.setAlignment(Qt.AlignmentFlag.AlignLeft)
+        self.now_playing_title = title
 
         self.cover_label = RoundedCoverLabel("Hush")
         self.cover_label.setObjectName("coverLabel")
@@ -6675,6 +6890,7 @@ class MainWindow(QMainWindow):
         now_info_box = QFrame()
         now_info_box.setObjectName("nowInfoBox")
         now_info_box.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)
+        self.now_info_box = now_info_box
 
         now_info_layout = QVBoxLayout(now_info_box)
         now_info_layout.setContentsMargins(16, 14, 16, 14)
@@ -6786,15 +7002,22 @@ class MainWindow(QMainWindow):
     def _create_player_bar(self) -> QFrame:
         bar = QFrame()
         bar.setObjectName("playerBar")
-        bar.setMinimumHeight(136)
+        bar.setMinimumHeight(124)
 
         layout = QHBoxLayout(bar)
+        self.player_bar_layout = layout
         layout.setContentsMargins(24, 16, 24, 16)
         layout.setSpacing(20)
 
         left_box = QFrame()
         left_box.setObjectName("playerLeft")
-        left_box.setFixedWidth(280)
+        left_box.setMinimumWidth(0)
+        left_box.setMaximumWidth(280)
+        left_box.setSizePolicy(
+            QSizePolicy.Policy.Preferred,
+            QSizePolicy.Policy.Expanding,
+        )
+        self.player_left_box = left_box
 
         left_layout = QVBoxLayout(left_box)
         left_layout.setContentsMargins(0, 0, 0, 0)
@@ -6802,11 +7025,19 @@ class MainWindow(QMainWindow):
 
         self.bottom_song_title = ElidedLabel("未播放")
         self.bottom_song_title.setObjectName("bottomSongTitle")
-        self.bottom_song_title.setFixedWidth(280)
+        self.bottom_song_title.setMinimumWidth(0)
+        self.bottom_song_title.setSizePolicy(
+            QSizePolicy.Policy.Expanding,
+            QSizePolicy.Policy.Preferred,
+        )
 
         self.bottom_song_artist = ElidedLabel("请选择一首音乐")
         self.bottom_song_artist.setObjectName("bottomSongArtist")
-        self.bottom_song_artist.setFixedWidth(280)
+        self.bottom_song_artist.setMinimumWidth(0)
+        self.bottom_song_artist.setSizePolicy(
+            QSizePolicy.Policy.Expanding,
+            QSizePolicy.Policy.Preferred,
+        )
 
         self.bottom_source_badge = QLabel("")
         self.bottom_source_badge.setObjectName("bottomSourceBadge")
@@ -6827,7 +7058,12 @@ class MainWindow(QMainWindow):
 
         center_box = QFrame()
         center_box.setObjectName("playerCenter")
-        center_box.setMinimumWidth(420)
+        center_box.setMinimumWidth(260)
+        center_box.setSizePolicy(
+            QSizePolicy.Policy.Expanding,
+            QSizePolicy.Policy.Expanding,
+        )
+        self.player_center_box = center_box
 
         center_layout = QVBoxLayout(center_box)
         center_layout.setContentsMargins(0, 0, 0, 0)
@@ -6867,8 +7103,12 @@ class MainWindow(QMainWindow):
         self.progress_slider.setObjectName("progressSlider")
         self.progress_slider.setRange(0, 100)
         self.progress_slider.setValue(0)
-        self.progress_slider.setMinimumWidth(360)
-        self.progress_slider.setFixedHeight(32)
+        self.progress_slider.setMinimumWidth(120)
+        self.progress_slider.setMinimumHeight(32)
+        self.progress_slider.setSizePolicy(
+            QSizePolicy.Policy.Expanding,
+            QSizePolicy.Policy.Fixed,
+        )
         self.progress_slider.sliderPressed.connect(self.on_seek_start)
         self.progress_slider.sliderReleased.connect(self.on_seek_end)
 
@@ -6897,7 +7137,13 @@ class MainWindow(QMainWindow):
 
         right_box = QFrame()
         right_box.setObjectName("playerRight")
-        right_box.setFixedWidth(320)
+        right_box.setMinimumWidth(190)
+        right_box.setMaximumWidth(320)
+        right_box.setSizePolicy(
+            QSizePolicy.Policy.Preferred,
+            QSizePolicy.Policy.Expanding,
+        )
+        self.player_right_box = right_box
 
         right_layout = QVBoxLayout(right_box)
         right_layout.setContentsMargins(0, 0, 0, 0)
@@ -6906,21 +7152,49 @@ class MainWindow(QMainWindow):
         self.like_btn = QPushButton("♡ 收藏")
         self.like_btn.setObjectName("likeButton")
         self.like_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.like_btn.setFixedWidth(92)
+        self.like_btn.setMinimumWidth(72)
+        self.like_btn.setMaximumWidth(96)
+        self.like_btn.setSizePolicy(
+            QSizePolicy.Policy.Preferred,
+            QSizePolicy.Policy.Preferred,
+        )
         self.like_btn.clicked.connect(self.toggle_like_current_song)
 
         self.play_mode_btn = QPushButton("列表循环")
         self.play_mode_btn.setObjectName("controlButton")
         self.play_mode_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.play_mode_btn.setFixedWidth(90)
+        self.play_mode_btn.setMinimumWidth(76)
+        self.play_mode_btn.setMaximumWidth(96)
+        self.play_mode_btn.setSizePolicy(
+            QSizePolicy.Policy.Preferred,
+            QSizePolicy.Policy.Preferred,
+        )
         self.play_mode_btn.clicked.connect(self.toggle_play_mode)
 
         self.floating_lyrics_button = QPushButton("桌面歌词")
         self.floating_lyrics_button.setObjectName("floatingLyricsToggleButton")
         self.floating_lyrics_button.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.floating_lyrics_button.setFixedHeight(34)
-        self.floating_lyrics_button.setFixedWidth(92)
+        self.floating_lyrics_button.setMinimumHeight(34)
+        self.floating_lyrics_button.setMinimumWidth(80)
+        self.floating_lyrics_button.setMaximumWidth(96)
         self.floating_lyrics_button.clicked.connect(self.toggle_floating_lyrics)
+
+        self.player_more_button = QPushButton("⋯")
+        self.player_more_button.setObjectName("controlButton")
+        self.player_more_button.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.player_more_button.setFixedSize(36, 34)
+        self.player_more_button.setToolTip("更多播放操作")
+        player_more_menu = QMenu(self.player_more_button)
+        current_info_action = player_more_menu.addAction("查看当前歌曲信息")
+        current_info_action.triggered.connect(
+            lambda checked=False: self.show_current_playing_info()
+        )
+        floating_action = player_more_menu.addAction("打开或关闭桌面歌词")
+        floating_action.triggered.connect(
+            lambda checked=False: self.toggle_floating_lyrics()
+        )
+        self.player_more_button.setMenu(player_more_menu)
+        self.player_more_button.hide()
 
         top_row = QHBoxLayout()
         top_row.setContentsMargins(0, 0, 0, 0)
@@ -6928,6 +7202,7 @@ class MainWindow(QMainWindow):
         top_row.addWidget(self.like_btn)
         top_row.addWidget(self.play_mode_btn)
         top_row.addWidget(self.floating_lyrics_button)
+        top_row.addWidget(self.player_more_button)
         top_row.addStretch()
 
         volume_row = QHBoxLayout()
@@ -6941,8 +7216,13 @@ class MainWindow(QMainWindow):
         self.volume_slider.setObjectName("volumeSlider")
         self.volume_slider.setRange(0, 100)
         self.volume_slider.setValue(self.current_volume)
-        self.volume_slider.setFixedWidth(178)
-        self.volume_slider.setFixedHeight(32)
+        self.volume_slider.setMinimumWidth(70)
+        self.volume_slider.setMaximumWidth(178)
+        self.volume_slider.setMinimumHeight(32)
+        self.volume_slider.setSizePolicy(
+            QSizePolicy.Policy.Expanding,
+            QSizePolicy.Policy.Fixed,
+        )
         self.volume_slider.valueChanged.connect(self.change_volume)
         self.volume_slider.valueChanged.connect(self.update_volume_status)
 
@@ -6961,9 +7241,9 @@ class MainWindow(QMainWindow):
         right_layout.addLayout(volume_row)
         right_layout.addStretch()
 
-        layout.addWidget(left_box)
-        layout.addWidget(center_box, 1)
-        layout.addWidget(right_box)
+        layout.addWidget(left_box, 1)
+        layout.addWidget(center_box, 3)
+        layout.addWidget(right_box, 1)
 
         self.media_player.positionChanged.connect(self.update_current_time_display)
         self.media_player.durationChanged.connect(self.update_total_time_display)
@@ -8766,8 +9046,9 @@ class MainWindow(QMainWindow):
             self.floating_lyrics_button = QPushButton("桌面歌词")
             self.floating_lyrics_button.setObjectName("floatingLyricsToggleButton")
             self.floating_lyrics_button.setCursor(Qt.CursorShape.PointingHandCursor)
-            self.floating_lyrics_button.setFixedHeight(34)
-            self.floating_lyrics_button.setFixedWidth(92)
+            self.floating_lyrics_button.setMinimumHeight(34)
+            self.floating_lyrics_button.setMinimumWidth(80)
+            self.floating_lyrics_button.setMaximumWidth(96)
             self.floating_lyrics_button.clicked.connect(self.toggle_floating_lyrics)
 
         self.update_floating_lyrics_button_state()
@@ -8779,8 +9060,9 @@ class MainWindow(QMainWindow):
             self.floating_lyrics_button = QPushButton("桌面歌词")
             self.floating_lyrics_button.setObjectName("floatingLyricsToggleButton")
             self.floating_lyrics_button.setCursor(Qt.CursorShape.PointingHandCursor)
-            self.floating_lyrics_button.setFixedHeight(34)
-            self.floating_lyrics_button.setMinimumWidth(92)
+            self.floating_lyrics_button.setMinimumHeight(34)
+            self.floating_lyrics_button.setMinimumWidth(80)
+            self.floating_lyrics_button.setMaximumWidth(96)
             self.floating_lyrics_button.clicked.connect(self.toggle_floating_lyrics)
         else:
             old_parent = existing_button.parentWidget()
@@ -12345,6 +12627,18 @@ class MainWindow(QMainWindow):
             os.startfile(str(path.parent))
         except Exception as error:
             QMessageBox.warning(self, "打开失败", str(error))
+
+    def show_current_playing_info(self) -> None:
+        current = getattr(self, "current_media_item", None)
+        if isinstance(current, MediaItem):
+            self.show_media_item_info(current.to_dict())
+            return
+        song_data = self.find_song_data_by_path(self.current_song_path)
+        if isinstance(song_data, dict):
+            self.show_media_item_info(MediaItem.from_local(song_data).to_dict())
+            return
+        QMessageBox.information(self, "歌曲信息", "还没有正在播放的歌曲。")
+
     def play_previous_song(self) -> None:
         self.play_from_playback_context(-1)
 
@@ -13120,7 +13414,6 @@ class MainWindow(QMainWindow):
             border: 1px solid {t["border"]};
             border-radius: 12px;
             min-height: 38px;
-            max-height: 38px;
         }}
 
         QPushButton#songTableHeaderButton {{
@@ -13696,6 +13989,17 @@ class MainWindow(QMainWindow):
             border-top-left-radius: 22px;
             border-bottom-left-radius: 22px;
             border-right: 1px solid rgba(255, 255, 255, 0.06);
+        }
+
+        QScrollArea#sidebarScroll,
+        QScrollArea#sidebarScroll > QWidget > QWidget#sidebarContent,
+        QScrollArea#sidebarScroll QWidget#qt_scrollarea_viewport {
+            background: transparent;
+            border: none;
+        }
+
+        QSplitter#bodySplitter::handle {
+            background: rgba(255, 255, 255, 0.035);
         }
 
         QLabel#appTitle {

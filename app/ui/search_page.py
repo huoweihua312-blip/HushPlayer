@@ -44,14 +44,17 @@ class SearchPage(QFrame):
 
     def _build_ui(self, local_only: bool) -> None:
         layout = QVBoxLayout(self)
+        self.page_layout = layout
         layout.setContentsMargins(28, 26, 28, 24)
         layout.setSpacing(16)
         header = QHBoxLayout()
         title_box = QVBoxLayout()
         self.title_label = QLabel("搜索")
         self.title_label.setObjectName("pageTitle")
+        self.title_label.setWordWrap(True)
         self.subtitle_label = QLabel("本地结果立即显示；在线结果会在停止输入后异步加载。")
         self.subtitle_label.setObjectName("pageSubtitle")
+        self.subtitle_label.setWordWrap(True)
         title_box.addWidget(self.title_label)
         title_box.addWidget(self.subtitle_label)
         self.local_only_checkbox = QCheckBox("仅搜索本地")
@@ -111,6 +114,17 @@ class SearchPage(QFrame):
             "QPushButton#searchTabButton[active='true'] { background: rgba(76,141,255,0.20); color: #ffffff; border-color: rgba(76,141,255,0.55); }"
         )
         self.show_tab("local")
+
+    def set_responsive_mode(self, mode: str) -> None:
+        mode = mode if mode in {"full", "compact", "narrow"} else "full"
+        self.subtitle_label.setVisible(mode != "narrow")
+        self.page_status.setVisible(mode != "narrow")
+        if mode == "full":
+            self.page_layout.setContentsMargins(28, 26, 28, 24)
+        elif mode == "compact":
+            self.page_layout.setContentsMargins(20, 20, 20, 18)
+        else:
+            self.page_layout.setContentsMargins(16, 16, 16, 14)
 
     def set_collection_providers(self, local_state_provider, playlist_provider) -> None:
         self.local_state_provider = local_state_provider or (lambda _track: {})
