@@ -81,6 +81,9 @@ backups/
 
 # Runtime user data
 data/*.json
+data/metadata_cache.json
+data/play_queue.json
+source_runtime/source_registry.json
 
 # Node dependencies
 source_runtime/node_modules/

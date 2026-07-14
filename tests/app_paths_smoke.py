@@ -85,20 +85,58 @@ def main() -> int:
             assert json.loads((paths.data_dir / "library.json").read_text(encoding="utf-8"))[0]["title"] == "迁移测试"
             assert json.loads(paths.metadata_cache_file.read_text(encoding="utf-8"))["fixture"] is True
             assert json.loads(paths.source_registry_file.read_text(encoding="utf-8"))["sources"][0]["id"] == "fixture_source"
+            assert json.loads(paths.play_queue_file.read_text(encoding="utf-8")) == []
             assert (paths.source_runtime_data_dir / "sources" / "active" / "fixture.js").is_file()
             assert (paths.user_sources_dir / "user.js").is_file()
             (paths.data_dir / "library.json").write_text("[]", encoding="utf-8")
+            paths.metadata_cache_file.write_text(
+                '{"preserved": true}', encoding="utf-8"
+            )
+            paths.play_queue_file.write_text(
+                '[{"kind": "remote"}]', encoding="utf-8"
+            )
             paths.source_registry_file.write_text(
                 '{"version": 1, "sources": [{"id": "preserved"}]}',
                 encoding="utf-8",
             )
             paths.initialize_user_storage()
             assert (paths.data_dir / "library.json").read_text(encoding="utf-8") == "[]"
+            assert json.loads(paths.metadata_cache_file.read_text(encoding="utf-8")) == {
+                "preserved": True
+            }
+            assert json.loads(paths.play_queue_file.read_text(encoding="utf-8")) == [
+                {"kind": "remote"}
+            ]
             assert json.loads(paths.source_registry_file.read_text(encoding="utf-8"))["sources"][0]["id"] == "preserved"
             assert paths.data_dir.is_dir()
             assert (paths.cache_dir / "covers").is_dir()
             assert (paths.cache_dir / "lyrics").is_dir()
             assert paths.log_dir.is_dir()
+
+            clean_bundle = root / "clean bundle"
+            clean_default = (
+                clean_bundle / "app" / "resources" / "defaults" / "source_registry.json"
+            )
+            clean_default.parent.mkdir(parents=True)
+            clean_default.write_text(
+                '{\n  "version": 1,\n  "sources": []\n}\n', encoding="utf-8"
+            )
+            clean_paths = AppPaths(
+                bundled_resource_dir=clean_bundle,
+                application_data_dir=root / "clean user data",
+                cache_dir=root / "clean cache",
+                log_dir=root / "clean logs",
+                frozen=True,
+                legacy_project_dir=clean_bundle,
+            )
+            clean_paths.initialize_user_storage()
+            assert json.loads(
+                clean_paths.source_registry_file.read_text(encoding="utf-8")
+            ) == {"version": 1, "sources": []}
+            assert json.loads(
+                clean_paths.metadata_cache_file.read_text(encoding="utf-8")
+            ) == {}
+            assert json.loads(clean_paths.play_queue_file.read_text(encoding="utf-8")) == []
 
             frozen_bundle = root / "portable 中文" / "HushPlayer" / "_internal"
             frozen_bundle.mkdir(parents=True)

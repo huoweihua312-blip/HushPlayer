@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 import shutil
 import sys
@@ -111,6 +112,10 @@ class AppPaths:
         return self.cache_dir / "metadata_cache.json"
 
     @property
+    def play_queue_file(self) -> Path:
+        return self.data_dir / "play_queue.json"
+
+    @property
     def bundled_source_runtime_dir(self) -> Path:
         return self.resource_path("source_runtime")
 
@@ -159,6 +164,8 @@ class AppPaths:
             directory.mkdir(parents=True, exist_ok=True)
         self._migrate_legacy_data_files()
         self._initialize_source_registry()
+        self._initialize_json_file(self.metadata_cache_file, {})
+        self._initialize_json_file(self.play_queue_file, [])
 
     def _migrate_legacy_data_files(self) -> None:
         if self.frozen:
@@ -221,3 +228,13 @@ class AppPaths:
         destination.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(source, destination)
         return True
+
+    @staticmethod
+    def _initialize_json_file(path: Path, default_value: dict | list) -> None:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            with path.open("x", encoding="utf-8") as file:
+                json.dump(default_value, file, ensure_ascii=False, indent=2)
+                file.write("\n")
+        except FileExistsError:
+            return
