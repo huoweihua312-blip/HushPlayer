@@ -3573,11 +3573,24 @@ class MainWindow(QMainWindow):
         self.ignored_imports_file = data_dir / "ignored_imports.json"
         self.source_registry_manager = self.measure_startup_step(
             "音源注册管理器对象",
-            lambda: SourceRegistryManager(self.project_root),
+            lambda: SourceRegistryManager(
+                self.project_root,
+                runtime_dir=self.paths.source_runtime_data_dir,
+                user_sources_dir=self.paths.user_sources_dir,
+                bundled_runtime_dir=self.paths.bundled_source_runtime_dir,
+            ),
         )
         self.online_source_client = self.measure_startup_step(
             "在线音源客户端对象（未启动 Node）",
-            lambda: OnlineSourceClient(self.project_root, self),
+            lambda: OnlineSourceClient(
+                self.project_root,
+                self,
+                runtime_dir=self.paths.bundled_source_runtime_dir,
+                registry_path=self.paths.source_registry_file,
+                user_sources_dir=self.paths.user_sources_dir,
+                bundled_node_executable=self.paths.bundled_node_executable,
+                frozen=self.paths.frozen,
+            ),
         )
         self.online_download_manager = self.measure_startup_step(
             "下载管理器对象（无网络请求）",

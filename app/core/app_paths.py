@@ -105,6 +105,35 @@ class AppPaths:
     def metadata_cache_file(self) -> Path:
         return self.cache_dir / "metadata_cache.json"
 
+    @property
+    def bundled_source_runtime_dir(self) -> Path:
+        return self.bundled_resource_dir / "source_runtime"
+
+    @property
+    def bundled_node_executable(self) -> Path:
+        return self.bundled_resource_dir / "runtime" / "node" / "node.exe"
+
+    @property
+    def source_runtime_data_dir(self) -> Path:
+        return self.application_data_dir / "source_runtime"
+
+    @property
+    def source_registry_file(self) -> Path:
+        return self.source_runtime_data_dir / "source_registry.json"
+
+    @property
+    def user_sources_dir(self) -> Path:
+        return self.application_data_dir / "user_sources"
+
+    @property
+    def default_source_registry_template(self) -> Path:
+        return self.resource_path(
+            "app",
+            "resources",
+            "defaults",
+            "source_registry.json",
+        )
+
     def resource_path(self, *parts: str) -> Path:
         return self.bundled_resource_dir.joinpath(*parts)
 
@@ -116,9 +145,15 @@ class AppPaths:
             self.cache_dir / "covers",
             self.cache_dir / "lyrics",
             self.log_dir,
+            self.source_runtime_data_dir,
+            self.source_runtime_data_dir / "sources" / "staging",
+            self.source_runtime_data_dir / "sources" / "active",
+            self.source_runtime_data_dir / "sources" / "backups",
+            self.user_sources_dir,
         ):
             directory.mkdir(parents=True, exist_ok=True)
         self._migrate_legacy_data_files()
+        self._initialize_source_registry()
 
     def _migrate_legacy_data_files(self) -> None:
         if self.frozen:
@@ -133,6 +168,46 @@ class AppPaths:
             legacy_data_dir / "metadata_cache.json",
             self.metadata_cache_file,
         )
+
+    def _initialize_source_registry(self) -> None:
+        if self.source_registry_file.exists():
+            return
+
+        if not self.frozen:
+            legacy_runtime = self.legacy_project_dir / "source_runtime"
+            migrated = self._copy_file_if_missing(
+                legacy_runtime / "source_registry.json",
+                self.source_registry_file,
+            )
+            if migrated:
+                self._copy_tree_files_if_missing(
+                    legacy_runtime / "sources" / "active",
+                    self.source_runtime_data_dir / "sources" / "active",
+                )
+                self._copy_tree_files_if_missing(
+                    self.legacy_project_dir / "user_sources",
+                    self.user_sources_dir,
+                )
+                return
+
+        if not self._copy_file_if_missing(
+            self.default_source_registry_template,
+            self.source_registry_file,
+        ):
+            self.source_registry_file.write_text(
+                '{\n  "version": 1,\n  "sources": []\n}\n',
+                encoding="utf-8",
+            )
+
+    @staticmethod
+    def _copy_tree_files_if_missing(source: Path, destination: Path) -> None:
+        if not source.is_dir():
+            return
+        for source_file in source.rglob("*"):
+            if not source_file.is_file():
+                continue
+            relative = source_file.relative_to(source)
+            AppPaths._copy_file_if_missing(source_file, destination / relative)
 
     @staticmethod
     def _copy_file_if_missing(source: Path, destination: Path) -> bool:

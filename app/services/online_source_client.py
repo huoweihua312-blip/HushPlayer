@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import json
+import os
 import shutil
+import sys
 from pathlib import Path
 
-from PySide6.QtCore import QObject, QProcess, QTimer, Signal
+from PySide6.QtCore import QObject, QProcess, QProcessEnvironment, QTimer, Signal
 
 
 class OnlineSourceClient(QObject):
@@ -22,14 +24,75 @@ class OnlineSourceClient(QObject):
     nodeLog = Signal(str)
     processStopped = Signal()
 
-    def __init__(self, project_root: Path, parent: QObject | None = None) -> None:
+    def __init__(
+        self,
+        project_root: Path,
+        parent: QObject | None = None,
+        *,
+        runtime_dir: Path | None = None,
+        registry_path: Path | None = None,
+        user_sources_dir: Path | None = None,
+        bundled_node_executable: Path | None = None,
+        frozen: bool | None = None,
+    ) -> None:
         super().__init__(parent)
         self.project_root = Path(project_root).resolve()
-        self.runtime_dir = self.project_root / "source_runtime"
+        self.runtime_dir = (
+            Path(runtime_dir).resolve()
+            if runtime_dir is not None
+            else self.project_root / "source_runtime"
+        )
         self.runner_path = self.runtime_dir / "runner.js"
-        self.node_program = shutil.which("node") or ""
+        inherited_registry = str(os.environ.get("HUSHPLAYER_SOURCE_REGISTRY") or "").strip()
+        if registry_path is not None:
+            self.registry_path = Path(registry_path).resolve()
+            self.source_home_dir = self.registry_path.parent
+        elif inherited_registry:
+            # Preserve the original test/development override contract: source
+            # filenames remain relative to the bundled runtime unless the
+            # caller explicitly supplies the separated writable registry.
+            self.registry_path = Path(inherited_registry).resolve()
+            self.source_home_dir = self.runtime_dir
+        else:
+            self.registry_path = self.runtime_dir / "source_registry.json"
+            self.source_home_dir = self.runtime_dir
+        inherited_user_sources = str(
+            os.environ.get("HUSHPLAYER_USER_SOURCES") or ""
+        ).strip()
+        self.user_sources_dir = (
+            Path(user_sources_dir).resolve()
+            if user_sources_dir is not None
+            else Path(inherited_user_sources).resolve()
+            if inherited_user_sources
+            else self.project_root / "user_sources"
+        )
+        self.bundled_node_executable = (
+            Path(bundled_node_executable).resolve()
+            if bundled_node_executable is not None
+            else self.project_root / "runtime" / "node" / "node.exe"
+        )
+        self.frozen = bool(getattr(sys, "frozen", False)) if frozen is None else bool(frozen)
+        if self.bundled_node_executable.is_file():
+            self.node_program = str(self.bundled_node_executable)
+        elif self.frozen:
+            self.node_program = ""
+        else:
+            self.node_program = shutil.which("node") or ""
         self.process = QProcess(self)
         self.process.setWorkingDirectory(str(self.runtime_dir))
+        environment = QProcessEnvironment.systemEnvironment()
+        environment.insert("HUSHPLAYER_SOURCE_REGISTRY", str(self.registry_path))
+        environment.insert("HUSHPLAYER_SOURCE_HOME", str(self.source_home_dir))
+        environment.insert("HUSHPLAYER_USER_SOURCES", str(self.user_sources_dir))
+        node_modules = str(self.runtime_dir / "node_modules")
+        inherited_node_path = environment.value("NODE_PATH")
+        environment.insert(
+            "NODE_PATH",
+            os.pathsep.join(
+                item for item in (node_modules, inherited_node_path) if item
+            ),
+        )
+        self.process.setProcessEnvironment(environment)
         self.process.readyReadStandardOutput.connect(self._read_standard_output)
         self.process.readyReadStandardError.connect(self._read_standard_error)
         self.process.started.connect(self._on_started)
@@ -50,7 +113,12 @@ class OnlineSourceClient(QObject):
             return True
 
         if not self.node_program:
-            self.processError.emit("没有找到 Node.js，请确认 node 已安装并加入 PATH。")
+            if self.frozen:
+                self.processError.emit(
+                    f"发布包缺少内置 Node.js：{self.bundled_node_executable}"
+                )
+            else:
+                self.processError.emit("没有找到 Node.js，请确认 node 已安装并加入 PATH。")
             return False
 
         if not self.runner_path.exists():
