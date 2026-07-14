@@ -12,6 +12,7 @@ from pathlib import Path
 import requests
 from mutagen import File as MutagenFile
 from app.models.media_item import MediaItem
+from app.models.playback_queue_item import PlaybackQueueItem
 from app.core.app_paths import AppPaths
 from app.services.lyrics_cache import LyricsCache
 from app.services.online_artwork_service import OnlineArtworkService
@@ -19,6 +20,7 @@ from app.services.online_download_manager import OnlineDownloadManager
 from app.services.online_lyrics_service import OnlineLyricsService
 from app.services.online_source_client import OnlineSourceClient
 from app.services.playlist_membership import PlaylistMembership
+from app.services.playback_queue import PlaybackQueue
 from app.services.remote_track_store import RemoteTrackStore, RemoteTrackStoreError
 from app.services.source_registry import SourceRegistryManager
 from app.services.unified_search_service import UnifiedSearchService
@@ -2256,12 +2258,13 @@ class PlayQueueDialog(QDialog):
             self.main_window.play_queue = []
 
         valid_queue = []
-
-        for song_path in self.main_window.play_queue:
-            normalized_path = self.main_window.normalize_song_path(song_path)
-
-            if normalized_path and Path(normalized_path).exists():
-                valid_queue.append(normalized_path)
+        for value in self.main_window.play_queue:
+            queue_item = self.main_window.playback_queue_item_from_value(value)
+            if queue_item is None:
+                continue
+            if queue_item.kind == "local" and not Path(queue_item.local_path).is_file():
+                continue
+            valid_queue.append(queue_item)
 
         if valid_queue != self.main_window.play_queue:
             self.main_window.play_queue = valid_queue
@@ -2269,10 +2272,11 @@ class PlayQueueDialog(QDialog):
 
         self.queue_list.clear()
 
-        for index, song_path in enumerate(self.main_window.play_queue, start=1):
-            song_title = self.main_window.get_song_title_for_queue(song_path)
-            item = QListWidgetItem(f"{index}. {song_title}")
-            item.setData(Qt.ItemDataRole.UserRole, song_path)
+        for index, queue_item in enumerate(self.main_window.play_queue, start=1):
+            song_title = self.main_window.get_song_title_for_queue(queue_item)
+            kind_text = "在线" if queue_item.kind == "remote" else "本地"
+            item = QListWidgetItem(f"{index}. {song_title}  [{kind_text}]")
+            item.setData(Qt.ItemDataRole.UserRole, queue_item.to_mapping())
             self.queue_list.addItem(item)
 
         if self.queue_list.count() > 0 and self.queue_list.currentRow() < 0:
@@ -2303,10 +2307,10 @@ class PlayQueueDialog(QDialog):
         if row < 0:
             return
 
-        song_path = self.main_window.play_queue.pop(row)
+        queue_item = self.main_window.play_queue.pop(row)
         self.main_window.save_play_queue()
-
-        if self.main_window.play_song_from_queue_path(song_path):
+        self.main_window.remember_queue_return_state()
+        if self.main_window.play_queue_item(queue_item, update_context=False):
             self.refresh_queue_list()
             self.accept()
         else:
@@ -3474,8 +3478,9 @@ class MainWindow(QMainWindow):
         self.current_song_path: str | None = None
         # 浏览状态：只表示用户最近单击查看的歌曲，不驱动播放栏、封面或歌词。
         self.browsing_song_path: str | None = None
-        # 播放上下文：保存开始播放时的来源与路径顺序，不跟随之后的 UI 选择或筛选变化。
+        # 播放上下文：保存开始播放时的来源与混合队列，不跟随之后的 UI 选择或筛选变化。
         self.playback_context: dict | None = None
+        self.playback_queue = PlaybackQueue()
         # 队列返回状态：仅在内存中记录进入队列前的播放上下文位置。
         self.queue_return_state: dict | None = None
         self.library_category_filter_type: str | None = None
@@ -3532,6 +3537,9 @@ class MainWindow(QMainWindow):
         self.pending_online_track: dict | None = None
         self.pending_online_media_item: MediaItem | None = None
         self.pending_online_playback_request = 0
+        self.pending_online_playback_generation = 0
+        self.pending_online_playback_identity = ""
+        self.pending_online_keep_target_on_failure = False
         self.pending_online_metadata_request = 0
         self.pending_online_metadata_identity = ""
         self.pending_online_ui_snapshot: dict | None = None
@@ -3541,7 +3549,15 @@ class MainWindow(QMainWindow):
         self.pending_online_download_request = 0
         self.active_online_download_track: dict | None = None
         self.active_online_download_remote_id = ""
-        self.online_play_queue: list[dict] = []
+        self.current_queue_identity = ""
+        self.playback_generation = 0
+        self.media_loading_generation = 0
+        self.handled_end_generation = -1
+        self.last_advance_reason = ""
+        self.last_advance_at = 0.0
+        self.last_end_advance_at = 0.0
+        self.online_loop_retry_identity = ""
+        self.online_loop_retry_count = 0
         self.current_plain_lyrics = ""
         self.displayed_lyrics_track_key = ""
         self.current_online_lyrics_state = ""
@@ -5086,6 +5102,10 @@ class MainWindow(QMainWindow):
             self.show_playlist_sidebar_hint(f"「{self.get_playlist_name(playlist_id)}」里还没有可播放的歌曲")
             return
 
+        if shuffle:
+            self.play_mode = "shuffle"
+            self.update_play_mode_button()
+            self.save_settings()
         target_item = random.choice(playable_items) if shuffle else playable_items[0]
         self.song_list.setCurrentItem(target_item)
         self.play_selected_song(target_item)
@@ -5335,6 +5355,9 @@ class MainWindow(QMainWindow):
         return item.stable_identity
 
     def current_track_identity(self) -> str:
+        queue_identity = str(getattr(self, "current_queue_identity", "") or "")
+        if queue_identity:
+            return queue_identity
         current = getattr(self, "current_media_item", None)
         if isinstance(current, MediaItem):
             return current.stable_identity
@@ -6851,7 +6874,25 @@ class MainWindow(QMainWindow):
             resolving=is_pending and bool(self.pending_online_playback_request),
         )
 
-    def request_online_playback(self, track: dict) -> None:
+    def begin_playback_generation(self, identity: str) -> int:
+        identity = str(identity or "")
+        self.playback_generation = int(getattr(self, "playback_generation", 0) or 0) + 1
+        self.current_queue_identity = identity
+        self.media_loading_generation = self.playback_generation
+        self.handled_end_generation = -1
+        if identity != getattr(self, "online_loop_retry_identity", ""):
+            self.online_loop_retry_identity = identity
+            self.online_loop_retry_count = 0
+        return self.playback_generation
+
+    def request_online_playback(
+        self,
+        track: dict,
+        *,
+        playback_generation: int | None = None,
+        queue_identity: str = "",
+        keep_target_on_failure: bool = False,
+    ) -> None:
         if not isinstance(track, dict):
             return
         media_item = MediaItem.from_mapping(track)
@@ -6861,6 +6902,15 @@ class MainWindow(QMainWindow):
             self.set_online_status_message("播放请求缺少音源标识。")
             return
 
+        identity = str(queue_identity or media_item.stable_identity)
+        if playback_generation is None:
+            playback_generation = self.begin_playback_generation(identity)
+        elif playback_generation != self.playback_generation:
+            return
+        else:
+            self.current_queue_identity = identity
+            self.media_loading_generation = playback_generation
+
         previous_request = int(getattr(self, "pending_online_playback_request", 0) or 0)
         if previous_request:
             self.online_source_client.cancel_request(previous_request)
@@ -6868,6 +6918,9 @@ class MainWindow(QMainWindow):
         self.capture_online_playback_ui_snapshot()
         self.pending_online_media_item = media_item
         self.pending_online_track = dict(track)
+        self.pending_online_playback_generation = playback_generation
+        self.pending_online_playback_identity = identity
+        self.pending_online_keep_target_on_failure = bool(keep_target_on_failure)
         self.pending_online_playback_request = self.online_source_client.resolve_playback(
             source_id,
             track,
@@ -6883,6 +6936,26 @@ class MainWindow(QMainWindow):
         if stable_id:
             self.refresh_remote_song_item(stable_id, resolving=True)
 
+    def finish_online_playback_failure(self) -> None:
+        keep_target = bool(
+            getattr(self, "pending_online_keep_target_on_failure", False)
+        )
+        self.pending_online_keep_target_on_failure = False
+        if not keep_target:
+            self.restore_online_playback_ui_snapshot()
+            return
+        target = getattr(self, "pending_online_media_item", None)
+        self.pending_online_ui_snapshot = None
+        self.pending_online_media_item = None
+        if isinstance(target, MediaItem):
+            self.current_track_kind = "online"
+            self.current_media_item = target
+            self.current_online_track = target.to_legacy_online()
+            self.current_song_path = None
+            self.current_queue_identity = target.stable_identity
+            self.present_online_media_item(target)
+            self.refresh_playing_song_indicators()
+
     def on_online_playback_resolved(
         self,
         request_id: int,
@@ -6893,18 +6966,38 @@ class MainWindow(QMainWindow):
             return
         track = self.pending_online_track
         pending_media_item = self.pending_online_media_item
+        pending_generation = int(
+            getattr(self, "pending_online_playback_generation", 0) or 0
+        )
+        pending_identity = str(
+            getattr(self, "pending_online_playback_identity", "") or ""
+        )
+        keep_target_on_failure = bool(
+            getattr(self, "pending_online_keep_target_on_failure", False)
+        )
         self.pending_online_playback_request = 0
+        self.pending_online_playback_generation = 0
+        self.pending_online_playback_identity = ""
+        self.pending_online_keep_target_on_failure = False
         self.pending_online_track = None
+        if (
+            pending_generation != self.playback_generation
+            or pending_identity != self.current_queue_identity
+        ):
+            self.cancel_pending_online_metadata()
+            return
         if not isinstance(track, dict) or str(track.get("sourceId") or "") != source_id:
             self.cancel_pending_online_metadata()
-            self.restore_online_playback_ui_snapshot()
+            self.pending_online_keep_target_on_failure = keep_target_on_failure
+            self.finish_online_playback_failure()
             return
         stable_id = str(track.get("remoteStableId") or "")
         if stable_id:
             self.refresh_remote_song_item(stable_id, resolving=False)
         if resolution.get("headers"):
             self.cancel_pending_online_metadata()
-            self.restore_online_playback_ui_snapshot()
+            self.pending_online_keep_target_on_failure = keep_target_on_failure
+            self.finish_online_playback_failure()
             self.set_online_status_message(
                 "该音源需要附加请求头，当前播放模式暂不支持。"
             )
@@ -6913,7 +7006,8 @@ class MainWindow(QMainWindow):
         url = QUrl(str(resolution.get("url") or ""))
         if not url.isValid() or url.scheme().lower() not in {"http", "https"}:
             self.cancel_pending_online_metadata()
-            self.restore_online_playback_ui_snapshot()
+            self.pending_online_keep_target_on_failure = keep_target_on_failure
+            self.finish_online_playback_failure()
             self.set_online_status_message("音源返回了无效的播放地址。")
             return
 
@@ -6925,11 +7019,13 @@ class MainWindow(QMainWindow):
         ).with_resolution(resolution)
         self.pending_online_media_item = None
         self.pending_online_ui_snapshot = None
+        self.pending_online_keep_target_on_failure = False
         self.current_track_kind = "online"
         self.current_media_item = media_item
         self.current_online_track = media_item.to_legacy_online()
         self.pending_lazy_restore_song_data = None
         self.current_song_path = None
+        self.current_queue_identity = pending_identity or media_item.stable_identity
         self.current_duration = 0
         self.pending_restore_position = 0
         self.reset_playback_stats_session()
@@ -6944,6 +7040,7 @@ class MainWindow(QMainWindow):
         self.online_lyrics_service.request_lyrics(media_item)
 
         self.set_online_status_message("正在加载在线歌曲…")
+        self.media_loading_generation = pending_generation
         self.media_player.stop()
         self.media_player.setSource(url)
         self.progress_slider.setValue(0)
@@ -7017,9 +7114,12 @@ class MainWindow(QMainWindow):
         if action == "resolvePlayback" and request_id == self.pending_online_playback_request:
             track = self.pending_online_track
             self.pending_online_playback_request = 0
+            self.pending_online_playback_generation = 0
+            self.pending_online_playback_identity = ""
             self.pending_online_track = None
+            self.media_loading_generation = 0
             self.cancel_pending_online_metadata()
-            self.restore_online_playback_ui_snapshot()
+            self.finish_online_playback_failure()
             self.set_online_status_message(f"获取播放地址失败：{message}")
             stable_id = (
                 str(track.get("remoteStableId") or "")
@@ -8162,16 +8262,22 @@ class MainWindow(QMainWindow):
         stable_id = str(media_item.extra.get("remote_stable_id") or "").strip()
         record = self.remote_tracks.get(stable_id)
         if isinstance(record, dict):
-            local_path = str(record.get("local_path") or "")
-            if local_path and Path(local_path).is_file():
-                self.play_remote_song_data(
-                    {"recordKind": "remote", "remoteStableId": stable_id}
-                )
-                return
-        if media_item.availability != "available":
+            song_data = RemoteTrackStore.to_song_data(
+                stable_id,
+                record,
+                self.is_remote_source_available(record),
+            )
+            media_item = self.media_item_from_song_data(song_data)
+        if media_item.availability != "available" and not media_item.is_local_available:
             self.set_online_status_message("该在线来源当前不可用。")
             return
-        self.request_online_playback(media_item.to_legacy_online())
+        self.create_playback_context(
+            media_item,
+            self.unified_search_results,
+            source_type="online_search",
+            source_id=self.search_input.text().strip() or "online",
+        )
+        self.play_queue_item(media_item)
 
     def remove_unified_track_from_current_playlist(self, track: dict) -> None:
         media_item = MediaItem.from_mapping(track)
@@ -8187,8 +8293,7 @@ class MainWindow(QMainWindow):
         self.search_input.clear()
 
     def current_media_key(self) -> str:
-        item = getattr(self, "current_media_item", None)
-        return item.stable_identity if isinstance(item, MediaItem) else ""
+        return self.current_track_identity()
 
     def browse_media_item(self, value: dict) -> None:
         try:
@@ -8209,48 +8314,35 @@ class MainWindow(QMainWindow):
         except (TypeError, ValueError):
             return
         self.browse_media_item(media_item.to_dict())
-        if media_item.media_type == "online" and not media_item.is_local_available:
-            if media_item.availability != "available" or not media_item.can_play:
+        candidates = None
+        source_type = None
+        source_id = None
+        search_page = getattr(self, "search_page", None)
+        stack = getattr(self, "content_stack", None)
+        if search_page is not None and stack is not None and stack.currentWidget() is search_page:
+            if search_page.current_tab() == "local":
+                candidates = list(getattr(search_page, "_local_results", []))
+                source_type = "local_search"
+            else:
+                candidates = list(self.unified_search_results)
+                source_type = "online_search"
+            source_id = self.search_input.text().strip() or "search"
+        self.create_playback_context(
+            media_item,
+            candidates,
+            source_type=source_type,
+            source_id=source_id,
+        )
+        if not self.play_queue_item(media_item):
+            if media_item.media_type == "online":
                 self.set_online_status_message("该在线来源当前不可播放。")
-                return
-            self.request_online_playback(media_item.to_legacy_online())
-            return
-        song_data = self.find_song_data_by_path(media_item.local_file_path)
-        if not isinstance(song_data, dict) or song_data.get("recordKind") == "remote":
-            song_data = media_item.to_legacy_local()
-        song_path = self.normalize_song_path(song_data.get("path", ""))
-        if not song_path or not Path(song_path).is_file():
-            QMessageBox.information(self, "无法播放", "本地音乐文件已经不存在。")
-            return
-        self.create_playback_context(song_path)
-        self.load_song_for_playback(song_data)
-        self.play_current_song()
+            else:
+                QMessageBox.information(self, "无法播放", "本地音乐文件已经不存在。")
 
     def queue_media_item_next(self, value: dict) -> None:
         media_item = MediaItem.from_mapping(value)
-        if media_item.media_type == "online" and not media_item.is_local_available:
-            queued = media_item.to_dict()
-            queued["play_url"] = ""
-            self.online_play_queue.insert(0, queued)
-            self.update_play_queue_nav_badge()
-            if hasattr(self, "play_queue_page_list"):
-                self.refresh_play_queue_page()
+        if self.queue_media_item(media_item, insert_next=True, notify_user=False):
             self.set_online_status_message(f"已将“{media_item.title}”设为下一首播放。")
-            return
-        self.queue_song_path(media_item.local_file_path, insert_next=True)
-
-    def play_next_queued_online_song(self) -> bool:
-        while self.online_play_queue:
-            value = self.online_play_queue.pop(0)
-            try:
-                media_item = MediaItem.from_mapping(value)
-            except (TypeError, ValueError):
-                continue
-            self.update_play_queue_nav_badge()
-            self.remember_queue_return_state()
-            self.request_online_playback(media_item.to_legacy_online())
-            return True
-        return False
 
     def get_local_media_item_collection_state(self, value: dict) -> dict:
         return self.media_interactions.get_local_state(value)
@@ -9853,7 +9945,7 @@ class MainWindow(QMainWindow):
         play_mode_button = getattr(self, "play_mode_button", None)
 
         if play_mode_button is None:
-            play_mode_button = find_button_by_text(["列表循环", "单曲循环", "随机播放"])
+            play_mode_button = find_button_by_text(["顺序播放", "列表循环", "单曲循环", "随机播放"])
 
         like_button = getattr(self, "like_button", None)
 
@@ -10112,9 +10204,6 @@ class MainWindow(QMainWindow):
 
         queue = getattr(self, "play_queue", [])
         count = len(queue) if isinstance(queue, list) else 0
-        online_queue = getattr(self, "online_play_queue", [])
-        if isinstance(online_queue, list):
-            count += len(online_queue)
 
         if count > 0:
             button.setText(f"播放列表 ({count})")
@@ -10159,7 +10248,7 @@ class MainWindow(QMainWindow):
 
         return removed_count
 
-    def load_play_queue(self) -> list[str]:
+    def load_play_queue(self) -> list[PlaybackQueueItem]:
         if not self.play_queue_file.exists():
             return []
 
@@ -10170,13 +10259,14 @@ class MainWindow(QMainWindow):
             if not isinstance(data, list):
                 return []
 
-            queue = []
-
-            for song_path in data:
-                normalized_path = self.normalize_song_path(str(song_path))
-
-                if normalized_path and Path(normalized_path).exists():
-                    queue.append(normalized_path)
+            queue: list[PlaybackQueueItem] = []
+            for value in data:
+                queue_item = self.playback_queue_item_from_value(value)
+                if queue_item is None:
+                    continue
+                if queue_item.kind == "local" and not Path(queue_item.local_path).is_file():
+                    continue
+                queue.append(queue_item)
 
             return queue
 
@@ -10189,7 +10279,12 @@ class MainWindow(QMainWindow):
             self.play_queue_file.parent.mkdir(parents=True, exist_ok=True)
 
             with self.play_queue_file.open("w", encoding="utf-8") as file:
-                json.dump(self.play_queue, file, ensure_ascii=False, indent=2)
+                json.dump(
+                    [item.to_storage_value() for item in self.play_queue],
+                    file,
+                    ensure_ascii=False,
+                    indent=2,
+                )
 
             print("播放队列已保存：", self.play_queue_file)
 
@@ -10201,15 +10296,47 @@ class MainWindow(QMainWindow):
         except Exception:
             pass
 
-    def get_song_title_for_queue(self, song_path: str) -> str:
-        song_data = self.find_song_data_by_path(song_path) if hasattr(self, "find_song_data_by_path") else None
+    def get_song_title_for_queue(self, value) -> str:
+        queue_item = self.playback_queue_item_from_value(value)
+        if queue_item is None:
+            return "未知歌曲"
+        media_item = queue_item.media_item
+        if queue_item.kind == "local" and hasattr(self, "song_list"):
+            song_data = self.find_song_data_by_path(queue_item.local_path)
+            if isinstance(song_data, dict):
+                media_item = MediaItem.from_local(song_data)
+        return f"{media_item.title} - {media_item.artist}"
 
-        if song_data:
-            title = song_data.get("title", "未知歌曲")
-            artist = song_data.get("artist", "未知艺术家")
-            return f"{title} - {artist}"
-
-        return Path(song_path).stem
+    def queue_media_item(
+        self,
+        value,
+        *,
+        insert_next: bool = False,
+        notify_user: bool = True,
+    ) -> bool:
+        queue_item = self.playback_queue_item_from_value(value)
+        if queue_item is None:
+            if notify_user:
+                QMessageBox.information(self, "提示", "这首歌没有可用的播放信息。")
+            return False
+        if queue_item.kind == "local" and not Path(queue_item.local_path).is_file():
+            if notify_user:
+                QMessageBox.information(self, "提示", "这个音乐文件已经不存在。")
+            return False
+        if insert_next:
+            self.play_queue.insert(0, queue_item)
+            action_text = "已设为下一首播放"
+        else:
+            self.play_queue.append(queue_item)
+            action_text = "已加入播放队列"
+        self.save_play_queue()
+        if hasattr(self, "play_queue_page_list"):
+            self.refresh_play_queue_page()
+        song_text = self.get_song_title_for_queue(queue_item)
+        print(f"{action_text}：{song_text}")
+        if notify_user:
+            QMessageBox.information(self, "播放队列", f"{action_text}\n\n{song_text}")
+        return True
 
     def queue_song_path(self, song_path: str | None, insert_next: bool = False) -> None:
         normalized_path = self.normalize_song_path(song_path)
@@ -10222,21 +10349,7 @@ class MainWindow(QMainWindow):
             QMessageBox.information(self, "提示", "这个音乐文件已经不存在。")
             return
 
-        if not hasattr(self, "play_queue"):
-            self.play_queue = []
-
-        if insert_next:
-            self.play_queue.insert(0, normalized_path)
-            action_text = "已设为下一首播放"
-        else:
-            self.play_queue.append(normalized_path)
-            action_text = "已加入播放队列"
-
-        self.save_play_queue()
-
-        song_text = self.get_song_title_for_queue(normalized_path)
-        print(f"{action_text}：{song_text}")
-        QMessageBox.information(self, "播放队列", f"{action_text}\\n\\n{song_text}")
+        self.queue_media_item(normalized_path, insert_next=insert_next)
 
     def queue_selected_song_next(self, selected_item=None) -> None:
         item = selected_item or self.song_list.currentItem()
@@ -10251,7 +10364,9 @@ class MainWindow(QMainWindow):
             QMessageBox.information(self, "提示", "请选择一首真实歌曲。")
             return
 
-        self.queue_song_path(song_data.get("path", ""), insert_next=True)
+        queue_item = self.playback_queue_item_from_song_data(song_data)
+        if queue_item is not None:
+            self.queue_media_item(queue_item, insert_next=True)
 
     def queue_selected_song_last(self, selected_item=None) -> None:
         item = selected_item or self.song_list.currentItem()
@@ -10266,7 +10381,9 @@ class MainWindow(QMainWindow):
             QMessageBox.information(self, "提示", "请选择一首真实歌曲。")
             return
 
-        self.queue_song_path(song_data.get("path", ""), insert_next=False)
+        queue_item = self.playback_queue_item_from_song_data(song_data)
+        if queue_item is not None:
+            self.queue_media_item(queue_item, insert_next=False)
 
     def get_main_stack_widget(self):
         possible_names = [
@@ -10445,36 +10562,30 @@ class MainWindow(QMainWindow):
             return
         if not hasattr(self, "play_queue"):
             self.play_queue = []
-        valid_queue = []
-        for song_path in self.play_queue:
-            normalized_path = self.normalize_song_path(song_path)
-            if normalized_path and Path(normalized_path).exists():
-                valid_queue.append(normalized_path)
+        valid_queue: list[PlaybackQueueItem] = []
+        for value in self.play_queue:
+            queue_item = self.playback_queue_item_from_value(value)
+            if queue_item is None:
+                continue
+            if queue_item.kind == "local" and not Path(queue_item.local_path).is_file():
+                continue
+            valid_queue.append(queue_item)
         if valid_queue != self.play_queue:
             self.play_queue = valid_queue
             self.save_play_queue()
         self.play_queue_page_list.clear()
-        index = 1
-        for track in self.online_play_queue:
-            media_item = MediaItem.from_mapping(track)
+        for index, queue_item in enumerate(self.play_queue, start=1):
+            media_item = queue_item.media_item
+            kind_text = (
+                f"{media_item.source_name} · 在线"
+                if queue_item.kind == "remote"
+                else "本地"
+            )
             item = QListWidgetItem(
-                f"{index}. {media_item.title} - {media_item.artist}  [{media_item.source_name} · 在线]"
+                f"{index}. {media_item.title} - {media_item.artist}  [{kind_text}]"
             )
-            item.setData(
-                Qt.ItemDataRole.UserRole,
-                {"kind": "online", "track": media_item.to_dict()},
-            )
+            item.setData(Qt.ItemDataRole.UserRole, queue_item.to_mapping())
             self.play_queue_page_list.addItem(item)
-            index += 1
-        for song_path in self.play_queue:
-            song_title = self.get_song_title_for_queue(song_path)
-            item = QListWidgetItem(f"{index}. {song_title}  [本地]")
-            item.setData(
-                Qt.ItemDataRole.UserRole,
-                {"kind": "local", "path": song_path},
-            )
-            self.play_queue_page_list.addItem(item)
-            index += 1
         if self.play_queue_page_list.count() > 0 and self.play_queue_page_list.currentRow() < 0:
             self.play_queue_page_list.setCurrentRow(0)
         count = self.play_queue_page_list.count()
@@ -10484,7 +10595,7 @@ class MainWindow(QMainWindow):
             )
         else:
             self.play_queue_page_hint.setText(
-                f"队列里有 {count} 首歌。在线项目只在本次运行期间保留。"
+                f"队列里有 {count} 首歌。本地和在线歌曲会按当前顺序播放。"
             )
         self.update_play_queue_nav_badge()
 
@@ -10492,7 +10603,7 @@ class MainWindow(QMainWindow):
         if not hasattr(self, "play_queue_page_list"):
             return -1
         row = self.play_queue_page_list.currentRow()
-        total = len(self.online_play_queue) + len(self.play_queue)
+        total = len(self.play_queue)
         if row < 0 or row >= total:
             QMessageBox.information(self, "播放列表", "请先选择播放列表里的一首歌。")
             return -1
@@ -10502,17 +10613,10 @@ class MainWindow(QMainWindow):
         row = self.get_selected_queue_page_index()
         if row < 0:
             return
-        online_count = len(self.online_play_queue)
-        if row < online_count:
-            value = self.online_play_queue.pop(row)
-            self.update_play_queue_nav_badge()
-            self.play_media_item(value)
-            self.refresh_play_queue_page()
-            return
-        local_index = row - online_count
-        song_path = self.play_queue.pop(local_index)
+        queue_item = self.play_queue.pop(row)
         self.save_play_queue()
-        if not self.play_song_from_queue_path(song_path):
+        self.remember_queue_return_state()
+        if not self.play_queue_item(queue_item, update_context=False):
             QMessageBox.information(self, "播放列表", "这首歌无法播放，可能文件已经不存在。")
         self.refresh_play_queue_page()
 
@@ -10520,13 +10624,8 @@ class MainWindow(QMainWindow):
         row = self.get_selected_queue_page_index()
         if row < 0:
             return
-        online_count = len(self.online_play_queue)
-        if row < online_count:
-            self.online_play_queue.pop(row)
-            self.update_play_queue_nav_badge()
-        else:
-            self.play_queue.pop(row - online_count)
-            self.save_play_queue()
+        self.play_queue.pop(row)
+        self.save_play_queue()
         self.refresh_play_queue_page()
         if self.play_queue_page_list.count() > 0:
             self.play_queue_page_list.setCurrentRow(
@@ -10537,21 +10636,11 @@ class MainWindow(QMainWindow):
         row = self.get_selected_queue_page_index()
         if row <= 0:
             return
-        online_count = len(self.online_play_queue)
-        if row < online_count:
-            self.online_play_queue[row - 1], self.online_play_queue[row] = (
-                self.online_play_queue[row],
-                self.online_play_queue[row - 1],
-            )
-        elif row > online_count:
-            local_index = row - online_count
-            self.play_queue[local_index - 1], self.play_queue[local_index] = (
-                self.play_queue[local_index],
-                self.play_queue[local_index - 1],
-            )
-            self.save_play_queue()
-        else:
-            return
+        self.play_queue[row - 1], self.play_queue[row] = (
+            self.play_queue[row],
+            self.play_queue[row - 1],
+        )
+        self.save_play_queue()
         self.refresh_play_queue_page()
         self.play_queue_page_list.setCurrentRow(row - 1)
 
@@ -10559,25 +10648,17 @@ class MainWindow(QMainWindow):
         row = self.get_selected_queue_page_index()
         if row < 0:
             return
-        online_count = len(self.online_play_queue)
-        if row < online_count - 1:
-            self.online_play_queue[row + 1], self.online_play_queue[row] = (
-                self.online_play_queue[row],
-                self.online_play_queue[row + 1],
-            )
-        elif row >= online_count and row < online_count + len(self.play_queue) - 1:
-            local_index = row - online_count
-            self.play_queue[local_index + 1], self.play_queue[local_index] = (
-                self.play_queue[local_index],
-                self.play_queue[local_index + 1],
-            )
-            self.save_play_queue()
-        else:
+        if row >= len(self.play_queue) - 1:
             return
+        self.play_queue[row + 1], self.play_queue[row] = (
+            self.play_queue[row],
+            self.play_queue[row + 1],
+        )
+        self.save_play_queue()
         self.refresh_play_queue_page()
         self.play_queue_page_list.setCurrentRow(row + 1)
     def clear_queue_from_page(self) -> None:
-        if not self.play_queue and not self.online_play_queue:
+        if not self.play_queue:
             QMessageBox.information(self, "播放列表", "播放列表已经是空的。")
             return
 
@@ -10593,7 +10674,6 @@ class MainWindow(QMainWindow):
             return
 
         self.play_queue.clear()
-        self.online_play_queue.clear()
         self.save_play_queue()
         self.refresh_play_queue_page()
 
@@ -10604,71 +10684,34 @@ class MainWindow(QMainWindow):
         if not hasattr(self, "play_queue"):
             self.play_queue = []
 
-        if not self.play_queue and not self.online_play_queue:
+        if not self.play_queue:
             QMessageBox.information(self, "播放队列", "播放队列已经是空的。")
             self.save_play_queue()
             return
 
         self.play_queue.clear()
-        self.online_play_queue.clear()
         self.save_play_queue()
         QMessageBox.information(self, "播放队列", "播放队列已清空。")
         print("播放队列已清空")
 
     def play_song_from_queue_path(self, song_path: str) -> bool:
-        normalized_path = self.normalize_song_path(song_path)
-
-        if not normalized_path or not Path(normalized_path).exists():
+        queue_item = self.playback_queue_item_from_value(song_path)
+        if queue_item is None:
             return False
-
-        item = self.find_song_item_by_path(normalized_path) if hasattr(self, "find_song_item_by_path") else None
-        song_data = self.find_song_data_by_path(normalized_path) if hasattr(self, "find_song_data_by_path") else None
-
-        if song_data is None and item is not None:
-            item_data = item.data(Qt.ItemDataRole.UserRole)
-
-            if isinstance(item_data, dict):
-                song_data = item_data
-
-        if not song_data:
-            return False
-
         self.remember_queue_return_state()
-
-        if item is not None:
-            self.song_list.setCurrentItem(item)
-
-        self.browsing_song_path = normalized_path
-        self.browsing_song_data = song_data
-
-        self.load_song_for_playback(song_data)
-        self.media_player.play()
-
-        if hasattr(self, "play_button"):
-            self.play_button.setText("暂停")
-
-        try:
-            self.save_play_queue()
-
-            if hasattr(self, "save_playback_session"):
-                self.request_save_playback_session()
-        except Exception as error:
-            print("播放队列歌曲后保存状态失败：", error)
-
-        title = song_data.get("title", "未知歌曲")
-        artist = song_data.get("artist", "未知艺术家")
-        print(f"正在播放队列歌曲：{title} - {artist}")
-
-        return True
+        return self.play_queue_item(queue_item, update_context=False)
 
     def play_next_queued_song(self) -> bool:
         if not hasattr(self, "play_queue"):
             self.play_queue = []
 
-        while self.play_queue:
-            song_path = self.play_queue.pop(0)
+        if not self.play_queue:
+            return False
 
-            if self.play_song_from_queue_path(song_path):
+        while self.play_queue:
+            queue_item = self.play_queue.pop(0)
+            self.remember_queue_return_state()
+            if self.play_queue_item(queue_item, update_context=False):
                 self.save_play_queue()
                 return True
 
@@ -10679,21 +10722,19 @@ class MainWindow(QMainWindow):
         if isinstance(self.queue_return_state, dict):
             return
 
-        ordered_paths = self.get_playback_context_paths()
-
-        if not ordered_paths:
+        ordered_items = self.get_playback_context_items()
+        if not ordered_items:
             return
-
-        anchor_index = self.get_playback_context_anchor_index(ordered_paths)
-
-        if anchor_index < 0:
+        anchor_identity = self.playback_queue.current_identity
+        anchor_index = self.playback_queue.current_index
+        if not anchor_identity or anchor_index < 0:
             return
 
         self.queue_return_state = {
-            "anchor_path": ordered_paths[anchor_index],
+            "anchor_identity": anchor_identity,
             "anchor_index": anchor_index,
         }
-        print("已记录队列返回位置：", ordered_paths[anchor_index])
+        print("已记录队列返回位置：", anchor_identity)
 
     def resume_playback_context_after_queue(self) -> bool:
         state = self.queue_return_state
@@ -10701,31 +10742,29 @@ class MainWindow(QMainWindow):
         if not isinstance(state, dict):
             return False
 
-        ordered_paths = self.get_playback_context_paths()
-        anchor_path = self.normalize_song_path(state.get("anchor_path", ""))
-
-        if anchor_path not in ordered_paths:
+        ordered_items = self.get_playback_context_items()
+        anchor_identity = str(state.get("anchor_identity") or "")
+        if self.playback_queue.index_for_identity(anchor_identity) < 0:
             try:
                 anchor_index = int(state.get("anchor_index", -1))
             except (TypeError, ValueError):
                 anchor_index = -1
 
-            if 0 <= anchor_index < len(ordered_paths):
-                anchor_path = ordered_paths[anchor_index]
+            if 0 <= anchor_index < len(ordered_items):
+                anchor_identity = ordered_items[anchor_index].stable_identity
             else:
-                anchor_path = ""
+                anchor_identity = ""
 
         self.queue_return_state = None
 
-        if not anchor_path:
+        if not anchor_identity:
             print("队列已结束，但原播放上下文返回位置不可用。")
             return False
-
-        print("队列已结束，返回原播放上下文：", anchor_path)
+        self.playback_queue.set_current_identity(anchor_identity)
+        print("队列已结束，返回原播放上下文：", anchor_identity)
         return self.play_from_playback_context(
             1,
             respect_single_loop=False,
-            anchor_path=anchor_path,
         )
 
     def load_playback_session(self) -> dict:
@@ -11087,7 +11126,7 @@ class MainWindow(QMainWindow):
             volume = max(0, min(100, volume))
 
             play_mode = settings.get("play_mode", default_settings["play_mode"])
-            if play_mode not in {"list_loop", "single_loop", "shuffle"}:
+            if play_mode not in {"sequence", "list_loop", "single_loop", "shuffle"}:
                 play_mode = "list_loop"
 
             settings["volume"] = volume
@@ -11886,7 +11925,13 @@ class MainWindow(QMainWindow):
             return
         self.reset_cover()
 
-    def load_song_for_playback(self, song_data: dict | None) -> None:
+    def load_song_for_playback(
+        self,
+        song_data: dict | None,
+        *,
+        playback_generation: int | None = None,
+        queue_identity: str = "",
+    ) -> None:
         if not isinstance(song_data, dict):
             return
 
@@ -11905,10 +11950,23 @@ class MainWindow(QMainWindow):
         if not normalized_path:
             return
 
+        local_media_item = MediaItem.from_local(song_data)
+        identity = str(queue_identity or local_media_item.stable_identity)
+        if playback_generation is None:
+            playback_generation = self.begin_playback_generation(identity)
+        elif playback_generation != self.playback_generation:
+            return
+        else:
+            self.current_queue_identity = identity
+            self.media_loading_generation = playback_generation
+
         pending_request = int(getattr(self, "pending_online_playback_request", 0) or 0)
         if pending_request:
             self.online_source_client.cancel_request(pending_request)
         self.pending_online_playback_request = 0
+        self.pending_online_playback_generation = 0
+        self.pending_online_playback_identity = ""
+        self.pending_online_keep_target_on_failure = False
         self.pending_online_track = None
         self.cancel_pending_online_metadata()
         if self.pending_online_ui_snapshot is not None:
@@ -11919,7 +11977,7 @@ class MainWindow(QMainWindow):
             self.presented_online_cover_url = ""
         self.current_track_kind = "local"
         self.current_online_track = None
-        self.current_media_item = MediaItem.from_local(song_data)
+        self.current_media_item = local_media_item
         self.current_plain_lyrics = ""
         self.current_online_lyrics_state = ""
         self.displayed_lyrics_track_key = ""
@@ -11942,11 +12000,13 @@ class MainWindow(QMainWindow):
         self.flush_current_listen_time()
 
         self.current_song_path = normalized_path
+        self.current_queue_identity = identity
         self.current_duration = 0
         self.reset_playback_stats_session()
         self.update_bottom_player(song_data)
         self.refresh_playing_song_indicators()
 
+        self.media_loading_generation = playback_generation
         self.media_player.stop()
         source_started_at = time.perf_counter()
         self.media_player.setSource(QUrl.fromLocalFile(self.current_song_path))
@@ -12002,6 +12062,9 @@ class MainWindow(QMainWindow):
         if pending_request:
             self.online_source_client.cancel_request(pending_request)
         self.pending_online_playback_request = 0
+        self.pending_online_playback_generation = 0
+        self.pending_online_playback_identity = ""
+        self.pending_online_keep_target_on_failure = False
         self.pending_online_track = None
         self.pending_online_media_item = None
         self.pending_online_ui_snapshot = None
@@ -12010,6 +12073,7 @@ class MainWindow(QMainWindow):
         self.presented_online_cover_url = ""
 
         self.current_song_path = None
+        self.current_queue_identity = ""
         self.current_media_item = None
         self.current_track_kind = "local"
         self.current_online_track = None
@@ -12020,7 +12084,11 @@ class MainWindow(QMainWindow):
         self.browsing_song_path = None
         self.browsing_song_data = None
         self.playback_context = None
+        self.playback_queue.clear()
         self.queue_return_state = None
+        self.playback_generation = int(getattr(self, "playback_generation", 0) or 0) + 1
+        self.media_loading_generation = 0
+        self.handled_end_generation = -1
 
         self.current_duration = 0
         self.current_lyrics = []
@@ -12103,9 +12171,12 @@ class MainWindow(QMainWindow):
 
         if isinstance(getattr(self, "play_queue", None), list):
             cleaned_queue = [
-                self.normalize_song_path(path)
-                for path in self.play_queue
-                if self.normalize_song_path(path) not in removed_paths
+                item
+                for item in self.play_queue
+                if not (
+                    item.kind == "local"
+                    and self.normalize_song_path(item.local_path) in removed_paths
+                )
             ]
 
             if cleaned_queue != self.play_queue:
@@ -13031,30 +13102,64 @@ class MainWindow(QMainWindow):
                 lyrics.append((timestamp, lyric_text))
         lyrics.sort(key=lambda item: item[0])
         return lyrics
-    def get_visible_playback_paths(self) -> list[str]:
-        ordered_paths = []
+    def playback_queue_item_from_song_data(
+        self,
+        song_data: dict,
+    ) -> PlaybackQueueItem | None:
+        if not isinstance(song_data, dict) or song_data.get("demo"):
+            return None
+        try:
+            media_item = self.media_item_from_song_data(song_data)
+        except (TypeError, ValueError):
+            return None
+        if media_item.media_type == "local" and not media_item.local_file_path:
+            return None
+        return PlaybackQueueItem(media_item)
 
+    def playback_queue_item_from_value(
+        self,
+        value,
+    ) -> PlaybackQueueItem | None:
+        if isinstance(value, str):
+            normalized_path = self.normalize_song_path(value)
+            song_data = (
+                self.find_song_data_by_path(normalized_path)
+                if hasattr(self, "song_list")
+                else None
+            )
+            if isinstance(song_data, dict):
+                return self.playback_queue_item_from_song_data(song_data)
+            value = normalized_path
+        try:
+            return PlaybackQueueItem.from_value(value)
+        except (TypeError, ValueError):
+            return None
+
+    def get_visible_playback_items(self) -> list[PlaybackQueueItem]:
+        ordered_items: list[PlaybackQueueItem] = []
+        seen: set[str] = set()
         for row in self.get_visible_rows():
             item = self.song_list.item(row)
-
-            if item is None:
+            song_data = item.data(Qt.ItemDataRole.UserRole) if item is not None else None
+            queue_item = (
+                self.playback_queue_item_from_song_data(song_data)
+                if isinstance(song_data, dict)
+                else None
+            )
+            if queue_item is None or queue_item.stable_identity in seen:
                 continue
+            seen.add(queue_item.stable_identity)
+            ordered_items.append(queue_item)
+        return ordered_items
 
-            song_data = item.data(Qt.ItemDataRole.UserRole)
+    def get_visible_playback_paths(self) -> list[str]:
+        """Compatibility view for local-only playback session persistence."""
 
-            if (
-                not isinstance(song_data, dict)
-                or song_data.get("demo")
-                or song_data.get("recordKind") == "remote"
-            ):
-                continue
-
-            song_path = self.normalize_song_path(song_data.get("path", ""))
-
-            if song_path and song_path not in ordered_paths:
-                ordered_paths.append(song_path)
-
-        return ordered_paths
+        return [
+            item.local_path
+            for item in self.get_visible_playback_items()
+            if item.kind == "local" and item.local_path
+        ]
 
     def get_playback_context_source(self) -> tuple[str, str]:
         view_name = str(getattr(self, "current_library_view", "all") or "all")
@@ -13085,33 +13190,87 @@ class MainWindow(QMainWindow):
 
         return source_type, "|".join(source_details)
 
-    def create_playback_context(self, current_path: str | None) -> bool:
-        normalized_path = self.normalize_song_path(current_path)
-
-        if not normalized_path:
+    def create_playback_context(
+        self,
+        current_value,
+        candidates: list | None = None,
+        source_type: str | None = None,
+        source_id: str | None = None,
+    ) -> bool:
+        current_item = self.playback_queue_item_from_value(current_value)
+        if current_item is None:
             return False
+        if candidates is None:
+            ordered_items = self.get_visible_playback_items()
+        else:
+            ordered_items = []
+            for value in candidates:
+                item = self.playback_queue_item_from_value(value)
+                if item is not None:
+                    ordered_items.append(item)
+        if not any(
+            item.stable_identity == current_item.stable_identity
+            for item in ordered_items
+        ):
+            ordered_items.append(current_item)
 
-        ordered_paths = self.get_visible_playback_paths()
-
-        if normalized_path not in ordered_paths:
-            ordered_paths.append(normalized_path)
-
-        source_type, source_id = self.get_playback_context_source()
+        if source_type is None or source_id is None:
+            detected_type, detected_id = self.get_playback_context_source()
+            source_type = source_type or detected_type
+            source_id = source_id or detected_id
+        self.playback_queue.replace(ordered_items, current_item.stable_identity)
         self.queue_return_state = None
         self.playback_context = {
             "source_type": source_type,
             "source_id": source_id,
-            "ordered_paths": ordered_paths,
-            "current_index": ordered_paths.index(normalized_path),
+            "ordered_items": [item.to_mapping() for item in self.playback_queue.items],
+            "ordered_paths": [
+                item.local_path
+                for item in self.playback_queue.items
+                if item.kind == "local" and item.local_path
+            ],
+            "current_identity": current_item.stable_identity,
+            "current_index": self.playback_queue.current_index,
         }
         print(
             "已建立播放上下文：",
             source_type,
             source_id,
-            f"歌曲数={len(ordered_paths)}",
+            f"歌曲数={len(self.playback_queue.items)}",
             f"当前位置={self.playback_context['current_index']}",
         )
         return True
+
+    def get_playback_context_items(self) -> list[PlaybackQueueItem]:
+        context = self.playback_context
+        if not isinstance(context, dict):
+            return []
+        raw_items = context.get("ordered_items")
+        items: list[PlaybackQueueItem] = []
+        if isinstance(raw_items, list):
+            for value in raw_items:
+                item = self.playback_queue_item_from_value(value)
+                if item is not None:
+                    items.append(item)
+        if not items:
+            raw_paths = context.get("ordered_paths", [])
+            if isinstance(raw_paths, list):
+                for value in raw_paths:
+                    item = self.playback_queue_item_from_value(value)
+                    if item is not None:
+                        items.append(item)
+        identities = [item.stable_identity for item in items]
+        if identities != [item.stable_identity for item in self.playback_queue.items]:
+            current_identity = str(context.get("current_identity") or "")
+            if not current_identity:
+                try:
+                    index = int(context.get("current_index", 0))
+                except (TypeError, ValueError):
+                    index = 0
+                if 0 <= index < len(items):
+                    current_identity = items[index].stable_identity
+            self.playback_queue.replace(items, current_identity)
+        return list(self.playback_queue.items)
 
     def get_playback_context_paths(self) -> list[str]:
         context = self.playback_context
@@ -13119,20 +13278,11 @@ class MainWindow(QMainWindow):
         if not isinstance(context, dict):
             return []
 
-        raw_paths = context.get("ordered_paths", [])
-
-        if not isinstance(raw_paths, list):
-            return []
-
-        ordered_paths = []
-
-        for path in raw_paths:
-            normalized_path = self.normalize_song_path(path)
-
-            if normalized_path and normalized_path not in ordered_paths:
-                ordered_paths.append(normalized_path)
-
-        return ordered_paths
+        return [
+            item.local_path
+            for item in self.get_playback_context_items()
+            if item.kind == "local" and item.local_path
+        ]
 
     def get_playback_context_anchor_index(
         self,
@@ -13166,49 +13316,41 @@ class MainWindow(QMainWindow):
         direction: int,
         anchor_path: str | None = None,
     ) -> list[int]:
-        ordered_paths = self.get_playback_context_paths()
-
-        if not ordered_paths:
-            return []
-
-        current_index = self.get_playback_context_anchor_index(ordered_paths, anchor_path)
-
-        if current_index < 0:
-            return []
-
-        if self.play_mode == "shuffle":
-            current_path = self.normalize_song_path(anchor_path or self.current_song_path)
-
-            if not current_path:
-                pending_song = getattr(self, "pending_lazy_restore_song_data", None)
-
-                if isinstance(pending_song, dict):
-                    current_path = self.normalize_song_path(pending_song.get("path", ""))
-
-            candidates = [
-                index
-                for index, song_path in enumerate(ordered_paths)
-                if song_path != current_path
-            ]
-
-            if not candidates:
-                return [current_index]
-
-            random.shuffle(candidates)
-            return candidates
-
-        step = 1 if direction >= 0 else -1
-        return [
-            (current_index + step * offset) % len(ordered_paths)
-            for offset in range(1, len(ordered_paths) + 1)
-        ]
+        self.get_playback_context_items()
+        if anchor_path:
+            anchor_item = self.playback_queue_item_from_value(anchor_path)
+            if anchor_item is not None:
+                self.playback_queue.set_current_identity(anchor_item.stable_identity)
+        target_index = self.playback_queue.next_index(self.play_mode, direction)
+        return [] if target_index is None else [target_index]
 
     def replay_current_song(self) -> bool:
-        current_path = self.normalize_song_path(self.current_song_path)
+        current_media = getattr(self, "current_media_item", None)
+        if (
+            isinstance(current_media, MediaItem)
+            and current_media.media_type == "online"
+            and getattr(self, "current_track_kind", "local") == "online"
+        ):
+            identity = self.current_track_identity() or current_media.stable_identity
+            if self.media_player.source().isValid():
+                self.media_player.setPosition(0)
+                self.progress_slider.setValue(0)
+                self.last_recorded_position = 0
+                self.media_player.play()
+                self.play_btn.setText("暂停")
+                print("重新播放当前在线歌曲：", identity)
+                return True
+            generation = self.begin_playback_generation(identity)
+            self.request_online_playback(
+                current_media.to_legacy_online(),
+                playback_generation=generation,
+                queue_identity=identity,
+            )
+            return True
 
+        current_path = self.normalize_song_path(self.current_song_path)
         if not current_path:
             return False
-
         self.media_player.setPosition(0)
         self.progress_slider.setValue(0)
         self.last_recorded_position = 0
@@ -13217,40 +13359,106 @@ class MainWindow(QMainWindow):
         print("重新播放当前歌曲：", current_path)
         return True
 
+    def sync_playback_context_current(self, identity: str) -> None:
+        if not isinstance(self.playback_context, dict):
+            return
+        if self.playback_queue.set_current_identity(identity):
+            self.playback_context["current_identity"] = identity
+            self.playback_context["current_index"] = self.playback_queue.current_index
+
+    def play_queue_item(
+        self,
+        value,
+        *,
+        update_context: bool = True,
+    ) -> bool:
+        queue_item = self.playback_queue_item_from_value(value)
+        if queue_item is None:
+            return False
+        identity = queue_item.stable_identity
+        if update_context:
+            self.sync_playback_context_current(identity)
+        generation = self.begin_playback_generation(identity)
+        media_item = queue_item.media_item
+        self.browse_media_item(media_item.to_dict())
+
+        if queue_item.kind == "remote" and not media_item.is_local_available:
+            self.flush_current_listen_time()
+            self.current_track_kind = "online"
+            self.current_media_item = media_item
+            self.current_online_track = media_item.to_legacy_online()
+            self.current_song_path = None
+            self.refresh_playing_song_indicators()
+            self.media_player.stop()
+            self.media_player.setSource(QUrl())
+            if media_item.availability != "available":
+                self.media_loading_generation = 0
+                self.present_online_media_item(media_item)
+                self.set_online_status_message("该在线来源当前不可用。")
+                return False
+            self.request_online_playback(
+                media_item.to_legacy_online(),
+                playback_generation=generation,
+                queue_identity=identity,
+                keep_target_on_failure=True,
+            )
+            return True
+
+        local_path = self.normalize_song_path(media_item.local_file_path)
+        if not local_path or not Path(local_path).is_file():
+            return False
+        song_data = self.find_song_data_by_path(local_path)
+        if not isinstance(song_data, dict) or song_data.get("recordKind") == "remote":
+            song_data = media_item.to_legacy_local()
+        self.load_song_for_playback(
+            song_data,
+            playback_generation=generation,
+            queue_identity=identity,
+        )
+        if queue_item.kind == "remote":
+            self.current_media_item = media_item
+            self.current_online_track = media_item.to_legacy_online()
+            self.current_queue_identity = identity
+            self.refresh_playing_song_indicators()
+            self.update_like_button()
+        self.play_current_song()
+        return True
+
     def play_from_playback_context(
         self,
         direction: int,
         respect_single_loop: bool = True,
         anchor_path: str | None = None,
     ) -> bool:
-        if respect_single_loop and self.play_mode == "single_loop" and self.current_song_path:
+        if respect_single_loop and self.play_mode == "single_loop":
             return self.replay_current_song()
 
-        ordered_paths = self.get_playback_context_paths()
-
-        if not ordered_paths:
+        ordered_items = self.get_playback_context_items()
+        if not ordered_items:
             print("当前没有可用的播放上下文，无法导航歌曲。")
             return False
 
-        for target_index in self.get_playback_navigation_indices(direction, anchor_path):
-            target_path = ordered_paths[target_index]
-            song_data = self.find_song_data_by_path(target_path)
-
-            if not isinstance(song_data, dict) or song_data.get("demo"):
-                continue
-
-            if not Path(target_path).exists():
-                continue
-
+        if anchor_path:
+            anchor_item = self.playback_queue_item_from_value(anchor_path)
+            if anchor_item is not None:
+                self.playback_queue.set_current_identity(anchor_item.stable_identity)
+        attempts = 0
+        while attempts < len(ordered_items):
+            target_index = self.playback_queue.next_index(self.play_mode, direction)
+            if target_index is None:
+                print("播放上下文已经到达边界。")
+                return False
+            target_item = self.playback_queue.items[target_index]
             if isinstance(self.playback_context, dict):
                 self.playback_context["current_index"] = target_index
-
-            if target_path == self.normalize_song_path(self.current_song_path):
+                self.playback_context["current_identity"] = target_item.stable_identity
+            if target_item.stable_identity == self.current_track_identity():
                 return self.replay_current_song()
-
-            self.load_song_for_playback(song_data)
-            self.play_current_song()
-            return True
+            if self.play_queue_item(target_item, update_context=True):
+                return True
+            if target_item.kind == "remote":
+                return False
+            attempts += 1
 
         print("播放上下文中没有可播放的歌曲。")
         return False
@@ -13263,18 +13471,11 @@ class MainWindow(QMainWindow):
         if not isinstance(song_data, dict):
             return
 
-        if song_data.get("recordKind") == "remote":
-            self.play_remote_song_data(song_data)
+        queue_item = self.playback_queue_item_from_song_data(song_data)
+        if queue_item is None:
             return
-
-        song_path = self.normalize_song_path(song_data.get("path", ""))
-
-        if not song_path:
-            return
-
-        self.create_playback_context(song_path)
-        self.load_song_for_playback(song_data)
-        self.play_current_song()
+        self.create_playback_context(queue_item)
+        self.play_queue_item(queue_item)
 
     def get_remote_record_from_song_data(self, song_data: dict) -> tuple[str, dict] | None:
         stable_id = str(song_data.get("remoteStableId") or "").strip()
@@ -13284,38 +13485,18 @@ class MainWindow(QMainWindow):
         return stable_id, record
 
     def play_remote_song_data(self, song_data: dict) -> None:
-        remote = self.get_remote_record_from_song_data(song_data)
-        if remote is None:
+        queue_item = self.playback_queue_item_from_song_data(song_data)
+        if queue_item is None:
             QMessageBox.warning(self, "在线歌曲不可用", "没有找到这首在线歌曲的持久化记录。")
             return
-        stable_id, record = remote
-        local_path = str(record.get("local_path") or "").strip()
-        if local_path and Path(local_path).is_file():
-            local_song = self.find_song_data_by_path(local_path)
-            if not isinstance(local_song, dict) or local_song.get("recordKind") == "remote":
-                local_song = {
-                    "title": str(record.get("title") or "未知歌曲"),
-                    "artist": str(record.get("artist") or "未知艺术家"),
-                    "album": str(record.get("album") or "未知专辑"),
-                    "path": str(Path(local_path).resolve()),
-                    "added_at": int(record.get("downloaded_at") or record.get("added_at") or 0),
-                    "demo": False,
-                }
-            self.load_song_for_playback(local_song)
-            self.play_current_song()
-            return
-        if not self.is_remote_source_available(record):
+        if self.playback_queue.index_for_identity(queue_item.stable_identity) < 0:
+            self.create_playback_context(queue_item)
+        if not self.play_queue_item(queue_item):
             QMessageBox.information(
                 self,
                 "在线来源不可用",
                 "保存的歌曲记录仍会保留，但对应的自定义 URL 来源当前未注册或已不可用。",
             )
-            return
-        track = RemoteTrackStore.to_online_track(stable_id, record)
-        source = self.get_registered_source_safely(str(record.get("source_id") or "")) or {}
-        track["sourceName"] = str(source.get("name") or record.get("source_id") or "在线来源")
-        track["capabilities"] = dict(source.get("capabilities") or {})
-        self.request_online_playback(track)
 
     def play_current_song(self) -> None:
         if not self.current_song_path:
@@ -13359,12 +13540,14 @@ class MainWindow(QMainWindow):
             self.play_current_song()
 
     def toggle_play_mode(self) -> None:
-        if self.play_mode == "list_loop":
+        if self.play_mode == "sequence":
+            self.play_mode = "list_loop"
+        elif self.play_mode == "list_loop":
             self.play_mode = "single_loop"
         elif self.play_mode == "single_loop":
             self.play_mode = "shuffle"
         else:
-            self.play_mode = "list_loop"
+            self.play_mode = "sequence"
 
         self.update_play_mode_button()
         self.save_settings()
@@ -13374,6 +13557,7 @@ class MainWindow(QMainWindow):
             return
 
         mode_text = {
+            "sequence": "顺序播放",
             "list_loop": "列表循环",
             "single_loop": "单曲循环",
             "shuffle": "随机播放",
@@ -13405,13 +13589,22 @@ class MainWindow(QMainWindow):
             if not isinstance(song_data, dict) or song_data.get("demo"):
                 continue
 
-            if self.normalize_song_path(song_data.get("path", "")):
+            queue_item = self.playback_queue_item_from_song_data(song_data)
+            if queue_item is not None:
+                if (
+                    queue_item.kind == "remote"
+                    and queue_item.media_item.availability != "available"
+                ):
+                    continue
                 candidates.append(row)
 
         if not candidates:
             QMessageBox.information(self, "随机播放", "音乐库里还没有可以播放的真实歌曲。")
             return
 
+        self.play_mode = "shuffle"
+        self.update_play_mode_button()
+        self.save_settings()
         self.play_song_by_row(random.choice(candidates))
 
     def open_current_song_folder(self) -> None:
@@ -13450,9 +13643,22 @@ class MainWindow(QMainWindow):
     def play_previous_song(self) -> None:
         self.play_from_playback_context(-1)
 
-    def play_next_with_queue_priority(self) -> bool:
-        if self.play_next_queued_online_song():
-            return True
+    def play_next_with_queue_priority(self, reason: str = "manual") -> bool:
+        now = time.monotonic()
+        last_reason = str(getattr(self, "last_advance_reason", "") or "")
+        last_at = float(getattr(self, "last_advance_at", 0.0) or 0.0)
+        if (
+            reason in {"manual", "end"}
+            and last_reason in {"manual", "end"}
+            and reason != last_reason
+            and now - last_at < 0.35
+        ):
+            print("已忽略同一切歌边界上的重复推进：", last_reason, "->", reason)
+            return False
+        self.last_advance_reason = reason
+        self.last_advance_at = now
+        if reason == "end" and self.play_mode == "single_loop":
+            return self.play_from_playback_context(1)
         if self.play_next_queued_song():
             return True
 
@@ -13462,12 +13668,24 @@ class MainWindow(QMainWindow):
         return self.play_from_playback_context(1)
 
     def play_next_song(self) -> None:
-        self.play_next_with_queue_priority()
+        self.play_next_with_queue_priority("manual")
 
-    def handle_song_finished(self) -> None:
+    def handle_song_finished(self, expected_generation: int | None = None) -> None:
+        generation = int(getattr(self, "playback_generation", 0) or 0)
+        if expected_generation is not None and expected_generation != generation:
+            print("已忽略旧播放会话的结束事件：", expected_generation, generation)
+            return
+        if self.handled_end_generation == generation:
+            print("已忽略重复的媒体结束事件：", generation)
+            return
+        now = time.monotonic()
+        if now - float(getattr(self, "last_end_advance_at", 0.0) or 0.0) < 0.35:
+            print("已忽略短时间内重复到达的媒体结束事件。")
+            return
+        self.last_end_advance_at = now
+        self.handled_end_generation = generation
         print("歌曲播放结束，准备根据播放模式切歌：", self.play_mode)
-
-        self.play_next_with_queue_priority()
+        self.play_next_with_queue_priority("end")
 
     def import_music_files(self) -> None:
         file_paths, _ = QFileDialog.getOpenFileNames(
@@ -13643,6 +13861,12 @@ class MainWindow(QMainWindow):
         if self.is_seeking or self.current_duration <= 0:
             return
 
+        if (
+            position >= 1000
+            and getattr(self, "current_track_kind", "local") == "online"
+        ):
+            self.online_loop_retry_count = 0
+
         progress = int(position * 100 / self.current_duration)
         self.progress_slider.setValue(progress)
 
@@ -13693,26 +13917,26 @@ class MainWindow(QMainWindow):
 
     def on_media_status_changed(self, status) -> None:
         print("媒体状态：", status)
-
-        if getattr(self, "current_track_kind", "local") == "online":
-            if status in {
-                QMediaPlayer.MediaStatus.LoadedMedia,
-                QMediaPlayer.MediaStatus.BufferedMedia,
-            }:
-                self.set_online_status_message("在线歌曲正在播放。")
-            elif status == QMediaPlayer.MediaStatus.EndOfMedia:
-                self.set_online_status_message("在线试播已结束。")
-            return
-
         if status in {
             QMediaPlayer.MediaStatus.LoadedMedia,
             QMediaPlayer.MediaStatus.BufferedMedia,
         }:
-            self.apply_pending_restore_position()
+            if self.media_loading_generation == self.playback_generation:
+                self.media_loading_generation = 0
+            if getattr(self, "current_track_kind", "local") == "online":
+                self.set_online_status_message("在线歌曲正在播放。")
+            else:
+                self.apply_pending_restore_position()
 
         if status == QMediaPlayer.MediaStatus.EndOfMedia:
+            generation = int(getattr(self, "playback_generation", 0) or 0)
+            if self.media_loading_generation == generation:
+                print("已忽略切换媒体期间到达的旧结束事件：", generation)
+                return
             self.flush_current_listen_time()
-            self.handle_song_finished()
+            if getattr(self, "current_track_kind", "local") == "online":
+                self.set_online_status_message("在线歌曲已播放结束，正在继续队列。")
+            self.handle_song_finished(generation)
 
     def on_player_error(self, error=None, error_string: str = "") -> None:
         real_error_text = error_string or self.media_player.errorString()
@@ -13721,6 +13945,33 @@ class MainWindow(QMainWindow):
         print("错误信息：", real_error_text)
 
         if real_error_text and getattr(self, "current_track_kind", "local") == "online":
+            queue_item = self.playback_queue.current_item
+            identity = self.current_track_identity()
+            current_media = getattr(self, "current_media_item", None)
+            if (
+                (queue_item is None or queue_item.stable_identity != identity)
+                and isinstance(current_media, MediaItem)
+                and current_media.media_type == "online"
+            ):
+                queue_item = PlaybackQueueItem(current_media)
+            if (
+                self.play_mode == "single_loop"
+                and queue_item is not None
+                and queue_item.kind == "remote"
+                and queue_item.stable_identity == identity
+                and self.online_loop_retry_count < 1
+            ):
+                self.online_loop_retry_identity = identity
+                self.online_loop_retry_count += 1
+                generation = self.begin_playback_generation(identity)
+                self.media_player.stop()
+                self.media_player.setSource(QUrl())
+                self.request_online_playback(
+                    queue_item.media_item.to_legacy_online(),
+                    playback_generation=generation,
+                    queue_identity=identity,
+                )
+                return
             self.set_online_status_message(f"在线播放失败：{real_error_text}")
         elif real_error_text:
             self.lyrics_view.set_placeholder("播放失败", real_error_text)
