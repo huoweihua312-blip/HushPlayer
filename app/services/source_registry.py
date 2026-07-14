@@ -44,15 +44,35 @@ class SourceRegistryError(RuntimeError):
 
 
 class SourceRegistryManager:
-    def __init__(self, project_root: Path) -> None:
+    def __init__(
+        self,
+        project_root: Path,
+        *,
+        runtime_dir: Path | None = None,
+        user_sources_dir: Path | None = None,
+        bundled_runtime_dir: Path | None = None,
+    ) -> None:
         self.project_root = Path(project_root).resolve()
-        self.runtime_dir = self.project_root / "source_runtime"
+        self.runtime_dir = (
+            Path(runtime_dir).resolve()
+            if runtime_dir is not None
+            else self.project_root / "source_runtime"
+        )
+        self.bundled_runtime_dir = (
+            Path(bundled_runtime_dir).resolve()
+            if bundled_runtime_dir is not None
+            else self.project_root / "source_runtime"
+        )
         self.registry_path = self.runtime_dir / "source_registry.json"
         self.sources_dir = self.runtime_dir / "sources"
         self.staging_dir = self.sources_dir / "staging"
         self.active_dir = self.sources_dir / "active"
         self.backups_dir = self.sources_dir / "backups"
-        self.user_sources_dir = self.project_root / "user_sources"
+        self.user_sources_dir = (
+            Path(user_sources_dir).resolve()
+            if user_sources_dir is not None
+            else self.project_root / "user_sources"
+        )
 
     def ensure_runtime_dirs(self) -> None:
         self.staging_dir.mkdir(parents=True, exist_ok=True)
@@ -755,7 +775,7 @@ class SourceRegistryManager:
 
     def _node_module_exists(self, module_name: str) -> bool:
         package_name = "/".join(module_name.split("/")[:2]) if module_name.startswith("@") else module_name.split("/")[0]
-        return (self.runtime_dir / "node_modules" / package_name).exists()
+        return (self.bundled_runtime_dir / "node_modules" / package_name).exists()
 
     @staticmethod
     def _extract_js_string(code: str, field: str) -> str:

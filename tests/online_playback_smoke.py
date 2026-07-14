@@ -480,7 +480,6 @@ def test_main_window_online_entry() -> None:
                 window.song_list.addItem(item)
                 local_items.append(item)
             window.play_queue.clear()
-            window.online_play_queue.clear()
             window.queue_return_state = None
             window.play_mode = "list_loop"
             original_load_lyrics = window.load_lyrics_for_song
@@ -549,8 +548,15 @@ def test_main_window_online_entry() -> None:
         window.online_artwork_service.request = lambda _key, _url: 1
         window.current_song_path = "C:/music/local.mp3"
         window.playback_context = preserved_context
+        pending_media = MediaItem.from_online(track)
+        pending_generation = window.begin_playback_generation(
+            pending_media.stable_identity
+        )
         window.pending_online_track = dict(track)
+        window.pending_online_media_item = pending_media
         window.pending_online_playback_request = 71
+        window.pending_online_playback_generation = pending_generation
+        window.pending_online_playback_identity = pending_media.stable_identity
         window.on_online_playback_resolved(
             71,
             "open_fixture",
@@ -560,8 +566,14 @@ def test_main_window_online_entry() -> None:
         assert window.current_track_kind == "local"
         assert "附加请求头" in window.online_search_page.status_label.text()
 
+        pending_generation = window.begin_playback_generation(
+            pending_media.stable_identity
+        )
         window.pending_online_track = dict(track)
+        window.pending_online_media_item = pending_media
         window.pending_online_playback_request = 72
+        window.pending_online_playback_generation = pending_generation
+        window.pending_online_playback_identity = pending_media.stable_identity
         window.on_online_playback_resolved(
             72,
             "open_fixture",
@@ -609,14 +621,17 @@ def test_main_window_online_entry() -> None:
         window.on_position_changed(2500)
         assert window.lyrics_view.current_index == 1
 
-        window.online_play_queue.clear()
+        window.play_queue.clear()
         queued_requests = []
         window.queue_media_item_next(track)
-        assert len(window.online_play_queue) == 1
-        window.request_online_playback = lambda value: queued_requests.append(value)
-        assert window.play_next_queued_online_song() is True
+        assert len(window.play_queue) == 1
+        assert window.play_queue[0].kind == "remote"
+        window.request_online_playback = (
+            lambda value, **_kwargs: queued_requests.append(value)
+        )
+        assert window.play_next_queued_song() is True
         assert queued_requests[0]["sourceId"] == "open_fixture"
-        assert window.online_play_queue == []
+        assert window.play_queue == []
         assert window.parse_lrc_text("[00:01.25]第一行\n[00:02.500]第二行") == [
             (1250, "第一行"),
             (2500, "第二行"),
@@ -664,7 +679,9 @@ def test_main_window_online_entry() -> None:
             downloaded_record["local_path"] = str(downloaded_path)
             window.remote_tracks[stable_id] = downloaded_record
             played_local: list[dict] = []
-            window.load_song_for_playback = lambda song: played_local.append(dict(song))
+            window.load_song_for_playback = (
+                lambda song, **_kwargs: played_local.append(dict(song))
+            )
             window.play_current_song = lambda: None
             window.play_unified_search_track(
                 {**remote_track, "remoteStableId": stable_id, "availability": "available"}

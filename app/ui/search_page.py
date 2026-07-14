@@ -9,14 +9,228 @@ from PySide6.QtWidgets import (
     QListWidgetItem,
     QMenu,
     QPushButton,
+    QScrollArea,
     QStackedWidget,
+    QToolButton,
     QVBoxLayout,
     QWidget,
+    QWidgetAction,
 )
 
 from app.models.media_item import MediaItem
 from app.ui.track_list_view import TrackListView
 from app.ui.unified_search_panel import UnifiedSearchResultsPanel
+
+
+class SearchSourceSelector(QToolButton):
+    selectionChanged = Signal(list)
+
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.setObjectName("searchSourceSelector")
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
+        self.setMinimumWidth(170)
+        self._sources: list[dict] = []
+        self._checkboxes: dict[str, QCheckBox] = {}
+        self._selected_ids: set[str] = set()
+        self._updating = False
+        self._loading = True
+        self._build_menu()
+        self.set_loading()
+
+    def _build_menu(self) -> None:
+        menu = QMenu(self)
+        menu.setObjectName("searchSourceMenu")
+        panel = QFrame(menu)
+        panel.setObjectName("searchSourceMenuPanel")
+        panel.setMinimumWidth(300)
+        panel_layout = QVBoxLayout(panel)
+        panel_layout.setContentsMargins(12, 12, 12, 12)
+        panel_layout.setSpacing(8)
+
+        action_row = QHBoxLayout()
+        action_row.setSpacing(6)
+        self.select_all_button = QPushButton("全选")
+        self.clear_button = QPushButton("取消全选")
+        self.select_all_button.setObjectName("secondaryButton")
+        self.clear_button.setObjectName("secondaryButton")
+        self.select_all_button.clicked.connect(self.select_all)
+        self.clear_button.clicked.connect(self.clear_selection)
+        action_row.addWidget(self.select_all_button)
+        action_row.addWidget(self.clear_button)
+        action_row.addStretch()
+        panel_layout.addLayout(action_row)
+
+        self.source_scroll = QScrollArea(panel)
+        self.source_scroll.setWidgetResizable(True)
+        self.source_scroll.setFrameShape(QFrame.Shape.NoFrame)
+        self.source_scroll.setHorizontalScrollBarPolicy(
+            Qt.ScrollBarPolicy.ScrollBarAlwaysOff
+        )
+        self.source_scroll.setMaximumHeight(320)
+        self.source_container = QWidget(self.source_scroll)
+        self.source_layout = QVBoxLayout(self.source_container)
+        self.source_layout.setContentsMargins(0, 0, 0, 0)
+        self.source_layout.setSpacing(5)
+        self.source_scroll.setWidget(self.source_container)
+        panel_layout.addWidget(self.source_scroll)
+
+        widget_action = QWidgetAction(menu)
+        widget_action.setDefaultWidget(panel)
+        menu.addAction(widget_action)
+        self.setMenu(menu)
+
+    def set_loading(self) -> None:
+        self._loading = True
+        self.setText("正在读取来源…")
+        self.setEnabled(False)
+
+    def set_sources(self, sources: list[dict], selected_ids: list[str]) -> None:
+        normalized_sources = [dict(source) for source in sources if isinstance(source, dict)]
+        selected_set = {str(source_id or "").strip() for source_id in selected_ids}
+        selected_set.discard("")
+        signature = [
+            (
+                str(source.get("id") or ""),
+                str(source.get("name") or ""),
+                bool(source.get("selectable")),
+                str(source.get("reason") or ""),
+            )
+            for source in normalized_sources
+        ]
+        current_signature = [
+            (
+                str(source.get("id") or ""),
+                str(source.get("name") or ""),
+                bool(source.get("selectable")),
+                str(source.get("reason") or ""),
+            )
+            for source in self._sources
+        ]
+        self._sources = normalized_sources
+        self._selected_ids = selected_set
+        self._loading = False
+        if signature != current_signature:
+            self._rebuild_source_checkboxes()
+        else:
+            self._sync_checkbox_states()
+        self._update_button_text()
+        self.setEnabled(self.has_sources())
+
+    def _clear_source_layout(self) -> None:
+        while self.source_layout.count():
+            item = self.source_layout.takeAt(0)
+            widget = item.widget()
+            if widget is not None:
+                widget.deleteLater()
+        self._checkboxes.clear()
+
+    def _rebuild_source_checkboxes(self) -> None:
+        self._updating = True
+        self._clear_source_layout()
+        if not self._sources:
+            empty_label = QLabel("没有已启用的自定义来源")
+            empty_label.setObjectName("pageSubtitle")
+            self.source_layout.addWidget(empty_label)
+        for source in self._sources:
+            source_id = str(source.get("id") or "").strip()
+            if not source_id:
+                continue
+            source_name = str(source.get("name") or source_id)
+            selectable = bool(source.get("selectable"))
+            reason = str(source.get("reason") or "").strip()
+            label = source_name if selectable or not reason else f"{source_name}（{reason}）"
+            checkbox = QCheckBox(label, self.source_container)
+            checkbox.setChecked(selectable and source_id in self._selected_ids)
+            checkbox.setEnabled(selectable)
+            if reason:
+                checkbox.setToolTip(reason)
+            checkbox.toggled.connect(
+                lambda checked, current_id=source_id:
+                self._on_source_toggled(current_id, checked)
+            )
+            self._checkboxes[source_id] = checkbox
+            self.source_layout.addWidget(checkbox)
+        self.source_layout.addStretch()
+        self._updating = False
+
+    def _sync_checkbox_states(self) -> None:
+        self._updating = True
+        for source in self._sources:
+            source_id = str(source.get("id") or "")
+            checkbox = self._checkboxes.get(source_id)
+            if checkbox is not None:
+                checkbox.setChecked(
+                    bool(source.get("selectable"))
+                    and source_id in self._selected_ids
+                )
+        self._updating = False
+
+    def _on_source_toggled(self, source_id: str, checked: bool) -> None:
+        if self._updating:
+            return
+        if checked:
+            self._selected_ids.add(source_id)
+        else:
+            self._selected_ids.discard(source_id)
+        self._emit_selection()
+
+    def select_all(self) -> None:
+        self._selected_ids = {
+            str(source.get("id") or "")
+            for source in self._sources
+            if source.get("selectable") and str(source.get("id") or "")
+        }
+        self._sync_checkbox_states()
+        self._emit_selection()
+
+    def clear_selection(self) -> None:
+        self._selected_ids.clear()
+        self._sync_checkbox_states()
+        self._emit_selection()
+
+    def selected_source_ids(self) -> list[str]:
+        return [
+            str(source.get("id") or "")
+            for source in self._sources
+            if source.get("selectable")
+            and str(source.get("id") or "") in self._selected_ids
+        ]
+
+    def has_selectable_sources(self) -> bool:
+        return any(source.get("selectable") for source in self._sources)
+
+    def has_sources(self) -> bool:
+        return bool(self._sources)
+
+    def _emit_selection(self) -> None:
+        self._update_button_text()
+        self.selectionChanged.emit(self.selected_source_ids())
+
+    def _update_button_text(self) -> None:
+        if self._loading:
+            self.setText("正在读取来源…")
+            return
+        selectable = [source for source in self._sources if source.get("selectable")]
+        selected_ids = self.selected_source_ids()
+        self.select_all_button.setEnabled(bool(selectable))
+        self.clear_button.setEnabled(bool(selected_ids))
+        if not selectable:
+            self.setText("无可用来源")
+        elif not selected_ids:
+            self.setText("未选择来源")
+        elif len(selected_ids) == len(selectable):
+            self.setText("全部来源")
+        elif len(selected_ids) == 1:
+            selected_id = selected_ids[0]
+            selected = next(
+                (source for source in selectable if str(source.get("id") or "") == selected_id),
+                {},
+            )
+            self.setText(str(selected.get("name") or selected_id))
+        else:
+            self.setText(f"已选择 {len(selected_ids)} 个来源")
 
 
 class SearchPage(QFrame):
@@ -36,11 +250,15 @@ class SearchPage(QFrame):
     def __init__(self, local_only: bool = False, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.setObjectName("searchPage")
+        self._source_service = getattr(parent, "unified_search_service", None)
+        self._settings_owner = parent
+        self._responsive_mode = "full"
         self._keyword = ""
         self._local_results: list[dict] = []
         self.local_state_provider = lambda _track: {}
         self.playlist_provider = lambda: []
         self._build_ui(local_only)
+        self._connect_source_service()
 
     def _build_ui(self, local_only: bool) -> None:
         layout = QVBoxLayout(self)
@@ -60,12 +278,21 @@ class SearchPage(QFrame):
         self.local_only_checkbox = QCheckBox("仅搜索本地")
         self.local_only_checkbox.setChecked(bool(local_only))
         self.local_only_checkbox.toggled.connect(self.localOnlyChanged)
+        self.local_only_checkbox.toggled.connect(self._sync_source_selector_state)
+        self.source_selector_label = QLabel("搜索来源：")
+        self.source_selector_label.setObjectName("pageSubtitle")
+        self.source_selector = SearchSourceSelector(self)
+        self.source_selector.selectionChanged.connect(
+            self._on_source_selection_changed
+        )
         self.back_button = QPushButton("返回音乐库")
         self.back_button.setObjectName("secondaryButton")
         self.back_button.setCursor(Qt.CursorShape.PointingHandCursor)
         self.back_button.clicked.connect(self.backRequested)
         header.addLayout(title_box)
         header.addStretch()
+        header.addWidget(self.source_selector_label)
+        header.addWidget(self.source_selector)
         header.addWidget(self.local_only_checkbox)
         header.addWidget(self.back_button)
 
@@ -131,11 +358,65 @@ class SearchPage(QFrame):
             "QPushButton#searchTabButton { background: #151922; color: #9ca5b5; border: 1px solid #2a303b; border-radius: 10px; padding: 8px 16px; font-weight: 700; }"
             "QPushButton#searchTabButton:hover { background: #202631; color: #eef1f7; }"
             "QPushButton#searchTabButton[active='true'] { background: rgba(76,141,255,0.20); color: #ffffff; border-color: rgba(76,141,255,0.55); }"
+            "QToolButton#searchSourceSelector { background: #151922; color: #eef1f7; border: 1px solid #303744; border-radius: 9px; padding: 7px 12px; font-weight: 650; }"
+            "QToolButton#searchSourceSelector:hover { background: #202631; border-color: #465066; }"
+            "QToolButton#searchSourceSelector:disabled { color: #737d8f; background: #12161d; border-color: #252b35; }"
+            "QFrame#searchSourceMenuPanel { background: #171c25; border: 1px solid #303744; border-radius: 10px; }"
         )
         self.show_tab("local")
 
+    def _connect_source_service(self) -> None:
+        service = self._source_service
+        if service is None:
+            self.source_selector.set_sources([], [])
+            self._sync_source_selector_state()
+            return
+        service.sourceCatalogChanged.connect(self._on_source_catalog_changed)
+        getter = getattr(self._settings_owner, "get_user_setting", None)
+        saved_ids = getter("online_search_selected_sources", None) if callable(getter) else None
+        if isinstance(saved_ids, list):
+            service.set_selected_source_ids(saved_ids, restart=False)
+        if service.source_catalog_loaded:
+            self._on_source_catalog_changed(
+                service.source_catalog,
+                service.selected_source_ids,
+            )
+        else:
+            self.source_selector.set_loading()
+        self._sync_source_selector_state()
+
+    def _on_source_catalog_changed(
+        self,
+        sources: list[dict],
+        selected_ids: list[str],
+    ) -> None:
+        self.source_selector.set_sources(sources, selected_ids)
+        self._sync_source_selector_state()
+
+    def _on_source_selection_changed(self, source_ids: list[str]) -> None:
+        service = self._source_service
+        if service is not None:
+            service.set_selected_source_ids(source_ids)
+        saver = getattr(self._settings_owner, "save_hush_settings", None)
+        if callable(saver):
+            saver({"online_search_selected_sources": list(source_ids)})
+        self._sync_source_selector_state()
+
+    def _sync_source_selector_state(self, *_args) -> None:
+        online = hasattr(self, "results_stack") and self.current_tab() == "online"
+        self.source_selector_label.setVisible(
+            online and self._responsive_mode != "narrow"
+        )
+        self.source_selector.setVisible(online)
+        self.source_selector.setEnabled(
+            online
+            and not self.local_only_checkbox.isChecked()
+            and self.source_selector.has_sources()
+        )
+
     def set_responsive_mode(self, mode: str) -> None:
         mode = mode if mode in {"full", "compact", "narrow"} else "full"
+        self._responsive_mode = mode
         self.subtitle_label.setVisible(mode != "narrow")
         self.local_status_label.setVisible(self.current_tab() == "local")
         if mode == "full":
@@ -144,6 +425,7 @@ class SearchPage(QFrame):
             self.page_layout.setContentsMargins(20, 20, 20, 18)
         else:
             self.page_layout.setContentsMargins(16, 16, 16, 14)
+        self._sync_source_selector_state()
 
     def set_collection_providers(self, local_state_provider, playlist_provider) -> None:
         self.local_state_provider = local_state_provider or (lambda _track: {})
@@ -208,6 +490,9 @@ class SearchPage(QFrame):
             button.style().unpolish(button)
             button.style().polish(button)
             button.update()
+        self._sync_source_selector_state()
+        if online and self._source_service is not None:
+            self._source_service.ensure_source_catalog()
         if not online:
             self.local_status_label.setText(
                 f"本地搜索完成，找到 {len(self._local_results)} 首歌曲"

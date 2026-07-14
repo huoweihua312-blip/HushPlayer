@@ -11,9 +11,10 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from PySide6.QtCore import QObject, Signal
-from PySide6.QtWidgets import QApplication
+from PySide6.QtWidgets import QApplication, QWidget
 
 from app.services.unified_search_service import UnifiedSearchService
+from app.ui.search_page import SearchPage, SearchSourceSelector
 from app.ui.unified_search_panel import UnifiedSearchResultsPanel
 
 
@@ -117,6 +118,14 @@ def test_parallel_failure_stale_and_cache() -> None:
         request_a,
         [{"id": "a1", "title": "Song", "artist": "Artist", "album": "Album", "duration": 180}],
     )
+    partial = emissions[-1]
+    partial_states = {
+        state["sourceId"]: state["status"]
+        for state in partial[3]["sources"]
+    }
+    assert partial[3]["final"] is False
+    assert partial_states == {"source_a": "success", "source_b": "searching"}
+    assert [item["id"] for item in partial[2]] == ["a1"]
     client.fail_search(request_b, "fixture failure")
     final = emissions[-1]
     assert final[1] == "first"
@@ -164,7 +173,63 @@ def test_parallel_failure_stale_and_cache() -> None:
     assert emissions[-1][2] == []
 
 
-def test_cross_source_deduplication() -> None:
+def test_selected_sources_and_empty_selection() -> None:
+    client = FakeOnlineSourceClient()
+    service = UnifiedSearchService(client)
+    emissions = []
+    catalogs = []
+    service.resultsChanged.connect(
+        lambda _generation, _keyword, results, summary:
+        emissions.append((list(results), dict(summary)))
+    )
+    service.sourceCatalogChanged.connect(
+        lambda sources, selected_ids: catalogs.append((list(sources), list(selected_ids)))
+    )
+    service.set_selected_source_ids(["source_b"], restart=False)
+    service.schedule_search("selected")
+    list_request = stop_debounce_and_start(service)
+    unavailable = source_fixture("source_unavailable", "Unavailable")
+    unavailable["scanError"] = "fixture"
+    client.answer_sources(
+        list_request,
+        [
+            source_fixture("source_a", "A"),
+            source_fixture("source_b", "B"),
+            unavailable,
+        ],
+    )
+    assert catalogs[-1][1] == ["source_b"]
+    assert [source["id"] for source in catalogs[-1][0]] == [
+        "source_a",
+        "source_b",
+        "source_unavailable",
+    ]
+    assert catalogs[-1][0][-1]["selectable"] is False
+    assert catalogs[-1][0][-1]["reason"] == "能力检测失败"
+    active = dict(client.search_requests)
+    assert {source_id for source_id, _keyword in active.values()} == {"source_b"}
+    request_b = next(iter(active))
+    client.answer_search(request_b, [])
+    assert emissions[-1][1]["sources"][0]["status"] == "empty"
+
+    service.schedule_search("timeout")
+    timeout_list_request = stop_debounce_and_start(service)
+    client.answer_sources(
+        timeout_list_request,
+        [source_fixture("source_a", "A"), source_fixture("source_b", "B")],
+    )
+    timeout_request = max(client.search_requests)
+    client.fail_search(timeout_request, "请求超时，请检查网络或音源状态。")
+    assert emissions[-1][1]["sources"][0]["status"] == "timeout"
+
+    list_count = len(client.list_requests)
+    service.set_selected_source_ids([])
+    assert len(client.list_requests) == list_count
+    assert emissions[-1][1]["final"] is True
+    assert emissions[-1][1]["selectedSourceIds"] == []
+
+
+def test_cross_source_results_remain_separate() -> None:
     client = FakeOnlineSourceClient()
     service = UnifiedSearchService(client)
     emissions = []
@@ -187,7 +252,116 @@ def test_cross_source_deduplication() -> None:
     }
     client.answer_search(requests[0], [{"id": "a", **duplicate}])
     client.answer_search(requests[1], [{"id": "b", **duplicate}])
-    assert len(emissions[-1][0]) == 1
+    assert len(emissions[-1][0]) == 2
+    assert [item["sourceId"] for item in emissions[-1][0]] == ["source_a", "source_b"]
+
+
+def test_source_selector_labels_and_unavailable_entries(app: QApplication) -> None:
+    selector = SearchSourceSelector()
+    emitted: list[list[str]] = []
+    selector.selectionChanged.connect(lambda source_ids: emitted.append(list(source_ids)))
+    selector.set_sources(
+        [
+            {"id": "source_a", "name": "A", "selectable": True, "reason": ""},
+            {"id": "source_b", "name": "B", "selectable": True, "reason": ""},
+            {
+                "id": "source_bad",
+                "name": "Bad",
+                "selectable": False,
+                "reason": "来源文件不可用",
+            },
+        ],
+        ["source_a", "source_b"],
+    )
+    assert selector.text() == "全部来源"
+    assert selector._checkboxes["source_bad"].isEnabled() is False
+    assert selector._checkboxes["source_bad"].toolTip() == "来源文件不可用"
+    selector._checkboxes["source_b"].setChecked(False)
+    assert selector.text() == "A"
+    assert emitted[-1] == ["source_a"]
+    selector.clear_selection()
+    assert selector.text() == "未选择来源"
+    selector.select_all()
+    assert selector.text() == "全部来源"
+
+
+def test_search_page_restores_and_saves_source_selection(app: QApplication) -> None:
+    client = FakeOnlineSourceClient()
+    service = UnifiedSearchService(client)
+    host = QWidget()
+    saved_updates: list[dict] = []
+    host.unified_search_service = service
+    host.get_user_setting = (
+        lambda key, default=None: ["source_b"]
+        if key == "online_search_selected_sources"
+        else default
+    )
+    host.save_hush_settings = lambda updates: saved_updates.append(dict(updates))
+    page = SearchPage(parent=host)
+    page.show_tab("online")
+    list_request = service._source_list_request
+    assert list_request > 0
+    client.answer_sources(
+        list_request,
+        [source_fixture("source_a", "A"), source_fixture("source_b", "B")],
+    )
+    assert page.source_selector.text() == "B"
+    assert service.selected_source_ids == ["source_b"]
+    page.source_selector._checkboxes["source_a"].setChecked(True)
+    assert service.selected_source_ids == ["source_a", "source_b"]
+    assert saved_updates[-1] == {
+        "online_search_selected_sources": ["source_a", "source_b"]
+    }
+    page.deleteLater()
+    host.deleteLater()
+
+
+def test_result_panel_groups_update_and_collapse(app: QApplication) -> None:
+    panel = UnifiedSearchResultsPanel()
+    track = {
+        "id": "track-a",
+        "sourceId": "source_a",
+        "sourceName": "Source A",
+        "title": "Fixture",
+        "artist": "Artist",
+        "album": "Album",
+        "duration": 120,
+        "availability": "available",
+        "capabilities": {"playback": True, "download": True},
+    }
+    panel.set_results(
+        "fixture",
+        [track],
+        {
+            "final": False,
+            "pendingCount": 1,
+            "sources": [
+                {
+                    "sourceId": "source_a",
+                    "sourceName": "Source A",
+                    "status": "success",
+                    "resultCount": 1,
+                    "message": "",
+                },
+                {
+                    "sourceId": "source_b",
+                    "sourceName": "Source B",
+                    "status": "searching",
+                    "resultCount": 0,
+                    "message": "",
+                },
+            ],
+        },
+    )
+    assert panel.result_list.count() == 3
+    assert "1 条结果" in panel.result_list.item(0).text()
+    assert "搜索中" in panel.result_list.item(2).text()
+    panel.toggle_source_group("source_a")
+    assert panel.is_source_collapsed("source_a") is True
+    assert panel.result_list.count() == 2
+    assert panel.result_list.item(0).text().startswith("▶")
+    panel.toggle_source_group("source_a")
+    assert panel.result_list.count() == 3
 
 
 def test_result_panel_requires_explicit_play(app: QApplication) -> None:
@@ -217,7 +391,11 @@ def test_result_panel_requires_explicit_play(app: QApplication) -> None:
 def main() -> int:
     app = QApplication.instance() or QApplication([])
     test_parallel_failure_stale_and_cache()
-    test_cross_source_deduplication()
+    test_selected_sources_and_empty_selection()
+    test_cross_source_results_remain_separate()
+    test_source_selector_labels_and_unavailable_entries(app)
+    test_search_page_restores_and_saves_source_selection(app)
+    test_result_panel_groups_update_and_collapse(app)
     test_result_panel_requires_explicit_play(app)
     print("unified search smoke: OK")
     return 0

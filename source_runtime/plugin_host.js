@@ -6,13 +6,18 @@ const Module = require("node:module");
 const path = require("node:path");
 
 const RUNTIME_DIR = __dirname;
-const PROJECT_ROOT = path.resolve(RUNTIME_DIR, "..");
 const REGISTRY_PATH = process.env.HUSHPLAYER_SOURCE_REGISTRY
     ? path.resolve(process.env.HUSHPLAYER_SOURCE_REGISTRY)
     : path.join(RUNTIME_DIR, "source_registry.json");
+const SOURCE_HOME_DIR = process.env.HUSHPLAYER_SOURCE_HOME
+    ? path.resolve(process.env.HUSHPLAYER_SOURCE_HOME)
+    : path.dirname(REGISTRY_PATH);
+const USER_SOURCES_DIR = process.env.HUSHPLAYER_USER_SOURCES
+    ? path.resolve(process.env.HUSHPLAYER_USER_SOURCES)
+    : path.resolve(SOURCE_HOME_DIR, "..", "user_sources");
 const ALLOWED_SOURCE_ROOTS = [
-    path.resolve(RUNTIME_DIR, "sources"),
-    path.resolve(PROJECT_ROOT, "user_sources"),
+    path.resolve(SOURCE_HOME_DIR, "sources"),
+    USER_SOURCES_DIR,
 ];
 const BLOCKED_MODULES = new Set([
     "fs",
@@ -192,7 +197,7 @@ function resolveSourceFile(source) {
         throw new Error(`音源 ${source.id} 没有 filename`);
     }
 
-    const candidate = path.resolve(RUNTIME_DIR, filename);
+    const candidate = path.resolve(SOURCE_HOME_DIR, filename);
 
     if (!ALLOWED_SOURCE_ROOTS.some((root) => isPathInside(candidate, root))) {
         throw new Error(`音源路径超出允许目录：${filename}`);

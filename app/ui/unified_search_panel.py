@@ -18,6 +18,9 @@ from app.models.media_item import MediaItem
 
 
 class UnifiedSearchResultsPanel(QFrame):
+    GROUP_SOURCE_ROLE = int(Qt.ItemDataRole.UserRole) + 1
+    GROUP_STATUS_ROLE = int(Qt.ItemDataRole.UserRole) + 2
+
     browseRequested = Signal(dict)
     playRequested = Signal(dict)
     queueNextRequested = Signal(dict)
@@ -34,6 +37,7 @@ class UnifiedSearchResultsPanel(QFrame):
         self._keyword = ""
         self._results: list[dict] = []
         self._summary: dict = {}
+        self._collapsed_source_ids: set[str] = set()
         self.collection_state_provider = lambda _track: {}
         self.playlist_provider = lambda: []
         self.playing_key_provider = lambda: ""
@@ -59,7 +63,7 @@ class UnifiedSearchResultsPanel(QFrame):
         self.result_list.setSpacing(2)
         self.result_list.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.result_list.customContextMenuRequested.connect(self.show_context_menu)
-        self.result_list.itemClicked.connect(self.browse_result)
+        self.result_list.itemClicked.connect(self._handle_item_clicked)
         self.result_list.itemDoubleClicked.connect(self.request_playback)
         self.result_list.setMinimumHeight(160)
         if not self.standalone:
@@ -131,7 +135,9 @@ class UnifiedSearchResultsPanel(QFrame):
         results: list[dict],
         summary: dict | None = None,
     ) -> None:
-        self._keyword = str(keyword or "")
+        next_keyword = str(keyword or "")
+        keyword_changed = next_keyword != self._keyword
+        self._keyword = next_keyword
         self._results = [
             MediaItem.from_mapping(item).to_dict()
             for item in results
@@ -139,6 +145,26 @@ class UnifiedSearchResultsPanel(QFrame):
         ]
         self._summary = dict(summary or {})
         self.setVisible(bool(self._keyword))
+        self._render_results(scroll_to_top=keyword_changed)
+        errors = self._summary.get("errors")
+        if isinstance(errors, dict) and errors:
+            messages = [str(message) for message in list(errors.values())[:3]]
+            self.detail_label.setText("部分来源搜索失败：" + "；".join(messages))
+        elif (
+            not self._results
+            and self._summary.get("final")
+            and "selectedSourceIds" in self._summary
+            and not self._summary.get("selectedSourceIds")
+        ):
+            self.detail_label.setText("请至少选择一个搜索来源。")
+        elif not self._results and self._summary.get("final"):
+            self.detail_label.setText("所选在线来源没有返回匹配结果；本地搜索结果不受影响。")
+        elif self._summary.get("pendingCount"):
+            self.detail_label.setText("已完成的来源会立即显示；其余来源继续搜索中。")
+        else:
+            self.detail_label.setText("单击在线歌曲可查看详情；双击才会解析播放地址。")
+
+    def _render_results(self, *, scroll_to_top: bool) -> None:
         previous_key = self._track_key(self.current_track())
         self.result_list.blockSignals(True)
         self.result_list.setUpdatesEnabled(False)
@@ -148,13 +174,63 @@ class UnifiedSearchResultsPanel(QFrame):
             source_id = str(result.get("source_id") or "")
             source_name = str(result.get("source_name") or source_id or "未知来源")
             groups.setdefault((source_id, source_name), []).append(result)
+        source_states = self._source_states()
+        ordered_groups: list[tuple[str, str, list[dict], dict]] = []
+        included_ids: set[str] = set()
+        for state in source_states:
+            source_id = str(state.get("sourceId") or state.get("source_id") or "")
+            source_name = str(
+                state.get("sourceName")
+                or state.get("source_name")
+                or source_id
+                or "未知来源"
+            )
+            tracks = groups.get((source_id, source_name))
+            if tracks is None:
+                tracks = next(
+                    (
+                        values
+                        for (group_id, _group_name), values in groups.items()
+                        if group_id == source_id
+                    ),
+                    [],
+                )
+            ordered_groups.append((source_id, source_name, list(tracks), state))
+            included_ids.add(source_id)
+        for (source_id, source_name), tracks in groups.items():
+            if source_id in included_ids:
+                continue
+            fallback_state = {
+                "sourceId": source_id,
+                "sourceName": source_name,
+                "status": "success" if tracks else "empty",
+                "resultCount": len(tracks),
+                "message": "",
+            }
+            ordered_groups.append((source_id, source_name, tracks, fallback_state))
         selected_item = None
-        for (_source_id, source_name), tracks in groups.items():
-            group_item = QListWidgetItem(f"来源：{source_name} · {len(tracks)} 条")
-            group_item.setFlags(Qt.ItemFlag.ItemIsEnabled)
+        for source_id, source_name, tracks, state in ordered_groups:
+            collapsed = source_id in self._collapsed_source_ids
+            arrow = "▶" if collapsed else "▼"
+            group_item = QListWidgetItem(
+                f"{arrow}  {source_name} · {self._source_status_text(state, len(tracks))}"
+            )
+            group_item.setFlags(
+                Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable
+            )
             group_item.setData(Qt.ItemDataRole.UserRole, None)
-            group_item.setSizeHint(QSize(0, 32))
+            group_item.setData(self.GROUP_SOURCE_ROLE, source_id)
+            group_item.setData(self.GROUP_STATUS_ROLE, str(state.get("status") or ""))
+            group_item.setToolTip(self._source_status_tooltip(source_name, state))
+            group_font = group_item.font()
+            group_font.setBold(True)
+            group_item.setFont(group_font)
+            group_item.setForeground(QColor("#a9c8ff"))
+            group_item.setBackground(QColor("#171e2a"))
+            group_item.setSizeHint(QSize(0, 38))
             self.result_list.addItem(group_item)
+            if collapsed:
+                continue
             for track in tracks:
                 item = QListWidgetItem(self._result_text(track))
                 item.setData(Qt.ItemDataRole.UserRole, track)
@@ -168,13 +244,71 @@ class UnifiedSearchResultsPanel(QFrame):
         self.refresh_playing_indicator()
         if selected_item is not None:
             self.result_list.setCurrentItem(selected_item)
-        self.scroll_to_top()
-        errors = self._summary.get("errors")
-        if isinstance(errors, dict) and errors:
-            messages = [str(message) for message in list(errors.values())[:3]]
-            self.detail_label.setText("部分来源搜索失败：" + "；".join(messages))
-        elif not self._results and self._summary.get("final"):
-            self.detail_label.setText("在线来源没有返回匹配结果；本地搜索结果不受影响。")
+        if scroll_to_top:
+            self.scroll_to_top()
+
+    def _source_states(self) -> list[dict]:
+        states = self._summary.get("sources")
+        if not isinstance(states, list):
+            return []
+        return [dict(state) for state in states if isinstance(state, dict)]
+
+    @staticmethod
+    def _source_status_text(state: dict, actual_count: int) -> str:
+        status = str(state.get("status") or "")
+        try:
+            result_count = max(0, int(state.get("resultCount", actual_count) or 0))
+        except (TypeError, ValueError):
+            result_count = max(0, int(actual_count))
+        if status == "searching":
+            return "搜索中…"
+        if status == "empty":
+            return "无结果"
+        if status == "failed":
+            return "搜索失败"
+        if status == "timeout":
+            return "搜索超时"
+        if status == "unavailable":
+            return "来源不可用"
+        if status == "success":
+            return f"搜索成功 · {result_count} 条结果"
+        return f"{result_count} 条结果"
+
+    @staticmethod
+    def _source_status_tooltip(source_name: str, state: dict) -> str:
+        try:
+            result_count = int(state.get("resultCount") or 0)
+        except (TypeError, ValueError):
+            result_count = 0
+        status_text = UnifiedSearchResultsPanel._source_status_text(
+            state,
+            result_count,
+        )
+        message = str(state.get("message") or "").strip()
+        return (
+            f"来源：{source_name}\n状态：{status_text}"
+            + (f"\n原因：{message}" if message else "")
+        )
+
+    def _handle_item_clicked(self, item: QListWidgetItem) -> None:
+        source_id = str(item.data(self.GROUP_SOURCE_ROLE) or "")
+        if source_id:
+            self.toggle_source_group(source_id)
+            return
+        self.browse_result(item)
+
+    def toggle_source_group(self, source_id: str) -> None:
+        target = str(source_id or "").strip()
+        if not target:
+            return
+        if target in self._collapsed_source_ids:
+            self._collapsed_source_ids.remove(target)
+        else:
+            self._collapsed_source_ids.add(target)
+        self._render_results(scroll_to_top=False)
+
+    def is_source_collapsed(self, source_id: str) -> bool:
+        return str(source_id or "").strip() in self._collapsed_source_ids
 
     def current_track(self) -> dict | None:
         item = self.result_list.currentItem()
@@ -284,8 +418,7 @@ class UnifiedSearchResultsPanel(QFrame):
         flags = [cls._local_status(track)]
         flags.append("可播放" if track.get("can_play") else "不可播放")
         flags.append("可下载" if track.get("can_download") else "不可下载")
-        source = str(track.get("source_name") or track.get("source_id") or "未知来源")
-        return f"{title}\n{artist} · {album} · {duration}   [{source}]   {' · '.join(flags)}"
+        return f"{title}\n{artist} · {album} · {duration}   {' · '.join(flags)}"
 
     @classmethod
     def _result_tooltip(cls, track: dict) -> str:

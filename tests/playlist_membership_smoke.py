@@ -315,7 +315,9 @@ def test_window_membership_and_sorting(app: QApplication) -> None:
                 sync_calls += 1
 
             window.sync_remote_song_items = counted_sync
-            window.request_online_playback = lambda track: playback_requests.append(track)
+            window.request_online_playback = (
+                lambda track, **_kwargs: playback_requests.append(track)
+            )
             window.play_remote_song_data(remote_data)
             window.sync_remote_song_items = original_sync
             window.request_online_playback = original_request
