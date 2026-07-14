@@ -81,12 +81,20 @@ class SearchPage(QFrame):
         tab_row.addWidget(self.local_tab)
         tab_row.addWidget(self.online_tab)
         tab_row.addStretch()
-        self.page_status = QLabel("点击左侧搜索框并输入关键词。")
-        self.page_status.setObjectName("pageSubtitle")
-        self.page_status.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
-        tab_row.addWidget(self.page_status, 1)
 
         self.results_stack = QStackedWidget()
+        self.local_container = QWidget()
+        local_layout = QVBoxLayout(self.local_container)
+        local_layout.setContentsMargins(0, 0, 0, 0)
+        local_layout.setSpacing(8)
+        self.local_status_label = QLabel("点击左侧搜索框并输入关键词。")
+        self.local_status_label.setObjectName("pageSubtitle")
+        self.local_status_label.setAlignment(
+            Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
+        )
+        self.local_status_label.setWordWrap(True)
+        # Keep the former attribute available for callers outside this page.
+        self.page_status = self.local_status_label
         self.local_view = TrackListView(
             object_name="localSearchResults",
             empty_text="输入关键词后显示本地搜索结果",
@@ -101,10 +109,21 @@ class SearchPage(QFrame):
         self.local_view.list_widget.customContextMenuRequested.connect(
             self._show_local_context_menu
         )
-        self.online_results = UnifiedSearchResultsPanel(self, standalone=True)
+        local_layout.addWidget(self.local_status_label)
+        local_layout.addWidget(self.local_view, 1)
+
+        self.online_container = QWidget()
+        online_layout = QVBoxLayout(self.online_container)
+        online_layout.setContentsMargins(0, 0, 0, 0)
+        online_layout.setSpacing(0)
+        self.online_results = UnifiedSearchResultsPanel(
+            self.online_container,
+            standalone=True,
+        )
         self.status_label = self.online_results.status_label
-        self.results_stack.addWidget(self.local_view)
-        self.results_stack.addWidget(self.online_results)
+        online_layout.addWidget(self.online_results, 1)
+        self.results_stack.addWidget(self.local_container)
+        self.results_stack.addWidget(self.online_container)
         layout.addLayout(header)
         layout.addLayout(tab_row)
         layout.addWidget(self.results_stack, 1)
@@ -118,7 +137,7 @@ class SearchPage(QFrame):
     def set_responsive_mode(self, mode: str) -> None:
         mode = mode if mode in {"full", "compact", "narrow"} else "full"
         self.subtitle_label.setVisible(mode != "narrow")
-        self.page_status.setVisible(mode != "narrow")
+        self.local_status_label.setVisible(self.current_tab() == "local")
         if mode == "full":
             self.page_layout.setContentsMargins(28, 26, 28, 24)
         elif mode == "compact":
@@ -153,8 +172,8 @@ class SearchPage(QFrame):
             empty_text = "本地音乐库没有找到匹配歌曲"
         self.local_view.set_items(self._local_results, empty_text=empty_text)
         self.local_tab.setText(f"本地结果 · {len(self._local_results)}")
-        if self.results_stack.currentWidget() is self.local_view:
-            self.page_status.setText(
+        if self.current_tab() == "local":
+            self.local_status_label.setText(
                 f"本地搜索完成，找到 {len(self._local_results)} 首歌曲"
                 if self._keyword
                 else "输入歌名、歌手或专辑"
@@ -172,25 +191,36 @@ class SearchPage(QFrame):
 
     def set_online_status(self, message: str) -> None:
         self.online_results.set_status(message)
-        if self.results_stack.currentWidget() is self.online_results:
-            self.page_status.setText(str(message or "在线搜索等待中"))
 
     def show_tab(self, name: str) -> None:
         online = name == "online"
-        self.results_stack.setCurrentWidget(self.online_results if online else self.local_view)
+        self.results_stack.setCurrentWidget(
+            self.online_container if online else self.local_container
+        )
+        self.local_container.setVisible(not online)
+        self.online_container.setVisible(online)
+        self.local_view.setVisible(not online)
+        self.online_results.setVisible(online)
+        self.local_status_label.setVisible(not online)
         self.local_tab.setProperty("active", not online)
         self.online_tab.setProperty("active", online)
         for button in (self.local_tab, self.online_tab):
             button.style().unpolish(button)
             button.style().polish(button)
             button.update()
-        if online:
-            self.page_status.setText(self.online_results.status_label.text() or "在线搜索等待中")
-        elif self._keyword:
-            self.page_status.setText(f"本地搜索完成，找到 {len(self._local_results)} 首歌曲")
+        if not online:
+            self.local_status_label.setText(
+                f"本地搜索完成，找到 {len(self._local_results)} 首歌曲"
+                if self._keyword
+                else "输入歌名、歌手或专辑"
+            )
 
     def current_tab(self) -> str:
-        return "online" if self.results_stack.currentWidget() is self.online_results else "local"
+        return (
+            "online"
+            if self.results_stack.currentWidget() is self.online_container
+            else "local"
+        )
 
     def _local_data(self, item: QListWidgetItem | None) -> dict | None:
         value = item.data(Qt.ItemDataRole.UserRole) if item is not None else None
