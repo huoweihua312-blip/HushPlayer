@@ -1,3 +1,4 @@
+import os
 import sys
 import time
 
@@ -45,6 +46,16 @@ def main() -> None:
             f"[startup] 首轮事件循环：{(time.perf_counter() - PROCESS_STARTED_AT) * 1000:.1f} ms"
         ),
     )
+    smoke_exit_text = str(
+        os.environ.get("HUSHPLAYER_PACKAGING_SMOKE_EXIT_MS") or ""
+    ).strip()
+    if smoke_exit_text:
+        try:
+            smoke_exit_ms = max(500, int(smoke_exit_text))
+        except ValueError:
+            smoke_exit_ms = 0
+        if smoke_exit_ms:
+            QTimer.singleShot(smoke_exit_ms, window.close)
 
     sys.exit(app.exec())
 

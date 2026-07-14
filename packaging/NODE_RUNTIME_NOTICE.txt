@@ -1,0 +1,12 @@
+The Windows debug package includes an official, Authenticode-validated
+Node.js Windows x64 executable already installed on the build machine.
+
+Node.js is a trademark of the OpenJS Foundation. Node.js is distributed
+under the MIT license and includes third-party software under additional
+licenses. Before public redistribution, include the complete LICENSE file
+from the exact matching official Node.js Windows x64 archive:
+
+https://nodejs.org/download/release/
+
+The build script records the exact Node.js version and signer in the output
+directory. It never downloads a Node.js binary.
