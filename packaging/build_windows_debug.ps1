@@ -14,16 +14,42 @@ if (-not (Test-Path -LiteralPath (Join-Path $ProjectRoot "main.py") -PathType Le
 }
 
 $Python = Join-Path $ProjectRoot ".venv\Scripts\python.exe"
-if (-not (Test-Path -LiteralPath $Python -PathType Leaf)) {
-    throw "Project virtual environment Python was not found: $Python"
+$VenvRebuildHelp = @(
+    "Rebuild the Python 3.12 virtual environment from the project root:"
+    "  Remove-Item -LiteralPath .venv -Recurse -Force"
+    "  py -3.12 -m venv .venv"
+    "  .\.venv\Scripts\python.exe -m pip install --requirement requirements-lock.txt"
+) -join [Environment]::NewLine
+
+function Stop-ForInvalidVenv([string]$Reason) {
+    throw ($Reason + [Environment]::NewLine + $VenvRebuildHelp)
 }
 
-& $Python -c "import platform, struct, PySide6; assert struct.calcsize('P') * 8 == 64; print('Python=' + platform.python_version()); print('PySide6=' + PySide6.__version__); print('Architecture=x64')"
-if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-& $Python -m PyInstaller --version
-if ($LASTEXITCODE -ne 0) {
-    throw "PyInstaller is not available in the project virtual environment."
+if (-not (Test-Path -LiteralPath $Python -PathType Leaf)) {
+    Stop-ForInvalidVenv "Project virtual environment Python was not found: $Python"
 }
+
+$PreviousErrorActionPreference = $ErrorActionPreference
+$ErrorActionPreference = "Continue"
+try {
+    $PythonProbe = @(
+        & $Python -c "import platform, struct, sys, PyInstaller, PySide6; assert struct.calcsize('P') * 8 == 64; print('Python=' + platform.python_version()); print('PythonExecutable=' + sys.executable); print('PyInstaller=' + PyInstaller.__version__); print('PySide6=' + PySide6.__version__); print('Architecture=x64')" 2>&1
+    )
+    $PythonProbeExitCode = $LASTEXITCODE
+} catch {
+    $PythonProbe = @($_.Exception.Message)
+    $PythonProbeExitCode = -1
+} finally {
+    $ErrorActionPreference = $PreviousErrorActionPreference
+}
+if ($PythonProbeExitCode -ne 0) {
+    $Details = ($PythonProbe | ForEach-Object { [string]$_ }) -join [Environment]::NewLine
+    Stop-ForInvalidVenv (
+        "Project virtual environment Python failed to start: $Python" +
+        [Environment]::NewLine + $Details
+    )
+}
+$PythonProbe | ForEach-Object { Write-Host ([string]$_) }
 
 $RepositoryNode = Join-Path $ProjectRoot "runtime\node\node.exe"
 if (Test-Path -LiteralPath $RepositoryNode -PathType Leaf) {
