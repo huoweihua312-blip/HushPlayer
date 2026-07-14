@@ -19,10 +19,15 @@ class LyricsCache:
         self.path = Path(path)
         self._loaded = False
         self._entries: dict[str, dict] = {}
+        self._memory_entries: dict[str, dict] = {}
 
     @classmethod
     def key_for(cls, item: MediaItem) -> str:
-        if item.source_id and item.track_id:
+        if item.media_type == "online":
+            if not item.source_id or not item.track_id:
+                raise ValueError("在线歌词缓存需要 source_id 和 remote_track_id")
+            identity = f"id\0{item.source_id}\0{item.track_id}"
+        elif item.source_id and item.track_id:
             identity = f"id\0{item.source_id}\0{item.track_id}"
         else:
             values = [
@@ -35,8 +40,24 @@ class LyricsCache:
         return hashlib.sha256(identity.encode("utf-8")).hexdigest()
 
     def get(self, item: MediaItem) -> dict | None:
+        memory = self.get_memory(item)
+        if memory is not None:
+            return memory
+        return self.get_persistent(item)
+
+    def get_memory(self, item: MediaItem) -> dict | None:
+        entry = self._memory_entries.get(self.key_for(item))
+        return self._validated_entry(entry)
+
+    def get_persistent(self, item: MediaItem) -> dict | None:
         self._ensure_loaded()
-        entry = self._entries.get(self.key_for(item))
+        key = self.key_for(item)
+        entry = self._validated_entry(self._entries.get(key))
+        if entry is not None:
+            self._memory_entries[key] = dict(entry)
+        return entry
+
+    def _validated_entry(self, entry) -> dict | None:
         if not isinstance(entry, dict):
             return None
         if entry.get("not_found"):
@@ -54,7 +75,9 @@ class LyricsCache:
             "fetched_at": self._safe_int(payload.get("fetched_at"), int(time.time())),
             "not_found": bool(payload.get("not_found")),
         }
-        self._entries[self.key_for(item)] = entry
+        key = self.key_for(item)
+        self._entries[key] = entry
+        self._memory_entries[key] = dict(entry)
         self._save()
 
     def _ensure_loaded(self) -> None:

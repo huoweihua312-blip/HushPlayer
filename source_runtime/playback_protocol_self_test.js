@@ -25,6 +25,9 @@ async function main() {
             },
             resolveDownload: async () => ({
                 url: "https://127.0.0.1:8765/audio.mp3", headers: {}, filename: "fixture.mp3"
+            }),
+            getLyric: async () => ({
+                data: { syncedLyrics: "[00:00.00]Fixture lyric" }
             })
         };\n`,
         "utf8"
@@ -159,6 +162,14 @@ async function main() {
     });
     assert.equal(download.success, true);
     assert.equal(download.data.filename, "fixture.mp3");
+
+    const lyric = await request("getLyric", {
+        sourceId: "open_fixture",
+        musicItem: { id: "fixture" },
+    });
+    assert.equal(lyric.success, true);
+    assert.equal(lyric.data.available, true);
+    assert.equal(lyric.data.rawLrc, "[00:00.00]Fixture lyric");
 
     const fallbackDownload = await request("resolveDownload", {
         sourceId: "fallback_fixture",

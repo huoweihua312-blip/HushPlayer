@@ -576,9 +576,35 @@ def test_main_window_online_entry() -> None:
         assert window.now_open_folder_btn.text() == "查看在线歌曲信息"
         assert window.now_open_folder_btn.isEnabled()
         assert window.like_btn.isEnabled()
+        lyric_generation = window.online_lyrics_service.generation
+        online_identity = window.current_media_item.stable_identity
+        window.on_online_lyrics_status_changed(
+            lyric_generation,
+            online_identity,
+            "正在获取歌词",
+        )
+        assert window.current_online_lyrics_state == "loading"
+        window.on_online_lyrics_ready(
+            lyric_generation,
+            online_identity,
+            {
+                "text": "",
+                "type": "error",
+                "source": "fixture timeout",
+                "error": True,
+            },
+        )
+        assert window.current_online_lyrics_state == "error"
+        assert "歌词获取失败" in window.lyrics_status_label.text()
+        window.on_online_lyrics_ready(
+            lyric_generation - 1,
+            online_identity,
+            {"text": "[00:00.00]过期歌词", "type": "lrc", "source": "stale"},
+        )
+        assert window.current_online_lyrics_state == "error"
         window.current_duration = 5000
         window.current_lyrics = [(0, "第一行"), (2000, "第二行")]
-        window.displayed_lyrics_track_key = window.current_media_item.key
+        window.displayed_lyrics_track_key = window.current_media_item.stable_identity
         window.lyrics_view.set_lyrics(window.current_lyrics)
         window.on_position_changed(2500)
         assert window.lyrics_view.current_index == 1

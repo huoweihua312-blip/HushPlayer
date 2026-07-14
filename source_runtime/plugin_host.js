@@ -593,6 +593,54 @@ async function getMetadata(sourceId, musicItem, options = {}) {
     };
 }
 
+function extractLyricText(value, depth = 0) {
+    if (depth > 6 || value === null || value === undefined) {
+        return "";
+    }
+    if (typeof value === "string") {
+        return value.trim();
+    }
+    if (Array.isArray(value)) {
+        return value
+            .map((item) => {
+                if (item && typeof item === "object") {
+                    return extractLyricText(
+                        item.text || item.words || item.lyric || item.content,
+                        depth + 1
+                    );
+                }
+                return extractLyricText(item, depth + 1);
+            })
+            .filter(Boolean)
+            .join("\n")
+            .trim();
+    }
+    if (typeof value !== "object") {
+        return "";
+    }
+    const keys = [
+        "rawLrc",
+        "syncedLyrics",
+        "lrc",
+        "lyric",
+        "lyrics",
+        "plainLyrics",
+        "rawLrcTxt",
+        "text",
+        "content",
+        "lines",
+        "data",
+        "result",
+    ];
+    for (const key of keys) {
+        const text = extractLyricText(value[key], depth + 1);
+        if (text) {
+            return text;
+        }
+    }
+    return "";
+}
+
 async function getLyric(sourceId, musicItem, options = {}) {
     const loaded = await loadPlugin(sourceId, options);
 
@@ -605,13 +653,7 @@ async function getLyric(sourceId, musicItem, options = {}) {
         loaded.plugin.getLyric(rawItem),
         `音源 ${sourceId} 歌词请求`
     );
-    const rawLrc =
-        (typeof result === "string" ? result : null) ||
-        result?.rawLrc ||
-        result?.lrc ||
-        result?.lyric ||
-        result?.data?.lrc ||
-        "";
+    const rawLrc = extractLyricText(result);
     const translation = result?.translation || result?.translatedLrc || result?.tlyric || "";
     return {
         available: Boolean(String(rawLrc).trim()),

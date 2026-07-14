@@ -47,20 +47,28 @@ class OnlineLyricsService(QObject):
         self.cancel()
         self._generation += 1
         generation = self._generation
-        self.statusChanged.emit(generation, item.key, "正在加载歌词")
+        track_key = item.stable_identity
+        self.statusChanged.emit(generation, track_key, "正在获取歌词")
 
-        cached = self.cache.get(item)
+        cached = self.cache.get_memory(item)
         if cached is not None:
             payload = dict(cached)
-            payload["source"] = f"缓存/{payload.get('source') or '未知'}"
-            self.lyricsReady.emit(generation, item.key, payload)
+            payload["source"] = f"内存缓存/{payload.get('source') or '未知'}"
+            self.lyricsReady.emit(generation, track_key, payload)
+            return generation
+
+        cached = self.cache.get_persistent(item)
+        if cached is not None:
+            payload = dict(cached)
+            payload["source"] = f"本地缓存/{payload.get('source') or '未知'}"
+            self.lyricsReady.emit(generation, track_key, payload)
             return generation
 
         embedded = self._extract_lyrics(item.lyrics)
         if embedded:
             payload = self._payload(embedded, "播放信息")
             self.cache.put(item, payload)
-            self.lyricsReady.emit(generation, item.key, payload)
+            self.lyricsReady.emit(generation, track_key, payload)
             return generation
 
         if item.source_id and item.source_id != "local":
@@ -70,7 +78,9 @@ class OnlineLyricsService(QObject):
                 timeout_ms=10000,
             )
             self._provider_context = (generation, item)
-            self.statusChanged.emit(generation, item.key, "正在向歌曲来源请求歌词")
+            self.statusChanged.emit(generation, track_key, "正在向歌曲来源请求歌词")
+        elif item.media_type == "online":
+            self._finish_not_found(generation, item, "当前来源没有歌词接口")
         else:
             self._start_lrclib(generation, item)
         return generation
@@ -100,11 +110,17 @@ class OnlineLyricsService(QObject):
         if text:
             payload = self._payload(text, item.source_name or "歌曲来源")
             self.cache.put(item, payload)
-            self.lyricsReady.emit(generation, item.key, payload)
+            self.lyricsReady.emit(generation, item.stable_identity, payload)
+            return
+        if item.media_type == "online":
+            if isinstance(result, dict) and result.get("available") is False:
+                self._finish_not_found(generation, item, "歌曲来源未提供歌词")
+            else:
+                self._finish_failed(generation, item, "歌曲来源返回的歌词格式异常")
             return
         self._start_lrclib(generation, item)
 
-    def _on_provider_failed(self, request_id: int, action: str, _message: str) -> None:
+    def _on_provider_failed(self, request_id: int, action: str, message: str) -> None:
         if action != "getLyric" or request_id != self._provider_request:
             return
         context = self._provider_context
@@ -114,7 +130,10 @@ class OnlineLyricsService(QObject):
             return
         generation, item = context
         if generation == self._generation:
-            self._start_lrclib(generation, item)
+            if item.media_type == "online":
+                self._finish_failed(generation, item, message or "歌词获取失败")
+            else:
+                self._start_lrclib(generation, item)
 
     def _start_lrclib(self, generation: int, item: MediaItem) -> None:
         if generation != self._generation:
@@ -137,7 +156,7 @@ class OnlineLyricsService(QObject):
         reply.finished.connect(lambda current=reply: self._on_lrclib_finished(current))
         self._network_reply = reply
         self._network_context = (generation, item)
-        self.statusChanged.emit(generation, item.key, "正在使用联网歌词匹配")
+        self.statusChanged.emit(generation, item.stable_identity, "正在使用联网歌词匹配")
 
     def _on_lrclib_finished(self, reply: QNetworkReply) -> None:
         context = self._network_context if reply is self._network_reply else None
@@ -170,7 +189,7 @@ class OnlineLyricsService(QObject):
             return
         payload = self._payload(text, "LRCLIB")
         self.cache.put(item, payload)
-        self.lyricsReady.emit(generation, item.key, payload)
+        self.lyricsReady.emit(generation, item.stable_identity, payload)
 
     def _finish_not_found(
         self,
@@ -188,7 +207,19 @@ class OnlineLyricsService(QObject):
         }
         if cache:
             self.cache.put(item, payload)
-        self.lyricsReady.emit(generation, item.key, payload)
+        self.lyricsReady.emit(generation, item.stable_identity, payload)
+
+    def _finish_failed(self, generation: int, item: MediaItem, message: str) -> None:
+        payload = {
+            "text": "",
+            "type": "error",
+            "source": str(message or "歌词获取失败"),
+            "fetched_at": int(time.time()),
+            "not_found": False,
+            "error": True,
+        }
+        self.statusChanged.emit(generation, item.stable_identity, "歌词获取失败")
+        self.lyricsReady.emit(generation, item.stable_identity, payload)
 
     @classmethod
     def _payload(cls, text: str, source: str) -> dict:
@@ -201,21 +232,56 @@ class OnlineLyricsService(QObject):
             "not_found": not bool(normalized),
         }
 
-    @staticmethod
-    def _extract_lyrics(value) -> str:
-        return str(value or "").strip()
+    @classmethod
+    def _extract_lyrics(cls, value) -> str:
+        if isinstance(value, str):
+            return value.strip()
+        if isinstance(value, (list, tuple)):
+            lines = []
+            for item in value:
+                if isinstance(item, dict):
+                    item = (
+                        item.get("text")
+                        or item.get("words")
+                        or item.get("lyric")
+                        or item.get("content")
+                    )
+                text = cls._extract_lyrics(item)
+                if text:
+                    lines.append(text)
+            return "\n".join(lines).strip()
+        return ""
 
     @classmethod
     def _extract_result_text(cls, result: dict) -> str:
         if not isinstance(result, dict):
             return ""
-        for key in ("rawLrc", "syncedLyrics", "lrc", "lyric", "plainLyrics"):
+        for key in (
+            "rawLrc",
+            "syncedLyrics",
+            "lrc",
+            "lyric",
+            "lyrics",
+            "plainLyrics",
+            "rawLrcTxt",
+            "text",
+            "content",
+            "lines",
+        ):
             text = cls._extract_lyrics(result.get(key))
             if text:
                 return text
-        raw = result.get("raw")
-        if isinstance(raw, dict):
-            return cls._extract_result_text(raw)
+            nested = result.get(key)
+            if isinstance(nested, dict):
+                text = cls._extract_result_text(nested)
+                if text:
+                    return text
+        for key in ("data", "raw", "result"):
+            nested = result.get(key)
+            if isinstance(nested, dict):
+                text = cls._extract_result_text(nested)
+                if text:
+                    return text
         return ""
 
     @classmethod

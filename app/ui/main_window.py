@@ -3543,6 +3543,7 @@ class MainWindow(QMainWindow):
         self.online_play_queue: list[dict] = []
         self.current_plain_lyrics = ""
         self.displayed_lyrics_track_key = ""
+        self.current_online_lyrics_state = ""
         self.is_seeking = False
         self.pending_restore_position = 0
         self.pending_lazy_restore_song_data: dict | None = None
@@ -6382,7 +6383,7 @@ class MainWindow(QMainWindow):
         )
         current = getattr(self, "current_media_item", None)
         if isinstance(current, MediaItem) and current.media_type == "online":
-            if self.displayed_lyrics_track_key != current.key:
+            if self.displayed_lyrics_track_key != current.stable_identity:
                 self.immersive_lyrics_window.set_lyrics([])
             elif self.current_plain_lyrics:
                 self.immersive_lyrics_window.set_plain_text(self.current_plain_lyrics)
@@ -6915,6 +6916,7 @@ class MainWindow(QMainWindow):
         self.reset_playback_stats_session()
         self.current_lyrics = []
         self.current_plain_lyrics = ""
+        self.current_online_lyrics_state = "loading"
         self.displayed_lyrics_track_key = ""
         self.displayed_lyrics_song_path = None
         self.refresh_playing_song_indicators()
@@ -7115,12 +7117,12 @@ class MainWindow(QMainWindow):
             self.full_lyrics_artist.setText(
                 f"{current.artist} · {current.album} · {current.source_name} · 在线"
             )
-            if self.displayed_lyrics_track_key == current.key:
+            if self.displayed_lyrics_track_key == current.stable_identity:
                 self.sync_full_lyrics_from_current()
             else:
                 self.full_lyrics_status.setText("正在加载在线歌词")
                 self.full_lyrics_view.set_placeholder(
-                    "正在加载歌词", "优先歌曲来源，其次使用联网歌词匹配"
+                    "正在加载歌词", "优先使用缓存，其次请求当前歌曲来源"
                 )
             return
 
@@ -7174,7 +7176,7 @@ class MainWindow(QMainWindow):
 
         current = getattr(self, "current_media_item", None)
         if isinstance(current, MediaItem) and current.media_type == "online":
-            if self.displayed_lyrics_track_key != current.key:
+            if self.displayed_lyrics_track_key != current.stable_identity:
                 return
             self.full_lyrics_title.setText(current.title)
             self.full_lyrics_artist.setText(
@@ -7188,7 +7190,17 @@ class MainWindow(QMainWindow):
                     self.media_player.position(), self.current_lyrics
                 )
             else:
-                self.full_lyrics_view.set_placeholder("暂无歌词", "歌曲来源没有提供歌词")
+                state = getattr(self, "current_online_lyrics_state", "")
+                if state == "error":
+                    self.full_lyrics_view.set_placeholder(
+                        "歌词获取失败", "播放不受影响，可以稍后重新播放重试"
+                    )
+                elif state == "loading":
+                    self.full_lyrics_view.set_placeholder(
+                        "正在获取歌词", "优先使用缓存，其次请求当前歌曲来源"
+                    )
+                else:
+                    self.full_lyrics_view.set_placeholder("暂无歌词", "歌曲来源没有提供歌词")
             if hasattr(self, "lyrics_status_label"):
                 self.full_lyrics_status.setText(
                     self.lyrics_status_label.text().replace("歌词：", "").strip()
@@ -10022,7 +10034,10 @@ class MainWindow(QMainWindow):
 
         current = getattr(self, "current_media_item", None)
         if isinstance(current, MediaItem) and current.media_type == "online":
-            if self.displayed_lyrics_track_key == current.key and self.current_lyrics:
+            if (
+                self.displayed_lyrics_track_key == current.stable_identity
+                and self.current_lyrics
+            ):
                 previous_line, current_line, next_line = self.get_lyric_context_by_position(
                     self.media_player.position(), self.current_lyrics
                 )
@@ -11759,26 +11774,34 @@ class MainWindow(QMainWindow):
 
     def on_online_lyrics_status_changed(
         self,
-        _generation: int,
+        generation: int,
         track_key: str,
         message: str,
     ) -> None:
         current = getattr(self, "current_media_item", None)
-        if not isinstance(current, MediaItem) or current.key != track_key:
+        if (
+            generation != self.online_lyrics_service.generation
+            or not isinstance(current, MediaItem)
+            or current.media_type != "online"
+            or current.stable_identity != track_key
+        ):
             return
+        if message.startswith("正在"):
+            self.current_online_lyrics_state = "loading"
         self.set_lyrics_status(message)
 
     def on_online_lyrics_ready(
         self,
-        _generation: int,
+        generation: int,
         track_key: str,
         payload: dict,
     ) -> None:
         current = getattr(self, "current_media_item", None)
         if (
-            not isinstance(current, MediaItem)
+            generation != self.online_lyrics_service.generation
+            or not isinstance(current, MediaItem)
             or current.media_type != "online"
-            or current.key != track_key
+            or current.stable_identity != track_key
         ):
             print("已忽略过期在线歌词：", track_key)
             return
@@ -11789,20 +11812,28 @@ class MainWindow(QMainWindow):
         self.current_plain_lyrics = ""
         self.displayed_lyrics_song_path = None
         self.displayed_lyrics_track_key = track_key
-        if not text or payload.get("not_found"):
+        if payload.get("error") or lyrics_type == "error":
+            self.current_online_lyrics_state = "error"
+            self.lyrics_view.set_placeholder("歌词获取失败", source)
+            self.set_lyrics_status("歌词获取失败")
+        elif not text or payload.get("not_found"):
+            self.current_online_lyrics_state = "none"
             self.lyrics_view.set_placeholder("暂无歌词", source)
             self.set_lyrics_status("暂无歌词")
         elif lyrics_type == "lrc":
             parsed = self.parse_lrc_text(text)
             if parsed:
+                self.current_online_lyrics_state = "ready"
                 self.current_lyrics = parsed
                 self.lyrics_view.set_lyrics(parsed)
                 self.set_lyrics_status(f"时间轴歌词 · {source}")
             else:
+                self.current_online_lyrics_state = "ready"
                 self.current_plain_lyrics = text
                 self.lyrics_view.set_plain_text(text)
                 self.set_lyrics_status(f"纯文本歌词 · {source}")
         else:
+            self.current_online_lyrics_state = "ready"
             self.current_plain_lyrics = text
             self.lyrics_view.set_plain_text(text)
             self.set_lyrics_status(f"纯文本歌词 · {source}")
@@ -11871,6 +11902,7 @@ class MainWindow(QMainWindow):
         self.current_online_track = None
         self.current_media_item = MediaItem.from_local(song_data)
         self.current_plain_lyrics = ""
+        self.current_online_lyrics_state = ""
         self.displayed_lyrics_track_key = ""
         self.online_lyrics_service.cancel()
         self.online_artwork_service.cancel()
@@ -11974,6 +12006,7 @@ class MainWindow(QMainWindow):
         self.current_duration = 0
         self.current_lyrics = []
         self.current_plain_lyrics = ""
+        self.current_online_lyrics_state = ""
         self.displayed_lyrics_track_key = ""
 
         self.reset_playback_stats_session()
@@ -12869,7 +12902,9 @@ class MainWindow(QMainWindow):
         self.current_lyrics = []
         self.current_plain_lyrics = ""
         current = getattr(self, "current_media_item", None)
-        self.displayed_lyrics_track_key = current.key if isinstance(current, MediaItem) else ""
+        self.displayed_lyrics_track_key = (
+            current.stable_identity if isinstance(current, MediaItem) else ""
+        )
         self.displayed_lyrics_song_path = normalized_file_path
         self.lyrics_view.set_placeholder("正在查找歌词", "优先手动绑定，其次本地歌词，然后缓存和联网")
         self.set_lyrics_status("正在查找歌词")
@@ -13598,7 +13633,7 @@ class MainWindow(QMainWindow):
         if (
             isinstance(current, MediaItem)
             and current.media_type == "online"
-            and self.displayed_lyrics_track_key == current.key
+            and self.displayed_lyrics_track_key == current.stable_identity
         ):
             self.lyrics_view.update_by_position(position, self.current_lyrics)
             if hasattr(self, "full_lyrics_view"):
