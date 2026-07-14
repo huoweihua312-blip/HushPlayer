@@ -291,6 +291,8 @@ class GroupedLibraryView(QFrame):
 
     def show_groups(self) -> None:
         self.stack.setCurrentWidget(self.grid_page)
+        self.group_list.scrollToTop()
+        QTimer.singleShot(0, self.group_list.scrollToTop)
 
     def _detail_item(self, item: QListWidgetItem | None) -> dict | None:
         value = item.data(Qt.ItemDataRole.UserRole) if item is not None else None
@@ -500,7 +502,23 @@ class LibraryPage(QFrame):
         else:
             self.album_view.set_tracks(self._scope_tracks, self._scope_cache_key + ":album")
             self.content_stack.setCurrentWidget(self.album_view)
+        self.scroll_current_view_to_top()
         self.viewChanged.emit(mode)
+
+    def scroll_current_view_to_top(self) -> None:
+        if self.current_mode == "tracks":
+            self.track_view.scroll_to_top()
+            return
+        grouped_view = (
+            self.artist_view
+            if self.current_mode == "artists"
+            else self.album_view
+        )
+        if grouped_view.stack.currentWidget() is grouped_view.detail_page:
+            grouped_view.detail_tracks.scroll_to_top()
+        else:
+            grouped_view.group_list.scrollToTop()
+            QTimer.singleShot(0, grouped_view.group_list.scrollToTop)
 
     def invalidate_group_cache(self) -> None:
         self.artist_view.invalidate_cache()

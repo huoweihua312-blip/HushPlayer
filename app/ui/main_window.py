@@ -3790,6 +3790,7 @@ class MainWindow(QMainWindow):
         self.content_stack.addWidget(pending_imports_page)
         self.content_stack.addWidget(search_page)
         self.content_stack.addWidget(custom_source_manager_page)
+        self.content_stack.currentChanged.connect(self.on_content_page_changed)
 
         self.content_stack.setMinimumWidth(0)
         self.content_stack.setSizePolicy(
@@ -6471,7 +6472,39 @@ class MainWindow(QMainWindow):
             else:
                 self.content_stack.setCurrentIndex(0)
 
+            self.reset_page_scroll_to_top(library_panel)
+
         self.set_right_panel_mode("lyrics")
+
+    def reset_page_scroll_to_top(self, page: QWidget | None) -> None:
+        if page is None:
+            return
+
+        def reset() -> None:
+            scroll_areas: list[QWidget] = []
+            if isinstance(page, (QAbstractItemView, QScrollArea)):
+                scroll_areas.append(page)
+            scroll_areas.extend(page.findChildren(QAbstractItemView))
+            scroll_areas.extend(page.findChildren(QScrollArea))
+            seen: set[int] = set()
+            for area in scroll_areas:
+                if id(area) in seen or isinstance(area, LyricsView):
+                    continue
+                seen.add(id(area))
+                vertical_bar = area.verticalScrollBar()
+                vertical_bar.setValue(vertical_bar.minimum())
+                if isinstance(area, QAbstractItemView):
+                    area.scrollToTop()
+
+        QTimer.singleShot(0, reset)
+
+    def on_content_page_changed(self, _index: int) -> None:
+        page = (
+            self.content_stack.currentWidget()
+            if hasattr(self, "content_stack")
+            else None
+        )
+        self.reset_page_scroll_to_top(page)
 
     def set_sidebar_active(self, active_key: str) -> None:
         nav_buttons = {
@@ -8327,6 +8360,8 @@ class MainWindow(QMainWindow):
 
     def on_library_content_view_changed(self, mode: str) -> None:
         mode = str(mode)
+        if hasattr(self, "library_page"):
+            self.library_page.scroll_current_view_to_top()
         if mode == getattr(self, "initial_library_content_view", "tracks"):
             return
         self.initial_library_content_view = mode

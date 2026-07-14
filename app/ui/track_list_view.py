@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from PySide6.QtCore import QEvent, QRectF, QSize, Qt, Signal
+from PySide6.QtCore import QEvent, QRectF, QSize, Qt, QTimer, Signal
 from PySide6.QtGui import QColor, QFont, QFontMetrics, QPainter, QPen
 from PySide6.QtWidgets import (
     QAbstractItemView,
@@ -215,6 +215,10 @@ class TrackListView(QFrame):
             CanonicalTrackDelegate(playing_key_provider, self.list_widget)
         )
 
+    def scroll_to_top(self) -> None:
+        self.list_widget.scrollToTop()
+        QTimer.singleShot(0, self.list_widget.scrollToTop)
+
     def set_items(self, items: list[MediaItem | dict], empty_text: str = "没有找到歌曲") -> None:
         selected_key = ""
         current = self.list_widget.currentItem()
@@ -248,3 +252,4 @@ class TrackListView(QFrame):
         self.empty_label.setVisible(not has_items)
         if selected_item is not None:
             self.list_widget.setCurrentItem(selected_item)
+        self.scroll_to_top()

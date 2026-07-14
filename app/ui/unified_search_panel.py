@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from collections import OrderedDict
 
-from PySide6.QtCore import QSize, Qt, Signal
+from PySide6.QtCore import QSize, Qt, QTimer, Signal
 from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (
     QFrame,
@@ -108,6 +108,10 @@ class UnifiedSearchResultsPanel(QFrame):
                 QColor("#8fbcff") if is_playing else None,
             )
 
+    def scroll_to_top(self) -> None:
+        self.result_list.scrollToTop()
+        QTimer.singleShot(0, self.result_list.scrollToTop)
+
     def set_status(self, message: str) -> None:
         self.status_label.setText(str(message or ""))
 
@@ -164,6 +168,7 @@ class UnifiedSearchResultsPanel(QFrame):
         self.refresh_playing_indicator()
         if selected_item is not None:
             self.result_list.setCurrentItem(selected_item)
+        self.scroll_to_top()
         errors = self._summary.get("errors")
         if isinstance(errors, dict) and errors:
             messages = [str(message) for message in list(errors.values())[:3]]

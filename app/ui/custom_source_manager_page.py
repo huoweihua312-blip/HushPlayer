@@ -4,7 +4,7 @@ import hashlib
 from pathlib import Path
 from urllib.parse import urlsplit
 
-from PySide6.QtCore import Qt, QUrl, Signal
+from PySide6.QtCore import Qt, QTimer, QUrl, Signal
 from PySide6.QtNetwork import QNetworkAccessManager, QNetworkReply, QNetworkRequest
 from PySide6.QtWidgets import (
     QCheckBox,
@@ -400,6 +400,8 @@ class CustomSourceManagerPage(QFrame):
             self.source_list.setCurrentRow(0)
         else:
             self.on_selected_source_changed(None, None)
+        self.source_list.scrollToTop()
+        QTimer.singleShot(0, self.source_list.scrollToTop)
         self.status_label.setText(f"已注册 {len(custom_sources)} 个自定义来源。")
 
     def on_request_failed(self, _request_id: int, action: str, message: str) -> None:

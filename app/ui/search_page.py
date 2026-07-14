@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from PySide6.QtCore import QPoint, Qt, Signal
+from PySide6.QtCore import QPoint, Qt, QTimer, Signal
 from PySide6.QtWidgets import (
     QCheckBox,
     QFrame,
@@ -214,6 +214,13 @@ class SearchPage(QFrame):
                 if self._keyword
                 else "输入歌名、歌手或专辑"
             )
+        target_list = (
+            self.online_results.result_list
+            if online
+            else self.local_view.list_widget
+        )
+        target_list.scrollToTop()
+        QTimer.singleShot(0, target_list.scrollToTop)
 
     def current_tab(self) -> str:
         return (
