@@ -6,6 +6,7 @@ import re
 import shutil
 import sys
 import time
+from copy import deepcopy
 from pathlib import Path
 
 import requests
@@ -16,6 +17,7 @@ from app.services.online_artwork_service import OnlineArtworkService
 from app.services.online_download_manager import OnlineDownloadManager
 from app.services.online_lyrics_service import OnlineLyricsService
 from app.services.online_source_client import OnlineSourceClient
+from app.services.playlist_membership import PlaylistMembership
 from app.services.remote_track_store import RemoteTrackStore, RemoteTrackStoreError
 from app.services.source_registry import SourceRegistryManager
 from app.services.unified_search_service import UnifiedSearchService
@@ -4384,26 +4386,18 @@ class MainWindow(QMainWindow):
             self.playlists[playlist_id] = {
                 "name": "未命名歌单",
                 "songs": [],
+                "remoteSongs": [],
+                "members": [],
+                "membershipVersion": PlaylistMembership.VERSION,
                 "fixed": False,
             }
-
         playlist = self.playlists[playlist_id]
-        songs = playlist.setdefault("songs", [])
-
-        if not isinstance(songs, list):
-            playlist["songs"] = []
-            songs = playlist["songs"]
-
-        normalized_songs = []
-
-        for path in songs:
-            normalized_path = self.normalize_song_path(str(path))
-
-            if normalized_path and normalized_path not in normalized_songs:
-                normalized_songs.append(normalized_path)
-
-        playlist["songs"] = normalized_songs
-        return playlist["songs"]
+        PlaylistMembership.normalize_playlist(playlist, self.normalize_song_path)
+        return [
+            self.normalize_song_path(path)
+            for path in playlist["songs"]
+            if self.normalize_song_path(path)
+        ]
 
     def get_playlist_remote_ids(self, playlist_id: str) -> list[str]:
         if playlist_id not in self.playlists or not isinstance(self.playlists.get(playlist_id), dict):
@@ -4411,20 +4405,153 @@ class MainWindow(QMainWindow):
                 "name": "未命名歌单",
                 "songs": [],
                 "remoteSongs": [],
+                "members": [],
+                "membershipVersion": PlaylistMembership.VERSION,
                 "fixed": False,
             }
         playlist = self.playlists[playlist_id]
-        remote_ids = playlist.setdefault("remoteSongs", [])
-        if not isinstance(remote_ids, list):
-            playlist["remoteSongs"] = []
-            remote_ids = playlist["remoteSongs"]
-        normalized_ids = []
-        for stable_id in remote_ids:
-            value = str(stable_id or "").strip()
-            if value and value not in normalized_ids:
-                normalized_ids.append(value)
-        playlist["remoteSongs"] = normalized_ids
+        PlaylistMembership.normalize_playlist(playlist, self.normalize_song_path)
         return playlist["remoteSongs"]
+
+    def set_playlist_member(
+        self,
+        playlist_id: str,
+        kind: str,
+        identifier: str,
+        present: bool,
+    ) -> bool:
+        playlist = self.playlists.get(playlist_id)
+        if not isinstance(playlist, dict):
+            return False
+        previous = deepcopy(playlist)
+        if present:
+            changed = PlaylistMembership.add_member(
+                playlist,
+                kind,
+                identifier,
+                self.normalize_song_path,
+            )
+        else:
+            changed = PlaylistMembership.remove_member(
+                playlist,
+                kind,
+                identifier,
+                self.normalize_song_path,
+            )
+        if not changed:
+            return False
+        if not self.save_playlists():
+            self.playlists[playlist_id] = previous
+            return False
+        self.mark_library_list_dirty()
+        return True
+
+    def add_local_path_to_playlist(self, path: str, playlist_id: str) -> bool:
+        return self.set_playlist_member(
+            playlist_id,
+            PlaylistMembership.LOCAL,
+            self.normalize_song_path(path),
+            True,
+        )
+
+    def add_local_paths_to_playlist(
+        self,
+        paths: list[str],
+        playlist_id: str,
+    ) -> int:
+        playlist = self.playlists.get(playlist_id)
+        if not isinstance(playlist, dict):
+            return 0
+        previous = deepcopy(playlist)
+        added_count = 0
+        for path in paths:
+            if PlaylistMembership.add_member(
+                playlist,
+                PlaylistMembership.LOCAL,
+                self.normalize_song_path(path),
+                self.normalize_song_path,
+            ):
+                added_count += 1
+        if added_count <= 0:
+            return 0
+        if not self.save_playlists():
+            self.playlists[playlist_id] = previous
+            return 0
+        self.mark_library_list_dirty()
+        return added_count
+
+    def remove_local_path_from_playlist(self, path: str, playlist_id: str) -> bool:
+        return self.set_playlist_member(
+            playlist_id,
+            PlaylistMembership.LOCAL,
+            self.normalize_song_path(path),
+            False,
+        )
+
+    def add_remote_id_to_playlist(self, stable_id: str, playlist_id: str) -> bool:
+        return self.set_playlist_member(
+            playlist_id,
+            PlaylistMembership.REMOTE,
+            stable_id,
+            True,
+        )
+
+    def remove_remote_id_from_playlist(self, stable_id: str, playlist_id: str) -> bool:
+        return self.set_playlist_member(
+            playlist_id,
+            PlaylistMembership.REMOTE,
+            stable_id,
+            False,
+        )
+
+    def get_playlist_member_added_at(
+        self,
+        playlist_id: str,
+        kind: str,
+        identifier: str,
+    ) -> int:
+        playlist = self.playlists.get(playlist_id)
+        if not isinstance(playlist, dict):
+            return 0
+        return PlaylistMembership.added_at(
+            playlist,
+            kind,
+            identifier,
+            self.normalize_song_path,
+        )
+
+    def get_playlist_membership_signature(
+        self,
+        playlist_id: str,
+    ) -> tuple[tuple[str, str, int], ...]:
+        playlist = self.playlists.get(playlist_id)
+        if not isinstance(playlist, dict):
+            return ()
+        return PlaylistMembership.signature(playlist, self.normalize_song_path)
+
+    def playlist_id_for_current_view(self) -> str:
+        if self.current_library_view == "liked":
+            return "liked"
+        if self.current_library_view.startswith("playlist:"):
+            return self.current_library_view.split("playlist:", 1)[1]
+        return ""
+
+    def playlist_member_added_at_for_song(
+        self,
+        playlist_id: str,
+        song_data: dict,
+    ) -> int:
+        if song_data.get("recordKind") == "remote":
+            return self.get_playlist_member_added_at(
+                playlist_id,
+                PlaylistMembership.REMOTE,
+                str(song_data.get("remoteStableId") or ""),
+            )
+        return self.get_playlist_member_added_at(
+            playlist_id,
+            PlaylistMembership.LOCAL,
+            self.normalize_song_path(song_data.get("path", "")),
+        )
 
     def get_online_playlist_choices(self) -> list[tuple[str, str]]:
         return [
@@ -4489,13 +4616,10 @@ class MainWindow(QMainWindow):
     def unlike_online_track(self, track: dict) -> None:
         track = MediaItem.from_mapping(track).to_legacy_online()
         stable_id = RemoteTrackStore.stable_id_for_track(track)
-        liked_ids = self.get_playlist_remote_ids("liked")
-        if stable_id not in liked_ids:
+        if stable_id not in self.get_playlist_remote_ids("liked"):
             self.set_online_status_message("该在线歌曲尚未收藏。")
             return
-        liked_ids.remove(stable_id)
-        if not self.save_playlists():
-            liked_ids.append(stable_id)
+        if not self.remove_remote_id_from_playlist(stable_id, "liked"):
             return
         self.refresh_remote_collection_views()
         self.set_online_status_message("已取消收藏该在线歌曲。")
@@ -4510,15 +4634,12 @@ class MainWindow(QMainWindow):
         except RemoteTrackStoreError as error:
             QMessageBox.warning(self, "保存在线歌曲失败", str(error))
             return
-        remote_ids = self.get_playlist_remote_ids(playlist_id)
-        if stable_id in remote_ids:
+        if stable_id in self.get_playlist_remote_ids(playlist_id):
             self.set_online_status_message(
                 f"该歌曲已经在“{self.get_playlist_name(playlist_id)}”中。"
             )
             return
-        remote_ids.append(stable_id)
-        if not self.save_playlists():
-            remote_ids.remove(stable_id)
+        if not self.add_remote_id_to_playlist(stable_id, playlist_id):
             return
         self.refresh_remote_collection_views()
         self.set_online_status_message(
@@ -4578,11 +4699,15 @@ class MainWindow(QMainWindow):
     def refresh_remote_collection_views(self) -> None:
         self.sync_remote_song_items()
         self.refresh_playlist_view_buttons()
+        self.refresh_playlist_membership_views()
+
+    def refresh_playlist_membership_views(self) -> None:
         if self.current_library_view == "liked" or self.current_library_view.startswith("playlist:"):
-            self.sort_song_list_for_current_view()
+            self.sort_song_list_for_current_view(force=True)
             self.filter_song_list(self.search_input.text())
         self.refresh_unified_search_result_states()
         self.update_like_button()
+        self.update_side_info_panel()
 
     def get_custom_playlist_ids(self) -> list[str]:
         playlist_ids = []
@@ -4721,17 +4846,7 @@ class MainWindow(QMainWindow):
         if playlist_id == "liked" or playlist_id not in self.playlists:
             return
 
-        playlist_songs = self.get_playlist_song_paths(playlist_id)
-        added_count = 0
-
-        for song_path in song_paths:
-            normalized_path = self.normalize_song_path(song_path)
-
-            if not normalized_path or normalized_path in playlist_songs:
-                continue
-
-            playlist_songs.append(normalized_path)
-            added_count += 1
+        added_count = self.add_local_paths_to_playlist(song_paths, playlist_id)
 
         playlist_name = self.get_playlist_name(playlist_id)
 
@@ -4739,10 +4854,8 @@ class MainWindow(QMainWindow):
             self.show_playlist_sidebar_hint(f"所选歌曲已经在「{playlist_name}」中")
             return
 
-        self.save_playlists()
-
         if self.current_library_view == f"playlist:{playlist_id}":
-            self.sort_song_list_for_current_view()
+            self.sort_song_list_for_current_view(force=True)
             self.filter_song_list(self.search_input.text())
 
         skipped_count = max(0, len(song_paths) - added_count)
@@ -4842,6 +4955,10 @@ class MainWindow(QMainWindow):
         else:
             target_view = "all"
         self.current_library_view = target_view
+        if previous_view != target_view:
+            self.library_sort_field = None
+            self.library_sort_descending = False
+            self.update_library_sort_headers()
         current_key = self.current_library_view_key() if hasattr(self, "song_list") else None
         if (
             previous_view == target_view
@@ -4896,6 +5013,15 @@ class MainWindow(QMainWindow):
 
         if song_data.get("demo"):
             return self.current_library_view == "all"
+
+        if song_data.get("recordKind") == "remote":
+            stable_id = str(song_data.get("remoteStableId") or "")
+            if self.current_library_view == "liked":
+                return stable_id in self.get_playlist_remote_ids("liked")
+            if self.current_library_view.startswith("playlist:"):
+                playlist_id = self.current_library_view.split("playlist:", 1)[1]
+                return stable_id in self.get_playlist_remote_ids(playlist_id)
+            return False
 
         path = song_data.get("path", "")
         normalized_path = self.normalize_song_path(path)
@@ -5139,11 +5265,18 @@ class MainWindow(QMainWindow):
         if field not in {"title", "artist", "album", "added_at"}:
             return
 
-        if self.library_sort_field == field:
-            self.library_sort_descending = not self.library_sort_descending
-        else:
+        if self.library_sort_field != field:
             self.library_sort_field = field
-            self.library_sort_descending = field == "added_at"
+            self.library_sort_descending = False
+        elif not self.library_sort_descending:
+            self.library_sort_descending = True
+        else:
+            self.library_sort_field = None
+            self.library_sort_descending = False
+            self.update_library_sort_headers()
+            self.sort_song_list_for_current_view(force=True)
+            self.filter_song_list(self.search_input.text())
+            return
 
         self.apply_current_library_sort()
 
@@ -5179,10 +5312,17 @@ class MainWindow(QMainWindow):
                 return False, 0 if field == "added_at" else ""
 
             if field == "added_at":
-                try:
-                    value = int(song_data.get("added_at", 0) or 0)
-                except (TypeError, ValueError):
-                    value = 0
+                playlist_id = self.playlist_id_for_current_view()
+                if playlist_id:
+                    value = self.playlist_member_added_at_for_song(
+                        playlist_id,
+                        song_data,
+                    )
+                else:
+                    try:
+                        value = int(song_data.get("added_at", 0) or 0)
+                    except (TypeError, ValueError):
+                        value = 0
 
                 return value > 0, value
 
@@ -5366,9 +5506,10 @@ class MainWindow(QMainWindow):
 
         if view_name == "liked":
             return (
-                "library_default",
+                "playlist",
+                "liked",
                 song_count,
-                tuple(self.get_playlist_remote_ids("liked")),
+                self.get_playlist_membership_signature("liked"),
             )
 
         if view_name in {"recent_played", "frequent", "recent_added"}:
@@ -5379,17 +5520,21 @@ class MainWindow(QMainWindow):
             return (
                 "playlist",
                 playlist_id,
-                tuple(self.get_playlist_song_paths(playlist_id)),
-                tuple(self.get_playlist_remote_ids(playlist_id)),
+                song_count,
+                self.get_playlist_membership_signature(playlist_id),
             )
 
         return ("library_default", song_count)
 
-    def sort_song_list_for_current_view(self) -> bool:
+    def sort_song_list_for_current_view(self, force: bool = False) -> bool:
         started_at = time.perf_counter()
         order_key = self.current_song_list_order_key()
 
-        if not getattr(self, "library_list_dirty", True) and order_key == getattr(self, "last_song_list_order_key", None):
+        if (
+            not force
+            and not getattr(self, "library_list_dirty", True)
+            and order_key == getattr(self, "last_song_list_order_key", None)
+        ):
             elapsed_ms = (time.perf_counter() - started_at) * 1000
             print(f"[perf] sort_song_list_for_current_view skip: {elapsed_ms:.1f} ms, key={order_key[0]}")
             return False
@@ -5435,25 +5580,17 @@ class MainWindow(QMainWindow):
                 reverse=True,
             )
 
-        elif self.current_library_view.startswith("playlist:"):
-            playlist_id = self.current_library_view.split("playlist:", 1)[1]
-            playlist_songs = self.get_playlist_song_paths(playlist_id)
-            playlist_remote_ids = self.get_playlist_remote_ids(playlist_id)
-            playlist_order = {
-                path: index
-                for index, path in enumerate(playlist_songs)
-            }
-            remote_order = {
-                stable_id: len(playlist_songs) + index
-                for index, stable_id in enumerate(playlist_remote_ids)
-            }
-
+        elif (
+            self.current_library_view == "liked"
+            or self.current_library_view.startswith("playlist:")
+        ):
+            playlist_id = self.playlist_id_for_current_view()
             songs.sort(
-                key=lambda song: (
-                    remote_order.get(str(song.get("remoteStableId") or ""), 999999)
-                    if song.get("recordKind") == "remote"
-                    else playlist_order.get(normalized_path(song), 999999)
+                key=lambda song: self.playlist_member_added_at_for_song(
+                    playlist_id,
+                    song,
                 ),
+                reverse=True,
             )
 
         else:
@@ -5488,6 +5625,8 @@ class MainWindow(QMainWindow):
             "name": name,
             "songs": [],
             "remoteSongs": [],
+            "members": [],
+            "membershipVersion": PlaylistMembership.VERSION,
             "fixed": False,
             "created_at": int(time.time()),
         }
@@ -5636,15 +5775,10 @@ class MainWindow(QMainWindow):
         if not playlist_id:
             return
 
-        playlist_songs = self.get_playlist_song_paths(playlist_id)
+        added = self.add_local_path_to_playlist(song_path, playlist_id)
 
-        if song_path not in playlist_songs:
-            playlist_songs.append(song_path)
-
-        self.save_playlists()
-
-        if self.current_library_view == f"playlist:{playlist_id}":
-            self.filter_song_list(self.search_input.text())
+        if added:
+            self.refresh_playlist_membership_views()
 
         print(f"已添加到歌单「{selected_name}」：", song_path)
 
@@ -5656,14 +5790,10 @@ class MainWindow(QMainWindow):
             return
 
         if self.current_library_view == "liked":
-            liked_songs = self.get_liked_song_paths()
-
-            if song_path in liked_songs:
-                liked_songs.remove(song_path)
-                self.save_playlists()
+            if self.remove_local_path_from_playlist(song_path, "liked"):
                 self.update_like_button()
                 self.update_side_info_panel()
-                self.filter_song_list(self.search_input.text())
+                self.refresh_playlist_membership_views()
 
             return
 
@@ -5672,12 +5802,8 @@ class MainWindow(QMainWindow):
             return
 
         playlist_id = self.current_library_view.split("playlist:", 1)[1]
-        playlist_songs = self.get_playlist_song_paths(playlist_id)
-
-        if song_path in playlist_songs:
-            playlist_songs.remove(song_path)
-            self.save_playlists()
-            self.filter_song_list(self.search_input.text())
+        if self.remove_local_path_from_playlist(song_path, playlist_id):
+            self.refresh_playlist_membership_views()
 
             print("已从当前歌单移除：", song_path)
 
@@ -5735,6 +5861,9 @@ class MainWindow(QMainWindow):
             return "未知时间"
 
     def get_current_info_song_data(self) -> dict | None:
+        current = getattr(self, "current_media_item", None)
+        if isinstance(current, MediaItem) and current.media_type == "online":
+            return current.to_dict()
         playing_path = self.normalize_song_path(self.current_song_path)
 
         if not playing_path:
@@ -5762,6 +5891,8 @@ class MainWindow(QMainWindow):
         artist = song_data.get("artist", "未知艺术家")
         album = song_data.get("album", "未知专辑")
         song_path = self.normalize_song_path(song_data.get("path", ""))
+        current = getattr(self, "current_media_item", None)
+        is_online = isinstance(current, MediaItem) and current.media_type == "online"
 
         stats = self.song_stats.get(
             song_path,
@@ -5783,12 +5914,17 @@ class MainWindow(QMainWindow):
 
         self.side_artist_detail.setText(str(artist))
         self.side_album_detail.setText(str(album))
-        self.side_like_detail.setText("已收藏" if self.is_song_liked(song_path) else "未收藏")
+        liked = (
+            bool(self.get_online_track_collection_state(current.to_dict()).get("liked"))
+            if is_online
+            else self.is_song_liked(song_path)
+        )
+        self.side_like_detail.setText("已收藏" if liked else "未收藏")
         self.side_play_count_detail.setText(f"{play_count} 次")
         self.side_listen_time_detail.setText(self.format_listen_time(total_listen_time))
         self.side_last_played_detail.setText(self.format_last_played_text(last_played))
         self.side_lyrics_status_value.setText(lyrics_status or "未知")
-        self.side_file_detail.setText(song_path)
+        self.side_file_detail.setText(current.source_name if is_online else song_path)
 
     def open_immersive_lyrics_window(self) -> None:
         was_already_visible = (
@@ -10368,11 +10504,14 @@ class MainWindow(QMainWindow):
             return default_settings
 
     def load_playlists(self) -> dict:
+        self.playlists_migration_pending = False
         default_playlists = {
             "liked": {
                 "name": "我喜欢",
                 "songs": [],
                 "remoteSongs": [],
+                "members": [],
+                "membershipVersion": PlaylistMembership.VERSION,
                 "fixed": True,
             }
         }
@@ -10409,6 +10548,16 @@ class MainWindow(QMainWindow):
                 if not isinstance(playlist["remoteSongs"], list):
                     playlist["remoteSongs"] = []
 
+            try:
+                anchor_ms = int(self.playlists_file.stat().st_mtime * 1000)
+            except OSError:
+                anchor_ms = int(time.time() * 1000)
+            self.playlists_migration_pending = PlaylistMembership.normalize_document(
+                playlists,
+                self.normalize_song_path,
+                anchor_ms=anchor_ms,
+            )
+
             self.playlists_load_error = ""
             return playlists
 
@@ -10430,8 +10579,15 @@ class MainWindow(QMainWindow):
                 "name": "我喜欢",
                 "songs": [],
                 "remoteSongs": [],
+                "members": [],
+                "membershipVersion": PlaylistMembership.VERSION,
                 "fixed": True,
             }
+
+        PlaylistMembership.normalize_document(
+            self.playlists,
+            self.normalize_song_path,
+        )
 
         temporary_path = self.playlists_file.with_suffix(".json.tmp")
         temporary_path.write_text(
@@ -10440,6 +10596,7 @@ class MainWindow(QMainWindow):
         )
         temporary_path.replace(self.playlists_file)
 
+        self.playlists_migration_pending = False
         print("歌单已保存：", self.playlists_file)
         return True
 
@@ -10459,17 +10616,21 @@ class MainWindow(QMainWindow):
                 "name": "我喜欢",
                 "songs": [],
                 "remoteSongs": [],
+                "members": [],
+                "membershipVersion": PlaylistMembership.VERSION,
                 "fixed": True,
             },
         )
 
-        songs = liked_playlist.setdefault("songs", [])
-
-        if not isinstance(songs, list):
-            liked_playlist["songs"] = []
-            songs = liked_playlist["songs"]
-
-        return songs
+        PlaylistMembership.normalize_playlist(
+            liked_playlist,
+            self.normalize_song_path,
+        )
+        return [
+            self.normalize_song_path(path)
+            for path in liked_playlist["songs"]
+            if self.normalize_song_path(path)
+        ]
 
     def is_song_liked(self, path: str | None) -> bool:
         normalized_path = self.normalize_song_path(path)
@@ -10533,21 +10694,18 @@ class MainWindow(QMainWindow):
             print("当前没有可收藏的真实歌曲。")
             return
 
-        liked_songs = self.get_liked_song_paths()
-
-        if target_path in liked_songs:
-            liked_songs.remove(target_path)
+        if self.is_song_liked(target_path):
+            changed = self.remove_local_path_from_playlist(target_path, "liked")
             print("已取消收藏：", target_path)
         else:
-            liked_songs.append(target_path)
+            changed = self.add_local_path_to_playlist(target_path, "liked")
             print("已加入我喜欢：", target_path)
 
-        self.save_playlists()
+        if not changed:
+            return
         self.update_like_button()
         self.update_side_info_panel()
-
-        if self.current_library_view == "liked":
-            self.filter_song_list(self.search_input.text())
+        self.refresh_playlist_membership_views()
 
     def load_song_stats(self) -> dict:
         if not self.stats_file.exists():
@@ -11269,30 +11427,27 @@ class MainWindow(QMainWindow):
         if not removed_paths:
             return
 
+        previous_playlists = deepcopy(self.playlists)
         playlists_changed = False
 
         for playlist in self.playlists.values():
             if not isinstance(playlist, dict):
                 continue
 
-            songs = playlist.get("songs", [])
-
-            if not isinstance(songs, list):
-                continue
-
-            cleaned_songs = [
-                self.normalize_song_path(path)
-                for path in songs
-                if self.normalize_song_path(path) not in removed_paths
-            ]
-
-            if cleaned_songs != songs:
-                playlist["songs"] = cleaned_songs
-                playlists_changed = True
+            for path in removed_paths:
+                playlists_changed = PlaylistMembership.remove_member(
+                    playlist,
+                    PlaylistMembership.LOCAL,
+                    path,
+                    self.normalize_song_path,
+                ) or playlists_changed
 
         if playlists_changed:
-            self.save_playlists()
-            self.refresh_playlist_view_buttons()
+            if self.save_playlists():
+                self.mark_library_list_dirty()
+                self.refresh_playlist_view_buttons()
+            else:
+                self.playlists = previous_playlists
 
         if isinstance(getattr(self, "play_queue", None), list):
             cleaned_queue = [
@@ -13134,11 +13289,8 @@ class MainWindow(QMainWindow):
             playlist_id = self.current_library_view.split("playlist:", 1)[1]
         else:
             return
-        remote_ids = self.get_playlist_remote_ids(playlist_id)
-        if stable_id in remote_ids:
-            remote_ids.remove(stable_id)
-            if not self.save_playlists():
-                remote_ids.append(stable_id)
+        if stable_id in self.get_playlist_remote_ids(playlist_id):
+            if not self.remove_remote_id_from_playlist(stable_id, playlist_id):
                 return
             self.refresh_remote_collection_views()
 
@@ -13163,23 +13315,21 @@ class MainWindow(QMainWindow):
         if not song_path:
             return
 
-        liked_songs = self.get_liked_song_paths()
-
-        if song_path in liked_songs:
-            liked_songs.remove(song_path)
+        if self.is_song_liked(song_path):
+            changed = self.remove_local_path_from_playlist(song_path, "liked")
             print("已取消收藏：", song_path)
         else:
-            liked_songs.append(song_path)
+            changed = self.add_local_path_to_playlist(song_path, "liked")
             print("已加入我喜欢：", song_path)
 
-        self.save_playlists()
+        if not changed:
+            return
 
         if self.current_song_path and self.normalize_song_path(self.current_song_path) == song_path:
             self.update_like_button()
             self.update_side_info_panel()
 
-        if self.current_library_view == "liked":
-            self.filter_song_list(self.search_input.text())
+        self.refresh_playlist_membership_views()
 
     def open_selected_song_folder(self) -> None:
         song_path = self.get_current_selected_song_path()

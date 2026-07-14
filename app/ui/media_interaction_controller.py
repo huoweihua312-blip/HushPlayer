@@ -44,18 +44,14 @@ class MediaInteractionController(QObject):
         path = self.window.normalize_song_path(item.local_file_path)
         if not path:
             return
-        liked_paths = self.window.get_liked_song_paths()
-        changed = False
-        if liked and path not in liked_paths:
-            liked_paths.append(path)
-            changed = True
-        elif not liked and path in liked_paths:
-            liked_paths.remove(path)
-            changed = True
+        changed = (
+            self.window.add_local_path_to_playlist(path, "liked")
+            if liked
+            else self.window.remove_local_path_from_playlist(path, "liked")
+        )
         if not changed:
             return
-        self.window.save_playlists()
-        self.window.filter_song_list("")
+        self.window.refresh_playlist_membership_views()
         self.window.search_page.set_local_results(
             self.window.search_input.text(),
             self.window.collect_local_search_results(self.window.search_input.text()),
@@ -66,10 +62,8 @@ class MediaInteractionController(QObject):
         path = self.window.normalize_song_path(item.local_file_path)
         if not path or playlist_id not in self.window.playlists:
             return
-        songs = self.window.get_playlist_song_paths(playlist_id)
-        if path not in songs:
-            songs.append(path)
-            self.window.save_playlists()
+        if self.window.add_local_path_to_playlist(path, playlist_id):
+            self.window.refresh_playlist_membership_views()
 
     def remove_local_from_current_playlist(self, value: dict) -> None:
         item = MediaItem.from_mapping(value)
@@ -80,11 +74,8 @@ class MediaInteractionController(QObject):
             playlist_id = self.window.current_library_view.split("playlist:", 1)[1]
         else:
             return
-        songs = self.window.get_playlist_song_paths(playlist_id)
-        if path in songs:
-            songs.remove(path)
-            self.window.save_playlists()
-            self.window.filter_song_list("")
+        if self.window.remove_local_path_from_playlist(path, playlist_id):
+            self.window.refresh_playlist_membership_views()
 
     def open_local_folder(self, value: dict) -> None:
         item = MediaItem.from_mapping(value)
@@ -109,6 +100,11 @@ class MediaInteractionController(QObject):
 
     def show_info(self, value: dict) -> None:
         item = MediaItem.from_mapping(value)
+        collection_state = (
+            self.window.get_online_track_collection_state(item.to_dict())
+            if item.media_type == "online"
+            else self.get_local_state(item.to_dict())
+        )
         stats = (
             self.window.song_stats.get(
                 self.window.normalize_song_path(item.local_file_path), {}
@@ -116,7 +112,12 @@ class MediaInteractionController(QObject):
             if item.media_type == "local"
             else {}
         )
-        dialog = TrackDetailsDialog(item, stats, self.window)
+        dialog = TrackDetailsDialog(
+            item,
+            stats,
+            self.window,
+            collection_state=collection_state,
+        )
         self.window.prepare_dark_dialog(dialog)
         dialog.exec()
 

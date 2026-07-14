@@ -21,10 +21,17 @@ from app.models.media_item import MediaItem
 class TrackDetailsPanel(QFrame):
     """Read-only details panel shared by local and online tracks."""
 
-    def __init__(self, value: MediaItem | dict, stats: dict | None = None, parent=None) -> None:
+    def __init__(
+        self,
+        value: MediaItem | dict,
+        stats: dict | None = None,
+        parent=None,
+        collection_state: dict | None = None,
+    ) -> None:
         super().__init__(parent)
         self.item = MediaItem.from_mapping(value)
         self.stats = dict(stats or {})
+        self.collection_state = dict(collection_state or {})
         self.setObjectName("trackDetailsPanel")
         self._build_ui()
 
@@ -85,6 +92,7 @@ class TrackDetailsPanel(QFrame):
     def _online_rows(self) -> list[tuple[str, str]]:
         return [
             ("来源", self.item.source_name),
+            ("收藏状态", "已收藏" if self.collection_state.get("liked") else "未收藏"),
             ("在线歌曲 ID", self.item.track_id),
             ("专辑", self.item.album),
             ("时长", self._duration(self.item.duration)),
@@ -106,6 +114,7 @@ class TrackDetailsPanel(QFrame):
         play_count = self._safe_int(self.stats.get("play_count"))
         listen_ms = self._safe_int(self.stats.get("total_listen_time"))
         return [
+            ("收藏状态", "已收藏" if self.collection_state.get("liked") else "未收藏"),
             ("文件路径", self.item.local_file_path or "文件不可用"),
             ("文件格式", self.item.format.upper() if self.item.format else "未知"),
             ("文件大小", self._size(size)),
@@ -142,7 +151,13 @@ class TrackDetailsPanel(QFrame):
 
 
 class TrackDetailsDialog(QDialog):
-    def __init__(self, value: MediaItem | dict, stats: dict | None = None, parent=None) -> None:
+    def __init__(
+        self,
+        value: MediaItem | dict,
+        stats: dict | None = None,
+        parent=None,
+        collection_state: dict | None = None,
+    ) -> None:
         super().__init__(parent)
         self.setObjectName("trackDetailsDialog")
         self.setWindowTitle("歌曲信息")
@@ -152,7 +167,14 @@ class TrackDetailsDialog(QDialog):
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QFrame.Shape.NoFrame)
-        scroll.setWidget(TrackDetailsPanel(value, stats, scroll))
+        scroll.setWidget(
+            TrackDetailsPanel(
+                value,
+                stats,
+                scroll,
+                collection_state=collection_state,
+            )
+        )
         close_button = QPushButton("关闭")
         close_button.setObjectName("primaryButton")
         close_button.clicked.connect(self.accept)
