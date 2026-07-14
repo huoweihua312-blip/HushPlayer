@@ -396,6 +396,13 @@ function normalizeResolvedResource(result, requestedQuality = "standard") {
         expiresAt: result.expiresAt ?? null,
         seekable: result.seekable !== false,
         filename: String(result.filename || "").trim(),
+        title: displayText(result.title || result.name),
+        artist: displayText(result.artist || result.artists || result.singer),
+        album: displayText(result.album || result.albumName),
+        artwork: displayText(
+            result.artwork || result.coverImg || result.picUrl || result.pic || result.cover
+        ),
+        duration: normalizeDuration(result.duration || result.interval || result.time),
     };
 }
 
@@ -571,10 +578,18 @@ async function getMetadata(sourceId, musicItem, options = {}) {
         metadataMethod.call(loaded.plugin, rawItem),
         `音源 ${sourceId} 元数据请求`
     );
+    const metadata = serializable(result) || {};
+    const metadataBody = metadata?.data && typeof metadata.data === "object"
+        ? metadata.data
+        : metadata;
+    const enrichedItem = {
+        ...rawItem,
+        ...(metadataBody && typeof metadataBody === "object" ? metadataBody : {}),
+    };
     return {
         available: true,
-        item: normalizeMusicItem(loaded.source, rawItem, loaded.capabilities),
-        metadata: serializable(result) || {},
+        item: normalizeMusicItem(loaded.source, enrichedItem, loaded.capabilities),
+        metadata,
     };
 }
 

@@ -25,6 +25,56 @@ def _safe_duration(value: Any) -> int:
     return max(0, int(round(duration)))
 
 
+def _metadata_candidates(value: dict) -> list[dict]:
+    """Return provider metadata mappings from most to least specific."""
+
+    if not isinstance(value, dict):
+        return []
+    candidates: list[dict] = []
+    metadata = value.get("metadata")
+    if isinstance(metadata, dict):
+        nested = metadata.get("data")
+        if isinstance(nested, dict):
+            candidates.append(nested)
+        candidates.append(metadata)
+    item = value.get("item")
+    if isinstance(item, dict):
+        candidates.append(item)
+    nested = value.get("data")
+    if isinstance(nested, dict):
+        candidates.append(nested)
+    candidates.append(value)
+    return candidates
+
+
+def _metadata_text(
+    candidates: list[dict],
+    keys: tuple[str, ...],
+    current: str,
+    placeholders: set[str] | None = None,
+) -> str:
+    placeholders = placeholders or set()
+    for candidate in candidates:
+        for key in keys:
+            value = candidate.get(key)
+            if isinstance(value, (list, tuple)):
+                parts = []
+                for item in value:
+                    if isinstance(item, dict):
+                        item = item.get("name") or item.get("title") or item.get("value")
+                    if item is not None and str(item).strip():
+                        parts.append(str(item).strip())
+                text = " / ".join(parts)
+            elif isinstance(value, dict):
+                nested = value.get("name") or value.get("title") or value.get("value")
+                text = str(nested or "").strip()
+            else:
+                text = str(value or "").strip()
+            if text and text not in placeholders:
+                return text
+    return current
+
+
 @dataclass(slots=True)
 class MediaItem:
     """Canonical track data used by new library, search and detail UI.
@@ -205,9 +255,10 @@ class MediaItem:
         return bool(self.local_file_path and Path(self.local_file_path).is_file())
 
     def with_resolution(self, resolution: dict) -> "MediaItem":
+        enriched = self.with_metadata(resolution)
         return replace(
-            self,
-            play_url=_first_text(resolution, "url", "play_url", default=self.play_url),
+            enriched,
+            play_url=_first_text(resolution, "url", "play_url", default=enriched.play_url),
             lyrics=_first_text(
                 resolution,
                 "lyrics",
@@ -216,15 +267,108 @@ class MediaItem:
                 "rawLrc",
                 "syncedLyrics",
                 "plainLyrics",
-                default=self.lyrics,
+                default=enriched.lyrics,
             ),
             cover_url=_first_text(
-                resolution, "cover_url", "artwork", "pic", "cover", default=self.cover_url
+                resolution,
+                "cover_url",
+                "artwork",
+                "pic",
+                "cover",
+                default=enriched.cover_url,
             ),
-            quality=_first_text(resolution, "quality", "bitrate", default=self.quality),
+            quality=_first_text(resolution, "quality", "bitrate", default=enriched.quality),
             format=_first_text(
-                resolution, "format", "mimeType", "type", "ext", default=self.format
+                resolution,
+                "format",
+                "mimeType",
+                "type",
+                "ext",
+                default=enriched.format,
             ),
+        )
+
+    def with_metadata(self, result: dict) -> "MediaItem":
+        """Merge richer provider metadata without changing the stable identity."""
+
+        candidates = _metadata_candidates(result)
+        if not candidates:
+            return self
+        duration = self.duration
+        for candidate in candidates:
+            candidate_duration = _safe_duration(
+                candidate.get("duration")
+                or candidate.get("interval")
+                or candidate.get("time")
+            )
+            if candidate_duration:
+                duration = candidate_duration
+                break
+        provider_data = self.extra.get("provider_data")
+        merged_provider_data = (
+            dict(provider_data) if isinstance(provider_data, dict) else {}
+        )
+        for candidate in reversed(candidates):
+            raw = candidate.get("raw")
+            if isinstance(raw, dict):
+                merged_provider_data.update(raw)
+            merged_provider_data.update(
+                {
+                    key: value
+                    for key, value in candidate.items()
+                    if key not in {"item", "metadata", "data", "raw"}
+                    and value is not None
+                }
+            )
+        extra = dict(self.extra)
+        extra["provider_data"] = merged_provider_data
+        return replace(
+            self,
+            title=_metadata_text(
+                candidates,
+                ("title", "name"),
+                self.title,
+                {"未知歌曲"},
+            ),
+            artist=_metadata_text(
+                candidates,
+                ("artist", "artists", "singer"),
+                self.artist,
+                {"未知艺术家"},
+            ),
+            album=_metadata_text(
+                candidates,
+                ("album", "albumName"),
+                self.album,
+                {"未知专辑"},
+            ),
+            duration=duration,
+            cover_url=_metadata_text(
+                candidates,
+                ("cover_url", "artwork", "coverImg", "picUrl", "pic", "cover"),
+                self.cover_url,
+            ),
+            lyrics=_metadata_text(
+                candidates,
+                ("lyrics", "lyric", "lrc", "rawLrc", "syncedLyrics", "plainLyrics"),
+                self.lyrics,
+            ),
+            lyrics_url=_metadata_text(
+                candidates,
+                ("lyrics_url", "lyricUrl"),
+                self.lyrics_url,
+            ),
+            quality=_metadata_text(
+                candidates,
+                ("quality", "bitrate"),
+                self.quality,
+            ),
+            format=_metadata_text(
+                candidates,
+                ("format", "type", "ext"),
+                self.format,
+            ),
+            extra=extra,
         )
 
     def to_dict(self) -> dict:

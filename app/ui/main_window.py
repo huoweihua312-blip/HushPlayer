@@ -3529,7 +3529,13 @@ class MainWindow(QMainWindow):
         self.current_media_item: MediaItem | None = None
         self.current_online_track: dict | None = None
         self.pending_online_track: dict | None = None
+        self.pending_online_media_item: MediaItem | None = None
         self.pending_online_playback_request = 0
+        self.pending_online_metadata_request = 0
+        self.pending_online_metadata_identity = ""
+        self.pending_online_ui_snapshot: dict | None = None
+        self.presented_online_identity = ""
+        self.presented_online_cover_url = ""
         self.pending_online_download_track: dict | None = None
         self.pending_online_download_request = 0
         self.active_online_download_track: dict | None = None
@@ -3771,6 +3777,8 @@ class MainWindow(QMainWindow):
         )
         self.online_lyrics_service.lyricsReady.connect(self.on_online_lyrics_ready)
         self.online_artwork_service.imageReady.connect(self.on_online_artwork_ready)
+        self.online_artwork_service.failed.connect(self.on_online_artwork_failed)
+        self.online_source_client.metadataFinished.connect(self.on_online_metadata_finished)
         self.online_source_client.playbackResolved.connect(self.on_online_playback_resolved)
         self.online_source_client.downloadResolved.connect(self.on_online_download_resolved)
         self.online_source_client.requestFailed.connect(self.on_online_source_request_failed)
@@ -6152,7 +6160,9 @@ class MainWindow(QMainWindow):
             return "未知时间"
 
     def get_current_info_song_data(self) -> dict | None:
-        current = getattr(self, "current_media_item", None)
+        current = self.get_displayed_online_media_item()
+        if current is None:
+            current = getattr(self, "current_media_item", None)
         if isinstance(current, MediaItem) and current.media_type == "online":
             return current.to_dict()
         playing_path = self.normalize_song_path(self.current_song_path)
@@ -6182,7 +6192,9 @@ class MainWindow(QMainWindow):
         artist = song_data.get("artist", "未知艺术家")
         album = song_data.get("album", "未知专辑")
         song_path = self.normalize_song_path(song_data.get("path", ""))
-        current = getattr(self, "current_media_item", None)
+        current = self.get_displayed_online_media_item()
+        if current is None:
+            current = getattr(self, "current_media_item", None)
         is_online = isinstance(current, MediaItem) and current.media_type == "online"
 
         stats = self.song_stats.get(
@@ -6638,6 +6650,187 @@ class MainWindow(QMainWindow):
         client.start()
         client.list_sources()
 
+    def get_displayed_online_media_item(self) -> MediaItem | None:
+        pending = getattr(self, "pending_online_media_item", None)
+        if isinstance(pending, MediaItem) and pending.media_type == "online":
+            return pending
+        current = getattr(self, "current_media_item", None)
+        if isinstance(current, MediaItem) and current.media_type == "online":
+            return current
+        return None
+
+    def capture_online_playback_ui_snapshot(self) -> None:
+        if self.pending_online_ui_snapshot is not None:
+            return
+        cover_pixmap = self.cover_label.pixmap()
+        self.pending_online_ui_snapshot = {
+            "bottom_title": self.bottom_song_title.text(),
+            "bottom_artist": self.bottom_song_artist.text(),
+            "bottom_title_tip": self.bottom_song_title.toolTip(),
+            "bottom_artist_tip": self.bottom_song_artist.toolTip(),
+            "now_title": self.now_song_title.text(),
+            "now_artist": self.now_artist.text(),
+            "now_stats": self.now_stats.text() if hasattr(self, "now_stats") else "",
+            "now_stats_visible": not self.now_stats.isHidden() if hasattr(self, "now_stats") else False,
+            "open_text": (
+                self.now_open_folder_btn.text()
+                if hasattr(self, "now_open_folder_btn")
+                else ""
+            ),
+            "open_enabled": (
+                self.now_open_folder_btn.isEnabled()
+                if hasattr(self, "now_open_folder_btn")
+                else False
+            ),
+            "source_text": (
+                self.bottom_source_badge.text()
+                if hasattr(self, "bottom_source_badge")
+                else ""
+            ),
+            "source_visible": (
+                not self.bottom_source_badge.isHidden()
+                if hasattr(self, "bottom_source_badge")
+                else False
+            ),
+            "cover_pixmap": QPixmap(cover_pixmap) if cover_pixmap is not None else QPixmap(),
+            "cover_text": self.cover_label.text(),
+        }
+
+    def restore_online_playback_ui_snapshot(self) -> None:
+        snapshot = self.pending_online_ui_snapshot
+        self.pending_online_ui_snapshot = None
+        self.pending_online_media_item = None
+        self.presented_online_identity = ""
+        self.presented_online_cover_url = ""
+        self.online_artwork_service.cancel()
+        if not isinstance(snapshot, dict):
+            self.update_side_info_panel()
+            return
+        self.bottom_song_title.setText(str(snapshot.get("bottom_title") or ""))
+        self.bottom_song_artist.setText(str(snapshot.get("bottom_artist") or ""))
+        self.bottom_song_title.setToolTip(str(snapshot.get("bottom_title_tip") or ""))
+        self.bottom_song_artist.setToolTip(str(snapshot.get("bottom_artist_tip") or ""))
+        self.now_song_title.setText(str(snapshot.get("now_title") or ""))
+        self.now_artist.setText(str(snapshot.get("now_artist") or ""))
+        if hasattr(self, "now_stats"):
+            self.now_stats.setText(str(snapshot.get("now_stats") or ""))
+            self.now_stats.setVisible(bool(snapshot.get("now_stats_visible")))
+        if hasattr(self, "now_open_folder_btn"):
+            self.now_open_folder_btn.setText(str(snapshot.get("open_text") or ""))
+            self.now_open_folder_btn.setEnabled(bool(snapshot.get("open_enabled")))
+        if hasattr(self, "bottom_source_badge"):
+            self.bottom_source_badge.setText(str(snapshot.get("source_text") or ""))
+            self.bottom_source_badge.setVisible(bool(snapshot.get("source_visible")))
+        cover_pixmap = snapshot.get("cover_pixmap")
+        if isinstance(cover_pixmap, QPixmap) and not cover_pixmap.isNull():
+            self.show_cover_pixmap(cover_pixmap)
+        else:
+            self.cover_label.clear()
+            self.cover_label.setPixmap(QPixmap())
+            self.cover_label.setText(str(snapshot.get("cover_text") or "Hush"))
+        self.update_like_button()
+        self.update_side_info_panel()
+
+    def cancel_pending_online_metadata(self) -> None:
+        request_id = int(getattr(self, "pending_online_metadata_request", 0) or 0)
+        self.pending_online_metadata_request = 0
+        self.pending_online_metadata_identity = ""
+        if request_id:
+            self.online_source_client.cancel_request(request_id)
+
+    def present_online_media_item(self, media_item: MediaItem, resolving: bool = False) -> None:
+        title = media_item.title
+        artist = media_item.artist
+        album = media_item.album
+        self.bottom_song_title.setText(title)
+        self.bottom_song_artist.setText(artist)
+        self.bottom_song_title.setToolTip(title)
+        self.bottom_song_artist.setToolTip(artist)
+        self.now_song_title.setText(title)
+        self.now_artist.setText(f"{artist} · {album}")
+        if hasattr(self, "now_stats"):
+            details = [media_item.source_name or media_item.source_id or "在线", "在线"]
+            if resolving:
+                details.append("正在解析")
+            if media_item.quality:
+                details.append(media_item.quality)
+            if media_item.format:
+                details.append(media_item.format.upper())
+            self.now_stats.setText(" · ".join(details))
+            self.now_stats.show()
+        if hasattr(self, "now_open_folder_btn"):
+            self.now_open_folder_btn.setText("查看在线歌曲信息")
+            self.now_open_folder_btn.setEnabled(True)
+        if hasattr(self, "bottom_source_badge"):
+            self.bottom_source_badge.setText(
+                media_item.source_name or media_item.source_id or "在线"
+            )
+            self.bottom_source_badge.setVisible(
+                getattr(self, "_responsive_mode", "full") == "full"
+            )
+        identity = media_item.stable_identity
+        cover_url = media_item.cover_url
+        artwork_changed = (
+            identity != self.presented_online_identity
+            or cover_url != self.presented_online_cover_url
+        )
+        self.presented_online_identity = identity
+        self.presented_online_cover_url = cover_url
+        if artwork_changed:
+            self.reset_cover()
+            self.online_artwork_service.request(identity, cover_url)
+        if resolving and hasattr(self, "like_btn"):
+            liked = bool(
+                self.get_online_track_collection_state(media_item.to_dict()).get("liked")
+            )
+            self.like_btn.setText("♥ 已收藏" if liked else "♡ 收藏")
+            self.like_btn.setProperty("liked", liked)
+            self.like_btn.setEnabled(False)
+            self.like_btn.style().unpolish(self.like_btn)
+            self.like_btn.style().polish(self.like_btn)
+            self.like_btn.update()
+        else:
+            self.update_like_button()
+        self.update_side_info_panel()
+
+    def on_online_metadata_finished(
+        self,
+        request_id: int,
+        source_id: str,
+        result: dict,
+    ) -> None:
+        if request_id != self.pending_online_metadata_request:
+            return
+        identity = self.pending_online_metadata_identity
+        self.pending_online_metadata_request = 0
+        self.pending_online_metadata_identity = ""
+        target = getattr(self, "pending_online_media_item", None)
+        is_pending = (
+            isinstance(target, MediaItem)
+            and target.stable_identity == identity
+            and target.source_id == source_id
+        )
+        if not is_pending:
+            target = getattr(self, "current_media_item", None)
+        if (
+            not isinstance(target, MediaItem)
+            or target.media_type != "online"
+            or target.stable_identity != identity
+            or target.source_id != source_id
+        ):
+            return
+        updated = target.with_metadata(result)
+        if is_pending:
+            self.pending_online_media_item = updated
+            self.pending_online_track = updated.to_legacy_online()
+        else:
+            self.current_media_item = updated
+            self.current_online_track = updated.to_legacy_online()
+        self.present_online_media_item(
+            updated,
+            resolving=is_pending and bool(self.pending_online_playback_request),
+        )
+
     def request_online_playback(self, track: dict) -> None:
         if not isinstance(track, dict):
             return
@@ -6651,11 +6844,21 @@ class MainWindow(QMainWindow):
         previous_request = int(getattr(self, "pending_online_playback_request", 0) or 0)
         if previous_request:
             self.online_source_client.cancel_request(previous_request)
+        self.cancel_pending_online_metadata()
+        self.capture_online_playback_ui_snapshot()
+        self.pending_online_media_item = media_item
         self.pending_online_track = dict(track)
         self.pending_online_playback_request = self.online_source_client.resolve_playback(
             source_id,
             track,
         )
+        self.pending_online_metadata_identity = media_item.stable_identity
+        self.pending_online_metadata_request = self.online_source_client.get_metadata(
+            source_id,
+            track,
+            timeout_ms=10000,
+        )
+        self.present_online_media_item(media_item, resolving=True)
         stable_id = str(track.get("remoteStableId") or "")
         if stable_id:
             self.refresh_remote_song_item(stable_id, resolving=True)
@@ -6669,14 +6872,19 @@ class MainWindow(QMainWindow):
         if request_id != self.pending_online_playback_request:
             return
         track = self.pending_online_track
+        pending_media_item = self.pending_online_media_item
         self.pending_online_playback_request = 0
         self.pending_online_track = None
         if not isinstance(track, dict) or str(track.get("sourceId") or "") != source_id:
+            self.cancel_pending_online_metadata()
+            self.restore_online_playback_ui_snapshot()
             return
         stable_id = str(track.get("remoteStableId") or "")
         if stable_id:
             self.refresh_remote_song_item(stable_id, resolving=False)
         if resolution.get("headers"):
+            self.cancel_pending_online_metadata()
+            self.restore_online_playback_ui_snapshot()
             self.set_online_status_message(
                 "该音源需要附加请求头，当前播放模式暂不支持。"
             )
@@ -6684,11 +6892,19 @@ class MainWindow(QMainWindow):
 
         url = QUrl(str(resolution.get("url") or ""))
         if not url.isValid() or url.scheme().lower() not in {"http", "https"}:
+            self.cancel_pending_online_metadata()
+            self.restore_online_playback_ui_snapshot()
             self.set_online_status_message("音源返回了无效的播放地址。")
             return
 
         self.flush_current_listen_time()
-        media_item = MediaItem.from_online(track).with_resolution(resolution)
+        media_item = (
+            pending_media_item
+            if isinstance(pending_media_item, MediaItem)
+            else MediaItem.from_online(track)
+        ).with_resolution(resolution)
+        self.pending_online_media_item = None
+        self.pending_online_ui_snapshot = None
         self.current_track_kind = "online"
         self.current_media_item = media_item
         self.current_online_track = media_item.to_legacy_online()
@@ -6702,37 +6918,9 @@ class MainWindow(QMainWindow):
         self.displayed_lyrics_track_key = ""
         self.displayed_lyrics_song_path = None
         self.refresh_playing_song_indicators()
-
-        title = media_item.title
-        artist = media_item.artist
-        album = media_item.album
-        self.bottom_song_title.setText(title)
-        self.bottom_song_artist.setText(artist)
-        self.bottom_song_title.setToolTip(title)
-        self.bottom_song_artist.setToolTip(artist)
-        self.now_song_title.setText(title)
-        self.now_artist.setText(f"{artist} · {album}")
-        if hasattr(self, "now_stats"):
-            details = [media_item.source_name, "在线"]
-            if media_item.quality:
-                details.append(media_item.quality)
-            if media_item.format:
-                details.append(media_item.format.upper())
-            self.now_stats.setText(" · ".join(details))
-            self.now_stats.show()
-        if hasattr(self, "now_open_folder_btn"):
-            self.now_open_folder_btn.setText("查看在线歌曲信息")
-            self.now_open_folder_btn.setEnabled(True)
-        self.update_like_button()
-        if hasattr(self, "bottom_source_badge"):
-            self.bottom_source_badge.setText(media_item.source_name or "在线")
-            self.bottom_source_badge.setVisible(
-                getattr(self, "_responsive_mode", "full") == "full"
-            )
-        self.reset_cover()
+        self.present_online_media_item(media_item)
         self.lyrics_view.set_placeholder("正在加载歌词", "优先使用歌曲来源，其次联网匹配")
         self.online_lyrics_service.request_lyrics(media_item)
-        self.online_artwork_service.request(media_item.key, media_item.cover_url)
 
         self.set_online_status_message("正在加载在线歌曲…")
         self.media_player.stop()
@@ -6809,6 +6997,8 @@ class MainWindow(QMainWindow):
             track = self.pending_online_track
             self.pending_online_playback_request = 0
             self.pending_online_track = None
+            self.cancel_pending_online_metadata()
+            self.restore_online_playback_ui_snapshot()
             self.set_online_status_message(f"获取播放地址失败：{message}")
             stable_id = (
                 str(track.get("remoteStableId") or "")
@@ -6817,6 +7007,9 @@ class MainWindow(QMainWindow):
             )
             if stable_id:
                 self.refresh_remote_song_item(stable_id, resolving=False)
+        elif action == "getMetadata" and request_id == self.pending_online_metadata_request:
+            self.pending_online_metadata_request = 0
+            self.pending_online_metadata_identity = ""
         elif action == "resolveDownload" and request_id == self.pending_online_download_request:
             self.pending_online_download_request = 0
             self.pending_online_download_track = None
@@ -11618,15 +11811,30 @@ class MainWindow(QMainWindow):
 
     def on_online_artwork_ready(
         self,
-        _generation: int,
+        generation: int,
         track_key: str,
         data: bytes,
     ) -> None:
-        current = getattr(self, "current_media_item", None)
-        if not isinstance(current, MediaItem) or current.key != track_key:
+        if (
+            generation != self.online_artwork_service.generation
+            or track_key != self.presented_online_identity
+        ):
             return
         if self.show_cover_from_bytes(data):
             self.sync_immersive_lyrics()
+
+    def on_online_artwork_failed(
+        self,
+        generation: int,
+        track_key: str,
+        _message: str,
+    ) -> None:
+        if (
+            generation != self.online_artwork_service.generation
+            or track_key != self.presented_online_identity
+        ):
+            return
+        self.reset_cover()
 
     def load_song_for_playback(self, song_data: dict | None) -> None:
         if not isinstance(song_data, dict):
@@ -11652,6 +11860,13 @@ class MainWindow(QMainWindow):
             self.online_source_client.cancel_request(pending_request)
         self.pending_online_playback_request = 0
         self.pending_online_track = None
+        self.cancel_pending_online_metadata()
+        if self.pending_online_ui_snapshot is not None:
+            self.restore_online_playback_ui_snapshot()
+        else:
+            self.pending_online_media_item = None
+            self.presented_online_identity = ""
+            self.presented_online_cover_url = ""
         self.current_track_kind = "local"
         self.current_online_track = None
         self.current_media_item = MediaItem.from_local(song_data)
@@ -11731,6 +11946,17 @@ class MainWindow(QMainWindow):
 
     def reset_now_playing_info(self) -> None:
         self.flush_current_listen_time()
+
+        pending_request = int(getattr(self, "pending_online_playback_request", 0) or 0)
+        if pending_request:
+            self.online_source_client.cancel_request(pending_request)
+        self.pending_online_playback_request = 0
+        self.pending_online_track = None
+        self.pending_online_media_item = None
+        self.pending_online_ui_snapshot = None
+        self.cancel_pending_online_metadata()
+        self.presented_online_identity = ""
+        self.presented_online_cover_url = ""
 
         self.current_song_path = None
         self.current_media_item = None

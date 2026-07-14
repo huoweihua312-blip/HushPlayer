@@ -22,6 +22,10 @@ class OnlineArtworkService(QObject):
         self._reply: QNetworkReply | None = None
         self._context: tuple[int, str, Path] | None = None
 
+    @property
+    def generation(self) -> int:
+        return self._generation
+
     def request(self, track_key: str, url_text: str) -> int:
         self.cancel()
         self._generation += 1
