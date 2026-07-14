@@ -78,8 +78,13 @@ class OnlineSourceClient(QObject):
             self.node_program = ""
         else:
             self.node_program = shutil.which("node") or ""
+        self.node_path = (
+            Path(self.node_program).resolve()
+            if self.node_program
+            else self.bundled_node_executable
+        )
         self.process = QProcess(self)
-        self.process.setWorkingDirectory(str(self.runtime_dir))
+        self.process.setWorkingDirectory(str(self.runner_path.parent))
         environment = QProcessEnvironment.systemEnvironment()
         environment.insert("HUSHPLAYER_SOURCE_REGISTRY", str(self.registry_path))
         environment.insert("HUSHPLAYER_SOURCE_HOME", str(self.source_home_dir))
@@ -108,28 +113,46 @@ class OnlineSourceClient(QObject):
     def is_running(self) -> bool:
         return self.process.state() == QProcess.ProcessState.Running
 
+    def _log_process_diagnostic(self, message: str) -> None:
+        self.nodeLog.emit(message)
+        print(f"[node-runner] {message}", file=sys.stderr)
+
     def start(self) -> bool:
         if self.process.state() != QProcess.ProcessState.NotRunning:
             return True
 
-        if not self.node_program:
+        node_exists = self.node_path.exists()
+        runner_exists = self.runner_path.exists()
+        self._log_process_diagnostic(
+            f"node_path={self.node_path}; node_path.exists={node_exists}; "
+            f"runner_path={self.runner_path}; "
+            f"runner_path.exists={runner_exists}"
+        )
+
+        if not self.node_program or not self.node_path.is_file():
             if self.frozen:
                 self.processError.emit(
-                    f"发布包缺少内置 Node.js：{self.bundled_node_executable}"
+                    f"发布包缺少内置 Node.js：{self.node_path}"
                 )
             else:
                 self.processError.emit("没有找到 Node.js，请确认 node 已安装并加入 PATH。")
             return False
 
-        if not self.runner_path.exists():
+        if not self.runner_path.is_file():
             self.processError.emit(f"Node runner 不存在：{self.runner_path}")
             return False
 
         self._stopping = False
         self._stdout_buffer = ""
         self._stderr_buffer = ""
-        self.process.setProgram(self.node_program)
+        self.process.setProgram(str(self.node_path))
         self.process.setArguments([str(self.runner_path)])
+        self.process.setWorkingDirectory(str(self.runner_path.parent))
+        self._log_process_diagnostic(
+            f"QProcess program={self.process.program()}; "
+            f"arguments={self.process.arguments()}; "
+            f"workingDirectory={self.process.workingDirectory()}"
+        )
         self.process.start()
         return True
 
@@ -393,7 +416,17 @@ class OnlineSourceClient(QObject):
         self._outbound_queue.clear()
 
     def _on_process_error(self, _error) -> None:
-        message = self.process.errorString() or "Node runner 进程错误"
+        error_string = self.process.errorString() or "Node runner 进程错误"
+        self._log_process_diagnostic(
+            f"QProcess.errorString={error_string}; "
+            f"program={self.process.program()}; "
+            f"arguments={self.process.arguments()}; "
+            f"workingDirectory={self.process.workingDirectory()}"
+        )
+        message = (
+            f"{error_string}（Node：{self.node_path}；"
+            f"runner：{self.runner_path}）"
+        )
         self.processError.emit(message)
 
         if self.process.state() == QProcess.ProcessState.NotRunning:

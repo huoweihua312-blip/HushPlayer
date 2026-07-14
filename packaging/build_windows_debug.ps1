@@ -93,27 +93,53 @@ $Spec = Join-Path $ProjectRoot "packaging\HushPlayer.debug.spec"
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
 $OutputRoot = Join-Path $ProjectRoot "dist\HushPlayer"
+$SupportRoot = Join-Path $OutputRoot "_internal"
 $ExePath = Join-Path $OutputRoot "HushPlayer.exe"
-$BundledNode = Join-Path $OutputRoot "runtime\node\node.exe"
+$BundledNode = Join-Path $SupportRoot "runtime\node\node.exe"
+$Runner = Join-Path $SupportRoot "source_runtime\runner.js"
 $RequiredFiles = @(
     $ExePath,
     $BundledNode,
-    (Join-Path $OutputRoot "source_runtime\runner.js"),
-    (Join-Path $OutputRoot "source_runtime\plugin_host.js"),
-    (Join-Path $OutputRoot "source_runtime\source_test_worker.js"),
-    (Join-Path $OutputRoot "app\resources\defaults\source_registry.json")
+    $Runner,
+    (Join-Path $SupportRoot "source_runtime\plugin_host.js"),
+    (Join-Path $SupportRoot "source_runtime\source_test_worker.js"),
+    (Join-Path $SupportRoot "app\resources\defaults\source_registry.json")
 )
 foreach ($RequiredFile in $RequiredFiles) {
     if (-not (Test-Path -LiteralPath $RequiredFile -PathType Leaf)) {
         throw "Required build output is missing: $RequiredFile"
     }
 }
-if (Test-Path -LiteralPath (Join-Path $OutputRoot "source_runtime\source_registry.json")) {
+if (Test-Path -LiteralPath (Join-Path $SupportRoot "source_runtime\source_registry.json")) {
     throw "Private source_runtime\source_registry.json must not be packaged."
 }
-if (Test-Path -LiteralPath (Join-Path $OutputRoot "data")) {
-    throw "User data directory must not be packaged."
+foreach ($PrivatePath in @(
+    (Join-Path $OutputRoot "data"),
+    (Join-Path $SupportRoot "data"),
+    (Join-Path $SupportRoot "user_sources"),
+    (Join-Path $SupportRoot "source_runtime\sources")
+)) {
+    if (Test-Path -LiteralPath $PrivatePath) {
+        throw "Private user data must not be packaged: $PrivatePath"
+    }
 }
+
+$DefaultRegistryPath = Join-Path $SupportRoot "app\resources\defaults\source_registry.json"
+$DefaultRegistry = Get-Content -LiteralPath $DefaultRegistryPath -Raw -Encoding UTF8 | ConvertFrom-Json
+if (@($DefaultRegistry.sources).Count -ne 0) {
+    throw "Bundled default source registry must not contain real source entries."
+}
+
+$BundledNodeVersion = (& $BundledNode --version).Trim()
+if ($LASTEXITCODE -ne 0) {
+    throw "Bundled Node.js failed to run: $BundledNode"
+}
+& $BundledNode --check $Runner
+if ($LASTEXITCODE -ne 0) {
+    throw "Bundled Node.js failed to parse runner.js: $Runner"
+}
+Write-Host "BundledNode=$BundledNodeVersion"
+Write-Host "BundledRunnerCheck=OK"
 
 $RuntimeInfo = @(
     "NodeVersion=$NodeVersion"
@@ -121,11 +147,11 @@ $RuntimeInfo = @(
     "NodeSigner=$NodeSigner"
 ) -join [Environment]::NewLine
 [System.IO.File]::WriteAllText(
-    (Join-Path $OutputRoot "runtime\node\NODE_RUNTIME_INFO.txt"),
+    (Join-Path $SupportRoot "runtime\node\NODE_RUNTIME_INFO.txt"),
     $RuntimeInfo + [Environment]::NewLine,
     [System.Text.UTF8Encoding]::new($false)
 )
-Copy-Item -LiteralPath (Join-Path $ProjectRoot "packaging\NODE_RUNTIME_NOTICE.txt") -Destination (Join-Path $OutputRoot "runtime\node\NODE_RUNTIME_NOTICE.txt") -Force
+Copy-Item -LiteralPath (Join-Path $ProjectRoot "packaging\NODE_RUNTIME_NOTICE.txt") -Destination (Join-Path $SupportRoot "runtime\node\NODE_RUNTIME_NOTICE.txt") -Force
 
 $TotalBytes = (Get-ChildItem -LiteralPath $OutputRoot -Recurse -File | Measure-Object -Property Length -Sum).Sum
 $TotalMiB = [Math]::Round($TotalBytes / 1MB, 2)

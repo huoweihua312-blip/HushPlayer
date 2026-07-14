@@ -67,6 +67,9 @@ def main() -> int:
                 "HUSHPLAYER_LOG_DIR",
             )
         }
+        missing = object()
+        previous_frozen = getattr(sys, "frozen", missing)
+        previous_meipass = getattr(sys, "_MEIPASS", missing)
         try:
             os.environ["HUSHPLAYER_BUNDLED_RESOURCE_DIR"] = str(bundle)
             os.environ["HUSHPLAYER_APP_DATA_DIR"] = str(app_data)
@@ -96,7 +99,41 @@ def main() -> int:
             assert (paths.cache_dir / "covers").is_dir()
             assert (paths.cache_dir / "lyrics").is_dir()
             assert paths.log_dir.is_dir()
+
+            frozen_bundle = root / "portable 中文" / "HushPlayer" / "_internal"
+            frozen_bundle.mkdir(parents=True)
+            sys.frozen = True
+            sys._MEIPASS = str(frozen_bundle)
+            frozen_paths = AppPaths.resolve()
+            assert frozen_paths.frozen is True
+            assert frozen_paths.bundled_resource_dir == frozen_bundle.resolve()
+            assert frozen_paths.bundled_node_executable == (
+                frozen_bundle / "runtime" / "node" / "node.exe"
+            ).resolve()
+            assert frozen_paths.bundled_source_runtime_dir == (
+                frozen_bundle / "source_runtime"
+            ).resolve()
+
+            del sys._MEIPASS
+            try:
+                AppPaths.resolve()
+            except RuntimeError as error:
+                assert "sys._MEIPASS" in str(error)
+            else:
+                raise AssertionError(
+                    "Frozen path resolution accepted a missing sys._MEIPASS"
+                )
         finally:
+            if previous_frozen is missing:
+                if hasattr(sys, "frozen"):
+                    del sys.frozen
+            else:
+                sys.frozen = previous_frozen
+            if previous_meipass is missing:
+                if hasattr(sys, "_MEIPASS"):
+                    del sys._MEIPASS
+            else:
+                sys._MEIPASS = previous_meipass
             for name, value in previous.items():
                 if value is None:
                     os.environ.pop(name, None)

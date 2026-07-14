@@ -49,6 +49,7 @@ foreach ($Name in @(
     "HUSHPLAYER_CACHE_DIR",
     "HUSHPLAYER_LOG_DIR",
     "HUSHPLAYER_PACKAGING_SMOKE_EXIT_MS",
+    "NODE_PATH",
     "PATH"
 )) {
     $OriginalEnvironment[$Name] = [Environment]::GetEnvironmentVariable($Name, "Process")
@@ -60,19 +61,25 @@ try {
     $env:PATH = "$env:SystemRoot\System32;$env:SystemRoot"
 
     function Test-BundledNodeRunner([string]$RunRoot) {
-        $BundledNode = Join-Path $RunRoot "runtime\node\node.exe"
-        $Runner = Join-Path $RunRoot "source_runtime\runner.js"
+        $SupportRoot = Join-Path $RunRoot "_internal"
+        $BundledNode = [System.IO.Path]::GetFullPath((Join-Path $SupportRoot "runtime\node\node.exe"))
+        $Runner = [System.IO.Path]::GetFullPath((Join-Path $SupportRoot "source_runtime\runner.js"))
+        if (-not (Test-Path -LiteralPath $BundledNode -PathType Leaf)) {
+            throw "Bundled Node.js was not found: $BundledNode"
+        }
+        if (-not (Test-Path -LiteralPath $Runner -PathType Leaf)) {
+            throw "Bundled runner.js was not found: $Runner"
+        }
         $StartInfo = New-Object System.Diagnostics.ProcessStartInfo
         $StartInfo.FileName = $BundledNode
         $StartInfo.Arguments = '"' + $Runner + '"'
-        $StartInfo.WorkingDirectory = $LaunchCwd
+        $StartInfo.WorkingDirectory = Split-Path -Parent $Runner
         $StartInfo.UseShellExecute = $false
         $StartInfo.CreateNoWindow = $true
         $StartInfo.RedirectStandardInput = $true
         $StartInfo.RedirectStandardOutput = $true
         $StartInfo.RedirectStandardError = $true
-        $StartInfo.EnvironmentVariables["PATH"] = $env:PATH
-        $StartInfo.EnvironmentVariables["NODE_PATH"] = Join-Path $RunRoot "source_runtime\node_modules"
+        $env:NODE_PATH = Join-Path $SupportRoot "source_runtime\node_modules"
         $RunnerProcess = New-Object System.Diagnostics.Process
         $RunnerProcess.StartInfo = $StartInfo
         if (-not $RunnerProcess.Start()) {
@@ -110,6 +117,11 @@ try {
         $Process = Start-Process -FilePath (Join-Path $RunRoot "HushPlayer.exe") -WorkingDirectory $LaunchCwd -WindowStyle Hidden -RedirectStandardOutput $Stdout -RedirectStandardError $Stderr -Wait -PassThru
         if ($Process.ExitCode -ne 0) {
             throw "Packaged application run '$RunName' failed with exit code $($Process.ExitCode)."
+        }
+        $RunStdout = Get-Content -LiteralPath $Stdout -Raw -Encoding UTF8
+        if ($RunStdout -notmatch '\[packaging-smoke\] Node runner ready') {
+            $RunStderr = Get-Content -LiteralPath $Stderr -Raw -Encoding UTF8
+            throw "Packaged application run '$RunName' did not start its bundled Node runner. stderr=$RunStderr"
         }
         $Registry = Join-Path $env:HUSHPLAYER_APP_DATA_DIR "source_runtime\source_registry.json"
         if (-not (Test-Path -LiteralPath $Registry -PathType Leaf)) {

@@ -50,13 +50,18 @@ class AppPaths:
         bundled_override = _resolved_environment_path(
             "HUSHPLAYER_BUNDLED_RESOURCE_DIR"
         )
-        if bundled_override is not None:
+        if frozen:
+            # PyInstaller 6 onedir points _MEIPASS at its support directory
+            # (normally dist/HushPlayer/_internal). Never guess from the EXE
+            # or the current working directory in a frozen process.
+            meipass = str(getattr(sys, "_MEIPASS", "") or "").strip()
+            if not meipass:
+                raise RuntimeError(
+                    "PyInstaller frozen runtime is missing sys._MEIPASS"
+                )
+            bundled_resource_dir = Path(meipass).resolve()
+        elif bundled_override is not None:
             bundled_resource_dir = bundled_override
-        elif frozen:
-            # PyInstaller-specific handling stays centralized in this module.
-            bundled_resource_dir = Path(
-                getattr(sys, "_MEIPASS", Path(sys.executable).resolve().parent)
-            ).resolve()
         else:
             bundled_resource_dir = Path(__file__).resolve().parents[2]
 
@@ -107,11 +112,11 @@ class AppPaths:
 
     @property
     def bundled_source_runtime_dir(self) -> Path:
-        return self.bundled_resource_dir / "source_runtime"
+        return self.resource_path("source_runtime")
 
     @property
     def bundled_node_executable(self) -> Path:
-        return self.bundled_resource_dir / "runtime" / "node" / "node.exe"
+        return self.resource_path("runtime", "node", "node.exe")
 
     @property
     def source_runtime_data_dir(self) -> Path:

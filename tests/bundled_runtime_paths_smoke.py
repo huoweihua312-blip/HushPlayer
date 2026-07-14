@@ -76,9 +76,11 @@ def main() -> int:
 
         result: list[dict] = []
         errors: list[str] = []
+        diagnostics: list[str] = []
         loop = QEventLoop()
         client.sourceListReceived.connect(lambda sources: (result.extend(sources), loop.quit()))
         client.processError.connect(lambda message: (errors.append(message), loop.quit()))
+        client.nodeLog.connect(diagnostics.append)
         client.requestFailed.connect(
             lambda _request_id, _action, message: (errors.append(message), loop.quit())
         )
@@ -88,6 +90,11 @@ def main() -> int:
         client.stop()
         assert not errors, errors
         assert any(source.get("id") == "fixture_source" for source in result), result
+        assert Path(client.process.program()).is_absolute()
+        assert client.process.arguments() == [str(client.runner_path)]
+        assert client.process.workingDirectory() == str(client.runner_path.parent)
+        assert any("node_path.exists=True" in item for item in diagnostics)
+        assert any("runner_path.exists=True" in item for item in diagnostics)
 
         missing_node = OnlineSourceClient(
             PROJECT_ROOT,
@@ -95,6 +102,10 @@ def main() -> int:
             frozen=True,
         )
         assert not missing_node.node_program
+        missing_diagnostics: list[str] = []
+        missing_node.nodeLog.connect(missing_diagnostics.append)
+        assert not missing_node.start()
+        assert any("node_path.exists=False" in item for item in missing_diagnostics)
 
     application.processEvents()
     print("bundled runtime paths smoke: OK")

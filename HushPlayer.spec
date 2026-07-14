@@ -1,11 +1,19 @@
 # -*- mode: python ; coding: utf-8 -*-
 
+from pathlib import Path
+
+
+PROJECT_ROOT = Path(SPECPATH).resolve()
+ICON_FILE = PROJECT_ROOT / "assets" / "icons" / "HushPlayer.ico"
+if not ICON_FILE.is_file():
+    raise SystemExit(f"Application icon not found: {ICON_FILE}")
+
 
 a = Analysis(
     ['main.py'],
     pathex=[],
     binaries=[],
-    datas=[],
+    datas=[(str(ICON_FILE), "assets/icons")],
     hiddenimports=[],
     hookspath=[],
     hooksconfig={},
@@ -32,6 +40,7 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
+    icon=str(ICON_FILE),
 )
 coll = COLLECT(
     exe,

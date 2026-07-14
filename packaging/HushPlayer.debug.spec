@@ -8,7 +8,10 @@ from PyInstaller.utils.hooks import collect_submodules
 
 
 PROJECT_ROOT = Path(SPECPATH).resolve().parent
+ICON_FILE = PROJECT_ROOT / "assets" / "icons" / "HushPlayer.ico"
 NODE_EXE = Path(os.environ["HUSHPLAYER_NODE_EXE"]).resolve()
+if not ICON_FILE.is_file():
+    raise SystemExit(f"Application icon not found: {ICON_FILE}")
 if not NODE_EXE.is_file():
     raise SystemExit(f"Bundled Node executable not found: {NODE_EXE}")
 
@@ -84,14 +87,14 @@ exe = EXE(
     bootloader_ignore_signals=False,
     strip=False,
     upx=False,
-    console=True,
+    console=False,
     disable_windowed_traceback=False,
     argv_emulation=False,
     target_arch="x86_64",
     codesign_identity=None,
     entitlements_file=None,
     version=str(PROJECT_ROOT / "packaging" / "version_info.txt"),
-    contents_directory=".",
+    icon=str(ICON_FILE),
 )
 
 coll = COLLECT(
