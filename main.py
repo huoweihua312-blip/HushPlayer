@@ -4,9 +4,10 @@ import time
 PROCESS_STARTED_AT = time.perf_counter()
 
 qt_import_started_at = time.perf_counter()
-from PySide6.QtCore import Qt, QTimer
+from PySide6.QtCore import QCoreApplication, Qt, QTimer
 from PySide6.QtGui import QGuiApplication
 from PySide6.QtWidgets import QApplication
+from app.core.app_paths import APP_NAME, APP_VERSION
 print(f"[startup] PySide6 导入：{(time.perf_counter() - qt_import_started_at) * 1000:.1f} ms")
 
 window_import_started_at = time.perf_counter()
@@ -15,12 +16,15 @@ print(f"[startup] 主窗口模块导入：{(time.perf_counter() - window_import_
 
 
 def main() -> None:
+    QCoreApplication.setOrganizationName(APP_NAME)
+    QCoreApplication.setApplicationName(APP_NAME)
+    QCoreApplication.setApplicationVersion(APP_VERSION)
     QGuiApplication.setHighDpiScaleFactorRoundingPolicy(
         Qt.HighDpiScaleFactorRoundingPolicy.PassThrough
     )
     app_started_at = time.perf_counter()
     app = QApplication(sys.argv)
-    app.setApplicationName("HushPlayer")
+    app.setApplicationName(APP_NAME)
     app.setProperty("hushStartupStartedAt", PROCESS_STARTED_AT)
     print(f"[startup] QApplication 创建：{(time.perf_counter() - app_started_at) * 1000:.1f} ms")
 

@@ -12,6 +12,7 @@ from pathlib import Path
 import requests
 from mutagen import File as MutagenFile
 from app.models.media_item import MediaItem
+from app.core.app_paths import AppPaths
 from app.services.lyrics_cache import LyricsCache
 from app.services.online_artwork_service import OnlineArtworkService
 from app.services.online_download_manager import OnlineDownloadManager
@@ -3553,20 +3554,23 @@ class MainWindow(QMainWindow):
         self.current_lyrics: list[tuple[int, str]] = []
         self.shortcuts: list[QShortcut] = []
 
-        self.project_root = Path(__file__).resolve().parents[2]
-        self.library_file = self.project_root / "data" / "library.json"
-        self.settings_file = self.project_root / "data" / "settings.json"
-        self.playlists_file = self.project_root / "data" / "playlists.json"
-        self.remote_tracks_file = self.project_root / "data" / "remote_tracks.json"
-        self.stats_file = self.project_root / "data" / "stats.json"
-        self.cover_cache_dir = self.project_root / "cache" / "covers"
-        self.lyrics_cache_dir = self.project_root / "cache" / "lyrics"
-        self.lyrics_bindings_file = self.project_root / "data" / "lyrics_bindings.json"
-        self.playback_session_file = self.project_root / "data" / "playback_session.json"
-        self.play_queue_file = self.project_root / "data" / "play_queue.json"
-        self.metadata_cache_file = self.project_root / "data" / "metadata_cache.json"
-        self.pending_imports_file = self.project_root / "data" / "pending_imports.json"
-        self.ignored_imports_file = self.project_root / "data" / "ignored_imports.json"
+        self.paths = AppPaths.resolve()
+        self.paths.initialize_user_storage()
+        self.project_root = self.paths.bundled_resource_dir
+        data_dir = self.paths.data_dir
+        self.library_file = data_dir / "library.json"
+        self.settings_file = data_dir / "settings.json"
+        self.playlists_file = data_dir / "playlists.json"
+        self.remote_tracks_file = data_dir / "remote_tracks.json"
+        self.stats_file = data_dir / "stats.json"
+        self.cover_cache_dir = self.paths.cache_dir / "covers"
+        self.lyrics_cache_dir = self.paths.cache_dir / "lyrics"
+        self.lyrics_bindings_file = data_dir / "lyrics_bindings.json"
+        self.playback_session_file = data_dir / "playback_session.json"
+        self.play_queue_file = data_dir / "play_queue.json"
+        self.metadata_cache_file = self.paths.metadata_cache_file
+        self.pending_imports_file = data_dir / "pending_imports.json"
+        self.ignored_imports_file = data_dir / "ignored_imports.json"
         self.source_registry_manager = self.measure_startup_step(
             "音源注册管理器对象",
             lambda: SourceRegistryManager(self.project_root),
@@ -3651,6 +3655,8 @@ class MainWindow(QMainWindow):
         }
 
         print("项目根目录：", self.project_root)
+        print("用户数据目录：", self.paths.application_data_dir)
+        print("日志目录：", self.paths.log_dir)
         print("音乐库保存位置：", self.library_file)
         print("设置保存位置：", self.settings_file)
         print("歌单保存位置：", self.playlists_file)
