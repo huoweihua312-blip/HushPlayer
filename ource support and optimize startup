@@ -22,3 +22,14 @@
  tests/online_playback_smoke.py                |  286 [32m++++[m
  tests/source_removal_smoke.py                 |  163 [32m+++[m
  23 files changed, 7063 insertions(+), 240 deletions(-)
+ 
+# Temporary source backups
+*.bak
+*.bak_*
+*.py.bak*
+*.orig
+*.rej
+
+# Local cleanup archives
+.cleanup_archive/
+dev_archive/
