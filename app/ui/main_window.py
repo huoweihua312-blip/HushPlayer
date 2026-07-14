@@ -698,9 +698,11 @@ class SongLibraryDelegate(QStyledItemDelegate):
         row_rect = QRectF(option.rect.adjusted(2, 2, -2, -2))
         selected = bool(option.state & QStyle.StateFlag.State_Selected)
         hovered = bool(option.state & QStyle.StateFlag.State_MouseOver)
-        song_path = self.main_window.normalize_song_path(song_data.get("path", ""))
-        playing_path = self.main_window.normalize_song_path(self.main_window.current_song_path)
-        is_playing = bool(song_path and song_path == playing_path)
+        track_identity = self.main_window.track_identity_for_song_data(song_data)
+        is_playing = bool(
+            track_identity
+            and track_identity == self.main_window.current_track_identity()
+        )
 
         if selected:
             background = QColor(76, 141, 255, 48)
@@ -3504,6 +3506,9 @@ class MainWindow(QMainWindow):
         self.main_was_minimized_before_immersive = False
         self.main_was_maximized_before_immersive = False
         self.last_playing_indicator_path = ""
+        self.last_playing_indicator_identity = ""
+        self.song_identity_to_item: dict[str, QListWidgetItem] = {}
+        self.playlist_membership_snapshots: dict[str, dict] = {}
         self.last_song_list_order_key = None
 
         self.search_debounce_timer = QTimer(self)
@@ -3836,6 +3841,12 @@ class MainWindow(QMainWindow):
         self.schedule_startup_task(0, "桌面歌词功能初始化", self.install_floating_lyrics_feature)
         self.schedule_startup_task(0, "桌面歌词按钮初始化", self.install_floating_lyrics_button)
         self.schedule_startup_task(0, "Windows 深色标题栏", self.apply_windows_dark_title_bar)
+        if self.playlists_migration_pending:
+            self.schedule_startup_task(
+                0,
+                "旧歌单加入时间迁移持久化",
+                self.persist_pending_playlist_migration,
+            )
         self.schedule_startup_task(120, "桌面歌词自动打开检查", self.auto_open_floating_lyrics_if_enabled)
         self.schedule_startup_task(1800, "启动文件夹扫描派发", self.auto_scan_music_folders_on_startup)
         print(f"[perf] 主窗口启动调度：{(time.perf_counter() - startup_started_at) * 1000:.1f} ms")
@@ -4392,12 +4403,7 @@ class MainWindow(QMainWindow):
                 "fixed": False,
             }
         playlist = self.playlists[playlist_id]
-        PlaylistMembership.normalize_playlist(playlist, self.normalize_song_path)
-        return [
-            self.normalize_song_path(path)
-            for path in playlist["songs"]
-            if self.normalize_song_path(path)
-        ]
+        return list(self.get_playlist_membership_snapshot(playlist_id)["local_ids"])
 
     def get_playlist_remote_ids(self, playlist_id: str) -> list[str]:
         if playlist_id not in self.playlists or not isinstance(self.playlists.get(playlist_id), dict):
@@ -4410,8 +4416,66 @@ class MainWindow(QMainWindow):
                 "fixed": False,
             }
         playlist = self.playlists[playlist_id]
-        PlaylistMembership.normalize_playlist(playlist, self.normalize_song_path)
-        return playlist["remoteSongs"]
+        return list(self.get_playlist_membership_snapshot(playlist_id)["remote_ids"])
+
+    def invalidate_playlist_membership_snapshot(self, playlist_id: str = "") -> None:
+        if playlist_id:
+            self.playlist_membership_snapshots.pop(playlist_id, None)
+        else:
+            self.playlist_membership_snapshots.clear()
+
+    def get_playlist_membership_snapshot(self, playlist_id: str) -> dict:
+        playlist = self.playlists.get(playlist_id)
+        cached = self.playlist_membership_snapshots.get(playlist_id)
+        if cached is not None and cached.get("playlist_object_id") == id(playlist):
+            return cached
+        if not isinstance(playlist, dict):
+            return {
+                "local_ids": (),
+                "remote_ids": (),
+                "member_index": {},
+                "signature": (),
+            }
+        if (
+            playlist.get("membershipVersion") != PlaylistMembership.VERSION
+            or not isinstance(playlist.get("members"), list)
+        ):
+            PlaylistMembership.normalize_playlist(
+                playlist,
+                self.normalize_song_path,
+            )
+        members = [
+            member
+            for member in playlist.get("members", [])
+            if isinstance(member, dict)
+        ]
+        member_index = {
+            (
+                str(member.get("kind") or ""),
+                str(member.get("id") or ""),
+            ): int(member.get("added_at") or 0)
+            for member in members
+        }
+        snapshot = {
+            "playlist_object_id": id(playlist),
+            "local_ids": tuple(
+                identifier
+                for (kind, identifier) in member_index
+                if kind == PlaylistMembership.LOCAL
+            ),
+            "remote_ids": tuple(
+                identifier
+                for (kind, identifier) in member_index
+                if kind == PlaylistMembership.REMOTE
+            ),
+            "member_index": member_index,
+            "signature": tuple(
+                (kind, identifier, added_at)
+                for (kind, identifier), added_at in member_index.items()
+            ),
+        }
+        self.playlist_membership_snapshots[playlist_id] = snapshot
+        return snapshot
 
     def set_playlist_member(
         self,
@@ -4440,8 +4504,10 @@ class MainWindow(QMainWindow):
             )
         if not changed:
             return False
+        self.invalidate_playlist_membership_snapshot(playlist_id)
         if not self.save_playlists():
             self.playlists[playlist_id] = previous
+            self.invalidate_playlist_membership_snapshot(playlist_id)
             return False
         self.mark_library_list_dirty()
         return True
@@ -4474,8 +4540,10 @@ class MainWindow(QMainWindow):
                 added_count += 1
         if added_count <= 0:
             return 0
+        self.invalidate_playlist_membership_snapshot(playlist_id)
         if not self.save_playlists():
             self.playlists[playlist_id] = previous
+            self.invalidate_playlist_membership_snapshot(playlist_id)
             return 0
         self.mark_library_list_dirty()
         return added_count
@@ -4513,11 +4581,16 @@ class MainWindow(QMainWindow):
         playlist = self.playlists.get(playlist_id)
         if not isinstance(playlist, dict):
             return 0
-        return PlaylistMembership.added_at(
-            playlist,
-            kind,
-            identifier,
-            self.normalize_song_path,
+        normalized_identifier = (
+            self.normalize_song_path(identifier)
+            if kind == PlaylistMembership.LOCAL
+            else str(identifier or "").strip()
+        )
+        return int(
+            self.get_playlist_membership_snapshot(playlist_id)["member_index"].get(
+                (kind, normalized_identifier),
+                0,
+            )
         )
 
     def get_playlist_membership_signature(
@@ -4527,7 +4600,18 @@ class MainWindow(QMainWindow):
         playlist = self.playlists.get(playlist_id)
         if not isinstance(playlist, dict):
             return ()
-        return PlaylistMembership.signature(playlist, self.normalize_song_path)
+        return self.get_playlist_membership_snapshot(playlist_id)["signature"]
+
+    def get_playlist_member_index(
+        self,
+        playlist_id: str,
+    ) -> dict[tuple[str, str], int]:
+        playlist = self.playlists.get(playlist_id)
+        if not isinstance(playlist, dict):
+            return {}
+        return self.get_playlist_membership_snapshot(playlist_id)[
+            "member_index"
+        ]
 
     def playlist_id_for_current_view(self) -> str:
         if self.current_library_view == "liked":
@@ -4540,17 +4624,29 @@ class MainWindow(QMainWindow):
         self,
         playlist_id: str,
         song_data: dict,
+        member_index: dict[tuple[str, str], int] | None = None,
     ) -> int:
+        index = member_index
+        if index is None:
+            index = self.get_playlist_member_index(playlist_id)
         if song_data.get("recordKind") == "remote":
-            return self.get_playlist_member_added_at(
-                playlist_id,
-                PlaylistMembership.REMOTE,
-                str(song_data.get("remoteStableId") or ""),
+            return int(
+                index.get(
+                    (
+                        PlaylistMembership.REMOTE,
+                        str(song_data.get("remoteStableId") or ""),
+                    ),
+                    0,
+                )
             )
-        return self.get_playlist_member_added_at(
-            playlist_id,
-            PlaylistMembership.LOCAL,
-            self.normalize_song_path(song_data.get("path", "")),
+        return int(
+            index.get(
+                (
+                    PlaylistMembership.LOCAL,
+                    self.normalize_song_path(song_data.get("path", "")),
+                ),
+                0,
+            )
         )
 
     def get_online_playlist_choices(self) -> list[tuple[str, str]]:
@@ -4582,11 +4678,14 @@ class MainWindow(QMainWindow):
             raise RemoteTrackStoreError(self.remote_tracks_error)
         track = MediaItem.from_mapping(track).to_legacy_online()
         stable_id = RemoteTrackStore.stable_id_for_track(track)
+        existing = self.remote_tracks.get(stable_id)
         stable_id, record = RemoteTrackStore.build_record(
             track,
             self.get_remote_track_source_url(track),
-            self.remote_tracks.get(stable_id),
+            existing,
         )
+        if isinstance(existing, dict) and existing == record:
+            return stable_id, existing
         updated = dict(self.remote_tracks)
         updated[stable_id] = record
         self.remote_track_store.save_tracks(updated)
@@ -4621,7 +4720,7 @@ class MainWindow(QMainWindow):
             return
         if not self.remove_remote_id_from_playlist(stable_id, "liked"):
             return
-        self.refresh_remote_collection_views()
+        self.refresh_playlist_membership_views()
         self.set_online_status_message("已取消收藏该在线歌曲。")
 
     def add_online_track_to_playlist(self, track: dict, playlist_id: str) -> None:
@@ -4629,19 +4728,21 @@ class MainWindow(QMainWindow):
         if playlist_id not in self.playlists or not isinstance(self.playlists.get(playlist_id), dict):
             self.set_online_status_message("目标歌单不存在。")
             return
-        try:
-            stable_id, _record = self.persist_remote_track(track)
-        except RemoteTrackStoreError as error:
-            QMessageBox.warning(self, "保存在线歌曲失败", str(error))
-            return
+        stable_id = RemoteTrackStore.stable_id_for_track(track)
         if stable_id in self.get_playlist_remote_ids(playlist_id):
             self.set_online_status_message(
                 f"该歌曲已经在“{self.get_playlist_name(playlist_id)}”中。"
             )
             return
+        try:
+            stable_id, _record = self.persist_remote_track(track)
+        except RemoteTrackStoreError as error:
+            QMessageBox.warning(self, "保存在线歌曲失败", str(error))
+            return
         if not self.add_remote_id_to_playlist(stable_id, playlist_id):
             return
-        self.refresh_remote_collection_views()
+        self.refresh_remote_song_item(stable_id)
+        self.refresh_playlist_membership_views()
         self.set_online_status_message(
             f"已加入“{self.get_playlist_name(playlist_id)}”。"
         )
@@ -4656,14 +4757,19 @@ class MainWindow(QMainWindow):
     def sync_remote_song_items(self) -> None:
         if not hasattr(self, "song_list"):
             return
+        existing_items: dict[str, QListWidgetItem] = {}
+        for row in range(self.song_list.count()):
+            item = self.song_list.item(row)
+            data = item.data(Qt.ItemDataRole.UserRole) if item is not None else None
+            if isinstance(data, dict) and data.get("recordKind") == "remote":
+                stable_id = str(data.get("remoteStableId") or "")
+                if stable_id and item is not None:
+                    existing_items[stable_id] = item
+
         previous_signal_state = self.song_list.blockSignals(True)
         self.song_list.setUpdatesEnabled(False)
+        structure_changed = False
         try:
-            for row in range(self.song_list.count() - 1, -1, -1):
-                item = self.song_list.item(row)
-                data = item.data(Qt.ItemDataRole.UserRole) if item is not None else None
-                if isinstance(data, dict) and data.get("recordKind") == "remote":
-                    self.song_list.takeItem(row)
             pending_track = getattr(self, "pending_online_track", None)
             pending_id = (
                 RemoteTrackStore.stable_id_for_track(pending_track)
@@ -4682,6 +4788,16 @@ class MainWindow(QMainWindow):
                 and source.get("enabled")
                 and source.get("sourceUrl")
             }
+            desired_ids = set(self.remote_tracks)
+            for stable_id, item in tuple(existing_items.items()):
+                if stable_id in desired_ids:
+                    continue
+                row = self.song_list.row(item)
+                if row >= 0:
+                    self.song_list.takeItem(row)
+                    structure_changed = True
+                existing_items.pop(stable_id, None)
+
             for stable_id, record in self.remote_tracks.items():
                 song_data = RemoteTrackStore.to_song_data(
                     stable_id,
@@ -4689,12 +4805,68 @@ class MainWindow(QMainWindow):
                     str(record.get("source_id") or "") in available_source_ids,
                     resolving=stable_id == pending_id,
                 )
-                self.song_list.addItem(self.create_song_list_item(song_data))
+                item = existing_items.get(stable_id)
+                if item is None:
+                    self.song_list.addItem(self.create_song_list_item(song_data))
+                    structure_changed = True
+                else:
+                    self.refresh_song_item_display(
+                        item,
+                        song_data,
+                        update_viewport=False,
+                    )
         finally:
             self.song_list.blockSignals(previous_signal_state)
             self.song_list.setUpdatesEnabled(True)
-        self.mark_library_list_dirty()
-        self.filter_song_list(self.search_input.text())
+
+        self.rebuild_song_identity_index()
+        self.song_list.viewport().update()
+        if structure_changed:
+            self.mark_library_list_dirty()
+            self.filter_song_list(self.search_input.text())
+
+    def refresh_remote_song_item(
+        self,
+        stable_id: str,
+        resolving: bool = False,
+    ) -> bool:
+        stable_id = str(stable_id or "").strip()
+        record = self.remote_tracks.get(stable_id)
+        if not stable_id or not isinstance(record, dict):
+            return False
+        track = RemoteTrackStore.to_online_track(stable_id, record)
+        identity = self.track_identity_for_song_data(track)
+        item = self.find_song_item_by_identity(identity)
+        if item is None:
+            for row in range(self.song_list.count()):
+                candidate = self.song_list.item(row)
+                data = (
+                    candidate.data(Qt.ItemDataRole.UserRole)
+                    if candidate is not None
+                    else None
+                )
+                if (
+                    isinstance(data, dict)
+                    and str(data.get("remoteStableId") or "") == stable_id
+                ):
+                    item = candidate
+                    break
+        song_data = RemoteTrackStore.to_song_data(
+            stable_id,
+            record,
+            self.is_remote_source_available(record),
+            resolving=resolving,
+        )
+        if item is None:
+            item = self.create_song_list_item(song_data)
+            self.song_list.addItem(item)
+            item.setHidden(not self.song_matches_current_view(song_data))
+            if identity:
+                self.song_identity_to_item[identity] = item
+            self.mark_library_list_dirty()
+            return True
+        self.refresh_song_item_display(item, song_data)
+        return True
 
     def refresh_remote_collection_views(self) -> None:
         self.sync_remote_song_items()
@@ -4970,8 +5142,11 @@ class MainWindow(QMainWindow):
             self.set_sidebar_active("library")
             return
         self.show_library_container()
+        container_ready_at = time.perf_counter()
         self.sort_song_list_for_current_view()
+        sorted_at = time.perf_counter()
         self.filter_song_list("")
+        filtered_at = time.perf_counter()
         self.update_view_buttons()
         self.remember_library_view_key()
         self.set_sidebar_active("library")
@@ -4989,7 +5164,16 @@ class MainWindow(QMainWindow):
             view_title = view_titles.get(self.current_library_view, "全部歌曲")
         if hasattr(self, "library_page"):
             self.library_page.page_title.setText(view_title)
-        elapsed_ms = (time.perf_counter() - started_at) * 1000
+        completed_at = time.perf_counter()
+        elapsed_ms = (completed_at - started_at) * 1000
+        if target_view == "liked" or target_view.startswith("playlist:"):
+            print(
+                "[perf] playlist_view phases: "
+                f"prepare={(container_ready_at - started_at) * 1000:.1f} ms, "
+                f"sort={(sorted_at - container_ready_at) * 1000:.1f} ms, "
+                f"filter={(filtered_at - sorted_at) * 1000:.1f} ms, "
+                f"selection/highlight/layout={(completed_at - filtered_at) * 1000:.1f} ms"
+            )
         print(f"当前音乐库视图：{view_title}")
         print(f"[perf] set_library_view: {elapsed_ms:.1f} ms, view={self.current_library_view}, songs={self.song_list.count() if hasattr(self, 'song_list') else 0}")
     def update_view_buttons(self) -> None:
@@ -5007,6 +5191,8 @@ class MainWindow(QMainWindow):
         song_data: dict,
         liked_paths: set[str] | None = None,
         playlist_paths: set[str] | None = None,
+        liked_remote_ids: set[str] | None = None,
+        playlist_remote_ids: set[str] | None = None,
     ) -> bool:
         if not isinstance(song_data, dict):
             return True
@@ -5017,8 +5203,12 @@ class MainWindow(QMainWindow):
         if song_data.get("recordKind") == "remote":
             stable_id = str(song_data.get("remoteStableId") or "")
             if self.current_library_view == "liked":
+                if liked_remote_ids is not None:
+                    return stable_id in liked_remote_ids
                 return stable_id in self.get_playlist_remote_ids("liked")
             if self.current_library_view.startswith("playlist:"):
+                if playlist_remote_ids is not None:
+                    return stable_id in playlist_remote_ids
                 playlist_id = self.current_library_view.split("playlist:", 1)[1]
                 return stable_id in self.get_playlist_remote_ids(playlist_id)
             return False
@@ -5077,8 +5267,16 @@ class MainWindow(QMainWindow):
         song_data: dict,
         liked_paths: set[str] | None = None,
         playlist_paths: set[str] | None = None,
+        liked_remote_ids: set[str] | None = None,
+        playlist_remote_ids: set[str] | None = None,
     ) -> bool:
-        return self.song_matches_base_library_view(song_data, liked_paths, playlist_paths) and self.song_matches_category_filter(song_data)
+        return self.song_matches_base_library_view(
+            song_data,
+            liked_paths,
+            playlist_paths,
+            liked_remote_ids,
+            playlist_remote_ids,
+        ) and self.song_matches_category_filter(song_data)
     def collect_song_data_from_list(self) -> list[dict]:
         songs = []
 
@@ -5095,6 +5293,54 @@ class MainWindow(QMainWindow):
 
         return songs
 
+    def track_identity_for_song_data(self, song_data: dict | MediaItem | None) -> str:
+        if isinstance(song_data, MediaItem):
+            item = song_data
+        elif isinstance(song_data, dict):
+            try:
+                item = MediaItem.from_mapping(song_data)
+            except (TypeError, ValueError):
+                return ""
+        else:
+            return ""
+        return item.stable_identity
+
+    def current_track_identity(self) -> str:
+        current = getattr(self, "current_media_item", None)
+        if isinstance(current, MediaItem):
+            return current.stable_identity
+        playing_path = self.normalize_song_path(getattr(self, "current_song_path", ""))
+        if not playing_path:
+            return ""
+        return MediaItem.from_local({"path": playing_path}).stable_identity
+
+    def rebuild_song_identity_index(self) -> None:
+        index: dict[str, QListWidgetItem] = {}
+        if hasattr(self, "song_list"):
+            for row in range(self.song_list.count()):
+                item = self.song_list.item(row)
+                data = item.data(Qt.ItemDataRole.UserRole) if item is not None else None
+                identity = self.track_identity_for_song_data(data)
+                if item is not None and identity:
+                    index[identity] = item
+        self.song_identity_to_item = index
+
+    def find_song_item_by_identity(self, identity: str) -> QListWidgetItem | None:
+        identity = str(identity or "")
+        if not identity or not hasattr(self, "song_list"):
+            return None
+        item = getattr(self, "song_identity_to_item", {}).get(identity)
+        if item is not None:
+            try:
+                if self.song_list.row(item) >= 0:
+                    data = item.data(Qt.ItemDataRole.UserRole)
+                    if self.track_identity_for_song_data(data) == identity:
+                        return item
+            except RuntimeError:
+                pass
+        self.rebuild_song_identity_index()
+        return self.song_identity_to_item.get(identity)
+
     def format_song_list_item_text(self, song_data: dict, is_playing: bool = False) -> str:
         title = str(song_data.get("title") or "未知歌曲")
         artist = str(song_data.get("artist") or "未知艺术家")
@@ -5107,15 +5353,16 @@ class MainWindow(QMainWindow):
         return f"{prefix}{title}\n{artist} · {album}"
 
     def get_song_item_display_text(self, song_data: dict) -> str:
-        song_path = self.normalize_song_path(song_data.get("path", ""))
-        playing_path = self.normalize_song_path(self.current_song_path)
-        is_playing = bool(song_path and playing_path and song_path == playing_path)
-        if song_data.get("recordKind") == "remote" and self.current_track_kind == "online":
-            current_remote_id = RemoteTrackStore.stable_id_for_track(self.current_online_track or {})
-            is_playing = current_remote_id == str(song_data.get("remoteStableId") or "")
+        identity = self.track_identity_for_song_data(song_data)
+        is_playing = bool(identity and identity == self.current_track_identity())
         return self.format_song_list_item_text(song_data, is_playing=is_playing)
 
-    def refresh_song_item_display(self, item: QListWidgetItem, song_data: dict) -> None:
+    def refresh_song_item_display(
+        self,
+        item: QListWidgetItem,
+        song_data: dict,
+        update_viewport: bool = True,
+    ) -> None:
         item.setText(self.get_song_item_display_text(song_data))
         title = str(song_data.get("title") or "未知歌曲")
         artist = str(song_data.get("artist") or "未知艺术家")
@@ -5132,8 +5379,15 @@ class MainWindow(QMainWindow):
         )
         item.setSizeHint(QSize(0, 58))
         item.setData(Qt.ItemDataRole.UserRole, song_data)
+        identity = self.track_identity_for_song_data(song_data)
+        if identity:
+            self.song_identity_to_item[identity] = item
 
-        if hasattr(self, "song_list") and self.song_list.row(item) >= 0:
+        if (
+            update_viewport
+            and hasattr(self, "song_list")
+            and self.song_list.row(item) >= 0
+        ):
             self.song_list.viewport().update(self.song_list.visualItemRect(item))
 
     def get_library_duration_seconds(self, song_data: dict) -> int:
@@ -5286,6 +5540,13 @@ class MainWindow(QMainWindow):
         if field not in {"title", "artist", "album", "added_at"}:
             return False
 
+        playlist_id = self.playlist_id_for_current_view()
+        playlist_member_index = (
+            self.get_playlist_member_index(playlist_id)
+            if field == "added_at" and playlist_id
+            else {}
+        )
+
         items = [
             self.song_list.item(row)
             for row in range(self.song_list.count())
@@ -5312,11 +5573,11 @@ class MainWindow(QMainWindow):
                 return False, 0 if field == "added_at" else ""
 
             if field == "added_at":
-                playlist_id = self.playlist_id_for_current_view()
                 if playlist_id:
                     value = self.playlist_member_added_at_for_song(
                         playlist_id,
                         song_data,
+                        playlist_member_index,
                     )
                 else:
                     try:
@@ -5365,6 +5626,8 @@ class MainWindow(QMainWindow):
         selected_item_ids = {id(item) for item in self.song_list.selectedItems()}
         current_item = self.song_list.currentItem()
         previous_signal_state = self.song_list.blockSignals(True)
+        if self.song_list.isSortingEnabled():
+            self.song_list.setSortingEnabled(False)
         self.song_list.setUpdatesEnabled(False)
 
         try:
@@ -5409,27 +5672,18 @@ class MainWindow(QMainWindow):
         if not hasattr(self, "song_list"):
             return
 
-        target_paths = {
-            self.normalize_song_path(getattr(self, "last_playing_indicator_path", "")),
-            self.normalize_song_path(getattr(self, "current_song_path", "")),
+        current_identity = self.current_track_identity()
+        target_identities = {
+            str(getattr(self, "last_playing_indicator_identity", "") or ""),
+            current_identity,
         }
-        target_paths.discard("")
+        target_identities.discard("")
         refreshed_count = 0
 
-        for row in range(self.song_list.count()):
-            item = self.song_list.item(row)
-
-            if item is None:
-                continue
-
-            song_data = item.data(Qt.ItemDataRole.UserRole)
-
+        for identity in target_identities:
+            item = self.find_song_item_by_identity(identity)
+            song_data = item.data(Qt.ItemDataRole.UserRole) if item is not None else None
             if isinstance(song_data, dict):
-                song_path = self.normalize_song_path(song_data.get("path", ""))
-
-                if target_paths and song_path not in target_paths:
-                    continue
-
                 self.refresh_song_item_display(item, song_data)
                 refreshed_count += 1
 
@@ -5437,6 +5691,7 @@ class MainWindow(QMainWindow):
             self.remember_library_view_key()
 
         self.last_playing_indicator_path = self.normalize_song_path(getattr(self, "current_song_path", ""))
+        self.last_playing_indicator_identity = current_identity
         if hasattr(self, "library_page"):
             self.library_page.refresh_playing_indicator()
         if hasattr(self, "search_page"):
@@ -5446,38 +5701,43 @@ class MainWindow(QMainWindow):
     def create_song_list_item(self, song_data: dict) -> QListWidgetItem:
         item = QListWidgetItem()
         self.refresh_song_item_display(item, song_data)
+        identity = self.track_identity_for_song_data(song_data)
+        if identity:
+            self.song_identity_to_item[identity] = item
         return item
 
     def rebuild_song_list_from_data(self, songs: list[dict]) -> None:
         started_at = time.perf_counter()
-        selected_paths = {
-            self.normalize_song_path(self.get_song_data_from_item(item).get("path", ""))
+        selected_identities = {
+            self.track_identity_for_song_data(self.get_song_data_from_item(item))
             for item in self.song_list.selectedItems()
             if self.get_song_data_from_item(item)
         }
         current_item_data = self.get_song_data_from_item(self.song_list.currentItem())
-        current_item_path = self.normalize_song_path(
-            current_item_data.get("path", "") if current_item_data else ""
+        current_item_identity = self.track_identity_for_song_data(current_item_data)
+        browsing_identity = self.track_identity_for_song_data(
+            getattr(self, "browsing_song_data", None)
         )
-        browsing_path = self.normalize_song_path(self.browsing_song_path) or current_item_path
+        target_current_identity = browsing_identity or current_item_identity
         restored_current_item = None
         restored_selected_items: list[QListWidgetItem] = []
         previous_signal_state = self.song_list.blockSignals(True)
         self.song_list.setUpdatesEnabled(False)
 
         try:
+            self.song_identity_to_item = {}
             self.song_list.clear()
 
             for song_data in songs:
                 item = self.create_song_list_item(song_data)
                 self.song_list.addItem(item)
 
-                song_path = self.normalize_song_path(song_data.get("path", ""))
+                identity = self.track_identity_for_song_data(song_data)
 
-                if browsing_path and song_path == browsing_path:
+                if target_current_identity and identity == target_current_identity:
                     restored_current_item = item
 
-                if song_path and song_path in selected_paths:
+                if identity and identity in selected_identities:
                     restored_selected_items.append(item)
 
             if restored_current_item is not None:
@@ -5529,6 +5789,7 @@ class MainWindow(QMainWindow):
     def sort_song_list_for_current_view(self, force: bool = False) -> bool:
         started_at = time.perf_counter()
         order_key = self.current_song_list_order_key()
+        signature_ready_at = time.perf_counter()
 
         if (
             not force
@@ -5539,18 +5800,28 @@ class MainWindow(QMainWindow):
             print(f"[perf] sort_song_list_for_current_view skip: {elapsed_ms:.1f} ms, key={order_key[0]}")
             return False
 
-        songs = self.collect_song_data_from_list()
+        items = [
+            self.song_list.item(row)
+            for row in range(self.song_list.count())
+            if self.song_list.item(row) is not None
+        ]
 
-        if not songs:
+        if not items:
             self.last_song_list_order_key = order_key
             return False
 
-        def normalized_path(song_data: dict) -> str:
-            return self.normalize_song_path(song_data.get("path", ""))
+        items_ready_at = time.perf_counter()
 
-        def stats_for(song_data: dict) -> dict:
+        def song_data(item: QListWidgetItem) -> dict:
+            value = item.data(Qt.ItemDataRole.UserRole)
+            return value if isinstance(value, dict) else {}
+
+        def normalized_path(item: QListWidgetItem) -> str:
+            return self.normalize_song_path(song_data(item).get("path", ""))
+
+        def stats_for(item: QListWidgetItem) -> dict:
             return self.song_stats.get(
-                normalized_path(song_data),
+                normalized_path(item),
                 {
                     "play_count": 0,
                     "total_listen_time": 0,
@@ -5559,24 +5830,24 @@ class MainWindow(QMainWindow):
             )
 
         if self.current_library_view == "recent_played":
-            songs.sort(
-                key=lambda song: int(stats_for(song).get("last_played", 0)),
+            items.sort(
+                key=lambda item: int(stats_for(item).get("last_played", 0)),
                 reverse=True,
             )
 
         elif self.current_library_view == "frequent":
-            songs.sort(
-                key=lambda song: (
-                    int(stats_for(song).get("play_count", 0)),
-                    int(stats_for(song).get("total_listen_time", 0)),
-                    int(stats_for(song).get("last_played", 0)),
+            items.sort(
+                key=lambda item: (
+                    int(stats_for(item).get("play_count", 0)),
+                    int(stats_for(item).get("total_listen_time", 0)),
+                    int(stats_for(item).get("last_played", 0)),
                 ),
                 reverse=True,
             )
 
         elif self.current_library_view == "recent_added":
-            songs.sort(
-                key=lambda song: int(song.get("added_at", 0) or 0),
+            items.sort(
+                key=lambda item: int(song_data(item).get("added_at", 0) or 0),
                 reverse=True,
             )
 
@@ -5585,22 +5856,41 @@ class MainWindow(QMainWindow):
             or self.current_library_view.startswith("playlist:")
         ):
             playlist_id = self.playlist_id_for_current_view()
-            songs.sort(
-                key=lambda song: self.playlist_member_added_at_for_song(
-                    playlist_id,
-                    song,
+            member_index = self.get_playlist_member_index(playlist_id)
+            member_index_ready_at = time.perf_counter()
+            items.sort(
+                key=lambda item: (
+                    self.playlist_member_added_at_for_song(
+                        playlist_id,
+                        song_data(item),
+                        member_index,
+                    ),
+                    self.track_identity_for_song_data(song_data(item)),
                 ),
                 reverse=True,
             )
 
         else:
-            songs.sort(
-                key=lambda song: int(song.get("added_at", 0) or 0),
+            items.sort(
+                key=lambda item: int(song_data(item).get("added_at", 0) or 0),
             )
 
-        self.rebuild_song_list_from_data(songs)
+        sorted_at = time.perf_counter()
+        self.reorder_song_list_items(items)
+        if self.library_sort_field in {"title", "artist", "album", "added_at"}:
+            self.apply_current_library_sort(refresh_view=False)
+        reordered_at = time.perf_counter()
         self.last_song_list_order_key = order_key
-        elapsed_ms = (time.perf_counter() - started_at) * 1000
+        elapsed_ms = (reordered_at - started_at) * 1000
+        if self.playlist_id_for_current_view():
+            print(
+                "[perf] playlist_view_sort phases: "
+                f"signature={(signature_ready_at - started_at) * 1000:.1f} ms, "
+                f"collect={(items_ready_at - signature_ready_at) * 1000:.1f} ms, "
+                f"member_index={(member_index_ready_at - items_ready_at) * 1000:.1f} ms, "
+                f"sort={(sorted_at - member_index_ready_at) * 1000:.1f} ms, "
+                f"reorder={(reordered_at - sorted_at) * 1000:.1f} ms"
+            )
         print(f"[perf] sort_song_list_for_current_view: {elapsed_ms:.1f} ms, key={order_key[0]}")
         return True
     def create_new_playlist(self) -> None:
@@ -6212,10 +6502,16 @@ class MainWindow(QMainWindow):
 
     def current_library_view_key(self) -> tuple:
         song_count = self.song_list.count() if hasattr(self, "song_list") else 0
-        playing_path = self.normalize_song_path(getattr(self, "current_song_path", ""))
+        playing_identity = self.current_track_identity()
         category_type = getattr(self, "library_category_filter_type", None)
         category_value = getattr(self, "library_category_filter_value", "")
-        return (self.current_library_view, song_count, playing_path, category_type, category_value)
+        return (
+            self.current_library_view,
+            song_count,
+            playing_identity,
+            category_type,
+            category_value,
+        )
 
     def mark_library_list_dirty(self) -> None:
         self.library_list_dirty = True
@@ -6327,8 +6623,9 @@ class MainWindow(QMainWindow):
             source_id,
             track,
         )
-        if track.get("remoteStableId"):
-            self.sync_remote_song_items()
+        stable_id = str(track.get("remoteStableId") or "")
+        if stable_id:
+            self.refresh_remote_song_item(stable_id, resolving=True)
 
     def on_online_playback_resolved(
         self,
@@ -6343,8 +6640,9 @@ class MainWindow(QMainWindow):
         self.pending_online_track = None
         if not isinstance(track, dict) or str(track.get("sourceId") or "") != source_id:
             return
-        if track.get("remoteStableId"):
-            self.sync_remote_song_items()
+        stable_id = str(track.get("remoteStableId") or "")
+        if stable_id:
+            self.refresh_remote_song_item(stable_id, resolving=False)
         if resolution.get("headers"):
             self.set_online_status_message(
                 "该音源需要附加请求头，当前播放模式暂不支持。"
@@ -6408,7 +6706,6 @@ class MainWindow(QMainWindow):
         self.media_player.setSource(url)
         self.progress_slider.setValue(0)
         self.media_player.play()
-        self.sync_remote_song_items()
 
     def request_online_download(self, track: dict) -> None:
         if not isinstance(track, dict):
@@ -6476,10 +6773,17 @@ class MainWindow(QMainWindow):
 
     def on_online_source_request_failed(self, request_id: int, action: str, message: str) -> None:
         if action == "resolvePlayback" and request_id == self.pending_online_playback_request:
+            track = self.pending_online_track
             self.pending_online_playback_request = 0
             self.pending_online_track = None
             self.set_online_status_message(f"获取播放地址失败：{message}")
-            self.sync_remote_song_items()
+            stable_id = (
+                str(track.get("remoteStableId") or "")
+                if isinstance(track, dict)
+                else ""
+            )
+            if stable_id:
+                self.refresh_remote_song_item(stable_id, resolving=False)
         elif action == "resolveDownload" and request_id == self.pending_online_download_request:
             self.pending_online_download_request = 0
             self.pending_online_download_track = None
@@ -6877,6 +7181,9 @@ class MainWindow(QMainWindow):
         page = LibraryPage(self)
         self.library_page = page
         self.song_list = page.track_view.list_widget
+        # Sorting is managed explicitly so batch inserts never trigger Qt's
+        # per-row automatic sort or change the playlist relationship order.
+        self.song_list.setSortingEnabled(False)
         self.song_list.setItemDelegate(SongLibraryDelegate(self, self.song_list))
         self.song_list.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.song_list.customContextMenuRequested.connect(self.show_song_context_menu)
@@ -7624,7 +7931,7 @@ class MainWindow(QMainWindow):
 
     def current_media_key(self) -> str:
         item = getattr(self, "current_media_item", None)
-        return item.key if isinstance(item, MediaItem) else ""
+        return item.stable_identity if isinstance(item, MediaItem) else ""
 
     def browse_media_item(self, value: dict) -> None:
         try:
@@ -7868,12 +8175,20 @@ class MainWindow(QMainWindow):
         visible_count = 0
         liked_paths_cache = None
         playlist_paths_cache = None
+        liked_remote_ids_cache = None
+        playlist_remote_ids_cache = None
 
         if self.current_library_view == "liked":
             liked_paths_cache = set(self.get_liked_song_paths())
+            liked_remote_ids_cache = set(self.get_playlist_remote_ids("liked"))
         elif self.current_library_view.startswith("playlist:"):
             playlist_id = self.current_library_view.split("playlist:", 1)[1]
             playlist_paths_cache = set(self.get_playlist_song_paths(playlist_id))
+            playlist_remote_ids_cache = set(
+                self.get_playlist_remote_ids(playlist_id)
+            )
+
+        membership_cache_ready_at = time.perf_counter()
 
         previous_signal_state = self.song_list.blockSignals(True)
         self.song_list.setUpdatesEnabled(False)
@@ -7896,7 +8211,13 @@ class MainWindow(QMainWindow):
 
                 search_text = f"{title} {artist} {album} {path}".lower()
                 matches_keyword = not keyword or keyword in search_text
-                matches_view = self.song_matches_current_view(song_data, liked_paths_cache, playlist_paths_cache)
+                matches_view = self.song_matches_current_view(
+                    song_data,
+                    liked_paths_cache,
+                    playlist_paths_cache,
+                    liked_remote_ids_cache,
+                    playlist_remote_ids_cache,
+                )
                 should_show = matches_keyword and matches_view
 
                 should_hide = not should_show
@@ -7908,6 +8229,8 @@ class MainWindow(QMainWindow):
         finally:
             self.song_list.blockSignals(previous_signal_state)
             self.song_list.setUpdatesEnabled(True)
+
+        rows_filtered_at = time.perf_counter()
 
         if hasattr(self, "song_list_empty_hint"):
             if visible_count <= 0:
@@ -7933,8 +8256,16 @@ class MainWindow(QMainWindow):
                     self.song_table_header.setVisible(True)
 
                 self.schedule_visible_library_durations()
-        elapsed_ms = (time.perf_counter() - started_at) * 1000
         self.update_library_page_scope()
+        scope_updated_at = time.perf_counter()
+        elapsed_ms = (scope_updated_at - started_at) * 1000
+        if self.playlist_id_for_current_view():
+            print(
+                "[perf] playlist_view_filter phases: "
+                f"membership={(membership_cache_ready_at - started_at) * 1000:.1f} ms, "
+                f"rows={(rows_filtered_at - membership_cache_ready_at) * 1000:.1f} ms, "
+                f"layout={(scope_updated_at - rows_filtered_at) * 1000:.1f} ms"
+            )
         print(f"搜索关键词：{keyword or '无'}，显示歌曲数量：{visible_count}")
         print(f"[perf] filter_song_list: {elapsed_ms:.1f} ms, songs={self.song_list.count()}")
 
@@ -8013,6 +8344,7 @@ class MainWindow(QMainWindow):
         return visible_rows
 
     def add_demo_songs(self) -> None:
+        self.song_identity_to_item = {}
         self.song_list.clear()
         self.filter_song_list(self.search_input.text())
 
@@ -8506,6 +8838,7 @@ class MainWindow(QMainWindow):
 
         if import_mode == "auto":
             if self.has_demo_songs() and new_songs:
+                self.song_identity_to_item = {}
                 self.song_list.clear()
 
             existing_paths = {path.lower() for path in self.get_existing_song_paths()}
@@ -9008,6 +9341,7 @@ class MainWindow(QMainWindow):
         valid_count = 0
 
         try:
+            self.song_identity_to_item = {}
             self.song_list.clear()
 
             for song in songs:
@@ -10504,6 +10838,7 @@ class MainWindow(QMainWindow):
             return default_settings
 
     def load_playlists(self) -> dict:
+        self.playlist_membership_snapshots = {}
         self.playlists_migration_pending = False
         default_playlists = {
             "liked": {
@@ -10600,6 +10935,16 @@ class MainWindow(QMainWindow):
         print("歌单已保存：", self.playlists_file)
         return True
 
+    def persist_pending_playlist_migration(self) -> None:
+        if not getattr(self, "playlists_migration_pending", False):
+            return
+        started_at = time.perf_counter()
+        if self.save_playlists():
+            print(
+                "[perf] 旧歌单加入时间迁移持久化："
+                f"{(time.perf_counter() - started_at) * 1000:.1f} ms"
+            )
+
     def normalize_song_path(self, path: str | None) -> str:
         if not path:
             return ""
@@ -10622,15 +10967,7 @@ class MainWindow(QMainWindow):
             },
         )
 
-        PlaylistMembership.normalize_playlist(
-            liked_playlist,
-            self.normalize_song_path,
-        )
-        return [
-            self.normalize_song_path(path)
-            for path in liked_playlist["songs"]
-            if self.normalize_song_path(path)
-        ]
+        return self.get_playlist_song_paths("liked")
 
     def is_song_liked(self, path: str | None) -> bool:
         normalized_path = self.normalize_song_path(path)
@@ -11443,11 +11780,13 @@ class MainWindow(QMainWindow):
                 ) or playlists_changed
 
         if playlists_changed:
+            self.invalidate_playlist_membership_snapshot()
             if self.save_playlists():
                 self.mark_library_list_dirty()
                 self.refresh_playlist_view_buttons()
             else:
                 self.playlists = previous_playlists
+                self.invalidate_playlist_membership_snapshot()
 
         if isinstance(getattr(self, "play_queue", None), list):
             cleaned_queue = [
@@ -12662,7 +13001,6 @@ class MainWindow(QMainWindow):
         track["sourceName"] = str(source.get("name") or record.get("source_id") or "在线来源")
         track["capabilities"] = dict(source.get("capabilities") or {})
         self.request_online_playback(track)
-        self.sync_remote_song_items()
 
     def play_current_song(self) -> None:
         if not self.current_song_path:
@@ -12872,6 +13210,7 @@ class MainWindow(QMainWindow):
             return
 
         if self.has_demo_songs():
+            self.song_identity_to_item = {}
             self.song_list.clear()
 
         existing_paths = self.get_existing_song_paths()
@@ -13292,7 +13631,7 @@ class MainWindow(QMainWindow):
         if stable_id in self.get_playlist_remote_ids(playlist_id):
             if not self.remove_remote_id_from_playlist(stable_id, playlist_id):
                 return
-            self.refresh_remote_collection_views()
+            self.refresh_playlist_membership_views()
 
     def open_remote_song_folder(self, local_path: str) -> None:
         path = Path(str(local_path or ""))

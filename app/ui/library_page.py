@@ -466,7 +466,13 @@ class LibraryPage(QFrame):
 
     def set_scope(self, title: str, tracks: list[dict], cache_key: str) -> None:
         self.page_title.setText(str(title or "音乐库"))
-        self._scope_tracks = [MediaItem.from_mapping(item).to_dict() for item in tracks]
+        self._scope_tracks = [
+            dict(item)
+            if isinstance(item, dict)
+            and {"track_id", "media_type", "source_id"}.issubset(item)
+            else MediaItem.from_mapping(item).to_dict()
+            for item in tracks
+        ]
         self._scope_cache_key = str(cache_key or "")
         if self.current_mode == "artists":
             self.artist_view.set_tracks(self._scope_tracks, self._scope_cache_key + ":artist")

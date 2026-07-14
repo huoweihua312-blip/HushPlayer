@@ -161,6 +161,39 @@ def test_window_membership_and_sorting(app: QApplication) -> None:
             window.remote_tracks = {}
             window.remote_tracks_error = ""
             window.source_registry_manager = FixtureRegistry()
+            window.playlists_file.write_text(
+                json.dumps(
+                    {
+                        "liked": {
+                            "name": "我喜欢",
+                            "songs": [str(root / "legacy.mp3")],
+                            "remoteSongs": [],
+                            "fixed": True,
+                        }
+                    },
+                    ensure_ascii=False,
+                ),
+                encoding="utf-8",
+            )
+            window.playlists = window.load_playlists()
+            assert window.playlists_migration_pending
+            migration_writes = 0
+            original_save_playlists = window.save_playlists
+
+            def counted_migration_save():
+                nonlocal migration_writes
+                migration_writes += 1
+                return original_save_playlists()
+
+            window.save_playlists = counted_migration_save
+            window.persist_pending_playlist_migration()
+            window.persist_pending_playlist_migration()
+            window.save_playlists = original_save_playlists
+            assert migration_writes == 1
+            migrated = json.loads(
+                window.playlists_file.read_text(encoding="utf-8")
+            )
+            assert migrated["liked"]["members"][0]["added_at"] > 0
             window.playlists = {
                 "liked": {
                     "name": "我喜欢",
@@ -212,14 +245,25 @@ def test_window_membership_and_sorting(app: QApplication) -> None:
 
             # Search-result signal, context menus and the bottom button all
             # converge on the same online favorite methods.
+            remote_save_calls = 0
+            original_remote_save = window.remote_track_store.save_tracks
+
+            def counted_remote_save(tracks):
+                nonlocal remote_save_calls
+                remote_save_calls += 1
+                return original_remote_save(tracks)
+
+            window.remote_track_store.save_tracks = counted_remote_save
             window.unified_search_panel.likeRequested.emit(dict(remote_track))
             app.processEvents()
             stable_id = RemoteTrackStore.stable_id_for_track(remote_track)
             assert stable_id in window.get_playlist_remote_ids("liked")
+            assert remote_save_calls == 1
             first_remote_added_at = window.get_playlist_member_added_at(
                 "liked", "remote", stable_id
             )
             window.like_online_track(remote_track)
+            assert remote_save_calls == 1
             assert window.get_playlist_member_added_at(
                 "liked", "remote", stable_id
             ) == first_remote_added_at
@@ -228,8 +272,57 @@ def test_window_membership_and_sorting(app: QApplication) -> None:
             app.processEvents()
             assert visible_titles(window) == ["在线歌曲", "本地三", "本地二", "本地一"]
 
-            window.current_media_item = MediaItem.from_online(remote_track)
+            playing_track = dict(remote_track)
+            playing_track["remoteStableId"] = stable_id
+            window.current_media_item = MediaItem.from_online(playing_track)
+            window.current_online_track = dict(playing_track)
             window.current_track_kind = "online"
+            order_before_play = visible_titles(window)
+            refresh_calls = 0
+            original_refresh = window.refresh_song_item_display
+
+            def counted_refresh(item, song_data, update_viewport=True):
+                nonlocal refresh_calls
+                refresh_calls += 1
+                return original_refresh(item, song_data, update_viewport)
+
+            window.refresh_song_item_display = counted_refresh
+            window.refresh_playing_song_indicators()
+            window.refresh_song_item_display = original_refresh
+            remote_item = window.find_song_item_by_identity(
+                window.current_track_identity()
+            )
+            assert remote_item is not None
+            remote_data = remote_item.data(Qt.ItemDataRole.UserRole)
+            assert window.get_song_item_display_text(remote_data).startswith("▶")
+            assert refresh_calls == 1
+            assert visible_titles(window) == order_before_play
+
+            assert window.refresh_remote_song_item(stable_id, resolving=True)
+            assert window.refresh_remote_song_item(stable_id, resolving=False)
+            assert visible_titles(window) == order_before_play
+            assert window.get_playlist_member_added_at(
+                "liked", "remote", stable_id
+            ) == first_remote_added_at
+
+            sync_calls = 0
+            playback_requests = []
+            original_sync = window.sync_remote_song_items
+            original_request = window.request_online_playback
+
+            def counted_sync():
+                nonlocal sync_calls
+                sync_calls += 1
+
+            window.sync_remote_song_items = counted_sync
+            window.request_online_playback = lambda track: playback_requests.append(track)
+            window.play_remote_song_data(remote_data)
+            window.sync_remote_song_items = original_sync
+            window.request_online_playback = original_request
+            assert playback_requests
+            assert sync_calls == 0
+            assert visible_titles(window) == order_before_play
+
             window.toggle_like_current_song()
             assert stable_id not in window.get_playlist_remote_ids("liked")
             window.playlists = window.load_playlists()

@@ -86,7 +86,10 @@ class CanonicalTrackDelegate(QStyledItemDelegate):
         row_rect = QRectF(option.rect.adjusted(2, 2, -2, -2))
         selected = bool(option.state & QStyle.StateFlag.State_Selected)
         hovered = bool(option.state & QStyle.StateFlag.State_MouseOver)
-        is_playing = bool(item.key and item.key == str(self.playing_key_provider() or ""))
+        is_playing = bool(
+            item.stable_identity
+            and item.stable_identity == str(self.playing_key_provider() or "")
+        )
         if selected:
             background, border = QColor(76, 141, 255, 48), QColor(76, 141, 255, 118)
         elif is_playing:
@@ -219,7 +222,7 @@ class TrackListView(QFrame):
             try:
                 selected_key = MediaItem.from_mapping(
                     current.data(Qt.ItemDataRole.UserRole)
-                ).key
+                ).stable_identity
             except (TypeError, ValueError):
                 selected_key = ""
         self.list_widget.blockSignals(True)
@@ -235,7 +238,7 @@ class TrackListView(QFrame):
                 f"{media_item.title}\n{media_item.artist} · {media_item.album}"
             )
             self.list_widget.addItem(list_item)
-            if media_item.key == selected_key:
+            if media_item.stable_identity == selected_key:
                 selected_item = list_item
         self.list_widget.blockSignals(False)
         self.list_widget.setUpdatesEnabled(True)

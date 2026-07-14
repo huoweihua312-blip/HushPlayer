@@ -222,6 +222,23 @@ class PlaylistMembership:
         )
 
     @classmethod
+    def member_index(
+        cls,
+        playlist: dict,
+        normalize_local: Callable[[str], str],
+    ) -> dict[tuple[str, str], int]:
+        """Return one normalized O(1) lookup table for a playlist view pass."""
+        cls.normalize_playlist(playlist, normalize_local)
+        return {
+            (
+                str(member.get("kind") or ""),
+                str(member.get("id") or ""),
+            ): cls._positive_int(member.get("added_at"))
+            for member in playlist.get("members", [])
+            if isinstance(member, dict)
+        }
+
+    @classmethod
     def _normalize_member(
         cls,
         kind: str,
@@ -241,10 +258,12 @@ class PlaylistMembership:
         if not isinstance(values, list):
             return []
         normalized: list[str] = []
+        seen: set[str] = set()
         for value in values:
             identifier = str(normalizer(value) or "").strip()
-            if identifier and identifier not in normalized:
+            if identifier and identifier not in seen:
                 normalized.append(identifier)
+                seen.add(identifier)
         return normalized
 
     @staticmethod
@@ -256,13 +275,15 @@ class PlaylistMembership:
             return [], []
         stored_values: list[str] = []
         normalized_ids: list[str] = []
+        seen: set[str] = set()
         for value in values:
             stored_value = str(value or "").strip()
             identifier = str(normalize_local(stored_value) or "").strip()
-            if not identifier or identifier in normalized_ids:
+            if not identifier or identifier in seen:
                 continue
             stored_values.append(stored_value)
             normalized_ids.append(identifier)
+            seen.add(identifier)
         return stored_values, normalized_ids
 
     @staticmethod

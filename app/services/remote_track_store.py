@@ -175,11 +175,16 @@ class RemoteTrackStore:
         else:
             status = "来源不可用"
         return {
+            "media_type": "online",
             "recordKind": "remote",
             "remoteStableId": stable_id,
+            "sourceId": str(record.get("source_id") or ""),
+            "id": str(record.get("remote_id") or ""),
+            "songmid": str(record.get("songmid") or ""),
             "title": str(record.get("title") or "未知歌曲"),
             "artist": str(record.get("artist") or "未知艺术家"),
             "album": str(record.get("album") or "未知专辑"),
+            "artwork": str(record.get("artwork") or ""),
             "duration": cls._safe_nonnegative_int(record.get("duration")),
             "added_at": cls._safe_nonnegative_int(record.get("added_at")),
             "path": str(Path(local_path).resolve()) if local_exists else "",

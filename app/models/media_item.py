@@ -193,6 +193,14 @@ class MediaItem:
         return f"{self.source_id}:{self.track_id}" if self.media_type == "online" else self.track_id
 
     @property
+    def stable_identity(self) -> str:
+        if self.media_type == "online":
+            return f"remote:{self.source_id.casefold()}:{self.track_id}"
+        if self.local_file_path:
+            return f"local:{self.local_file_path.casefold()}"
+        return f"local-id:{self.track_id}"
+
+    @property
     def is_local_available(self) -> bool:
         return bool(self.local_file_path and Path(self.local_file_path).is_file())
 

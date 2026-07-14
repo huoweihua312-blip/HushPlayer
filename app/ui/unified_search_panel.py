@@ -95,7 +95,9 @@ class UnifiedSearchResultsPanel(QFrame):
             if not isinstance(track, dict):
                 continue
             try:
-                is_playing = MediaItem.from_mapping(track).key == playing_key
+                is_playing = (
+                    MediaItem.from_mapping(track).stable_identity == playing_key
+                )
             except (TypeError, ValueError):
                 is_playing = False
             font = self.result_list.font()
