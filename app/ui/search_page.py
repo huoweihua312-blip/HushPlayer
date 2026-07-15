@@ -445,14 +445,29 @@ class SearchPage(QFrame):
         if not self._keyword:
             self.page_status.setText("输入歌名、歌手或专辑")
 
-    def set_local_results(self, keyword: str, results: list[dict]) -> None:
+    def set_local_results(self, keyword: str, results: list[dict]) -> bool:
         self.set_keyword(keyword)
-        self._local_results = [MediaItem.from_mapping(value).to_dict() for value in results]
+        normalized_results = [
+            MediaItem.from_mapping(value).to_dict()
+            for value in results
+        ]
+        results_changed = normalized_results != self._local_results
+        self._local_results = normalized_results
         if not self._keyword:
             empty_text = "输入关键词后显示本地搜索结果"
         else:
             empty_text = "本地音乐库没有找到匹配歌曲"
-        self.local_view.set_items(self._local_results, empty_text=empty_text)
+        if results_changed:
+            self.local_view.set_items(
+                self._local_results,
+                empty_text=empty_text,
+                preserve_scroll=True,
+            )
+        else:
+            # Playing and collection state come from live providers, so a
+            # repaint is enough when the ordered result data is unchanged.
+            self.local_view.update_empty_state(empty_text)
+            self.local_view.list_widget.viewport().update()
         self.local_tab.setText(f"本地结果 · {len(self._local_results)}")
         if self.current_tab() == "local":
             self.local_status_label.setText(
@@ -460,6 +475,7 @@ class SearchPage(QFrame):
                 if self._keyword
                 else "输入歌名、歌手或专辑"
             )
+        return results_changed
 
     def set_online_results(self, keyword: str, results: list[dict], summary: dict) -> None:
         self.set_keyword(keyword)

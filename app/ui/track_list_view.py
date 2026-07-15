@@ -219,9 +219,15 @@ class TrackListView(QFrame):
         self.list_widget.scrollToTop()
         QTimer.singleShot(0, self.list_widget.scrollToTop)
 
-    def set_items(self, items: list[MediaItem | dict], empty_text: str = "没有找到歌曲") -> None:
+    def set_items(
+        self,
+        items: list[MediaItem | dict],
+        empty_text: str = "没有找到歌曲",
+        preserve_scroll: bool = False,
+    ) -> None:
         selected_key = ""
         current = self.list_widget.currentItem()
+        scroll_value = self.list_widget.verticalScrollBar().value()
         if current is not None:
             try:
                 selected_key = MediaItem.from_mapping(
@@ -246,10 +252,24 @@ class TrackListView(QFrame):
                 selected_item = list_item
         self.list_widget.blockSignals(False)
         self.list_widget.setUpdatesEnabled(True)
+        self.update_empty_state(empty_text)
+        if selected_item is not None:
+            self.list_widget.setCurrentItem(selected_item)
+        if preserve_scroll:
+            scroll_bar = self.list_widget.verticalScrollBar()
+
+            def restore_scroll() -> None:
+                scroll_bar.setValue(
+                    max(scroll_bar.minimum(), min(scroll_value, scroll_bar.maximum()))
+                )
+
+            restore_scroll()
+            QTimer.singleShot(0, restore_scroll)
+        else:
+            self.scroll_to_top()
+
+    def update_empty_state(self, empty_text: str) -> None:
         has_items = self.list_widget.count() > 0
         self.list_widget.setVisible(has_items)
         self.empty_label.setText(empty_text)
         self.empty_label.setVisible(not has_items)
-        if selected_item is not None:
-            self.list_widget.setCurrentItem(selected_item)
-        self.scroll_to_top()

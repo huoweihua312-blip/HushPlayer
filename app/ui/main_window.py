@@ -3521,6 +3521,13 @@ class MainWindow(QMainWindow):
         self.search_debounce_timer.setSingleShot(True)
         self.search_debounce_timer.setInterval(220)
         self.search_debounce_timer.timeout.connect(self.apply_search_filter)
+        self.local_search_generation = 0
+        self.pending_local_search_generation = 0
+        self.pending_local_search_keyword = ""
+        self.pending_local_search_key = ""
+        self.pending_local_search_revision = -1
+        self.last_applied_local_search_key: str | None = None
+        self.last_applied_local_search_revision = -1
 
         self.playback_save_timer = QTimer(self)
         self.playback_save_timer.setSingleShot(True)
@@ -6568,6 +6575,12 @@ class MainWindow(QMainWindow):
             if hasattr(self, "content_stack")
             else None
         )
+        if (
+            hasattr(self, "search_page")
+            and page is not self.search_page
+            and getattr(self, "search_debounce_timer", None) is not None
+        ):
+            self.cancel_pending_local_search()
         if page is getattr(self, "_preserve_page_scroll_once", None):
             self._preserve_page_scroll_once = None
             return
@@ -6695,6 +6708,7 @@ class MainWindow(QMainWindow):
                 self.search_entry_library_view_key = self.current_library_view_key()
             self.content_stack.setCurrentWidget(self.search_page)
             self.search_page.set_keyword(self.search_input.text())
+            self.schedule_local_search_if_needed()
         self.set_right_panel_mode("info")
 
     def show_liked_playlist_page(self) -> None:
@@ -8160,9 +8174,6 @@ class MainWindow(QMainWindow):
 
     def request_search_filter(self, *_args) -> None:
         keyword = self.search_input.text().strip()
-        local_results = self.collect_local_search_results(keyword)
-        if hasattr(self, "search_page"):
-            self.search_page.set_local_results(keyword, local_results)
         local_only = bool(
             getattr(self, "search_page", None)
             and self.search_page.local_only_checkbox.isChecked()
@@ -8173,6 +8184,13 @@ class MainWindow(QMainWindow):
         if keyword:
             self.show_search_page()
         else:
+            self.cancel_pending_local_search()
+            if hasattr(self, "search_page"):
+                self.search_page.set_local_results("", [])
+            self.last_applied_local_search_key = ""
+            self.last_applied_local_search_revision = int(
+                getattr(self, "library_data_revision", 0)
+            )
             self.unified_search_results = []
             self.unified_search_summary = {}
             if hasattr(self, "search_page"):
@@ -8185,10 +8203,95 @@ class MainWindow(QMainWindow):
                 self.return_to_library_view()
 
     def apply_search_filter(self) -> None:
-        self.request_search_filter()
+        generation = int(getattr(self, "pending_local_search_generation", 0))
+        keyword = str(getattr(self, "pending_local_search_keyword", "") or "")
+        search_key = str(getattr(self, "pending_local_search_key", "") or "")
+        revision = int(getattr(self, "pending_local_search_revision", -1))
+        current_key = self.normalize_local_search_keyword(self.search_input.text())
+        current_revision = int(getattr(self, "library_data_revision", 0))
+        on_search_page = bool(
+            hasattr(self, "content_stack")
+            and hasattr(self, "search_page")
+            and self.content_stack.currentWidget() is self.search_page
+        )
+        if (
+            generation <= 0
+            or generation != int(getattr(self, "local_search_generation", 0))
+            or search_key != current_key
+            or revision != current_revision
+            or not on_search_page
+        ):
+            if generation == getattr(self, "pending_local_search_generation", 0):
+                self.clear_pending_local_search()
+            if on_search_page and current_key:
+                self.schedule_local_search_if_needed()
+            return
+
+        local_results = self.collect_local_search_results(keyword)
+        if (
+            generation != int(getattr(self, "local_search_generation", 0))
+            or search_key != self.normalize_local_search_keyword(self.search_input.text())
+            or revision != int(getattr(self, "library_data_revision", 0))
+        ):
+            return
+        if hasattr(self, "search_page"):
+            self.search_page.set_local_results(keyword, local_results)
+        self.last_applied_local_search_key = search_key
+        self.last_applied_local_search_revision = revision
+        self.clear_pending_local_search()
+
+    @staticmethod
+    def normalize_local_search_keyword(keyword: str) -> str:
+        return " ".join(str(keyword or "").casefold().split())
+
+    def schedule_local_search_if_needed(self) -> bool:
+        keyword = self.search_input.text().strip()
+        search_key = self.normalize_local_search_keyword(keyword)
+        revision = int(getattr(self, "library_data_revision", 0))
+        if (
+            not search_key
+            or not hasattr(self, "content_stack")
+            or not hasattr(self, "search_page")
+            or self.content_stack.currentWidget() is not self.search_page
+        ):
+            return False
+        if (
+            search_key == getattr(self, "last_applied_local_search_key", None)
+            and revision
+            == int(getattr(self, "last_applied_local_search_revision", -1))
+        ):
+            return False
+        if (
+            self.search_debounce_timer.isActive()
+            and search_key == getattr(self, "pending_local_search_key", "")
+            and revision == int(getattr(self, "pending_local_search_revision", -1))
+        ):
+            return False
+        self.local_search_generation = int(
+            getattr(self, "local_search_generation", 0)
+        ) + 1
+        self.pending_local_search_generation = self.local_search_generation
+        self.pending_local_search_keyword = keyword
+        self.pending_local_search_key = search_key
+        self.pending_local_search_revision = revision
+        self.search_debounce_timer.start()
+        return True
+
+    def clear_pending_local_search(self) -> None:
+        self.pending_local_search_generation = 0
+        self.pending_local_search_keyword = ""
+        self.pending_local_search_key = ""
+        self.pending_local_search_revision = -1
+
+    def cancel_pending_local_search(self) -> None:
+        self.search_debounce_timer.stop()
+        self.local_search_generation = int(
+            getattr(self, "local_search_generation", 0)
+        ) + 1
+        self.clear_pending_local_search()
 
     def collect_local_search_results(self, keyword: str) -> list[dict]:
-        normalized = " ".join(str(keyword or "").casefold().split())
+        normalized = self.normalize_local_search_keyword(keyword)
         if not normalized or not hasattr(self, "song_list"):
             return []
         results: list[dict] = []
@@ -14310,6 +14413,9 @@ class MainWindow(QMainWindow):
 
         if hasattr(self, "session_save_timer"):
             self.session_save_timer.stop()
+
+        if hasattr(self, "search_debounce_timer"):
+            self.cancel_pending_local_search()
 
         self.save_playback_session()
         floating_window = getattr(self, "floating_lyrics_window", None)
