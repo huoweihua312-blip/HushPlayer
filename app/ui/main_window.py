@@ -29,7 +29,7 @@ from app.ui.library_page import LibraryPage
 from app.ui.media_interaction_controller import MediaInteractionController
 from app.ui.search_page import SearchPage
 from app.ui.track_list_view import SearchEntryLineEdit
-from PySide6.QtCore import QEasingCurve, QEvent, QItemSelectionModel, QObject, QPropertyAnimation, QRectF, QRunnable, QSize, Qt, QThread, QThreadPool, QTimer, QUrl, Signal
+from PySide6.QtCore import QEasingCurve, QEvent, QItemSelectionModel, QObject, QPropertyAnimation, QRectF, QRunnable, QSize, Qt, QThread, QThreadPool, QTimer, QUrl, Signal, Slot
 from PySide6.QtGui import QColor, QFont, QFontMetrics, QIcon, QKeySequence, QPainter, QPainterPath, QPalette, QPen, QPixmap, QShortcut
 from PySide6.QtMultimedia import QAudioOutput, QMediaDevices, QMediaPlayer
 from PySide6.QtWidgets import (
@@ -1106,15 +1106,37 @@ class CoverSearchWorker(QObject):
         self.cover_cache_dir = Path(cover_cache_dir)
         self.http_headers = dict(http_headers)
         self.last_musicbrainz_request_time = 0.0
+        self._cancel_requested = False
+
+    def cancel(self) -> None:
+        self._cancel_requested = True
+
+    def is_cancelled(self) -> bool:
+        return self._cancel_requested or QThread.currentThread().isInterruptionRequested()
+
+    def cancelled_result(self) -> dict:
+        return {
+            "ok": False,
+            "source": "cancelled",
+            "message": "封面请求已取消",
+            "song_path": self.file_path,
+        }
 
     def emit_status(self, message: str) -> None:
+        if self.is_cancelled():
+            return
         self.status_changed.emit(self.request_id, message)
 
     def run(self) -> None:
         try:
-            result = self.search_cover()
+            result = self.cancelled_result() if self.is_cancelled() else self.search_cover()
+            if self.is_cancelled() and result.get("source") != "cancelled":
+                result = self.cancelled_result()
             self.finished.emit(self.request_id, result)
         except Exception as error:
+            if self.is_cancelled():
+                self.finished.emit(self.request_id, self.cancelled_result())
+                return
             self.finished.emit(
                 self.request_id,
                 {
@@ -1126,6 +1148,9 @@ class CoverSearchWorker(QObject):
             )
 
     def search_cover(self) -> dict:
+        if self.is_cancelled():
+            return self.cancelled_result()
+
         if not self.file_path:
             return {
                 "ok": False,
@@ -1159,6 +1184,9 @@ class CoverSearchWorker(QObject):
         self.emit_status("正在读取内嵌封面")
         cover_data = self.extract_album_cover(music_path)
 
+        if self.is_cancelled():
+            return self.cancelled_result()
+
         if cover_data:
             self.cover_cache_dir.mkdir(parents=True, exist_ok=True)
             cache_path.write_bytes(cover_data)
@@ -1174,6 +1202,9 @@ class CoverSearchWorker(QObject):
         self.emit_status("正在查找文件夹封面")
         folder_cover = self.find_folder_cover(music_path)
 
+        if self.is_cancelled():
+            return self.cancelled_result()
+
         if folder_cover:
             self.cover_cache_dir.mkdir(parents=True, exist_ok=True)
             shutil.copyfile(folder_cover, cache_path)
@@ -1188,6 +1219,9 @@ class CoverSearchWorker(QObject):
 
         self.emit_status("正在联网搜索封面")
         online_cover = self.fetch_online_cover(self.title, self.artist, self.album)
+
+        if self.is_cancelled():
+            return self.cancelled_result()
 
         if online_cover:
             self.cover_cache_dir.mkdir(parents=True, exist_ok=True)
@@ -1333,9 +1367,15 @@ class CoverSearchWorker(QObject):
             ]
 
         for query in queries:
+            if self.is_cancelled():
+                return None
+
             release_ids = self.search_musicbrainz_release_ids(query)
 
             for release_id in release_ids:
+                if self.is_cancelled():
+                    return None
+
                 cover_data = self.fetch_cover_art_archive(release_id)
 
                 if cover_data:
@@ -1346,6 +1386,9 @@ class CoverSearchWorker(QObject):
     def search_musicbrainz_release_ids(self, query: str) -> list[str]:
         try:
             self.wait_for_musicbrainz_rate_limit()
+
+            if self.is_cancelled():
+                return []
 
             response = requests.get(
                 "https://musicbrainz.org/ws/2/release/",
@@ -1359,6 +1402,10 @@ class CoverSearchWorker(QObject):
             )
 
             response.raise_for_status()
+
+            if self.is_cancelled():
+                return []
+
             data = response.json()
 
         except Exception as error:
@@ -1389,6 +1436,9 @@ class CoverSearchWorker(QObject):
                 timeout=15,
                 allow_redirects=True,
             )
+
+            if self.is_cancelled():
+                return None
 
             if response.status_code != 200:
                 return None
@@ -1430,15 +1480,37 @@ class LyricsSearchWorker(QObject):
         self.album = album
         self.lyrics_cache_dir = Path(lyrics_cache_dir)
         self.http_headers = dict(http_headers)
+        self._cancel_requested = False
+
+    def cancel(self) -> None:
+        self._cancel_requested = True
+
+    def is_cancelled(self) -> bool:
+        return self._cancel_requested or QThread.currentThread().isInterruptionRequested()
+
+    def cancelled_result(self) -> dict:
+        return {
+            "ok": False,
+            "source": "cancelled",
+            "message": "歌词请求已取消",
+            "song_path": self.file_path,
+        }
 
     def emit_status(self, message: str) -> None:
+        if self.is_cancelled():
+            return
         self.status_changed.emit(self.request_id, message)
 
     def run(self) -> None:
         try:
-            result = self.search_lyrics()
+            result = self.cancelled_result() if self.is_cancelled() else self.search_lyrics()
+            if self.is_cancelled() and result.get("source") != "cancelled":
+                result = self.cancelled_result()
             self.finished.emit(self.request_id, result)
         except Exception as error:
+            if self.is_cancelled():
+                self.finished.emit(self.request_id, self.cancelled_result())
+                return
             self.finished.emit(
                 self.request_id,
                 {
@@ -1450,6 +1522,9 @@ class LyricsSearchWorker(QObject):
             )
 
     def search_lyrics(self) -> dict:
+        if self.is_cancelled():
+            return self.cancelled_result()
+
         if not self.file_path:
             return {
                 "ok": False,
@@ -1464,6 +1539,9 @@ class LyricsSearchWorker(QObject):
 
         self.emit_status("正在查找本地歌词")
         local_lrc = self.find_lrc_file(music_path, self.title, self.artist)
+
+        if self.is_cancelled():
+            return self.cancelled_result()
 
         if local_lrc:
             self.remove_missing_cache(missing_path)
@@ -1506,6 +1584,9 @@ class LyricsSearchWorker(QObject):
             album=self.album,
             duration_seconds=duration_seconds,
         )
+
+        if self.is_cancelled():
+            return self.cancelled_result()
 
         if not synced_lyrics:
             self.write_missing_cache(missing_path, "lyrics not found")
@@ -1729,6 +1810,9 @@ class LyricsSearchWorker(QObject):
         best_score = -9999
 
         for params in search_requests:
+            if self.is_cancelled():
+                return None
+
             try:
                 response = requests.get(
                     "https://lrclib.net/api/search",
@@ -1738,6 +1822,10 @@ class LyricsSearchWorker(QObject):
                 )
 
                 response.raise_for_status()
+
+                if self.is_cancelled():
+                    return None
+
                 results = response.json()
 
                 if not isinstance(results, list):
@@ -3416,6 +3504,12 @@ class ImmersiveLyricsWindow(QWidget):
         super().closeEvent(event)
 
 class MainWindow(QMainWindow):
+    media_worker_destroyed_notice = Signal(str)
+    media_thread_finished_notice = Signal(str)
+    media_thread_destroyed_notice = Signal(str)
+
+    MEDIA_WORKER_SHUTDOWN_TIMEOUT_MS = 1500
+
     def create_hushplayer_icon(self) -> QIcon:
         pixmap = QPixmap(64, 64)
         pixmap.fill(Qt.GlobalColor.transparent)
@@ -3499,12 +3593,35 @@ class MainWindow(QMainWindow):
         self.lyrics_request_id = 0
         self.active_cover_request_id = ""
         self.active_lyrics_request_id = ""
-        self.cover_threads: list[QThread] = []
-        self.lyrics_threads: list[QThread] = []
+        self.cover_threads: dict[str, QThread] = {}
+        self.lyrics_threads: dict[str, QThread] = {}
         self.music_scan_threads: list[QThread] = []
-        self.cover_workers: list[QObject] = []
-        self.lyrics_workers: list[QObject] = []
+        self.cover_workers: dict[str, CoverSearchWorker] = {}
+        self.lyrics_workers: dict[str, LyricsSearchWorker] = {}
+        self.retiring_cover_workers: dict[str, CoverSearchWorker] = {}
+        self.retiring_lyrics_workers: dict[str, LyricsSearchWorker] = {}
+        self.retiring_cover_threads: dict[str, QThread] = {}
+        self.retiring_lyrics_threads: dict[str, QThread] = {}
         self.music_scan_workers: list[QObject] = []
+        self._media_lifecycle_records: dict[str, dict] = {}
+        self._running_cover_request: dict | None = None
+        self._running_lyrics_request: dict | None = None
+        self._pending_cover_request: dict | None = None
+        self._pending_lyrics_request: dict | None = None
+        self._media_workers_closing = False
+        self._media_shutdown_retry_scheduled = False
+        self.media_worker_destroyed_notice.connect(
+            self._on_media_worker_destroyed_notice,
+            Qt.ConnectionType.QueuedConnection,
+        )
+        self.media_thread_finished_notice.connect(
+            self._on_media_thread_finished_notice,
+            Qt.ConnectionType.QueuedConnection,
+        )
+        self.media_thread_destroyed_notice.connect(
+            self._on_media_thread_destroyed_notice,
+            Qt.ConnectionType.QueuedConnection,
+        )
         self.music_scan_in_progress = False
         self.displayed_lyrics_song_path: str | None = None
         self.immersive_lyrics_window: ImmersiveLyricsWindow | None = None
@@ -7035,6 +7152,8 @@ class MainWindow(QMainWindow):
             self.current_media_item = target
             self.current_online_track = target.to_legacy_online()
             self.current_song_path = None
+            self.invalidate_media_worker_request("cover")
+            self.invalidate_media_worker_request("lyrics")
             self.current_queue_identity = target.stable_identity
             self.present_online_media_item(target)
             self.refresh_playing_song_indicators()
@@ -7108,6 +7227,8 @@ class MainWindow(QMainWindow):
         self.current_online_track = media_item.to_legacy_online()
         self.pending_lazy_restore_song_data = None
         self.current_song_path = None
+        self.invalidate_media_worker_request("cover")
+        self.invalidate_media_worker_request("lyrics")
         self.current_queue_identity = pending_identity or media_item.stable_identity
         self.current_duration = 0
         self.pending_restore_position = 0
@@ -12402,6 +12523,8 @@ class MainWindow(QMainWindow):
 
     def reset_now_playing_info(self) -> None:
         self.flush_current_listen_time()
+        self.invalidate_media_worker_request("cover")
+        self.invalidate_media_worker_request("lyrics")
 
         pending_request = int(getattr(self, "pending_online_playback_request", 0) or 0)
         if pending_request:
@@ -12659,25 +12782,314 @@ class MainWindow(QMainWindow):
 
     def cleanup_thread_reference(self, thread: QThread, kind: str) -> None:
         try:
-            if kind == "cover" and thread in self.cover_threads:
-                self.cover_threads.remove(thread)
-            elif kind == "lyrics" and thread in self.lyrics_threads:
-                self.lyrics_threads.remove(thread)
-            elif kind == "music_scan" and thread in self.music_scan_threads:
+            if kind == "music_scan" and thread in self.music_scan_threads:
                 self.music_scan_threads.remove(thread)
         except Exception:
             pass
 
     def cleanup_worker_reference(self, worker: QObject, kind: str) -> None:
         try:
-            if kind == "cover" and worker in self.cover_workers:
-                self.cover_workers.remove(worker)
-            elif kind == "lyrics" and worker in self.lyrics_workers:
-                self.lyrics_workers.remove(worker)
-            elif kind == "music_scan" and worker in self.music_scan_workers:
+            if kind == "music_scan" and worker in self.music_scan_workers:
                 self.music_scan_workers.remove(worker)
         except Exception:
             pass
+
+    def _media_lifecycle_collections(self, kind: str):
+        if kind == "cover":
+            return (
+                self.cover_workers,
+                self.cover_threads,
+                self.retiring_cover_workers,
+                self.retiring_cover_threads,
+            )
+        if kind == "lyrics":
+            return (
+                self.lyrics_workers,
+                self.lyrics_threads,
+                self.retiring_lyrics_workers,
+                self.retiring_lyrics_threads,
+            )
+        raise ValueError(f"未知媒体 worker 类型：{kind}")
+
+    def _trace_media_lifecycle(self, stage: str, token: str) -> None:
+        callback = getattr(self, "_media_lifecycle_trace", None)
+        if callable(callback):
+            callback(stage, token)
+
+    @staticmethod
+    def media_worker_request_matches(
+        request: dict | None,
+        file_path: str,
+        title: str,
+        artist: str,
+        album: str,
+    ) -> bool:
+        if not isinstance(request, dict):
+            return False
+        return (
+            request.get("file_path") == file_path
+            and request.get("title") == title
+            and request.get("artist") == artist
+            and request.get("album") == album
+        )
+
+    @staticmethod
+    def media_thread_is_running(thread: QThread) -> bool:
+        try:
+            return thread.isRunning()
+        except RuntimeError:
+            return False
+
+    def cancel_media_workers(self, kind: str) -> None:
+        try:
+            workers, threads, _retiring_workers, _retiring_threads = (
+                self._media_lifecycle_collections(kind)
+            )
+        except ValueError:
+            return
+
+        for token, worker in tuple(workers.items()):
+            record = self._media_lifecycle_records.get(token, {})
+            if record.get("worker_destroyed"):
+                continue
+            try:
+                worker.cancel()
+            except (AttributeError, RuntimeError):
+                pass
+
+        for token, thread in tuple(threads.items()):
+            record = self._media_lifecycle_records.get(token, {})
+            if record.get("thread_finished") or record.get("thread_destroyed"):
+                continue
+            try:
+                thread.requestInterruption()
+                thread.quit()
+            except RuntimeError:
+                pass
+
+    def invalidate_media_worker_request(self, kind: str) -> None:
+        if kind == "cover":
+            self.cover_request_id += 1
+            self.active_cover_request_id = str(self.cover_request_id)
+            self._pending_cover_request = None
+        elif kind == "lyrics":
+            self.lyrics_request_id += 1
+            self.active_lyrics_request_id = str(self.lyrics_request_id)
+            self._pending_lyrics_request = None
+        else:
+            return
+        self.cancel_media_workers(kind)
+
+    def _register_media_worker(
+        self,
+        kind: str,
+        request_id: str,
+        worker: QObject,
+        thread: QThread,
+    ) -> str:
+        expected_type = CoverSearchWorker if kind == "cover" else LyricsSearchWorker
+        if not isinstance(worker, expected_type):
+            raise TypeError(f"{kind} worker 类型不匹配：{type(worker).__name__}")
+        token = f"{kind}:{request_id}"
+        workers, threads, _retiring_workers, _retiring_threads = (
+            self._media_lifecycle_collections(kind)
+        )
+        workers[token] = worker
+        threads[token] = thread
+        self._media_lifecycle_records[token] = {
+            "kind": kind,
+            "state": "active",
+            "worker_destroyed": False,
+            "thread_finished": False,
+            "thread_destroyed": False,
+            "thread_delete_scheduled": False,
+        }
+        worker.destroyed.connect(
+            lambda _object=None, stable_token=token: (
+                self.media_worker_destroyed_notice.emit(stable_token)
+            ),
+            Qt.ConnectionType.DirectConnection,
+        )
+        thread.finished.connect(
+            lambda stable_token=token: self.media_thread_finished_notice.emit(
+                stable_token
+            ),
+            Qt.ConnectionType.DirectConnection,
+        )
+        thread.destroyed.connect(
+            lambda _object=None, stable_token=token: (
+                self.media_thread_destroyed_notice.emit(stable_token)
+            ),
+            Qt.ConnectionType.DirectConnection,
+        )
+        return token
+
+    def _finalize_media_lifecycle_record(self, token: str) -> None:
+        record = self._media_lifecycle_records.get(token)
+        if not isinstance(record, dict):
+            return
+        if not record.get("worker_destroyed") or not record.get("thread_destroyed"):
+            return
+        kind = str(record.get("kind") or "")
+        try:
+            _workers, _threads, retiring_workers, retiring_threads = (
+                self._media_lifecycle_collections(kind)
+            )
+        except ValueError:
+            self._media_lifecycle_records.pop(token, None)
+            return
+        retiring_workers.pop(token, None)
+        retiring_threads.pop(token, None)
+        self._media_lifecycle_records.pop(token, None)
+
+    def _retire_media_thread(self, token: str) -> None:
+        record = self._media_lifecycle_records.get(token)
+        if not isinstance(record, dict) or record.get("state") != "active":
+            return
+        kind = str(record.get("kind") or "")
+        try:
+            workers, threads, retiring_workers, retiring_threads = (
+                self._media_lifecycle_collections(kind)
+            )
+        except ValueError:
+            return
+
+        worker = workers.pop(token, None)
+        thread = threads.pop(token, None)
+        if worker is not None:
+            retiring_workers[token] = worker
+        if thread is not None:
+            retiring_threads[token] = thread
+        record["state"] = "retiring"
+        record["thread_finished"] = True
+        self._trace_media_lifecycle("thread finished", token)
+
+        if record.get("worker_destroyed"):
+            retiring_workers.pop(token, None)
+
+        if thread is not None and not record.get("thread_delete_scheduled"):
+            record["thread_delete_scheduled"] = True
+            try:
+                thread.deleteLater()
+            except RuntimeError:
+                record["thread_destroyed"] = True
+                retiring_threads.pop(token, None)
+
+        if kind == "cover":
+            self._running_cover_request = None
+            if not self._media_workers_closing:
+                self._launch_pending_cover_worker()
+        elif kind == "lyrics":
+            self._running_lyrics_request = None
+            if not self._media_workers_closing:
+                self._launch_pending_lyrics_worker()
+
+        self._finalize_media_lifecycle_record(token)
+
+    @Slot(str)
+    def _on_media_worker_destroyed_notice(self, token: str) -> None:
+        record = self._media_lifecycle_records.get(token)
+        if not isinstance(record, dict):
+            return
+        record["worker_destroyed"] = True
+        self._trace_media_lifecycle("worker destroyed", token)
+        if record.get("state") == "retiring":
+            kind = str(record.get("kind") or "")
+            try:
+                _workers, _threads, retiring_workers, _retiring_threads = (
+                    self._media_lifecycle_collections(kind)
+                )
+            except ValueError:
+                retiring_workers = {}
+            retiring_workers.pop(token, None)
+        self._finalize_media_lifecycle_record(token)
+
+    @Slot(str)
+    def _on_media_thread_finished_notice(self, token: str) -> None:
+        self._retire_media_thread(token)
+
+    @Slot(str)
+    def _on_media_thread_destroyed_notice(self, token: str) -> None:
+        record = self._media_lifecycle_records.get(token)
+        if not isinstance(record, dict):
+            return
+        record["thread_destroyed"] = True
+        self._trace_media_lifecycle("thread destroyed", token)
+        kind = str(record.get("kind") or "")
+        try:
+            _workers, _threads, _retiring_workers, retiring_threads = (
+                self._media_lifecycle_collections(kind)
+            )
+        except ValueError:
+            retiring_threads = {}
+        retiring_threads.pop(token, None)
+        self._finalize_media_lifecycle_record(token)
+
+    def _media_lifecycle_has_references(self) -> bool:
+        return bool(
+            self.cover_workers
+            or self.lyrics_workers
+            or self.cover_threads
+            or self.lyrics_threads
+            or self.retiring_cover_workers
+            or self.retiring_lyrics_workers
+            or self.retiring_cover_threads
+            or self.retiring_lyrics_threads
+            or self._media_lifecycle_records
+        )
+
+    def shutdown_media_workers(self, timeout_ms: int | None = None) -> bool:
+        self._media_workers_closing = True
+        self.active_cover_request_id = ""
+        self.active_lyrics_request_id = ""
+        self._pending_cover_request = None
+        self._pending_lyrics_request = None
+        self.cancel_media_workers("cover")
+        self.cancel_media_workers("lyrics")
+
+        if timeout_ms is None:
+            timeout_ms = self.MEDIA_WORKER_SHUTDOWN_TIMEOUT_MS
+        deadline = time.monotonic() + max(0, int(timeout_ms)) / 1000.0
+        threads = tuple(self.cover_threads.items()) + tuple(self.lyrics_threads.items())
+
+        for _token, thread in threads:
+            if not self.media_thread_is_running(thread):
+                continue
+            remaining_ms = max(0, int((deadline - time.monotonic()) * 1000))
+            if remaining_ms <= 0:
+                break
+            try:
+                thread.wait(remaining_ms)
+            except RuntimeError:
+                pass
+
+        for token, thread in tuple(self.cover_threads.items()):
+            if not self.media_thread_is_running(thread):
+                self._retire_media_thread(token)
+        for token, thread in tuple(self.lyrics_threads.items()):
+            if not self.media_thread_is_running(thread):
+                self._retire_media_thread(token)
+
+        return not self._media_lifecycle_has_references()
+
+    def schedule_media_worker_close_retry(self) -> None:
+        if self._media_shutdown_retry_scheduled:
+            return
+        self._media_shutdown_retry_scheduled = True
+        QTimer.singleShot(100, self._retry_close_after_media_workers)
+
+    def _retry_close_after_media_workers(self) -> None:
+        self._media_shutdown_retry_scheduled = False
+        for token, thread in tuple(self.cover_threads.items()):
+            if not self.media_thread_is_running(thread):
+                self._retire_media_thread(token)
+        for token, thread in tuple(self.lyrics_threads.items()):
+            if not self.media_thread_is_running(thread):
+                self._retire_media_thread(token)
+        if self._media_lifecycle_has_references():
+            self.schedule_media_worker_close_retry()
+            return
+        self.close()
 
     def start_cover_worker(
         self,
@@ -12686,47 +13098,95 @@ class MainWindow(QMainWindow):
         artist: str,
         album: str,
     ) -> None:
+        if self._media_workers_closing:
+            return
+
+        existing_request = self._pending_cover_request or self._running_cover_request
+        if (
+            self.active_cover_request_id == str((existing_request or {}).get("request_id", ""))
+            and self.media_worker_request_matches(
+                existing_request,
+                file_path,
+                title,
+                artist,
+                album,
+            )
+        ):
+            return
+
         self.cover_request_id += 1
         request_id = str(self.cover_request_id)
         self.active_cover_request_id = request_id
+        self._pending_cover_request = {
+            "request_id": request_id,
+            "file_path": file_path,
+            "title": title,
+            "artist": artist,
+            "album": album,
+        }
+        self.cancel_media_workers("cover")
+        self._launch_pending_cover_worker()
+
+    def _launch_pending_cover_worker(self) -> None:
+        if self._media_workers_closing or self.cover_threads:
+            return
+        request = self._pending_cover_request
+        if not isinstance(request, dict):
+            return
+        if request.get("request_id") != self.active_cover_request_id:
+            self._pending_cover_request = None
+            return
+        self._pending_cover_request = None
+        self._running_cover_request = request
 
         worker = CoverSearchWorker(
-            request_id=request_id,
-            file_path=file_path,
-            title=title,
-            artist=artist,
-            album=album,
+            request_id=str(request["request_id"]),
+            file_path=str(request["file_path"]),
+            title=str(request["title"]),
+            artist=str(request["artist"]),
+            album=str(request["album"]),
             cover_cache_dir=str(self.cover_cache_dir),
             http_headers=self.http_headers,
         )
-
-        self.cover_workers.append(worker)
-
-        self.lyrics_workers.append(worker)
-
         thread = QThread(self)
         worker.moveToThread(thread)
+        self._register_media_worker(
+            "cover",
+            str(request["request_id"]),
+            worker,
+            thread,
+        )
 
         thread.started.connect(worker.run)
-        worker.status_changed.connect(self.on_cover_worker_status)
-        worker.finished.connect(self.on_cover_worker_finished)
-        worker.finished.connect(thread.quit)
-        worker.finished.connect(lambda request_id, result, worker=worker: self.cleanup_worker_reference(worker, "cover"))
-        worker.finished.connect(worker.deleteLater)
-        thread.finished.connect(thread.deleteLater)
-        thread.finished.connect(lambda thread=thread: self.cleanup_thread_reference(thread, "cover"))
-
-        self.cover_threads.append(thread)
+        worker.status_changed.connect(
+            self.on_cover_worker_status,
+            Qt.ConnectionType.QueuedConnection,
+        )
+        worker.finished.connect(
+            self.on_cover_worker_finished,
+            Qt.ConnectionType.QueuedConnection,
+        )
+        worker.finished.connect(
+            worker.deleteLater,
+            Qt.ConnectionType.DirectConnection,
+        )
+        worker.finished.connect(
+            thread.quit,
+            Qt.ConnectionType.QueuedConnection,
+        )
         thread.start()
 
     def on_cover_worker_status(self, request_id: str, message: str) -> None:
-        if request_id != self.active_cover_request_id:
+        if self._media_workers_closing or request_id != self.active_cover_request_id:
             return
 
         print("封面状态：", message)
         self.cover_label.setText(message)
 
     def on_cover_worker_finished(self, request_id: str, result: object) -> None:
+        if self._media_workers_closing:
+            return
+
         if request_id != self.active_cover_request_id:
             print("已忽略过期封面结果：", request_id)
             return
@@ -12761,42 +13221,95 @@ class MainWindow(QMainWindow):
         artist: str,
         album: str,
     ) -> None:
+        if self._media_workers_closing:
+            return
+
+        existing_request = self._pending_lyrics_request or self._running_lyrics_request
+        if (
+            self.active_lyrics_request_id == str((existing_request or {}).get("request_id", ""))
+            and self.media_worker_request_matches(
+                existing_request,
+                file_path,
+                title,
+                artist,
+                album,
+            )
+        ):
+            return
+
         self.lyrics_request_id += 1
         request_id = str(self.lyrics_request_id)
         self.active_lyrics_request_id = request_id
+        self._pending_lyrics_request = {
+            "request_id": request_id,
+            "file_path": file_path,
+            "title": title,
+            "artist": artist,
+            "album": album,
+        }
+        self.cancel_media_workers("lyrics")
+        self._launch_pending_lyrics_worker()
+
+    def _launch_pending_lyrics_worker(self) -> None:
+        if self._media_workers_closing or self.lyrics_threads:
+            return
+        request = self._pending_lyrics_request
+        if not isinstance(request, dict):
+            return
+        if request.get("request_id") != self.active_lyrics_request_id:
+            self._pending_lyrics_request = None
+            return
+        self._pending_lyrics_request = None
+        self._running_lyrics_request = request
 
         worker = LyricsSearchWorker(
-            request_id=request_id,
-            file_path=file_path,
-            title=title,
-            artist=artist,
-            album=album,
+            request_id=str(request["request_id"]),
+            file_path=str(request["file_path"]),
+            title=str(request["title"]),
+            artist=str(request["artist"]),
+            album=str(request["album"]),
             lyrics_cache_dir=str(self.lyrics_cache_dir),
             http_headers=self.http_headers,
         )
 
         thread = QThread(self)
         worker.moveToThread(thread)
+        self._register_media_worker(
+            "lyrics",
+            str(request["request_id"]),
+            worker,
+            thread,
+        )
 
         thread.started.connect(worker.run)
-        worker.status_changed.connect(self.on_lyrics_worker_status)
-        worker.finished.connect(self.on_lyrics_worker_finished)
-        worker.finished.connect(thread.quit)
-        worker.finished.connect(lambda request_id, result, worker=worker: self.cleanup_worker_reference(worker, "lyrics"))
-        worker.finished.connect(worker.deleteLater)
-        thread.finished.connect(thread.deleteLater)
-        thread.finished.connect(lambda thread=thread: self.cleanup_thread_reference(thread, "lyrics"))
-
-        self.lyrics_threads.append(thread)
+        worker.status_changed.connect(
+            self.on_lyrics_worker_status,
+            Qt.ConnectionType.QueuedConnection,
+        )
+        worker.finished.connect(
+            self.on_lyrics_worker_finished,
+            Qt.ConnectionType.QueuedConnection,
+        )
+        worker.finished.connect(
+            worker.deleteLater,
+            Qt.ConnectionType.DirectConnection,
+        )
+        worker.finished.connect(
+            thread.quit,
+            Qt.ConnectionType.QueuedConnection,
+        )
         thread.start()
 
     def on_lyrics_worker_status(self, request_id: str, message: str) -> None:
-        if request_id != self.active_lyrics_request_id:
+        if self._media_workers_closing or request_id != self.active_lyrics_request_id:
             return
 
         self.set_lyrics_status(message)
 
     def on_lyrics_worker_finished(self, request_id: str, result: object) -> None:
+        if self._media_workers_closing:
+            return
+
         if request_id != self.active_lyrics_request_id:
             print("已忽略过期歌词结果：", request_id)
             return
@@ -13348,6 +13861,7 @@ class MainWindow(QMainWindow):
             bound_lyrics_path = self.get_bound_lyrics_path(normalized_file_path)
 
             if bound_lyrics_path:
+                self.invalidate_media_worker_request("lyrics")
                 self.set_lyrics_status("正在读取手动绑定歌词")
                 lyrics = self.parse_lrc_file(Path(bound_lyrics_path))
 
@@ -13733,6 +14247,8 @@ class MainWindow(QMainWindow):
             self.current_media_item = media_item
             self.current_online_track = media_item.to_legacy_online()
             self.current_song_path = None
+            self.invalidate_media_worker_request("cover")
+            self.invalidate_media_worker_request("lyrics")
             self.refresh_playing_song_indicators()
             self.media_player.stop()
             self.media_player.setSource(QUrl())
@@ -14607,6 +15123,12 @@ class MainWindow(QMainWindow):
             return
         self.show_media_item_info(self.media_item_from_song_data(song_data).to_dict())
     def closeEvent(self, event) -> None:
+        if not self.shutdown_media_workers():
+            print("媒体后台任务仍在安全退出，已暂缓关闭窗口。")
+            event.ignore()
+            self.schedule_media_worker_close_retry()
+            return
+
         self.flush_current_listen_time()
         self.save_song_stats()
         self.save_settings()
