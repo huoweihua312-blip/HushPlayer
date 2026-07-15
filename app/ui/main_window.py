@@ -4009,8 +4009,14 @@ class MainWindow(QMainWindow):
         )
         print(f"[perf] 样式初始化：{(time.perf_counter() - style_started_at) * 1000:.1f} ms")
         library_started_at = time.perf_counter()
-        self.load_music_library()
-        self.sync_remote_song_items()
+        valid_library_count, song_list_is_local_only = self.load_music_library(
+            refresh_view=False
+        )
+        self.sync_remote_song_items(
+            refresh_view=False,
+            song_list_is_local_only=song_list_is_local_only,
+        )
+        self.finish_music_library_load(valid_library_count)
         self.library_page.show_mode(self.initial_library_content_view)
         print(f"[perf] 音乐库初始化：{(time.perf_counter() - library_started_at) * 1000:.1f} ms")
         initial_ui_started_at = time.perf_counter()
@@ -4960,9 +4966,7 @@ class MainWindow(QMainWindow):
         source = self.get_registered_source_safely(str(record.get("source_id") or ""))
         return bool(source and source.get("enabled") and source.get("sourceUrl"))
 
-    def sync_remote_song_items(self) -> None:
-        if not hasattr(self, "song_list"):
-            return
+    def collect_remote_song_items(self) -> dict[str, QListWidgetItem]:
         existing_items: dict[str, QListWidgetItem] = {}
         for row in range(self.song_list.count()):
             item = self.song_list.item(row)
@@ -4971,10 +4975,28 @@ class MainWindow(QMainWindow):
                 stable_id = str(data.get("remoteStableId") or "")
                 if stable_id and item is not None:
                     existing_items[stable_id] = item
+        return existing_items
+
+    def sync_remote_song_items(
+        self,
+        *,
+        refresh_view: bool = True,
+        song_list_is_local_only: bool = False,
+    ) -> None:
+        if not hasattr(self, "song_list"):
+            return
+        remote_store_ready = not getattr(self, "remote_tracks_error", "")
+        if song_list_is_local_only and remote_store_ready:
+            if not self.remote_tracks:
+                return
+            existing_items: dict[str, QListWidgetItem] = {}
+        else:
+            existing_items = self.collect_remote_song_items()
 
         previous_signal_state = self.song_list.blockSignals(True)
         self.song_list.setUpdatesEnabled(False)
         structure_changed = False
+        data_changed = False
         try:
             pending_track = getattr(self, "pending_online_track", None)
             pending_id = (
@@ -5012,6 +5034,9 @@ class MainWindow(QMainWindow):
                     self.song_list.addItem(self.create_song_list_item(song_data))
                     structure_changed = True
                 else:
+                    previous_data = item.data(Qt.ItemDataRole.UserRole)
+                    if previous_data != song_data:
+                        data_changed = True
                     self.refresh_song_item_display(
                         item,
                         song_data,
@@ -5021,11 +5046,13 @@ class MainWindow(QMainWindow):
             self.song_list.blockSignals(previous_signal_state)
             self.song_list.setUpdatesEnabled(True)
 
-        self.rebuild_song_identity_index()
+        if not song_list_is_local_only or not remote_store_ready:
+            self.rebuild_song_identity_index()
         self.song_list.viewport().update()
-        if structure_changed:
+        if structure_changed or data_changed:
             self.mark_library_list_dirty()
-            self.filter_song_list(self.search_input.text())
+            if refresh_view:
+                self.filter_song_list(self.search_input.text())
 
     def refresh_remote_song_item(
         self,
@@ -8986,6 +9013,7 @@ class MainWindow(QMainWindow):
         # category/playlist scope and therefore keeps its scroll and selection.
         keyword = ""
         visible_count = 0
+        visible_song_data: list[dict] = []
         liked_paths_cache = None
         playlist_paths_cache = None
         liked_remote_ids_cache = None
@@ -9039,6 +9067,8 @@ class MainWindow(QMainWindow):
 
                 if should_show:
                     visible_count += 1
+                    if not song_data.get("demo"):
+                        visible_song_data.append(song_data)
         finally:
             self.song_list.blockSignals(previous_signal_state)
             self.song_list.setUpdatesEnabled(True)
@@ -9069,7 +9099,7 @@ class MainWindow(QMainWindow):
                     self.song_table_header.setVisible(True)
 
                 self.schedule_visible_library_durations()
-        self.update_library_page_scope()
+        self.update_library_page_scope(visible_song_data)
         scope_updated_at = time.perf_counter()
         elapsed_ms = (scope_updated_at - started_at) * 1000
         if self.playlist_id_for_current_view():
@@ -9109,17 +9139,30 @@ class MainWindow(QMainWindow):
             track["localPath"] = str(Path(local_path).resolve())
         return MediaItem.from_online(track)
 
-    def update_library_page_scope(self) -> None:
+    def update_library_page_scope(
+        self,
+        visible_song_data: list[dict] | None = None,
+    ) -> None:
         page = getattr(self, "library_page", None)
         if page is None or not hasattr(self, "song_list"):
             return
-        tracks = []
-        for row in range(self.song_list.count()):
-            item = self.song_list.item(row)
-            data = item.data(Qt.ItemDataRole.UserRole) if item is not None else None
-            if item is None or item.isHidden() or not isinstance(data, dict) or data.get("demo"):
-                continue
-            tracks.append(self.media_item_from_song_data(data).to_dict())
+        if visible_song_data is None:
+            visible_song_data = []
+            for row in range(self.song_list.count()):
+                item = self.song_list.item(row)
+                data = item.data(Qt.ItemDataRole.UserRole) if item is not None else None
+                if (
+                    item is None
+                    or item.isHidden()
+                    or not isinstance(data, dict)
+                    or data.get("demo")
+                ):
+                    continue
+                visible_song_data.append(data)
+        tracks = [
+            self.media_item_from_song_data(data).to_dict()
+            for data in visible_song_data
+        ]
         view_titles = {
             "all": "全部歌曲",
             "liked": "我喜欢",
@@ -9158,10 +9201,11 @@ class MainWindow(QMainWindow):
 
         return visible_rows
 
-    def add_demo_songs(self) -> None:
+    def add_demo_songs(self, refresh_view: bool = True) -> None:
         self.song_identity_to_item = {}
         self.song_list.clear()
-        self.filter_song_list(self.search_input.text())
+        if refresh_view:
+            self.filter_song_list(self.search_input.text())
 
     def has_demo_songs(self) -> bool:
         if self.song_list.count() == 0:
@@ -10130,14 +10174,33 @@ class MainWindow(QMainWindow):
         if candidate:
             self.apply_metadata_candidate(song_data, candidate)
 
-    def load_music_library(self) -> None:
+    def finish_music_library_load(self, valid_count: int) -> None:
+        self.filter_song_list(self.search_input.text())
+        self.last_song_list_order_key = self.current_song_list_order_key()
+        self.remember_library_view_key()
+
+        if valid_count <= 0:
+            return
+        visible_rows = self.get_visible_rows()
+        if not visible_rows:
+            return
+        first_row = visible_rows[0]
+        self.song_list.setCurrentRow(first_row)
+        first_item = self.song_list.item(first_row)
+        if first_item:
+            self.select_song(first_item)
+
+    def load_music_library(
+        self,
+        refresh_view: bool = True,
+    ) -> tuple[int, bool]:
         self.invalidate_local_song_match_index()
         print("正在读取音乐库：", self.library_file)
 
         if not self.library_file.exists():
             print("没有找到已保存的音乐库，显示空状态。")
-            self.add_demo_songs()
-            return
+            self.add_demo_songs(refresh_view=refresh_view)
+            return 0, True
 
         try:
             with self.library_file.open("r", encoding="utf-8") as file:
@@ -10145,17 +10208,18 @@ class MainWindow(QMainWindow):
 
         except Exception as error:
             print("读取音乐库失败：", error)
-            self.add_demo_songs()
-            return
+            self.add_demo_songs(refresh_view=refresh_view)
+            return 0, True
 
         if not songs:
             print("音乐库为空，显示空状态。")
-            self.add_demo_songs()
-            return
+            self.add_demo_songs(refresh_view=refresh_view)
+            return 0, True
 
         previous_signal_state = self.song_list.blockSignals(True)
         self.song_list.setUpdatesEnabled(False)
         valid_count = 0
+        song_list_is_local_only = True
 
         try:
             self.song_identity_to_item = {}
@@ -10186,6 +10250,8 @@ class MainWindow(QMainWindow):
                         "demo": False,
                     }
                 )
+                if song_data.get("recordKind") == "remote":
+                    song_list_is_local_only = False
 
                 item = self.create_song_list_item(song_data)
                 self.song_list.addItem(item)
@@ -10194,25 +10260,14 @@ class MainWindow(QMainWindow):
             self.song_list.blockSignals(previous_signal_state)
             self.song_list.setUpdatesEnabled(True)
 
-        self.filter_song_list(self.search_input.text())
-        self.last_song_list_order_key = self.current_song_list_order_key()
-        self.remember_library_view_key()
-
         if valid_count > 0:
-            visible_rows = self.get_visible_rows()
-
-            if visible_rows:
-                first_row = visible_rows[0]
-                self.song_list.setCurrentRow(first_row)
-                first_item = self.song_list.item(first_row)
-
-                if first_item:
-                    self.select_song(first_item)
-
+            if refresh_view:
+                self.finish_music_library_load(valid_count)
             print(f"已加载音乐库，共 {valid_count} 首歌。")
         else:
-            self.add_demo_songs()
+            self.add_demo_songs(refresh_view=refresh_view)
             print("保存的音乐文件路径全部失效，显示空状态。")
+        return valid_count, song_list_is_local_only
 
 
 
