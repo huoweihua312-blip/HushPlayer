@@ -3674,6 +3674,9 @@ class MainWindow(QMainWindow):
         self.library_data_revision = 0
         self.library_list_dirty = True
         self.last_library_view_key = None
+        self.search_entry_library_revision = None
+        self.search_entry_library_view_key = None
+        self._preserve_page_scroll_once = None
         self.view_buttons = {}
         self.custom_view_buttons = []
         self.media_interactions = MediaInteractionController(self)
@@ -6518,16 +6521,22 @@ class MainWindow(QMainWindow):
 
         return panel
 
-    def show_library_container(self) -> None:
+    def show_library_container(self, preserve_scroll: bool = False) -> None:
         if hasattr(self, "content_stack"):
             library_panel = getattr(self, "library_panel", None)
 
             if library_panel is not None:
+                if preserve_scroll and self.content_stack.currentWidget() is not library_panel:
+                    self._preserve_page_scroll_once = library_panel
                 self.content_stack.setCurrentWidget(library_panel)
             else:
                 self.content_stack.setCurrentIndex(0)
 
-            self.reset_page_scroll_to_top(library_panel)
+            if getattr(self, "_preserve_page_scroll_once", None) is library_panel:
+                self._preserve_page_scroll_once = None
+
+            if not preserve_scroll:
+                self.reset_page_scroll_to_top(library_panel)
 
         self.set_right_panel_mode("lyrics")
 
@@ -6559,6 +6568,9 @@ class MainWindow(QMainWindow):
             if hasattr(self, "content_stack")
             else None
         )
+        if page is getattr(self, "_preserve_page_scroll_once", None):
+            self._preserve_page_scroll_once = None
+            return
         self.reset_page_scroll_to_top(page)
 
     def set_sidebar_active(self, active_key: str) -> None:
@@ -6647,14 +6659,40 @@ class MainWindow(QMainWindow):
         self.set_library_view(view_name)
 
     def return_to_library_view(self) -> None:
+        reuse_cached_view = self.can_reuse_library_view_after_search()
         self.set_sidebar_active("library")
-        self.show_library_container()
-        self.filter_song_list("")
+        self.show_library_container(preserve_scroll=reuse_cached_view)
+        if not reuse_cached_view:
+            self.filter_song_list("")
         self.update_view_buttons()
+        self.search_entry_library_revision = None
+        self.search_entry_library_view_key = None
+
+    def can_reuse_library_view_after_search(self) -> bool:
+        if (
+            not hasattr(self, "content_stack")
+            or not hasattr(self, "search_page")
+            or self.content_stack.currentWidget() is not self.search_page
+        ):
+            return False
+        if getattr(self, "library_list_dirty", True):
+            return False
+        current_key = self.current_library_view_key()
+        return (
+            current_key == getattr(self, "last_library_view_key", None)
+            and current_key == getattr(self, "search_entry_library_view_key", None)
+            and int(getattr(self, "library_data_revision", 0))
+            == getattr(self, "search_entry_library_revision", None)
+        )
 
     def show_search_page(self) -> None:
         self.set_sidebar_active("search")
         if hasattr(self, "content_stack") and hasattr(self, "search_page"):
+            if self.content_stack.currentWidget() is not self.search_page:
+                self.search_entry_library_revision = int(
+                    getattr(self, "library_data_revision", 0)
+                )
+                self.search_entry_library_view_key = self.current_library_view_key()
             self.content_stack.setCurrentWidget(self.search_page)
             self.search_page.set_keyword(self.search_input.text())
         self.set_right_panel_mode("info")
@@ -9604,6 +9642,7 @@ class MainWindow(QMainWindow):
             song_data.update(updates)
             updated_song_data = song_data
 
+        self.mark_library_list_dirty()
         self.apply_current_library_sort(refresh_view=False)
         self.filter_song_list(self.search_input.text())
 
