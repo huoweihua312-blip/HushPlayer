@@ -483,6 +483,43 @@ class SearchPage(QFrame):
         count = len(results)
         self.online_tab.setText(f"在线结果 · {count}")
 
+    def begin_online_results(self, keyword: str, summary: dict) -> None:
+        self.set_keyword(keyword)
+        self.online_results.begin_results(keyword, summary)
+        self._update_online_tab_count(summary)
+
+    def update_online_summary(self, keyword: str, summary: dict) -> None:
+        self.set_keyword(keyword)
+        self.online_results.update_summary(keyword, summary)
+        self._update_online_tab_count(summary)
+
+    def update_online_source_results(
+        self,
+        keyword: str,
+        source_id: str,
+        source_name: str,
+        results: list[dict],
+        state: dict,
+        summary: dict,
+    ) -> bool:
+        self.set_keyword(keyword)
+        self.online_results.update_summary(keyword, summary)
+        changed = self.online_results.update_source_group(
+            source_id,
+            source_name,
+            results,
+            state,
+        )
+        self._update_online_tab_count(summary)
+        return changed
+
+    def _update_online_tab_count(self, summary: dict) -> None:
+        try:
+            count = max(0, int((summary or {}).get("resultCount") or 0))
+        except (TypeError, ValueError):
+            count = 0
+        self.online_tab.setText(f"在线结果 · {count}")
+
     def clear_online_results(self) -> None:
         self.online_results.clear_results(hide=False)
         self.online_tab.setText("在线结果")

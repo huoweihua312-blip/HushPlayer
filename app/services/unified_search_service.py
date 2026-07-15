@@ -13,6 +13,7 @@ class UnifiedSearchService(QObject):
     """Coordinate debounced concurrent searches across registered custom sources."""
 
     resultsChanged = Signal(int, str, list, dict)
+    sourceResultsChanged = Signal(int, str, str, list, dict, dict)
     statusChanged = Signal(str)
     searchStarted = Signal(int, str, int)
     sourceFailed = Signal(int, str, str, str)
@@ -60,6 +61,8 @@ class UnifiedSearchService(QObject):
         self._source_order: list[str] = []
         self._source_meta: dict[str, dict] = {}
         self._source_results: dict[str, list[dict]] = {}
+        self._combined_results_cache: list[dict] = []
+        self._source_result_sizes: dict[str, int] = {}
         self._source_errors: OrderedDict[str, str] = OrderedDict()
         self._source_states: OrderedDict[str, dict] = OrderedDict()
         self._cache: dict[tuple[str, str], tuple[float, str, list[dict]]] = {}
@@ -140,6 +143,8 @@ class UnifiedSearchService(QObject):
         self._source_order = []
         self._source_meta = {}
         self._source_results = {}
+        self._combined_results_cache = []
+        self._source_result_sizes = {}
         self._source_errors = OrderedDict()
         self._source_states = OrderedDict()
 
@@ -193,6 +198,7 @@ class UnifiedSearchService(QObject):
             for key in [key for key in self._cache if key[0] == target]:
                 self._cache.pop(key, None)
             self._source_results.pop(target, None)
+            self._replace_combined_source_results(target, [])
             self._source_errors.pop(target, None)
             self._source_meta.pop(target, None)
             self._source_order = [item for item in self._source_order if item != target]
@@ -208,6 +214,8 @@ class UnifiedSearchService(QObject):
             self._source_order = []
             self._source_meta = {}
             self._source_results = {}
+            self._combined_results_cache = []
+            self._source_result_sizes = {}
             self._source_errors = OrderedDict()
             self._source_states = OrderedDict()
         self.sourceCatalogChanged.emit([], list(self._selected_source_ids))
@@ -342,6 +350,7 @@ class UnifiedSearchService(QObject):
         self.statusChanged.emit(f"正在搜索 {len(sources)} 个在线来源…")
         normalized_keyword = self._normalize_text(self._keyword)
         now = time.monotonic()
+        cached_source_ids: list[str] = []
         for source in sources:
             source_id = str(source.get("id") or "")
             source_name = str(source.get("name") or source_id)
@@ -355,12 +364,17 @@ class UnifiedSearchService(QObject):
             cached = self._cache.get(cache_key)
             if cached and cached[0] > now and cached[1] == fingerprint:
                 self._source_results[source_id] = [dict(item) for item in cached[2]]
+                self._replace_combined_source_results(
+                    source_id,
+                    self._source_results[source_id],
+                )
                 self._source_states[source_id] = self._source_state(
                     source_id,
                     source_name,
                     "success" if self._source_results[source_id] else "empty",
                     result_count=len(self._source_results[source_id]),
                 )
+                cached_source_ids.append(source_id)
                 continue
             request_id = self.client.search(
                 source_id,
@@ -378,6 +392,8 @@ class UnifiedSearchService(QObject):
             self._emit_results(final=True)
         else:
             self._emit_results(final=False)
+        for source_id in cached_source_ids:
+            self._emit_source_results(source_id, final=not self._pending_requests)
 
     def _on_search_finished(
         self,
@@ -394,6 +410,7 @@ class UnifiedSearchService(QObject):
         source = self._source_meta.get(source_id, {})
         normalized = self._normalize_source_results(source, results)
         self._source_results[source_id] = normalized
+        self._replace_combined_source_results(source_id, normalized)
         source_name = str(source.get("name") or source_id)
         self._source_states[source_id] = self._source_state(
             source_id,
@@ -407,7 +424,7 @@ class UnifiedSearchService(QObject):
             self._source_fingerprint(source),
             [dict(item) for item in normalized],
         )
-        self._finish_or_update()
+        self._finish_or_update(source_id)
 
     def _on_request_failed(self, request_id: int, action: str, message: str) -> None:
         if request_id == self._source_list_request and action == "listSources":
@@ -438,13 +455,15 @@ class UnifiedSearchService(QObject):
             self._failure_status(safe_message),
             message=safe_message,
         )
+        self._source_results[source_id] = []
+        self._replace_combined_source_results(source_id, [])
         self.sourceFailed.emit(generation, source_id, source_name, safe_message)
-        self._finish_or_update()
+        self._finish_or_update(source_id)
 
-    def _finish_or_update(self) -> None:
+    def _finish_or_update(self, source_id: str) -> None:
         final = not self._pending_requests
         if final:
-            result_count = len(self._combined_results())
+            result_count = len(self._combined_results_cache)
             failed_count = len(self._source_errors)
             if result_count <= 0 and failed_count:
                 self.statusChanged.emit(f"在线搜索结束，{failed_count} 个来源失败，没有找到结果。")
@@ -463,14 +482,36 @@ class UnifiedSearchService(QObject):
                 f"其余来源继续搜索中…"
             )
         self._emit_results(final=final)
+        self._emit_source_results(source_id, final=final)
 
     def _emit_results(self, final: bool) -> None:
-        results = self._combined_results()
+        summary = self._build_summary(final)
+        self.resultsChanged.emit(
+            self._generation,
+            self._keyword,
+            list(self._combined_results_cache),
+            summary,
+        )
+
+    def _emit_source_results(self, source_id: str, *, final: bool) -> None:
+        state = self._source_states.get(source_id)
+        if not isinstance(state, dict):
+            return
+        self.sourceResultsChanged.emit(
+            self._generation,
+            self._keyword,
+            source_id,
+            self._source_results.get(source_id, []),
+            dict(state),
+            self._build_summary(final),
+        )
+
+    def _build_summary(self, final: bool) -> dict:
         summary = {
             "final": bool(final),
             "sourceCount": len(self._source_order),
             "pendingCount": len(self._pending_requests),
-            "resultCount": len(results),
+            "resultCount": len(self._combined_results_cache),
             "errors": dict(self._source_errors),
             "localOnly": self._local_only,
             "sources": [
@@ -480,19 +521,26 @@ class UnifiedSearchService(QObject):
             ],
             "selectedSourceIds": list(self._selected_source_ids),
         }
-        self.resultsChanged.emit(
-            self._generation,
-            self._keyword,
-            results,
-            summary,
-        )
+        return summary
 
     def _combined_results(self) -> list[dict]:
-        combined: list[dict] = []
-        for source_id in self._source_order:
-            for result in self._source_results.get(source_id, []):
-                combined.append(dict(result))
-        return combined
+        return list(self._combined_results_cache)
+
+    def _replace_combined_source_results(
+        self,
+        source_id: str,
+        results: list[dict],
+    ) -> None:
+        if source_id not in self._source_order:
+            return
+        source_index = self._source_order.index(source_id)
+        start = sum(
+            self._source_result_sizes.get(item, 0)
+            for item in self._source_order[:source_index]
+        )
+        previous_size = self._source_result_sizes.get(source_id, 0)
+        self._combined_results_cache[start:start + previous_size] = results
+        self._source_result_sizes[source_id] = len(results)
 
     @staticmethod
     def _source_state(

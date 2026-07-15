@@ -3643,7 +3643,17 @@ class MainWindow(QMainWindow):
         if self.initial_library_content_view not in {"tracks", "artists", "albums"}:
             self.initial_library_content_view = "tracks"
         self.unified_search_results: list[dict] = []
+        self.unified_search_results_by_source: dict[str, list[dict]] = {}
         self.unified_search_summary: dict = {}
+        self.unified_search_generation = 0
+        self.unified_search_keyword = ""
+        self._unified_search_source_order: list[str] = []
+        self._unified_search_source_sizes: dict[str, int] = {}
+        self._source_registry_snapshot: dict[str, dict] | None = None
+        self._source_registry_snapshot_manager_id = 0
+        self._local_song_match_index: set[tuple[str, str, str]] | None = None
+        self._local_song_match_index_revision = -1
+        self._local_song_match_index_build_count = 0
         self.unified_search_service = UnifiedSearchService(
             self.online_source_client,
             self,
@@ -3800,6 +3810,9 @@ class MainWindow(QMainWindow):
         )
         self.unified_search_service.resultsChanged.connect(
             self.on_unified_search_results_changed
+        )
+        self.unified_search_service.sourceResultsChanged.connect(
+            self.on_unified_search_source_results_changed
         )
         self.unified_search_panel.playRequested.connect(self.play_unified_search_track)
         self.unified_search_panel.queueNextRequested.connect(self.queue_media_item_next)
@@ -4714,12 +4727,32 @@ class MainWindow(QMainWindow):
         source_id = str(source_id or "").strip()
         if not source_id:
             return None
+        source = self.get_registered_source_snapshot().get(source_id)
+        return dict(source) if isinstance(source, dict) else None
+
+    def get_registered_source_snapshot(self) -> dict[str, dict]:
+        manager_id = id(self.source_registry_manager)
+        if (
+            self._source_registry_snapshot is not None
+            and self._source_registry_snapshot_manager_id == manager_id
+        ):
+            return self._source_registry_snapshot
         try:
-            source = self.source_registry_manager.get_source(source_id)
+            sources = self.source_registry_manager.list_sources()
         except Exception as error:
             print(f"读取在线来源失败：{error}")
-            return None
-        return source if isinstance(source, dict) else None
+            sources = []
+        self._source_registry_snapshot = {
+            str(source.get("id") or "").strip(): dict(source)
+            for source in sources
+            if isinstance(source, dict) and str(source.get("id") or "").strip()
+        }
+        self._source_registry_snapshot_manager_id = manager_id
+        return self._source_registry_snapshot
+
+    def invalidate_registered_source_snapshot(self) -> None:
+        self._source_registry_snapshot = None
+        self._source_registry_snapshot_manager_id = 0
 
     def get_remote_track_source_url(self, track: dict) -> str:
         source_url = str(track.get("sourceUrl") or track.get("source_url") or "").strip()
@@ -4745,6 +4778,7 @@ class MainWindow(QMainWindow):
         updated[stable_id] = record
         self.remote_track_store.save_tracks(updated)
         self.remote_tracks = updated
+        self.invalidate_local_song_match_index()
         return stable_id, record
 
     def get_online_track_collection_state(self, track: dict) -> dict:
@@ -4831,11 +4865,7 @@ class MainWindow(QMainWindow):
                 if isinstance(pending_track, dict)
                 else ""
             )
-            try:
-                registered_sources = self.source_registry_manager.list_sources()
-            except Exception as error:
-                print("读取远程歌曲来源状态失败：", error)
-                registered_sources = []
+            registered_sources = self.get_registered_source_snapshot().values()
             available_source_ids = {
                 str(source.get("id") or "")
                 for source in registered_sources
@@ -6629,6 +6659,7 @@ class MainWindow(QMainWindow):
     def mark_library_list_dirty(self) -> None:
         self.library_list_dirty = True
         self.library_data_revision = int(getattr(self, "library_data_revision", 0)) + 1
+        self.invalidate_local_song_match_index()
         page = getattr(self, "library_page", None)
         if page is not None:
             page.invalidate_group_cache()
@@ -7216,6 +7247,7 @@ class MainWindow(QMainWindow):
             self.set_online_status_message(f"文件已下载，但保存关联失败：{error}")
             return
         self.remote_tracks = updated_tracks
+        self.invalidate_local_song_match_index()
         self.add_music_paths([Path(target_path)])
         local_song = self.find_song_data_by_path(target_path)
         self.sync_remote_song_items()
@@ -7248,11 +7280,12 @@ class MainWindow(QMainWindow):
         self.set_right_panel_mode("info")
 
     def on_custom_sources_changed(self, source_id: str) -> None:
+        self.invalidate_registered_source_snapshot()
         service = getattr(self, "unified_search_service", None)
         if service is not None:
             service.invalidate_source(str(source_id or ""))
         self.sync_remote_song_items()
-        self.refresh_unified_search_result_states()
+        self.refresh_unified_search_result_states(str(source_id or ""))
 
     def find_song_data_by_path(self, song_path: str | None) -> dict | None:
         normalized_path = self.normalize_song_path(song_path)
@@ -8192,7 +8225,12 @@ class MainWindow(QMainWindow):
                 getattr(self, "library_data_revision", 0)
             )
             self.unified_search_results = []
+            self.unified_search_results_by_source = {}
             self.unified_search_summary = {}
+            self.unified_search_generation = 0
+            self.unified_search_keyword = ""
+            self._unified_search_source_order = []
+            self._unified_search_source_sizes = {}
             if hasattr(self, "search_page"):
                 self.search_page.clear_online_results()
             if (
@@ -8321,30 +8359,143 @@ class MainWindow(QMainWindow):
 
     def on_unified_search_results_changed(
         self,
-        _generation: int,
+        generation: int,
         keyword: str,
-        results: list,
+        _results: list,
         summary: dict,
     ) -> None:
         current_keyword = self.search_input.text().strip()
-        if current_keyword != str(keyword or "").strip():
+        keyword = str(keyword or "").strip()
+        service = getattr(self, "unified_search_service", None)
+        if (
+            current_keyword != keyword
+            or (service is not None and int(generation) != service.generation)
+        ):
             return
         if not current_keyword:
             self.unified_search_results = []
+            self.unified_search_results_by_source = {}
             self.unified_search_summary = {}
+            self.unified_search_generation = 0
+            self.unified_search_keyword = ""
+            self._unified_search_source_order = []
+            self._unified_search_source_sizes = {}
             self.search_page.clear_online_results()
             return
-        self.unified_search_results = [
+        new_request = (
+            int(generation) != self.unified_search_generation
+            or keyword != self.unified_search_keyword
+        )
+        if new_request:
+            self.unified_search_generation = int(generation)
+            self.unified_search_keyword = keyword
+            self.unified_search_results = []
+            self.unified_search_results_by_source = {}
+            self._unified_search_source_order = []
+            self._unified_search_source_sizes = {}
+        self.unified_search_summary = dict(summary or {})
+        self._sync_unified_search_source_order(self.unified_search_summary)
+        if new_request:
+            self.search_page.begin_online_results(
+                current_keyword,
+                self.unified_search_summary,
+            )
+        else:
+            self.search_page.update_online_summary(
+                current_keyword,
+                self.unified_search_summary,
+            )
+
+    def on_unified_search_source_results_changed(
+        self,
+        generation: int,
+        keyword: str,
+        source_id: str,
+        results: list,
+        state: dict,
+        summary: dict,
+    ) -> None:
+        keyword = str(keyword or "").strip()
+        source_id = str(source_id or "").strip()
+        current_keyword = self.search_input.text().strip()
+        service = getattr(self, "unified_search_service", None)
+        if (
+            not source_id
+            or current_keyword != keyword
+            or int(generation) != self.unified_search_generation
+            or keyword != self.unified_search_keyword
+            or (service is not None and int(generation) != service.generation)
+        ):
+            return
+        state_source_id = str(
+            (state or {}).get("sourceId")
+            or (state or {}).get("source_id")
+            or source_id
+        ).strip()
+        if state_source_id != source_id:
+            return
+        self.unified_search_summary = dict(summary or {})
+        self._sync_unified_search_source_order(self.unified_search_summary)
+        decorated = [
             self.decorate_unified_search_result(result)
             for result in results
             if isinstance(result, dict)
         ]
-        self.unified_search_summary = dict(summary or {})
-        self.search_page.set_online_results(
+        self._replace_unified_search_source_results(source_id, decorated)
+        source_name = str(
+            (state or {}).get("sourceName")
+            or (state or {}).get("source_name")
+            or source_id
+        )
+        self.search_page.update_online_source_results(
             current_keyword,
-            self.unified_search_results,
+            source_id,
+            source_name,
+            decorated,
+            dict(state or {}),
             self.unified_search_summary,
         )
+
+    def _sync_unified_search_source_order(self, summary: dict) -> None:
+        states = summary.get("sources") if isinstance(summary, dict) else None
+        if not isinstance(states, list):
+            return
+        next_order = [
+            str(state.get("sourceId") or state.get("source_id") or "").strip()
+            for state in states
+            if isinstance(state, dict)
+            and str(state.get("sourceId") or state.get("source_id") or "").strip()
+        ]
+        if next_order == self._unified_search_source_order:
+            return
+        self._unified_search_source_order = next_order
+        if self.unified_search_results_by_source:
+            self.unified_search_results = [
+                track
+                for source_id in next_order
+                for track in self.unified_search_results_by_source.get(source_id, [])
+            ]
+            self._unified_search_source_sizes = {
+                source_id: len(self.unified_search_results_by_source.get(source_id, []))
+                for source_id in next_order
+            }
+
+    def _replace_unified_search_source_results(
+        self,
+        source_id: str,
+        results: list[dict],
+    ) -> None:
+        if source_id not in self._unified_search_source_order:
+            self._unified_search_source_order.append(source_id)
+        source_index = self._unified_search_source_order.index(source_id)
+        start = sum(
+            self._unified_search_source_sizes.get(item, 0)
+            for item in self._unified_search_source_order[:source_index]
+        )
+        previous_size = self._unified_search_source_sizes.get(source_id, 0)
+        self.unified_search_results[start:start + previous_size] = results
+        self._unified_search_source_sizes[source_id] = len(results)
+        self.unified_search_results_by_source[source_id] = results
 
     def decorate_unified_search_result(self, track: dict) -> dict:
         media_item = MediaItem.from_online(track)
@@ -8367,36 +8518,87 @@ class MainWindow(QMainWindow):
         return media_item.to_dict()
 
     def has_matching_local_song(self, track: dict) -> bool:
-        title = " ".join(str(track.get("title") or "").casefold().split())
-        artist = " ".join(str(track.get("artist") or "").casefold().split())
-        album = " ".join(str(track.get("album") or "").casefold().split())
+        title, artist, album = self.local_song_match_key(track)
         if not title or not artist:
             return False
+        return (title, artist, album) in self.get_local_song_match_index()
+
+    @staticmethod
+    def local_song_match_key(track: dict) -> tuple[str, str, str]:
+        return tuple(
+            " ".join(str(track.get(field) or "").casefold().split())
+            for field in ("title", "artist", "album")
+        )
+
+    def get_local_song_match_index(self) -> set[tuple[str, str, str]]:
+        revision = int(getattr(self, "library_data_revision", 0))
+        if (
+            self._local_song_match_index is not None
+            and self._local_song_match_index_revision == revision
+        ):
+            return self._local_song_match_index
+        index: set[tuple[str, str, str]] = set()
         for row in range(self.song_list.count()):
             item = self.song_list.item(row)
             song = item.data(Qt.ItemDataRole.UserRole) if item is not None else None
             if not isinstance(song, dict) or song.get("recordKind") == "remote":
                 continue
-            song_title = " ".join(str(song.get("title") or "").casefold().split())
-            song_artist = " ".join(str(song.get("artist") or "").casefold().split())
-            song_album = " ".join(str(song.get("album") or "").casefold().split())
-            if song_title == title and song_artist == artist and song_album == album:
-                return True
-        return False
+            key = self.local_song_match_key(song)
+            if key[0] and key[1]:
+                index.add(key)
+        self._local_song_match_index = index
+        self._local_song_match_index_revision = revision
+        self._local_song_match_index_build_count += 1
+        return index
 
-    def refresh_unified_search_result_states(self) -> None:
+    def invalidate_local_song_match_index(self) -> None:
+        self._local_song_match_index = None
+        self._local_song_match_index_revision = -1
+
+    def refresh_unified_search_result_states(self, source_id: str = "") -> None:
         page = getattr(self, "search_page", None)
         if page is None or not self.unified_search_results:
             return
-        self.unified_search_results = [
-            self.decorate_unified_search_result(result)
-            for result in self.unified_search_results
-        ]
-        page.set_online_results(
-            self.search_input.text().strip(),
-            self.unified_search_results,
-            self.unified_search_summary,
+        target = str(source_id or "").strip()
+        target_ids = (
+            [target]
+            if target
+            else list(self._unified_search_source_order)
         )
+        states = {
+            str(state.get("sourceId") or state.get("source_id") or ""): dict(state)
+            for state in self.unified_search_summary.get("sources", [])
+            if isinstance(state, dict)
+        }
+        keyword = self.search_input.text().strip()
+        for current_source_id in target_ids:
+            current_results = self.unified_search_results_by_source.get(
+                current_source_id,
+                [],
+            )
+            if not current_results:
+                continue
+            decorated = [
+                self.decorate_unified_search_result(result)
+                for result in current_results
+            ]
+            self._replace_unified_search_source_results(
+                current_source_id,
+                decorated,
+            )
+            state = states.get(current_source_id, {})
+            page.update_online_source_results(
+                keyword,
+                current_source_id,
+                str(
+                    state.get("sourceName")
+                    or state.get("source_name")
+                    or current_source_id
+                ),
+                decorated,
+                state,
+                self.unified_search_summary,
+            )
 
     def play_unified_search_track(self, track: dict) -> None:
         media_item = MediaItem.from_mapping(track)
@@ -9808,6 +10010,7 @@ class MainWindow(QMainWindow):
             self.apply_metadata_candidate(song_data, candidate)
 
     def load_music_library(self) -> None:
+        self.invalidate_local_song_match_index()
         print("正在读取音乐库：", self.library_file)
 
         if not self.library_file.exists():

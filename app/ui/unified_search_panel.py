@@ -38,6 +38,11 @@ class UnifiedSearchResultsPanel(QFrame):
         self._results: list[dict] = []
         self._summary: dict = {}
         self._collapsed_source_ids: set[str] = set()
+        self._source_results: dict[str, list[dict]] = {}
+        self._source_states_by_id: dict[str, dict] = {}
+        self._source_names: dict[str, str] = {}
+        self._source_order: list[str] = []
+        self._group_headers: dict[str, QListWidgetItem] = {}
         self.collection_state_provider = lambda _track: {}
         self.playlist_provider = lambda: []
         self.playing_key_provider = lambda: ""
@@ -123,6 +128,11 @@ class UnifiedSearchResultsPanel(QFrame):
         self._keyword = ""
         self._results = []
         self._summary = {}
+        self._source_results = {}
+        self._source_states_by_id = {}
+        self._source_names = {}
+        self._source_order = []
+        self._group_headers = {}
         self.result_list.clear()
         self.status_label.clear()
         self.detail_label.setText("单击在线歌曲可查看详情；双击才会解析播放地址。")
@@ -137,27 +147,280 @@ class UnifiedSearchResultsPanel(QFrame):
     ) -> None:
         next_keyword = str(keyword or "")
         keyword_changed = next_keyword != self._keyword
-        self._keyword = next_keyword
-        self._results = [
+        normalized_results = [
             MediaItem.from_mapping(item).to_dict()
             for item in results
             if isinstance(item, dict)
         ]
+        next_summary = dict(summary or {})
+        if keyword_changed:
+            self.begin_results(next_keyword, next_summary)
+        else:
+            self.update_summary(next_keyword, next_summary)
+        grouped: OrderedDict[str, list[dict]] = OrderedDict()
+        source_names: dict[str, str] = {}
+        for result in normalized_results:
+            source_id = str(result.get("source_id") or "")
+            source_names[source_id] = str(
+                result.get("source_name") or source_id or "未知来源"
+            )
+            grouped.setdefault(source_id, []).append(result)
+        known_ids = set(self._source_results)
+        for source_id, tracks in grouped.items():
+            state = self._source_states_by_id.get(
+                source_id,
+                {
+                    "sourceId": source_id,
+                    "sourceName": source_names[source_id],
+                    "status": "success" if tracks else "empty",
+                    "resultCount": len(tracks),
+                    "message": "",
+                },
+            )
+            self.update_source_group(
+                source_id,
+                source_names[source_id],
+                tracks,
+                state,
+            )
+        for source_id in known_ids - set(grouped):
+            state = self._source_states_by_id.get(source_id, {})
+            self.update_source_group(
+                source_id,
+                self._source_names.get(source_id, source_id),
+                [],
+                state,
+            )
+        self._results = normalized_results
+        self._update_detail_text()
+
+    def begin_results(self, keyword: str, summary: dict | None = None) -> None:
+        self._keyword = str(keyword or "")
+        self._results = []
         self._summary = dict(summary or {})
+        self._source_results = {}
+        self._source_states_by_id = {}
+        self._source_names = {}
+        self._source_order = []
+        self._group_headers = {}
+        self.result_list.clear()
         self.setVisible(bool(self._keyword))
-        self._render_results(scroll_to_top=keyword_changed)
+        self._sync_source_groups_from_summary()
+        self._update_detail_text()
+        if self._keyword:
+            self.scroll_to_top()
+
+    def update_summary(self, keyword: str, summary: dict | None = None) -> None:
+        next_keyword = str(keyword or "")
+        if next_keyword != self._keyword:
+            self.begin_results(next_keyword, summary)
+            return
+        self._summary = dict(summary or {})
+        self._sync_source_groups_from_summary()
+        self._update_detail_text()
+
+    def update_source_group(
+        self,
+        source_id: str,
+        source_name: str,
+        results: list[dict],
+        state: dict | None = None,
+    ) -> bool:
+        source_id = str(source_id or "").strip()
+        if not source_id:
+            return False
+        normalized_results = [
+            MediaItem.from_mapping(item).to_dict()
+            for item in results
+            if isinstance(item, dict)
+        ]
+        source_name = str(source_name or source_id or "未知来源")
+        next_state = dict(state or {})
+        next_state.setdefault("sourceId", source_id)
+        next_state.setdefault("sourceName", source_name)
+        next_state.setdefault(
+            "status",
+            "success" if normalized_results else "empty",
+        )
+        next_state["resultCount"] = len(normalized_results)
+        self._source_names[source_id] = source_name
+        self._source_states_by_id[source_id] = next_state
+        if source_id not in self._source_order:
+            self._source_order.append(source_id)
+        header = self._ensure_source_group(source_id)
+        results_changed = normalized_results != self._source_results.get(source_id, [])
+        self._source_results[source_id] = normalized_results
+        self._update_group_header(source_id)
+        if not results_changed:
+            self._update_detail_text()
+            return False
+
+        previous_key = self._track_key(self.current_track())
+        scroll_bar = self.result_list.verticalScrollBar()
+        scroll_value = scroll_bar.value()
+        previous_signal_state = self.result_list.blockSignals(True)
+        self.result_list.setUpdatesEnabled(False)
+        selected_item = None
+        try:
+            self._remove_source_track_rows(source_id)
+            if source_id not in self._collapsed_source_ids:
+                insert_row = self.result_list.row(header) + 1
+                for track in normalized_results:
+                    item = self._create_track_item(track)
+                    self.result_list.insertItem(insert_row, item)
+                    insert_row += 1
+                    if previous_key and self._track_key(track) == previous_key:
+                        selected_item = item
+        finally:
+            self.result_list.blockSignals(previous_signal_state)
+            self.result_list.setUpdatesEnabled(True)
+        if selected_item is not None:
+            self.result_list.setCurrentItem(selected_item)
+        scroll_bar.setValue(scroll_value)
+        self._update_detail_text()
+        return True
+
+    def clear_source_group(self, source_id: str) -> bool:
+        source_id = str(source_id or "").strip()
+        if source_id not in self._group_headers:
+            return False
+        self._remove_source_group(source_id)
+        self._source_results.pop(source_id, None)
+        self._source_states_by_id.pop(source_id, None)
+        self._source_names.pop(source_id, None)
+        self._source_order = [item for item in self._source_order if item != source_id]
+        self._update_detail_text()
+        return True
+
+    def _sync_source_groups_from_summary(self) -> None:
+        states = self._source_states()
+        if "sources" in self._summary:
+            next_order = [
+                str(state.get("sourceId") or state.get("source_id") or "")
+                for state in states
+                if str(state.get("sourceId") or state.get("source_id") or "")
+            ]
+            for source_id in set(self._group_headers) - set(next_order):
+                self.clear_source_group(source_id)
+            self._source_order = next_order
+        for state in states:
+            source_id = str(state.get("sourceId") or state.get("source_id") or "")
+            if not source_id:
+                continue
+            source_name = str(
+                state.get("sourceName")
+                or state.get("source_name")
+                or source_id
+                or "未知来源"
+            )
+            self._source_names[source_id] = source_name
+            self._source_states_by_id[source_id] = dict(state)
+            self._ensure_source_group(source_id)
+            self._update_group_header(source_id)
+
+    def _ensure_source_group(self, source_id: str) -> QListWidgetItem:
+        existing = self._group_headers.get(source_id)
+        if existing is not None:
+            return existing
+        group_item = QListWidgetItem()
+        group_item.setFlags(Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable)
+        group_item.setData(Qt.ItemDataRole.UserRole, None)
+        group_item.setData(self.GROUP_SOURCE_ROLE, source_id)
+        group_font = group_item.font()
+        group_font.setBold(True)
+        group_item.setFont(group_font)
+        group_item.setForeground(QColor("#a9c8ff"))
+        group_item.setBackground(QColor("#171e2a"))
+        group_item.setSizeHint(QSize(0, 38))
+        insert_row = self.result_list.count()
+        if source_id in self._source_order:
+            source_index = self._source_order.index(source_id)
+            for following_id in self._source_order[source_index + 1:]:
+                following = self._group_headers.get(following_id)
+                if following is not None:
+                    insert_row = self.result_list.row(following)
+                    break
+        self.result_list.insertItem(insert_row, group_item)
+        self._group_headers[source_id] = group_item
+        self._update_group_header(source_id)
+        return group_item
+
+    def _update_group_header(self, source_id: str) -> None:
+        item = self._group_headers.get(source_id)
+        if item is None:
+            return
+        state = self._source_states_by_id.get(source_id, {})
+        source_name = self._source_names.get(source_id, source_id or "未知来源")
+        tracks = self._source_results.get(source_id, [])
+        collapsed = source_id in self._collapsed_source_ids
+        arrow = "▶" if collapsed else "▼"
+        item.setText(
+            f"{arrow}  {source_name} · {self._source_status_text(state, len(tracks))}"
+        )
+        item.setData(self.GROUP_STATUS_ROLE, str(state.get("status") or ""))
+        item.setToolTip(self._source_status_tooltip(source_name, state))
+
+    def _remove_source_track_rows(self, source_id: str) -> None:
+        header = self._group_headers.get(source_id)
+        if header is None:
+            return
+        row = self.result_list.row(header) + 1
+        while row < self.result_list.count():
+            item = self.result_list.item(row)
+            if str(item.data(self.GROUP_SOURCE_ROLE) or ""):
+                break
+            self.result_list.takeItem(row)
+
+    def _remove_source_group(self, source_id: str) -> None:
+        header = self._group_headers.get(source_id)
+        if header is None:
+            return
+        self._remove_source_track_rows(source_id)
+        row = self.result_list.row(header)
+        if row >= 0:
+            self.result_list.takeItem(row)
+        self._group_headers.pop(source_id, None)
+
+    def _create_track_item(self, track: dict) -> QListWidgetItem:
+        item = QListWidgetItem(self._result_text(track))
+        item.setData(Qt.ItemDataRole.UserRole, track)
+        item.setToolTip(self._result_tooltip(track))
+        item.setSizeHint(QSize(0, 54))
+        self._apply_playing_indicator(item, track)
+        return item
+
+    def _apply_playing_indicator(self, item: QListWidgetItem, track: dict) -> None:
+        playing_key = str(self.playing_key_provider() or "")
+        try:
+            is_playing = MediaItem.from_mapping(track).stable_identity == playing_key
+        except (TypeError, ValueError):
+            is_playing = False
+        font = self.result_list.font()
+        font.setBold(is_playing)
+        item.setFont(font)
+        item.setData(
+            Qt.ItemDataRole.ForegroundRole,
+            QColor("#8fbcff") if is_playing else None,
+        )
+
+    def _update_detail_text(self) -> None:
+        has_results = bool(any(self._source_results.values()))
+        try:
+            has_results = has_results or int(self._summary.get("resultCount") or 0) > 0
+        except (TypeError, ValueError):
+            pass
         errors = self._summary.get("errors")
         if isinstance(errors, dict) and errors:
             messages = [str(message) for message in list(errors.values())[:3]]
             self.detail_label.setText("部分来源搜索失败：" + "；".join(messages))
         elif (
-            not self._results
+            not has_results
             and self._summary.get("final")
             and "selectedSourceIds" in self._summary
             and not self._summary.get("selectedSourceIds")
         ):
             self.detail_label.setText("请至少选择一个搜索来源。")
-        elif not self._results and self._summary.get("final"):
+        elif not has_results and self._summary.get("final"):
             self.detail_label.setText("所选在线来源没有返回匹配结果；本地搜索结果不受影响。")
         elif self._summary.get("pendingCount"):
             self.detail_label.setText("已完成的来源会立即显示；其余来源继续搜索中。")
@@ -305,7 +568,27 @@ class UnifiedSearchResultsPanel(QFrame):
             self._collapsed_source_ids.remove(target)
         else:
             self._collapsed_source_ids.add(target)
-        self._render_results(scroll_to_top=False)
+        scroll_bar = self.result_list.verticalScrollBar()
+        scroll_value = scroll_bar.value()
+        previous_signal_state = self.result_list.blockSignals(True)
+        self.result_list.setUpdatesEnabled(False)
+        try:
+            self._remove_source_track_rows(target)
+            if target not in self._collapsed_source_ids:
+                header = self._group_headers.get(target)
+                if header is not None:
+                    insert_row = self.result_list.row(header) + 1
+                    for track in self._source_results.get(target, []):
+                        self.result_list.insertItem(
+                            insert_row,
+                            self._create_track_item(track),
+                        )
+                        insert_row += 1
+            self._update_group_header(target)
+        finally:
+            self.result_list.blockSignals(previous_signal_state)
+            self.result_list.setUpdatesEnabled(True)
+        scroll_bar.setValue(scroll_value)
 
     def is_source_collapsed(self, source_id: str) -> bool:
         return str(source_id or "").strip() in self._collapsed_source_ids
