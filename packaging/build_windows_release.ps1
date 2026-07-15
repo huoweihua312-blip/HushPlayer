@@ -1,5 +1,7 @@
 [CmdletBinding()]
-param()
+param(
+    [string]$PythonPath = ""
+)
 
 $ErrorActionPreference = "Stop"
 Set-StrictMode -Version Latest
@@ -13,43 +15,21 @@ if (-not (Test-Path -LiteralPath (Join-Path $ProjectRoot "main.py") -PathType Le
     throw "main.py was not found in the project root."
 }
 
-$Python = Join-Path $ProjectRoot ".venv\Scripts\python.exe"
-$VenvRebuildHelp = @(
-    "Rebuild the Python 3.12 virtual environment from the project root:"
-    "  Remove-Item -LiteralPath .venv -Recurse -Force"
-    "  py -3.12 -m venv .venv"
-    "  .\.venv\Scripts\python.exe -m pip install --require-hashes --requirement requirements-lock.txt"
-) -join [Environment]::NewLine
-
-function Stop-ForInvalidVenv([string]$Reason) {
-    throw ($Reason + [Environment]::NewLine + $VenvRebuildHelp)
+$Python = if ($PythonPath) {
+    [System.IO.Path]::GetFullPath($PythonPath)
+} else {
+    Join-Path $ProjectRoot ".venv\Scripts\python.exe"
 }
-
 if (-not (Test-Path -LiteralPath $Python -PathType Leaf)) {
-    Stop-ForInvalidVenv "Project virtual environment Python was not found: $Python"
+    throw "Python interpreter was not found: $Python"
 }
 
-$PreviousErrorActionPreference = $ErrorActionPreference
-$ErrorActionPreference = "Continue"
-try {
-    $PythonProbe = @(
-        & $Python -c "import platform, struct, sys, PyInstaller, PySide6; assert struct.calcsize('P') * 8 == 64; print('Python=' + platform.python_version()); print('PythonExecutable=' + sys.executable); print('PyInstaller=' + PyInstaller.__version__); print('PySide6=' + PySide6.__version__); print('Architecture=x64')" 2>&1
-    )
-    $PythonProbeExitCode = $LASTEXITCODE
-} catch {
-    $PythonProbe = @($_.Exception.Message)
-    $PythonProbeExitCode = -1
-} finally {
-    $ErrorActionPreference = $PreviousErrorActionPreference
+& $Python -c "import platform, struct, sys, PyInstaller, PySide6; assert struct.calcsize('P') * 8 == 64; print('Python=' + platform.python_version()); print('PythonExecutable=' + sys.executable); print('PyInstaller=' + PyInstaller.__version__); print('PySide6=' + PySide6.__version__); print('Architecture=x64')"
+if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+& $Python -m PyInstaller --version
+if ($LASTEXITCODE -ne 0) {
+    throw "PyInstaller is not available in the project virtual environment."
 }
-if ($PythonProbeExitCode -ne 0) {
-    $Details = ($PythonProbe | ForEach-Object { [string]$_ }) -join [Environment]::NewLine
-    Stop-ForInvalidVenv (
-        "Project virtual environment Python failed to start: $Python" +
-        [Environment]::NewLine + $Details
-    )
-}
-$PythonProbe | ForEach-Object { Write-Host ([string]$_) }
 
 $NodeRuntimeHelper = Join-Path $PSScriptRoot "prepare_node_runtime.ps1"
 if (-not (Test-Path -LiteralPath $NodeRuntimeHelper -PathType Leaf)) {
@@ -84,7 +64,7 @@ Remove-ProjectOutputDirectory "build"
 Remove-ProjectOutputDirectory "dist"
 
 $env:HUSHPLAYER_NODE_EXE = $NodeExe
-$Spec = Join-Path $ProjectRoot "packaging\HushPlayer.debug.spec"
+$Spec = Join-Path $ProjectRoot "packaging\HushPlayer.release.spec"
 & $Python -m PyInstaller --noconfirm --clean --workpath (Join-Path $ProjectRoot "build\pyinstaller") --distpath (Join-Path $ProjectRoot "dist") $Spec
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
@@ -106,6 +86,17 @@ foreach ($RequiredFile in $RequiredFiles) {
         throw "Required build output is missing: $RequiredFile"
     }
 }
+$ExeBytes = [System.IO.File]::ReadAllBytes($ExePath)
+if ($ExeBytes.Length -lt 256) {
+    throw "Release executable is too small to contain a valid PE header: $ExePath"
+}
+$PeOffset = [BitConverter]::ToInt32($ExeBytes, 0x3C)
+$OptionalHeaderOffset = $PeOffset + 24
+$Subsystem = [BitConverter]::ToUInt16($ExeBytes, $OptionalHeaderOffset + 68)
+if ($Subsystem -ne 2) {
+    throw "Release executable is not a Windows GUI application. PE subsystem=$Subsystem"
+}
+Write-Host "ExecutableSubsystem=Windows GUI"
 if (Test-Path -LiteralPath (Join-Path $SupportRoot "source_runtime\source_registry.json")) {
     throw "Private source_runtime\source_registry.json must not be packaged."
 }
@@ -157,5 +148,6 @@ Copy-Item -LiteralPath $NodeRuntime.LicensePath -Destination (Join-Path $Support
 $TotalBytes = (Get-ChildItem -LiteralPath $OutputRoot -Recurse -File | Measure-Object -Property Length -Sum).Sum
 $TotalMiB = [Math]::Round($TotalBytes / 1MB, 2)
 Write-Host "Build complete."
+Write-Host "BuildVariant=Release"
 Write-Host "Executable=$ExePath"
 Write-Host "OutputSizeMiB=$TotalMiB"

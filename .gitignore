@@ -78,6 +78,7 @@ __pycache__/
 
 # Local backups
 backups/
+.build-cache/
 
 # Runtime user data
 data/*.json

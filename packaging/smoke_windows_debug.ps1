@@ -37,6 +37,72 @@ function Reset-SmokePackageDestination([string]$Destination) {
     }
 }
 
+function Set-IsolatedProcessEnvironment(
+    [System.Diagnostics.ProcessStartInfo]$StartInfo,
+    [string]$NodePath = ""
+) {
+    $EnvironmentSnapshot = [Environment]::GetEnvironmentVariables("Process")
+    $StartInfo.EnvironmentVariables.Clear()
+    foreach ($Entry in $EnvironmentSnapshot.GetEnumerator()) {
+        $Name = [string]$Entry.Key
+        if ($Name -ieq "PATH" -or $Name -ieq "NODE_PATH") {
+            continue
+        }
+        $StartInfo.EnvironmentVariables[$Name] = [string]$Entry.Value
+    }
+    $StartInfo.EnvironmentVariables["Path"] = "$env:SystemRoot\System32;$env:SystemRoot"
+    if ($NodePath) {
+        $StartInfo.EnvironmentVariables["NODE_PATH"] = $NodePath
+    }
+}
+
+function Invoke-PackagedApplication(
+    [string]$Executable,
+    [string]$WorkingDirectory,
+    [string]$StdoutPath,
+    [string]$StderrPath
+) {
+    $StartInfo = New-Object System.Diagnostics.ProcessStartInfo
+    $StartInfo.FileName = $Executable
+    $StartInfo.WorkingDirectory = $WorkingDirectory
+    $StartInfo.UseShellExecute = $false
+    $StartInfo.CreateNoWindow = $true
+    $StartInfo.RedirectStandardOutput = $true
+    $StartInfo.RedirectStandardError = $true
+    Set-IsolatedProcessEnvironment $StartInfo
+
+    $Process = New-Object System.Diagnostics.Process
+    $Process.StartInfo = $StartInfo
+    $Started = $false
+    try {
+        if (-not $Process.Start()) {
+            throw "Packaged application did not start: $Executable"
+        }
+        $Started = $true
+        $StdoutTask = $Process.StandardOutput.ReadToEndAsync()
+        $StderrTask = $Process.StandardError.ReadToEndAsync()
+        if (-not $Process.WaitForExit(30000)) {
+            $Process.Kill()
+            throw "Packaged application did not exit within 30 seconds: $Executable"
+        }
+        $StdoutText = $StdoutTask.GetAwaiter().GetResult()
+        $StderrText = $StderrTask.GetAwaiter().GetResult()
+        [System.IO.File]::WriteAllText($StdoutPath, $StdoutText, [System.Text.UTF8Encoding]::new($false))
+        [System.IO.File]::WriteAllText($StderrPath, $StderrText, [System.Text.UTF8Encoding]::new($false))
+        [PSCustomObject]@{
+            ExitCode       = $Process.ExitCode
+            StandardOutput = $StdoutText
+            StandardError  = $StderrText
+        }
+    } finally {
+        if ($Started -and -not $Process.HasExited) {
+            $Process.Kill()
+            $Process.WaitForExit()
+        }
+        $Process.Dispose()
+    }
+}
+
 foreach ($Destination in @($SpacePackage, $ChinesePackage)) {
     Reset-SmokePackageDestination $Destination
     New-Item -ItemType Directory -Path (Split-Path -Parent $Destination) -Force | Out-Null
@@ -48,9 +114,7 @@ foreach ($Name in @(
     "HUSHPLAYER_APP_DATA_DIR",
     "HUSHPLAYER_CACHE_DIR",
     "HUSHPLAYER_LOG_DIR",
-    "HUSHPLAYER_PACKAGING_SMOKE_EXIT_MS",
-    "NODE_PATH",
-    "PATH"
+    "HUSHPLAYER_PACKAGING_SMOKE_EXIT_MS"
 )) {
     $OriginalEnvironment[$Name] = [Environment]::GetEnvironmentVariable($Name, "Process")
 }
@@ -58,7 +122,6 @@ foreach ($Name in @(
 $NodeBefore = @(Get-Process node -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Id)
 try {
     $env:HUSHPLAYER_PACKAGING_SMOKE_EXIT_MS = "4000"
-    $env:PATH = "$env:SystemRoot\System32;$env:SystemRoot"
 
     function Test-BundledNodeRunner([string]$RunRoot) {
         $SupportRoot = Join-Path $RunRoot "_internal"
@@ -79,23 +142,35 @@ try {
         $StartInfo.RedirectStandardInput = $true
         $StartInfo.RedirectStandardOutput = $true
         $StartInfo.RedirectStandardError = $true
-        $env:NODE_PATH = Join-Path $SupportRoot "source_runtime\node_modules"
+        Set-IsolatedProcessEnvironment $StartInfo (Join-Path $SupportRoot "source_runtime\node_modules")
         $RunnerProcess = New-Object System.Diagnostics.Process
         $RunnerProcess.StartInfo = $StartInfo
-        if (-not $RunnerProcess.Start()) {
-            throw "Bundled Node runner did not start: $BundledNode"
-        }
-        $RunnerProcess.StandardInput.WriteLine('{"id":1,"action":"ping"}')
-        $RunnerProcess.StandardInput.WriteLine('{"id":0,"action":"shutdown"}')
-        $RunnerProcess.StandardInput.Close()
-        $RunnerStdout = $RunnerProcess.StandardOutput.ReadToEnd()
-        $RunnerStderr = $RunnerProcess.StandardError.ReadToEnd()
-        if (-not $RunnerProcess.WaitForExit(10000)) {
-            $RunnerProcess.Kill()
-            throw "Bundled Node runner did not exit after shutdown."
-        }
-        if ($RunnerProcess.ExitCode -ne 0 -or $RunnerStdout -notmatch '"runnerVersion"') {
-            throw "Bundled Node runner ping failed. stderr=$RunnerStderr"
+        $RunnerStarted = $false
+        try {
+            if (-not $RunnerProcess.Start()) {
+                throw "Bundled Node runner did not start: $BundledNode"
+            }
+            $RunnerStarted = $true
+            $RunnerProcess.StandardInput.WriteLine('{"id":1,"action":"ping"}')
+            $RunnerProcess.StandardInput.WriteLine('{"id":0,"action":"shutdown"}')
+            $RunnerProcess.StandardInput.Close()
+            $RunnerStdoutTask = $RunnerProcess.StandardOutput.ReadToEndAsync()
+            $RunnerStderrTask = $RunnerProcess.StandardError.ReadToEndAsync()
+            if (-not $RunnerProcess.WaitForExit(10000)) {
+                $RunnerProcess.Kill()
+                throw "Bundled Node runner did not exit after shutdown."
+            }
+            $RunnerStdout = $RunnerStdoutTask.GetAwaiter().GetResult()
+            $RunnerStderr = $RunnerStderrTask.GetAwaiter().GetResult()
+            if ($RunnerProcess.ExitCode -ne 0 -or $RunnerStdout -notmatch '"runnerVersion"') {
+                throw "Bundled Node runner ping failed. stderr=$RunnerStderr"
+            }
+        } finally {
+            if ($RunnerStarted -and -not $RunnerProcess.HasExited) {
+                $RunnerProcess.Kill()
+                $RunnerProcess.WaitForExit()
+            }
+            $RunnerProcess.Dispose()
         }
     }
 
@@ -114,14 +189,13 @@ try {
         $Stdout = Join-Path $SmokeRoot ("stdout-" + $RunName + ".log")
         $Stderr = Join-Path $SmokeRoot ("stderr-" + $RunName + ".log")
         Test-BundledNodeRunner $RunRoot
-        $Process = Start-Process -FilePath (Join-Path $RunRoot "HushPlayer.exe") -WorkingDirectory $LaunchCwd -WindowStyle Hidden -RedirectStandardOutput $Stdout -RedirectStandardError $Stderr -Wait -PassThru
-        if ($Process.ExitCode -ne 0) {
-            throw "Packaged application run '$RunName' failed with exit code $($Process.ExitCode)."
+        $RunResult = Invoke-PackagedApplication (Join-Path $RunRoot "HushPlayer.exe") $LaunchCwd $Stdout $Stderr
+        if ($RunResult.ExitCode -ne 0) {
+            throw "Packaged application run '$RunName' failed with exit code $($RunResult.ExitCode)."
         }
-        $RunStdout = Get-Content -LiteralPath $Stdout -Raw -Encoding UTF8
+        $RunStdout = $RunResult.StandardOutput
         if ($RunStdout -notmatch '\[packaging-smoke\] Node runner ready') {
-            $RunStderr = Get-Content -LiteralPath $Stderr -Raw -Encoding UTF8
-            throw "Packaged application run '$RunName' did not start its bundled Node runner. stderr=$RunStderr"
+            throw "Packaged application run '$RunName' did not start its bundled Node runner. stderr=$($RunResult.StandardError)"
         }
         $Registry = Join-Path $env:HUSHPLAYER_APP_DATA_DIR "source_runtime\source_registry.json"
         if (-not (Test-Path -LiteralPath $Registry -PathType Leaf)) {
@@ -139,7 +213,7 @@ try {
                 $RegistryText + [Environment]::NewLine,
                 [System.Text.UTF8Encoding]::new($false)
             )
-            $Restart = Start-Process -FilePath (Join-Path $RunRoot "HushPlayer.exe") -WorkingDirectory $LaunchCwd -WindowStyle Hidden -RedirectStandardOutput (Join-Path $SmokeRoot "stdout-restart.log") -RedirectStandardError (Join-Path $SmokeRoot "stderr-restart.log") -Wait -PassThru
+            $Restart = Invoke-PackagedApplication (Join-Path $RunRoot "HushPlayer.exe") $LaunchCwd (Join-Path $SmokeRoot "stdout-restart.log") (Join-Path $SmokeRoot "stderr-restart.log")
             if ($Restart.ExitCode -ne 0) {
                 throw "Packaged application restart failed with exit code $($Restart.ExitCode)."
             }

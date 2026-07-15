@@ -1,12 +1,15 @@
-The Windows debug package includes an official, Authenticode-validated
-Node.js Windows x64 executable already installed on the build machine.
+The Windows package includes the official Node.js v22.22.3 Windows x64
+runtime downloaded from this fixed official archive:
+
+https://nodejs.org/dist/v22.22.3/node-v22.22.3-win-x64.zip
+
+Archive SHA-256:
+6c8d54f635feff4df76c2ca80f45332eb2ff57d25226edce36592e51a177ee33
 
 Node.js is a trademark of the OpenJS Foundation. Node.js is distributed
 under the MIT license and includes third-party software under additional
-licenses. Before public redistribution, include the complete LICENSE file
-from the exact matching official Node.js Windows x64 archive:
+licenses. The package includes the complete LICENSE file from that verified
+official archive.
 
-https://nodejs.org/download/release/
-
-The build script records the exact Node.js version and signer in the output
-directory. It never downloads a Node.js binary.
+The build script records the archive URL and SHA-256, executable SHA-256,
+Node.js version, architecture, signer, and LICENSE SHA-256 in the output.
