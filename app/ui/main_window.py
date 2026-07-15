@@ -2864,7 +2864,10 @@ class SettingsDialog(QDialog):
         }
 
     def scan_music_folders_now(self) -> None:
-        self.main_window.save_hush_settings(self.collect_settings_updates())
+        self.main_window.save_hush_settings(
+            self.collect_settings_updates(),
+            immediate=True,
+        )
         self.main_window.scan_music_folders(manual=True)
 
     def update_alpha_label(self, value: int) -> None:
@@ -2884,7 +2887,10 @@ class SettingsDialog(QDialog):
         QMessageBox.information(self, "桌面歌词", "桌面歌词位置已重置。")
 
     def save_settings(self) -> None:
-        self.main_window.save_hush_settings(self.collect_settings_updates())
+        self.main_window.save_hush_settings(
+            self.collect_settings_updates(),
+            immediate=True,
+        )
         self.main_window.apply_runtime_settings()
         QMessageBox.information(self, "设置", "设置已保存。")
         self.accept()
@@ -3749,6 +3755,13 @@ class MainWindow(QMainWindow):
             print(self.remote_tracks_error)
 
         settings = self.measure_startup_step("设置 JSON", self.load_settings)
+        self.settings = deepcopy(settings)
+        self._saved_settings = deepcopy(settings)
+        self._settings_dirty = False
+        self.settings_save_timer = QTimer(self)
+        self.settings_save_timer.setSingleShot(True)
+        self.settings_save_timer.setInterval(350)
+        self.settings_save_timer.timeout.connect(self.flush_settings)
         self.current_volume = int(settings.get("volume", 65))
         self.play_mode = settings.get("play_mode", "list_loop")
         self.unified_search_local_only = bool(
@@ -10291,43 +10304,68 @@ class MainWindow(QMainWindow):
 
 
     def get_hush_settings(self) -> dict:
-        settings = {}
-
-        try:
-            if hasattr(self, "settings_file") and self.settings_file.exists():
-                with self.settings_file.open("r", encoding="utf-8") as file:
-                    file_settings = json.load(file)
-
-                if isinstance(file_settings, dict):
-                    settings.update(file_settings)
-        except Exception as error:
-            print("读取设置文件失败：", error)
-
-        if hasattr(self, "settings") and isinstance(self.settings, dict):
-            settings.update(self.settings)
-
-        return settings
+        settings = getattr(self, "settings", {})
+        if not isinstance(settings, dict):
+            return {}
+        return deepcopy(settings)
 
     def get_user_setting(self, key: str, default=None):
-        return self.get_hush_settings().get(key, default)
+        settings = getattr(self, "settings", {})
+        if not isinstance(settings, dict):
+            return default
+        return deepcopy(settings.get(key, default))
 
-    def save_hush_settings(self, updates: dict) -> None:
-        settings = self.get_hush_settings()
-        settings.update(updates)
+    def _write_settings_file(self, settings: dict) -> None:
+        self.settings_file.parent.mkdir(parents=True, exist_ok=True)
+        temporary_path = self.settings_file.with_suffix(
+            self.settings_file.suffix + ".tmp"
+        )
+        temporary_path.write_text(
+            json.dumps(settings, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+        temporary_path.replace(self.settings_file)
 
-        self.settings = settings
+    def flush_settings(self) -> bool:
+        if hasattr(self, "settings_save_timer"):
+            self.settings_save_timer.stop()
+        if not getattr(self, "_settings_dirty", False):
+            return False
 
+        settings_snapshot = deepcopy(self.settings)
         try:
-            self.settings_file.parent.mkdir(parents=True, exist_ok=True)
-
-            with self.settings_file.open("w", encoding="utf-8") as file:
-                json.dump(settings, file, ensure_ascii=False, indent=2)
-
+            self._write_settings_file(settings_snapshot)
+            self._saved_settings = settings_snapshot
+            self._settings_dirty = False
             print("设置已保存：", self.settings_file)
+            return True
 
         except Exception as error:
             print("保存设置失败：", error)
             QMessageBox.warning(self, "设置", f"保存设置失败：{error}")
+            return False
+
+    def save_hush_settings(self, updates: dict, *, immediate: bool = False) -> bool:
+        if not isinstance(updates, dict):
+            return False
+
+        changed = False
+        for key, value in updates.items():
+            copied_value = deepcopy(value)
+            if key in self.settings and self.settings[key] == copied_value:
+                continue
+            self.settings[key] = copied_value
+            changed = True
+
+        self._settings_dirty = self.settings != self._saved_settings
+        if not self._settings_dirty:
+            self.settings_save_timer.stop()
+            return changed
+        if immediate:
+            return self.flush_settings()
+        if changed:
+            self.settings_save_timer.start()
+        return changed
 
     def apply_runtime_settings(self) -> None:
         immersive_window = getattr(self, "immersive_lyrics_window", None)
@@ -11634,30 +11672,61 @@ class MainWindow(QMainWindow):
         }
 
         if not self.settings_file.exists():
-            return default_settings
+            print("设置文件不存在，使用默认设置。")
+            return dict(default_settings)
 
         try:
             with self.settings_file.open("r", encoding="utf-8") as file:
                 settings = json.load(file)
 
             if not isinstance(settings, dict):
-                return default_settings
-
-            volume = int(settings.get("volume", default_settings["volume"]))
-            volume = max(0, min(100, volume))
-
-            play_mode = settings.get("play_mode", default_settings["play_mode"])
-            if play_mode not in {"sequence", "list_loop", "single_loop", "shuffle"}:
-                play_mode = "list_loop"
-
-            settings["volume"] = volume
-            settings["play_mode"] = play_mode
-
-            return settings
+                print("设置文件内容不是对象，使用默认设置。")
+                return dict(default_settings)
 
         except Exception as error:
             print("读取设置失败：", error)
-            return default_settings
+            return dict(default_settings)
+
+        try:
+            volume = int(settings.get("volume", default_settings["volume"]))
+        except (TypeError, ValueError):
+            print("设置项 volume 类型无效，使用默认值 65。")
+            volume = default_settings["volume"]
+        settings["volume"] = max(0, min(100, volume))
+
+        play_mode = settings.get("play_mode", default_settings["play_mode"])
+        if not isinstance(play_mode, str) or play_mode not in {
+            "sequence",
+            "list_loop",
+            "single_loop",
+            "shuffle",
+        }:
+            print("设置项 play_mode 无效，使用默认值 list_loop。")
+            play_mode = default_settings["play_mode"]
+        settings["play_mode"] = play_mode
+
+        integer_defaults = {
+            "immersive_background_alpha": 68,
+            "floating_lyrics_opacity": 100,
+            "floating_lyrics_font_size": 42,
+            "floating_lyrics_width": 980,
+            "floating_lyrics_height": 135,
+        }
+        for key, default_value in integer_defaults.items():
+            if key not in settings:
+                continue
+            try:
+                settings[key] = int(settings[key])
+            except (TypeError, ValueError):
+                print(f"设置项 {key} 类型无效，使用默认值 {default_value}。")
+                settings[key] = default_value
+
+        if "music_scan_folders" in settings and not isinstance(
+            settings["music_scan_folders"], list
+        ):
+            print("设置项 music_scan_folders 类型无效，使用空列表。")
+            settings["music_scan_folders"] = []
+        return settings
 
     def load_playlists(self) -> dict:
         self.playlist_membership_snapshots = {}
@@ -12024,21 +12093,21 @@ class MainWindow(QMainWindow):
 
         print("本次播放已计入播放次数：", self.current_song_path)
 
-    def flush_current_listen_time(self) -> None:
+    def flush_current_listen_time(self) -> bool:
         if not self.current_song_path:
             self.pending_listen_ms = 0
-            return
+            return False
 
         saved_seconds = self.pending_listen_ms // 1000
         self.pending_listen_ms = self.pending_listen_ms % 1000
 
         if saved_seconds <= 0:
-            return
+            return False
 
         stats = self.get_song_stats(self.current_song_path)
 
         if not stats:
-            return
+            return False
 
         stats["total_listen_time"] = int(stats.get("total_listen_time", 0)) + int(saved_seconds)
         stats["last_played"] = int(time.time())
@@ -12048,6 +12117,7 @@ class MainWindow(QMainWindow):
         self.update_side_info_panel()
 
         print(f"已累计听歌时长：{saved_seconds} 秒")
+        return True
 
     def load_lyrics_bindings(self) -> dict:
         if not self.lyrics_bindings_file.exists():
@@ -14755,7 +14825,7 @@ class MainWindow(QMainWindow):
     def change_volume(self, value: int) -> None:
         self.current_volume = value
         self.audio_output.setVolume(value / 100)
-        self.save_settings()
+        self.save_hush_settings({"volume": value})
         print("音量改为：", value)
 
     def on_seek_start(self) -> None:
@@ -15184,9 +15254,12 @@ class MainWindow(QMainWindow):
             self.schedule_media_worker_close_retry()
             return
 
-        self.flush_current_listen_time()
-        self.save_song_stats()
-        self.save_settings()
+        stats_saved = self.flush_current_listen_time()
+        if not stats_saved:
+            self.save_song_stats()
+
+        if hasattr(self, "settings_save_timer"):
+            self.settings_save_timer.stop()
 
         if hasattr(self, "playback_save_timer"):
             self.playback_save_timer.stop()
@@ -15201,7 +15274,6 @@ class MainWindow(QMainWindow):
         floating_window = getattr(self, "floating_lyrics_window", None)
 
         if floating_window is not None:
-            floating_window.save_preferences()
             floating_window.close()
             self.floating_lyrics_window = None
 
@@ -15222,6 +15294,8 @@ class MainWindow(QMainWindow):
 
         if online_source_client is not None:
             online_source_client.stop()
+
+        self.flush_settings()
 
         super().closeEvent(event)
 
