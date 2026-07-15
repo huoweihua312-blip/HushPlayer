@@ -1895,130 +1895,337 @@ class LibraryDurationTask(QRunnable):
 
 
 class MusicFolderScanWorker(QObject):
-    finished = Signal(object)
+    progress = Signal(int, object)
+    finished = Signal(int, object)
 
     def __init__(
         self,
-        folders: list[str],
+        task_id: int,
+        entries: list[str],
         existing_paths: list[str],
         pending_paths: list[str] | None = None,
         ignored_paths: list[str] | None = None,
+        *,
+        folders_only: bool = False,
+        casefold_paths: bool = True,
+        include_duration: bool = True,
+        sort_folder_paths: bool = False,
     ) -> None:
         super().__init__()
 
-        self.folders = list(folders)
+        self.task_id = int(task_id)
+        self.entries = list(entries)
         self.existing_paths = set(existing_paths)
         self.pending_paths = set(pending_paths or [])
         self.ignored_paths = set(ignored_paths or [])
+        self.folders_only = bool(folders_only)
+        self.casefold_paths = bool(casefold_paths)
+        self.include_duration = bool(include_duration)
+        self.sort_folder_paths = bool(sort_folder_paths)
+        self.cancel_requested = False
+        self.last_progress_at = 0.0
+
+    def request_cancel(self) -> None:
+        self.cancel_requested = True
+
+    def is_cancelled(self) -> bool:
+        if self.cancel_requested:
+            return True
+        thread = QThread.currentThread()
+        return bool(thread and thread.isInterruptionRequested())
+
+    def path_key(self, path_text: str) -> str:
+        return path_text.lower() if self.casefold_paths else path_text
+
+    def emit_progress(
+        self,
+        phase: str,
+        processed: int,
+        total: int,
+        *,
+        force: bool = False,
+    ) -> None:
+        now = time.monotonic()
+        if not force and processed % 25 != 0 and now - self.last_progress_at < 0.12:
+            return
+        self.last_progress_at = now
+        self.progress.emit(
+            self.task_id,
+            {
+                "phase": str(phase),
+                "processed": max(0, int(processed)),
+                "total": max(0, int(total)),
+            },
+        )
 
     def run(self) -> None:
         result = {
             "ok": True,
+            "cancelled": False,
+            "scan_ms": 0.0,
+            "metadata_ms": 0.0,
             "scanned": 0,
             "new_songs": [],
             "duplicates": 0,
+            "skipped": 0,
             "failed": 0,
             "errors": [],
+            "metadata_errors": [],
         }
 
         try:
-            self.scan_folders(result)
+            self.scan_entries(result)
         except Exception as error:
             result["ok"] = False
             result["errors"].append(str(error))
 
-        self.finished.emit(result)
+        result["cancelled"] = self.is_cancelled()
+        self.finished.emit(self.task_id, result)
 
-    def scan_folders(self, result: dict) -> None:
-        seen_paths = set(self.existing_paths) | set(self.pending_paths) | set(self.ignored_paths)
+    @staticmethod
+    def is_link_or_junction(path: Path) -> bool:
+        try:
+            if path.is_symlink():
+                return True
+            is_junction = getattr(path, "is_junction", None)
+            return bool(callable(is_junction) and is_junction())
+        except OSError:
+            return True
 
-        for folder_text in self.folders:
-            folder_text = str(folder_text).strip()
+    def scan_entries(self, result: dict) -> None:
+        scan_started_at = time.perf_counter()
+        seen_paths = {
+            self.path_key(path)
+            for path in (
+                set(self.existing_paths)
+                | set(self.pending_paths)
+                | set(self.ignored_paths)
+            )
+        }
+        candidates: list[tuple[Path, str]] = []
 
-            if not folder_text:
+        self.emit_progress("scanning", 0, 0, force=True)
+
+        for entry_text in self.entries:
+            if self.is_cancelled():
+                return
+
+            entry_text = str(entry_text).strip()
+
+            if not entry_text:
                 continue
 
-            folder = Path(folder_text).expanduser()
+            raw_path = Path(entry_text).expanduser()
 
             try:
-                folder = folder.resolve()
-            except Exception:
-                pass
-
-            source_folder = str(folder)
-
-            if not folder.exists() or not folder.is_dir():
+                is_symbolic_link = raw_path.is_symlink()
+            except OSError:
+                is_symbolic_link = True
+            if is_symbolic_link:
                 result["failed"] += 1
-                result["errors"].append(f"文件夹不可用：{folder_text}")
+                result["errors"].append(f"已跳过符号链接或目录联接：{entry_text}")
+                continue
+
+            try:
+                path = raw_path.resolve()
+            except Exception as error:
+                result["failed"] += 1
+                result["errors"].append(f"{entry_text}: {error}")
+                continue
+
+            try:
+                is_directory = path.is_dir()
+                is_file = path.is_file()
+            except OSError as error:
+                result["failed"] += 1
+                result["errors"].append(f"{entry_text}: {error}")
+                continue
+
+            if is_directory and self.is_link_or_junction(raw_path):
+                result["failed"] += 1
+                result["errors"].append(f"已跳过符号链接或目录联接：{entry_text}")
+                continue
+
+            if is_file and not self.folders_only:
+                if path.suffix.lower() in AUDIO_EXTENSIONS:
+                    candidates.append((path, str(path.parent)))
+                else:
+                    result["skipped"] += 1
+                continue
+
+            if not is_directory:
+                result["failed"] += 1
+                result["errors"].append(f"路径不可用：{entry_text}")
                 continue
 
             def on_walk_error(error) -> None:
                 result["failed"] += 1
                 result["errors"].append(str(error))
 
-            for root, _, file_names in os.walk(folder, onerror=on_walk_error):
+            source_folder = str(path)
+            visited_directories: set[str] = set()
+            folder_candidate_start = len(candidates)
+
+            for root, directory_names, file_names in os.walk(
+                path,
+                topdown=True,
+                onerror=on_walk_error,
+                followlinks=False,
+            ):
+                if self.is_cancelled():
+                    return
+
+                root_path = Path(root)
+                try:
+                    root_key = str(root_path.resolve()).lower()
+                except Exception as error:
+                    result["failed"] += 1
+                    result["errors"].append(f"{root_path}: {error}")
+                    directory_names[:] = []
+                    continue
+
+                if root_key in visited_directories:
+                    directory_names[:] = []
+                    continue
+                visited_directories.add(root_key)
+
+                safe_directories = []
+                directory_iterator = (
+                    sorted(directory_names, key=str.lower)
+                    if self.sort_folder_paths
+                    else list(directory_names)
+                )
+                for directory_name in directory_iterator:
+                    directory_path = root_path / directory_name
+                    if self.is_link_or_junction(directory_path):
+                        continue
+                    safe_directories.append(directory_name)
+                directory_names[:] = safe_directories
+
+                if self.sort_folder_paths:
+                    file_names.sort(key=str.lower)
                 for file_name in file_names:
-                    path = Path(root) / file_name
+                    candidate = root_path / file_name
 
-                    if path.suffix.lower() not in AUDIO_EXTENSIONS:
+                    if candidate.suffix.lower() not in AUDIO_EXTENSIONS:
                         continue
-
-                    result["scanned"] += 1
-
                     try:
-                        normalized_path = str(path.resolve())
-                    except Exception as error:
-                        result["failed"] += 1
-                        result["errors"].append(f"{path}: {error}")
+                        is_symbolic_file = candidate.is_symlink()
+                    except OSError:
+                        is_symbolic_file = True
+                    if is_symbolic_file:
                         continue
+                    candidates.append((candidate, source_folder))
 
-                    normalized_key = normalized_path.lower()
+                self.emit_progress("scanning", len(candidates), 0)
 
-                    if normalized_key in seen_paths:
-                        result["duplicates"] += 1
-                        continue
+            if self.sort_folder_paths:
+                candidates[folder_candidate_start:] = sorted(
+                    candidates[folder_candidate_start:],
+                    key=lambda item: str(item[0]).lower(),
+                )
 
-                    if not path.exists() or not path.is_file():
-                        result["failed"] += 1
-                        continue
+        total = len(candidates)
+        result["scan_ms"] = (time.perf_counter() - scan_started_at) * 1000
+        metadata_started_at = time.perf_counter()
+        self.emit_progress("metadata", 0, total, force=True)
 
-                    title, artist, album = self.read_audio_metadata(path)
-                    result["new_songs"].append(
-                        {
-                            "title": title,
-                            "artist": artist,
-                            "album": album,
-                            "duration": self.read_audio_duration(path),
-                            "format": path.suffix.lower().lstrip("."),
-                            "path": normalized_path,
-                            "source_folder": source_folder,
-                            "found_at": int(time.time()),
-                            "added_at": int(time.time()) + len(result["new_songs"]),
-                            "demo": False,
-                        }
-                    )
-                    seen_paths.add(normalized_key)
+        for index, (path, source_folder) in enumerate(candidates, start=1):
+            if self.is_cancelled():
+                return
 
-    def read_audio_metadata(self, path: Path) -> tuple[str, str, str]:
+            result["scanned"] += 1
+
+            try:
+                normalized_path = str(path.resolve())
+            except Exception as error:
+                result["failed"] += 1
+                result["errors"].append(f"{path}: {error}")
+                self.emit_progress("metadata", index, total)
+                continue
+
+            normalized_key = self.path_key(normalized_path)
+
+            if normalized_key in seen_paths:
+                result["duplicates"] += 1
+                self.emit_progress("metadata", index, total)
+                continue
+
+            try:
+                if not path.is_file():
+                    result["failed"] += 1
+                    self.emit_progress("metadata", index, total)
+                    continue
+            except OSError as error:
+                result["failed"] += 1
+                result["errors"].append(f"{path}: {error}")
+                self.emit_progress("metadata", index, total)
+                continue
+
+            title, artist, album, metadata_error = self.read_audio_metadata(path)
+            if metadata_error:
+                result["metadata_errors"].append(metadata_error)
+
+            try:
+                if not path.is_file():
+                    result["failed"] += 1
+                    self.emit_progress("metadata", index, total)
+                    continue
+            except OSError as error:
+                result["failed"] += 1
+                result["errors"].append(f"{path}: {error}")
+                self.emit_progress("metadata", index, total)
+                continue
+
+            song_data = {
+                "title": title,
+                "artist": artist,
+                "album": album,
+                "path": normalized_path,
+                "added_at": int(time.time()) + len(result["new_songs"]),
+                "demo": False,
+            }
+            if self.include_duration:
+                song_data.update(
+                    {
+                        "duration": self.read_audio_duration(path),
+                        "format": path.suffix.lower().lstrip("."),
+                        "source_folder": source_folder,
+                        "found_at": int(time.time()),
+                    }
+                )
+            result["new_songs"].append(song_data)
+            seen_paths.add(normalized_key)
+            self.emit_progress("metadata", index, total)
+
+        self.emit_progress("metadata", total, total, force=True)
+        result["metadata_ms"] = (time.perf_counter() - metadata_started_at) * 1000
+
+    def read_audio_metadata(self, path: Path) -> tuple[str, str, str, str]:
         title = path.stem
         artist = "未知艺术家"
         album = "未知专辑"
+        error_message = ""
 
         try:
             audio = MutagenFile(path, easy=True)
 
             if audio is None or audio.tags is None:
-                return title, artist, album
+                return title, artist, album, error_message
 
             title = audio.tags.get("title", [title])[0]
             artist = audio.tags.get("artist", [artist])[0]
             album = audio.tags.get("album", [album])[0]
 
         except Exception as error:
-            print(f"后台读取歌曲信息失败：{path}")
-            print(error)
+            error_message = f"{path}: {error}"
 
-        return str(title or path.stem), str(artist or "未知艺术家"), str(album or "未知专辑")
+        return (
+            str(title or path.stem),
+            str(artist or "未知艺术家"),
+            str(album or "未知专辑"),
+            error_message,
+        )
 
     def read_audio_duration(self, path: Path) -> int:
         try:
@@ -3515,6 +3722,8 @@ class MainWindow(QMainWindow):
     media_thread_destroyed_notice = Signal(str)
 
     MEDIA_WORKER_SHUTDOWN_TIMEOUT_MS = 1500
+    MUSIC_SCAN_SHUTDOWN_TIMEOUT_MS = 1500
+    MUSIC_IMPORT_INITIAL_BATCH_SIZE = 25
 
     def create_hushplayer_icon(self) -> QIcon:
         pixmap = QPixmap(64, 64)
@@ -3609,6 +3818,7 @@ class MainWindow(QMainWindow):
         self.retiring_cover_threads: dict[str, QThread] = {}
         self.retiring_lyrics_threads: dict[str, QThread] = {}
         self.music_scan_workers: list[QObject] = []
+        self.music_scan_lifecycle: dict[int, tuple[MusicFolderScanWorker, QThread]] = {}
         self._media_lifecycle_records: dict[str, dict] = {}
         self._running_cover_request: dict | None = None
         self._running_lyrics_request: dict | None = None
@@ -3629,6 +3839,25 @@ class MainWindow(QMainWindow):
             Qt.ConnectionType.QueuedConnection,
         )
         self.music_scan_in_progress = False
+        self.music_scan_generation = 0
+        self.active_music_scan_task_id = 0
+        self.music_scan_context: dict | None = None
+        self.last_music_import_metrics: dict = {}
+        self.music_scan_closing = False
+        self.music_scan_close_retry_scheduled = False
+        self.music_scan_original_subtitle = ""
+        self.music_scan_apply_timer = QTimer(self)
+        self.music_scan_apply_timer.setSingleShot(True)
+        self.music_scan_apply_timer.timeout.connect(
+            self.apply_next_music_import_batch,
+            Qt.ConnectionType.QueuedConnection,
+        )
+        self.music_scan_finalize_timer = QTimer(self)
+        self.music_scan_finalize_timer.setSingleShot(True)
+        self.music_scan_finalize_timer.timeout.connect(
+            self.continue_music_scan_finalization,
+            Qt.ConnectionType.QueuedConnection,
+        )
         self.displayed_lyrics_song_path: str | None = None
         self.immersive_lyrics_window: ImmersiveLyricsWindow | None = None
         self.restore_main_after_immersive = False
@@ -8351,18 +8580,11 @@ class MainWindow(QMainWindow):
                 continue
 
             path = Path(local_path)
-
-            if path.is_dir():
-                scanned_paths = self.scan_music_folder(path)
-                paths_to_import.extend(scanned_paths)
-                print(f"拖拽导入文件夹：{path}")
-                print(f"扫描到音乐文件数量：{len(scanned_paths)}")
-            elif path.is_file():
-                paths_to_import.append(path)
-                print(f"拖拽导入文件：{path}")
+            paths_to_import.append(path)
+            print(f"拖拽导入路径：{path}")
 
         if paths_to_import:
-            self.add_music_paths(paths_to_import)
+            self.start_manual_music_import(paths_to_import, source="drop")
 
         event.acceptProposedAction()
 
@@ -9648,7 +9870,6 @@ class MainWindow(QMainWindow):
         self.scan_music_folders(manual=True, folders=[folder_path])
 
     def scan_music_folders(self, manual: bool = False, folders: list[str] | None = None) -> None:
-        started_at = time.perf_counter()
         scan_folders = folders if folders is not None else self.get_music_scan_folders()
         scan_folders = [str(folder).strip() for folder in scan_folders if str(folder).strip()]
 
@@ -9657,100 +9878,532 @@ class MainWindow(QMainWindow):
                 QMessageBox.information(self, "音乐文件夹", "还没有添加需要扫描的音乐文件夹。")
             return
 
-        if getattr(self, "music_scan_in_progress", False):
-            if manual:
-                QMessageBox.information(self, "音乐文件夹", "正在扫描音乐文件夹，请稍后再试。")
-            return
-
-        existing_paths = [path.lower() for path in self.get_existing_song_paths()]
-        pending_paths = list(self.get_pending_import_paths())
-        ignored_paths = list(getattr(self, "ignored_imports", set()))
-        worker = MusicFolderScanWorker(scan_folders, existing_paths, pending_paths, ignored_paths)
-        thread = QThread(self)
-        worker.moveToThread(thread)
-
-        self.music_scan_in_progress = True
-        self.music_scan_workers.append(worker)
-        self.music_scan_threads.append(thread)
-
-        thread.started.connect(worker.run)
-        worker.finished.connect(lambda result, manual=manual: self.on_music_scan_finished(result, manual))
-        worker.finished.connect(lambda result=None, worker=worker: self.cleanup_worker_reference(worker, "music_scan"))
-        worker.finished.connect(worker.deleteLater)
-        worker.finished.connect(thread.quit)
-        thread.finished.connect(lambda thread=thread: self.cleanup_thread_reference(thread, "music_scan"))
-        thread.finished.connect(thread.deleteLater)
-        thread.start()
-        elapsed_ms = (time.perf_counter() - started_at) * 1000
-        print(f"[perf] scan_music_folders dispatch: {elapsed_ms:.1f} ms, folders={len(scan_folders)}")
-
-        if manual:
+        started = self.start_music_scan_task(
+            scan_folders,
+            source="folder_scan",
+            folders_only=True,
+            direct_import=False,
+            manual_prompt=manual,
+        )
+        if started and manual:
             print("开始扫描音乐文件夹：", scan_folders)
 
-    def on_music_scan_finished(self, result: dict, manual: bool = False) -> None:
-        self.music_scan_in_progress = False
+    def start_manual_music_import(self, paths: list[Path], source: str = "manual") -> bool:
+        return self.start_music_scan_task(
+            [str(path) for path in paths],
+            source=source,
+            folders_only=False,
+            direct_import=True,
+            manual_prompt=False,
+        )
+
+    def set_music_import_status(self, message: str) -> None:
+        page = getattr(self, "library_page", None)
+        subtitle = getattr(page, "page_subtitle", None) if page is not None else None
+        if subtitle is not None:
+            subtitle.setText(str(message))
+        print(f"[import] {message}")
+
+    def reject_music_scan_request(self, show_dialog: bool) -> None:
+        message = "已有音乐导入或文件夹扫描任务正在运行，请稍后再试。"
+        self.set_music_import_status(message)
+        if show_dialog and not getattr(self, "music_scan_closing", False):
+            QMessageBox.information(self, "音乐导入", message)
+
+    def start_music_scan_task(
+        self,
+        entries: list[str],
+        *,
+        source: str,
+        folders_only: bool,
+        direct_import: bool,
+        manual_prompt: bool,
+    ) -> bool:
+        started_at = time.perf_counter()
+        cleaned_entries = [str(entry).strip() for entry in entries if str(entry).strip()]
+        if not cleaned_entries or getattr(self, "music_scan_closing", False):
+            return False
+
+        has_running_thread = any(
+            thread.isRunning()
+            for thread in tuple(getattr(self, "music_scan_threads", []))
+        )
+        if getattr(self, "music_scan_in_progress", False) or has_running_thread:
+            self.reject_music_scan_request(manual_prompt or direct_import)
+            return False
+
+        existing_paths = list(self.get_existing_song_paths())
+        pending_paths: list[str] = []
+        ignored_paths: list[str] = []
+        casefold_paths = not direct_import
+        if not direct_import:
+            existing_paths = [path.lower() for path in existing_paths]
+            pending_paths = list(self.get_pending_import_paths())
+            ignored_paths = list(getattr(self, "ignored_imports", set()))
+
+        self.music_scan_generation += 1
+        task_id = self.music_scan_generation
+        worker = MusicFolderScanWorker(
+            task_id,
+            cleaned_entries,
+            existing_paths,
+            pending_paths,
+            ignored_paths,
+            folders_only=folders_only,
+            casefold_paths=casefold_paths,
+            include_duration=not direct_import,
+            sort_folder_paths=direct_import,
+        )
+        thread = QThread(self)
+        thread.setObjectName(f"music-import-{task_id}")
+        thread.setProperty("musicScanTaskId", task_id)
+        worker.moveToThread(thread)
+
+        page = getattr(self, "library_page", None)
+        subtitle = getattr(page, "page_subtitle", None) if page is not None else None
+        self.music_scan_original_subtitle = subtitle.text() if subtitle is not None else ""
+        self.music_scan_in_progress = True
+        self.active_music_scan_task_id = task_id
+        self.music_scan_context = {
+            "task_id": task_id,
+            "source": str(source),
+            "direct_import": bool(direct_import),
+            "manual_prompt": bool(manual_prompt),
+            "result": None,
+            "songs": [],
+            "apply_index": 0,
+            "batch_size": self.MUSIC_IMPORT_INITIAL_BATCH_SIZE,
+            "batch_times_ms": [],
+            "added_items": [],
+            "added_count": 0,
+            "pending_count": 0,
+            "started_at": time.perf_counter(),
+        }
+        self.music_scan_workers.append(worker)
+        self.music_scan_threads.append(thread)
+        self.music_scan_lifecycle[task_id] = (worker, thread)
+
+        thread.started.connect(worker.run)
+        worker.progress.connect(
+            self.on_music_scan_progress,
+            Qt.ConnectionType.QueuedConnection,
+        )
+        worker.finished.connect(
+            self.on_music_scan_worker_finished,
+            Qt.ConnectionType.QueuedConnection,
+        )
+        worker.finished.connect(thread.quit, Qt.ConnectionType.DirectConnection)
+        thread.finished.connect(worker.deleteLater)
+        thread.finished.connect(
+            self.on_music_scan_thread_finished,
+            Qt.ConnectionType.QueuedConnection,
+        )
+        thread.finished.connect(thread.deleteLater)
+
+        self.set_music_import_status("正在扫描文件夹和检查音乐文件…")
+        try:
+            thread.start()
+        except Exception as error:
+            self.music_scan_lifecycle.pop(task_id, None)
+            self.cleanup_worker_reference(worker, "music_scan")
+            self.cleanup_thread_reference(thread, "music_scan")
+            self.music_scan_context = None
+            self.active_music_scan_task_id = 0
+            self.music_scan_in_progress = False
+            worker.deleteLater()
+            thread.deleteLater()
+            self.restore_music_import_status()
+            if manual_prompt or direct_import:
+                QMessageBox.warning(self, "音乐导入失败", str(error))
+            return False
+
+        elapsed_ms = (time.perf_counter() - started_at) * 1000
+        print(
+            f"[perf] music import dispatch: {elapsed_ms:.1f} ms, "
+            f"entries={len(cleaned_entries)}, task={task_id}"
+        )
+        return True
+
+    @Slot(int, object)
+    def on_music_scan_progress(self, task_id: int, progress: object) -> None:
+        if (
+            int(task_id) != int(getattr(self, "active_music_scan_task_id", 0))
+            or getattr(self, "music_scan_closing", False)
+            or not isinstance(progress, dict)
+        ):
+            return
+
+        phase = str(progress.get("phase", ""))
+        processed = int(progress.get("processed", 0) or 0)
+        total = int(progress.get("total", 0) or 0)
+        if phase == "metadata" and total > 0:
+            self.set_music_import_status(f"正在读取音乐信息：{processed} / {total}")
+        elif processed > 0:
+            self.set_music_import_status(f"正在扫描文件夹：已发现 {processed} 个音频文件")
+        else:
+            self.set_music_import_status("正在扫描文件夹和检查音乐文件…")
+
+    @Slot(int, object)
+    def on_music_scan_worker_finished(self, task_id: int, result: object) -> None:
+        try:
+            self.handle_music_scan_worker_result(task_id, result)
+        except Exception as error:
+            self.fail_music_scan_task(task_id, f"应用扫描结果失败：{error}")
+
+    def handle_music_scan_worker_result(self, task_id: int, result: object) -> None:
+        if (
+            int(task_id) != int(getattr(self, "active_music_scan_task_id", 0))
+            or getattr(self, "music_scan_closing", False)
+        ):
+            return
+
+        context = getattr(self, "music_scan_context", None)
+        if not isinstance(context, dict) or int(context.get("task_id", 0)) != int(task_id):
+            return
 
         if not isinstance(result, dict):
             result = {
                 "ok": False,
+                "cancelled": False,
                 "scanned": 0,
                 "new_songs": [],
                 "duplicates": 0,
+                "skipped": 0,
                 "failed": 1,
                 "errors": ["扫描结果无效"],
+                "metadata_errors": [],
             }
 
-        added_count = 0
-        pending_count = 0
-        new_songs = [
-            song for song in result.get("new_songs", [])
-            if isinstance(song, dict)
-        ]
-        import_mode = str(self.get_user_setting("music_scan_import_mode", "pending"))
+        if bool(result.get("cancelled")):
+            self.finish_music_scan_task(task_id, cancelled=True)
+            return
 
-        if import_mode == "auto":
-            if self.has_demo_songs() and new_songs:
-                self.song_identity_to_item = {}
-                self.song_list.clear()
+        songs = [song for song in result.get("new_songs", []) if isinstance(song, dict)]
+        context["result"] = result
+        context["songs"] = songs
+        context["apply_index"] = 0
+        context["added_at_base"] = int(time.time())
 
-            existing_paths = {path.lower() for path in self.get_existing_song_paths()}
+        direct_import = bool(context.get("direct_import"))
+        import_mode = "direct" if direct_import else str(
+            self.get_user_setting("music_scan_import_mode", "pending")
+        )
+        context["import_mode"] = import_mode
+        use_casefold = import_mode != "direct"
+        existing_paths = self.get_existing_song_paths()
+        final_keys = {
+            path.lower() if use_casefold else path
+            for path in existing_paths
+        }
+        if import_mode == "pending":
+            final_keys.update(self.get_pending_import_paths())
+            final_keys.update(getattr(self, "ignored_imports", set()))
+        context["final_keys"] = final_keys
 
-            for song_data in new_songs:
-                path = str(song_data.get("path", "")).strip()
+        if import_mode in {"auto", "direct"} and songs and self.has_demo_songs():
+            self.song_identity_to_item = {}
+            self.song_list.clear()
 
-                if not path:
+        if not songs:
+            self.finish_music_scan_task(task_id)
+            return
+
+        self.set_music_import_status(f"正在应用导入结果：0 / {len(songs)}")
+        self.music_scan_apply_timer.start(0)
+
+    @Slot()
+    def apply_next_music_import_batch(self) -> None:
+        task_id = int(getattr(self, "active_music_scan_task_id", 0))
+        try:
+            self.apply_next_music_import_batch_safely()
+        except Exception as error:
+            self.fail_music_scan_task(task_id, f"应用音乐条目失败：{error}")
+
+    def apply_next_music_import_batch_safely(self) -> None:
+        context = getattr(self, "music_scan_context", None)
+        task_id = int(getattr(self, "active_music_scan_task_id", 0))
+        if (
+            not isinstance(context, dict)
+            or int(context.get("task_id", 0)) != task_id
+            or getattr(self, "music_scan_closing", False)
+        ):
+            return
+
+        songs = context.get("songs", [])
+        if not isinstance(songs, list):
+            songs = []
+        start_index = int(context.get("apply_index", 0) or 0)
+        batch_size = max(10, int(context.get("batch_size", self.MUSIC_IMPORT_INITIAL_BATCH_SIZE) or 0))
+        end_index = min(len(songs), start_index + batch_size)
+        result = context.get("result") if isinstance(context.get("result"), dict) else {}
+        import_mode = str(context.get("import_mode", "direct"))
+        final_keys = context.get("final_keys")
+        if not isinstance(final_keys, set):
+            final_keys = set()
+            context["final_keys"] = final_keys
+
+        batch_started_at = time.perf_counter()
+        previous_signal_state = self.song_list.blockSignals(True)
+        previous_updates_state = self.song_list.updatesEnabled()
+        self.song_list.setUpdatesEnabled(False)
+        try:
+            for song_data in songs[start_index:end_index]:
+                if (
+                    task_id != int(getattr(self, "active_music_scan_task_id", 0))
+                    or getattr(self, "music_scan_closing", False)
+                ):
+                    return
+
+                normalized_path = self.normalize_song_path(song_data.get("path", ""))
+                if not normalized_path:
+                    result["failed"] = int(result.get("failed", 0) or 0) + 1
                     continue
 
-                normalized_key = path.lower()
-
-                if normalized_key in existing_paths:
+                path_key = normalized_path if import_mode == "direct" else normalized_path.lower()
+                if path_key in final_keys:
                     result["duplicates"] = int(result.get("duplicates", 0) or 0) + 1
                     continue
 
-                item = self.create_song_list_item(song_data)
-                self.song_list.addItem(item)
-                existing_paths.add(normalized_key)
-                added_count += 1
+                final_keys.add(path_key)
+                final_song = dict(song_data)
+                final_song["path"] = normalized_path
+                if import_mode == "direct":
+                    final_song["added_at"] = int(context.get("added_at_base", 0)) + int(
+                        context.get("added_count", 0)
+                    )
+                    final_song.pop("duration", None)
+                    final_song.pop("format", None)
+                    final_song.pop("source_folder", None)
+                    final_song.pop("found_at", None)
+                    item = self.create_song_list_item(final_song)
+                    self.song_list.addItem(item)
+                    context["added_items"].append(item)
+                    context["added_count"] = int(context.get("added_count", 0)) + 1
+                elif import_mode == "auto":
+                    item = self.create_song_list_item(final_song)
+                    self.song_list.addItem(item)
+                    context["added_items"].append(item)
+                    context["added_count"] = int(context.get("added_count", 0)) + 1
+                else:
+                    final_song.setdefault("duration", 0)
+                    final_song.setdefault("format", Path(normalized_path).suffix.lower().lstrip("."))
+                    final_song.setdefault("source_folder", str(Path(normalized_path).parent))
+                    final_song.setdefault("found_at", int(time.time()))
+                    final_song.pop("demo", None)
+                    self.pending_imports.append(final_song)
+                    context["pending_count"] = int(context.get("pending_count", 0)) + 1
+        finally:
+            self.song_list.blockSignals(previous_signal_state)
+            self.song_list.setUpdatesEnabled(previous_updates_state)
 
-            if added_count > 0:
-                self.mark_library_list_dirty()
-                self.apply_current_library_sort(refresh_view=False)
-                self.filter_song_list(self.search_input.text())
-                self.save_music_library()
+        elapsed_ms = (time.perf_counter() - batch_started_at) * 1000
+        context["batch_times_ms"].append(elapsed_ms)
+        context["apply_index"] = end_index
+        if elapsed_ms > 14.0 and batch_size > 10:
+            context["batch_size"] = max(10, int(batch_size * 10.0 / elapsed_ms))
+        elif elapsed_ms < 4.0 and batch_size < 100:
+            context["batch_size"] = min(100, batch_size + 10)
+
+        if len(context["batch_times_ms"]) % 5 == 0 or end_index >= len(songs):
+            self.set_music_import_status(f"正在应用导入结果：{end_index} / {len(songs)}")
+        if end_index < len(songs):
+            self.music_scan_apply_timer.start(0)
+            return
+        self.finish_music_scan_task(task_id)
+
+    @Slot()
+    def continue_music_scan_finalization(self) -> None:
+        task_id = int(getattr(self, "active_music_scan_task_id", 0))
+        try:
+            self.continue_music_scan_finalization_safely()
+        except Exception as error:
+            self.fail_music_scan_task(task_id, f"完成音乐导入失败：{error}")
+
+    def continue_music_scan_finalization_safely(self) -> None:
+        context = getattr(self, "music_scan_context", None)
+        task_id = int(getattr(self, "active_music_scan_task_id", 0))
+        if (
+            not isinstance(context, dict)
+            or int(context.get("task_id", 0)) != task_id
+            or getattr(self, "music_scan_closing", False)
+        ):
+            return
+
+        phase = str(context.get("finalize_phase", ""))
+        import_mode = str(context.get("import_mode", "direct"))
+        added_count = int(context.get("added_count", 0) or 0)
+        pending_count = int(context.get("pending_count", 0) or 0)
+
+        if phase == "sort":
+            self.set_music_import_status("正在整理新增音乐…")
+            self.mark_library_list_dirty()
+            self.apply_current_library_sort(refresh_view=False)
+            context["finalize_phase"] = "filter"
+            self.music_scan_finalize_timer.start(0)
+            return
+
+        if phase == "filter":
+            self.set_music_import_status("正在刷新音乐库视图…")
+            self.filter_song_list(self.search_input.text())
+            added_items = [
+                item for item in context.get("added_items", []) if item is not None
+            ]
+            visible_added_items = [item for item in added_items if not item.isHidden()]
+            selected_item = visible_added_items[0] if visible_added_items else (
+                added_items[0] if added_items else None
+            )
+            if import_mode == "direct" and selected_item is not None:
+                self.song_list.setCurrentItem(selected_item)
+                self.select_song(selected_item)
+            context["finalize_phase"] = "save"
+            self.music_scan_finalize_timer.start(0)
+            return
+
+        if phase == "save":
+            self.set_music_import_status("正在保存音乐库…")
+            self.save_music_library()
+            if import_mode == "auto":
                 self.update_side_info_panel()
                 self.update_view_buttons()
-        else:
-            for song_data in new_songs:
-                if self.add_pending_import(song_data):
-                    pending_count += 1
+            context["finalize_phase"] = "complete"
+            self.music_scan_finalize_timer.start(0)
+            return
 
-            if pending_count > 0:
-                self.save_pending_imports()
-                self.refresh_pending_imports_list()
+        if phase == "pending_save":
+            self.set_music_import_status("正在保存待导入列表…")
+            self.save_pending_imports()
+            context["finalize_phase"] = "pending_refresh"
+            self.music_scan_finalize_timer.start(0)
+            return
 
+        if phase == "pending_refresh":
+            self.refresh_pending_imports_list()
+            context["finalize_phase"] = "complete"
+            self.music_scan_finalize_timer.start(0)
+            return
+
+        if phase == "complete":
+            self.finish_music_scan_task(task_id, finalized=True)
+            return
+
+        if added_count <= 0 and pending_count <= 0:
+            self.finish_music_scan_task(task_id, finalized=True)
+
+    def restore_music_import_status(self) -> None:
+        page = getattr(self, "library_page", None)
+        subtitle = getattr(page, "page_subtitle", None) if page is not None else None
+        if subtitle is not None and self.music_scan_original_subtitle:
+            subtitle.setText(self.music_scan_original_subtitle)
+        self.music_scan_original_subtitle = ""
+
+    def fail_music_scan_task(self, task_id: int, message: str) -> None:
+        if int(task_id) != int(getattr(self, "active_music_scan_task_id", 0)):
+            return
+        context = getattr(self, "music_scan_context", None)
+        if isinstance(context, dict):
+            result = context.get("result")
+            if not isinstance(result, dict):
+                result = {}
+                context["result"] = result
+            result["ok"] = False
+            errors = result.get("errors")
+            if not isinstance(errors, list):
+                errors = []
+                result["errors"] = errors
+            errors.append(str(message))
+        self.set_music_import_status(str(message))
+        if not getattr(self, "music_scan_closing", False):
+            QMessageBox.warning(self, "音乐导入失败", str(message))
+        self.finish_music_scan_task(task_id, failed=True)
+
+    def finish_music_scan_task(
+        self,
+        task_id: int,
+        *,
+        cancelled: bool = False,
+        finalized: bool = False,
+        failed: bool = False,
+    ) -> None:
+        if int(task_id) != int(getattr(self, "active_music_scan_task_id", 0)):
+            return
+        context = getattr(self, "music_scan_context", None)
+        if not isinstance(context, dict):
+            self.music_scan_in_progress = False
+            self.active_music_scan_task_id = 0
+            return
+
+        result = context.get("result") if isinstance(context.get("result"), dict) else {}
+        added_count = int(context.get("added_count", 0) or 0)
+        pending_count = int(context.get("pending_count", 0) or 0)
+        import_mode = str(context.get("import_mode", "direct"))
+
+        should_finalize_library = import_mode in {"auto", "direct"} and added_count > 0
+        should_finalize_pending = import_mode == "pending" and pending_count > 0
+        if (
+            not cancelled
+            and not failed
+            and not finalized
+            and not getattr(self, "music_scan_closing", False)
+            and (should_finalize_library or should_finalize_pending)
+        ):
+            context["finalize_phase"] = (
+                "sort" if should_finalize_library else "pending_save"
+            )
+            self.music_scan_finalize_timer.start(0)
+            return
+
+        if not cancelled and not failed and not getattr(self, "music_scan_closing", False):
+            self.report_music_scan_result(context, result)
+
+        batch_times = context.get("batch_times_ms", [])
+        max_batch_ms = max(batch_times) if batch_times else 0.0
+        elapsed_ms = (time.perf_counter() - float(context.get("started_at", time.perf_counter()))) * 1000
+        self.last_music_import_metrics = {
+            "task_id": int(task_id),
+            "elapsed_ms": elapsed_ms,
+            "max_batch_ms": max_batch_ms,
+            "batch_count": len(batch_times),
+            "added_count": added_count,
+            "pending_count": pending_count,
+            "scanned_count": int(result.get("scanned", 0) or 0),
+            "scan_ms": float(result.get("scan_ms", 0.0) or 0.0),
+            "metadata_ms": float(result.get("metadata_ms", 0.0) or 0.0),
+            "duplicate_count": int(result.get("duplicates", 0) or 0),
+            "skipped_count": int(result.get("skipped", 0) or 0),
+            "failed_count": int(result.get("failed", 0) or 0),
+            "cancelled": bool(cancelled),
+            "apply_failed": bool(failed),
+        }
+        print(
+            f"[perf] music import complete: {elapsed_ms:.1f} ms, "
+            f"max_batch={max_batch_ms:.1f} ms, batches={len(batch_times)}, task={task_id}"
+        )
+
+        self.music_scan_apply_timer.stop()
+        self.music_scan_finalize_timer.stop()
+        self.music_scan_context = None
+        self.active_music_scan_task_id = 0
+        self.music_scan_in_progress = False
+        self.restore_music_import_status()
+
+    def report_music_scan_result(self, context: dict, result: dict) -> None:
+        source = str(context.get("source", ""))
+        import_mode = str(context.get("import_mode", "direct"))
+        manual_prompt = bool(context.get("manual_prompt"))
         scanned_count = int(result.get("scanned", 0) or 0)
         duplicate_count = int(result.get("duplicates", 0) or 0)
+        skipped_count = int(result.get("skipped", 0) or 0)
         failed_count = int(result.get("failed", 0) or 0)
+        added_count = int(context.get("added_count", 0) or 0)
+        pending_count = int(context.get("pending_count", 0) or 0)
+
+        if import_mode == "direct":
+            print(f"本次新增歌曲数量：{added_count}")
+            print(f"本次跳过重复或非音频数量：{duplicate_count + skipped_count}")
+            print(f"本次导入失败数量：{failed_count}")
+            if source == "drop":
+                print(f"拖拽导入处理完成：扫描到音乐文件数量：{scanned_count}")
+            return
 
         if import_mode == "auto":
             print(
@@ -9763,28 +10416,47 @@ class MainWindow(QMainWindow):
                 f"待导入 {pending_count} 首，跳过重复/已忽略 {duplicate_count} 首，失败 {failed_count} 个"
             )
 
-        if manual:
-            if import_mode == "auto":
-                QMessageBox.information(
-                    self,
-                    "音乐文件夹扫描完成",
-                    f"扫描了 {scanned_count} 个音频文件\n"
-                    f"新增了 {added_count} 首歌\n"
-                    f"跳过了 {duplicate_count} 首重复歌曲\n"
-                    f"失败了 {failed_count} 个文件",
-                )
-            else:
-                QMessageBox.information(
-                    self,
-                    "音乐文件夹扫描完成",
-                    f"扫描了 {scanned_count} 个音频文件\n"
-                    f"发现 {pending_count} 首待导入音乐\n"
-                    f"跳过了 {duplicate_count} 首重复、已待导入或已忽略歌曲\n"
-                    f"失败了 {failed_count} 个文件",
-                )
+        if not manual_prompt:
+            return
+        if import_mode == "auto":
+            QMessageBox.information(
+                self,
+                "音乐文件夹扫描完成",
+                f"扫描了 {scanned_count} 个音频文件\n"
+                f"新增了 {added_count} 首歌\n"
+                f"跳过了 {duplicate_count} 首重复歌曲\n"
+                f"失败了 {failed_count} 个文件",
+            )
+        else:
+            QMessageBox.information(
+                self,
+                "音乐文件夹扫描完成",
+                f"扫描了 {scanned_count} 个音频文件\n"
+                f"发现 {pending_count} 首待导入音乐\n"
+                f"跳过了 {duplicate_count} 首重复、已待导入或已忽略歌曲\n"
+                f"失败了 {failed_count} 个文件",
+            )
+            if pending_count > 0:
+                self.show_pending_imports_page()
 
-                if pending_count > 0:
-                    self.show_pending_imports_page()
+    @Slot()
+    def on_music_scan_thread_finished(self) -> None:
+        thread = self.sender()
+        if not isinstance(thread, QThread):
+            return
+        task_id = int(thread.property("musicScanTaskId") or 0)
+        record = self.music_scan_lifecycle.pop(task_id, None)
+        if isinstance(record, tuple) and len(record) == 2:
+            worker, recorded_thread = record
+            self.cleanup_worker_reference(worker, "music_scan")
+            self.cleanup_thread_reference(recorded_thread, "music_scan")
+        else:
+            self.cleanup_thread_reference(thread, "music_scan")
+
+        if self.music_scan_closing and not self.has_running_music_scan_threads():
+            self.music_scan_in_progress = False
+            self.schedule_music_scan_close_retry()
+
     def save_music_library(self) -> None:
         self.library_file.parent.mkdir(parents=True, exist_ok=True)
 
@@ -12919,6 +13591,74 @@ class MainWindow(QMainWindow):
         except Exception:
             pass
 
+    def has_running_music_scan_threads(self) -> bool:
+        for thread in tuple(getattr(self, "music_scan_threads", [])):
+            try:
+                if thread.isRunning():
+                    return True
+            except RuntimeError:
+                continue
+        return False
+
+    def shutdown_music_scan_workers(self, timeout_ms: int | None = None) -> bool:
+        if not getattr(self, "music_scan_closing", False):
+            self.music_scan_closing = True
+            self.music_scan_generation += 1
+            self.active_music_scan_task_id = 0
+            self.music_scan_context = None
+            if hasattr(self, "music_scan_apply_timer"):
+                self.music_scan_apply_timer.stop()
+            if hasattr(self, "music_scan_finalize_timer"):
+                self.music_scan_finalize_timer.stop()
+
+        for worker in tuple(getattr(self, "music_scan_workers", [])):
+            try:
+                if isinstance(worker, MusicFolderScanWorker):
+                    worker.request_cancel()
+            except RuntimeError:
+                continue
+
+        threads = tuple(getattr(self, "music_scan_threads", []))
+        for thread in threads:
+            try:
+                if thread.isRunning():
+                    thread.requestInterruption()
+            except RuntimeError:
+                continue
+
+        if timeout_ms is None:
+            timeout_ms = self.MUSIC_SCAN_SHUTDOWN_TIMEOUT_MS
+        deadline = time.monotonic() + max(0, int(timeout_ms)) / 1000.0
+        for thread in threads:
+            try:
+                if not thread.isRunning():
+                    continue
+                remaining_ms = max(0, int((deadline - time.monotonic()) * 1000))
+                if remaining_ms <= 0:
+                    break
+                thread.wait(remaining_ms)
+            except RuntimeError:
+                continue
+
+        if self.has_running_music_scan_threads():
+            return False
+        self.music_scan_in_progress = False
+        return True
+
+    def schedule_music_scan_close_retry(self) -> None:
+        if getattr(self, "music_scan_close_retry_scheduled", False):
+            return
+        self.music_scan_close_retry_scheduled = True
+        QTimer.singleShot(100, self._retry_close_after_music_scan_workers)
+
+    def _retry_close_after_music_scan_workers(self) -> None:
+        self.music_scan_close_retry_scheduled = False
+        if self.has_running_music_scan_threads():
+            self.schedule_music_scan_close_retry()
+            return
+        self.music_scan_in_progress = False
+        self.close()
+
     def _media_lifecycle_collections(self, kind: str):
         if kind == "cover":
             return (
@@ -14684,7 +15424,10 @@ class MainWindow(QMainWindow):
         if not file_paths:
             return
 
-        self.add_music_paths([Path(file_path) for file_path in file_paths])
+        self.start_manual_music_import(
+            [Path(file_path) for file_path in file_paths],
+            source="manual_files",
+        )
 
     def import_music_folder(self) -> None:
         folder_path = QFileDialog.getExistingDirectory(
@@ -14697,15 +15440,8 @@ class MainWindow(QMainWindow):
             return
 
         folder = Path(folder_path)
-        music_paths = self.scan_music_folder(folder)
-
         print(f"选择的文件夹：{folder}")
-        print(f"扫描到音乐文件数量：{len(music_paths)}")
-
-        if not music_paths:
-            return
-
-        self.add_music_paths(music_paths)
+        self.start_manual_music_import([folder], source="manual_folder")
 
     def scan_music_folder(self, folder: Path) -> list[Path]:
         music_paths = []
@@ -15248,6 +15984,12 @@ class MainWindow(QMainWindow):
             return
         self.show_media_item_info(self.media_item_from_song_data(song_data).to_dict())
     def closeEvent(self, event) -> None:
+        if not self.shutdown_music_scan_workers():
+            print("音乐导入任务仍在安全退出，已暂缓关闭窗口。")
+            event.ignore()
+            self.schedule_music_scan_close_retry()
+            return
+
         if not self.shutdown_media_workers():
             print("媒体后台任务仍在安全退出，已暂缓关闭窗口。")
             event.ignore()
