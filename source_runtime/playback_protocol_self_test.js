@@ -8,11 +8,53 @@ const { spawn } = require("node:child_process");
 const runtimeDir = __dirname;
 const stagingRoot = path.resolve(runtimeDir, "sources", "staging");
 const testRoot = path.resolve(stagingRoot, `hushplayer_protocol_${process.pid}`);
+const requestTimeoutMs = 5000;
+const shutdownTimeoutMs = 2000;
+let runnerChild = null;
+
+function hasExited(child) {
+    return child.exitCode !== null || child.signalCode !== null;
+}
+
+function waitForChildExit(child, timeoutMs) {
+    if (hasExited(child)) return Promise.resolve(true);
+    return new Promise((resolve) => {
+        let settled = false;
+        const finish = (exited) => {
+            if (settled) return;
+            settled = true;
+            clearTimeout(timer);
+            child.off("close", onClose);
+            resolve(exited);
+        };
+        const onClose = () => finish(true);
+        const timer = setTimeout(() => finish(false), timeoutMs);
+        child.once("close", onClose);
+        if (hasExited(child)) finish(true);
+    });
+}
+
+async function stopRunnerChild(child) {
+    if (!child || hasExited(child)) return;
+    if (child.stdin?.writable) {
+        try {
+            child.stdin.write(`${JSON.stringify({ id: 0, action: "shutdown" })}\n`);
+        } catch {
+            // Fall through to the bounded forced termination below.
+        }
+    }
+    if (await waitForChildExit(child, shutdownTimeoutMs)) return;
+    child.kill();
+    if (await waitForChildExit(child, shutdownTimeoutMs)) return;
+    throw new Error(`runner process ${child.pid} could not be terminated`);
+}
 
 async function main() {
     fs.mkdirSync(testRoot, { recursive: true });
-    const pluginPath = path.join(testRoot, "open_fixture.js");
-    const fallbackPluginPath = path.join(testRoot, "fallback_fixture.js");
+    const managedSourceRoot = path.join(testRoot, "sources", "active");
+    fs.mkdirSync(managedSourceRoot, { recursive: true });
+    const pluginPath = path.join(managedSourceRoot, "open_fixture.js");
+    const fallbackPluginPath = path.join(managedSourceRoot, "fallback_fixture.js");
     const registryPath = path.join(testRoot, "registry.json");
     fs.writeFileSync(
         pluginPath,
@@ -42,8 +84,8 @@ async function main() {
         };\n`,
         "utf8"
     );
-    const relativePlugin = path.relative(runtimeDir, pluginPath).replaceAll("\\", "/");
-    const relativeFallbackPlugin = path.relative(runtimeDir, fallbackPluginPath).replaceAll("\\", "/");
+    const relativePlugin = path.relative(testRoot, pluginPath).replaceAll("\\", "/");
+    const relativeFallbackPlugin = path.relative(testRoot, fallbackPluginPath).replaceAll("\\", "/");
     fs.writeFileSync(
         registryPath,
         JSON.stringify({
@@ -85,12 +127,13 @@ async function main() {
         "utf8"
     );
 
-    const child = spawn(process.execPath, [path.join(runtimeDir, "runner.js")], {
+    runnerChild = spawn(process.execPath, [path.join(runtimeDir, "runner.js")], {
         cwd: runtimeDir,
         env: { ...process.env, HUSHPLAYER_SOURCE_REGISTRY: registryPath },
         windowsHide: true,
         stdio: ["pipe", "pipe", "pipe"],
     });
+    const child = runnerChild;
     child.stdout.setEncoding("utf8");
     let buffer = "";
     const pending = new Map();
@@ -102,29 +145,66 @@ async function main() {
             buffer = buffer.slice(index + 1);
             if (!line) continue;
             const response = JSON.parse(line);
-            const resolve = pending.get(response.id);
-            if (resolve) {
+            const requestState = pending.get(response.id);
+            if (requestState) {
                 pending.delete(response.id);
-                resolve(response);
+                clearTimeout(requestState.timer);
+                requestState.resolve(response);
             }
         }
     });
 
+    const rejectPending = (error) => {
+        for (const requestState of pending.values()) {
+            clearTimeout(requestState.timer);
+            requestState.reject(error);
+        }
+        pending.clear();
+    };
+    child.once("error", (error) => rejectPending(error));
+    child.once("close", (code, signal) => {
+        rejectPending(new Error(`runner exited before responding: code=${code} signal=${signal}`));
+    });
+
     let id = 1;
-    const request = (action, payload = {}) => new Promise((resolve) => {
+    const request = (action, payload = {}) => new Promise((resolve, reject) => {
         const requestId = id++;
-        pending.set(requestId, resolve);
-        child.stdin.write(`${JSON.stringify({ id: requestId, action, ...payload })}\n`);
+        const timer = setTimeout(() => {
+            pending.delete(requestId);
+            reject(new Error(`runner request timed out: ${action}`));
+        }, requestTimeoutMs);
+        pending.set(requestId, { resolve, reject, timer });
+        try {
+            child.stdin.write(
+                `${JSON.stringify({ id: requestId, action, ...payload })}\n`,
+                (error) => {
+                    if (!error || !pending.has(requestId)) return;
+                    pending.delete(requestId);
+                    clearTimeout(timer);
+                    reject(error);
+                }
+            );
+        } catch (error) {
+            pending.delete(requestId);
+            clearTimeout(timer);
+            reject(error);
+        }
     });
 
     const sources = await request("listSources");
     assert.equal(sources.success, true);
-    assert.equal(sources.data[0].capabilities.playback, true);
-    assert.equal(sources.data[0].capabilities.download, true);
-    assert.equal(sources.data[1].capabilities.playback, true);
-    assert.equal(sources.data[1].capabilities.download, true);
-    assert.equal(sources.data[1].capabilities.downloadViaPlayback, true);
-    assert.equal(sources.data[2].capabilities.playback, false);
+    const sourceById = Object.fromEntries(sources.data.map((source) => [source.id, source]));
+    const sourceDiagnostics = JSON.stringify(sources.data, null, 2);
+    assert.equal(sourceById.open_fixture.capabilities.playback, true, sourceDiagnostics);
+    assert.equal(sourceById.open_fixture.capabilities.download, true);
+    assert.equal(sourceById.fallback_fixture.capabilities.playback, true);
+    assert.equal(sourceById.fallback_fixture.capabilities.download, true);
+    assert.equal(sourceById.fallback_fixture.capabilities.downloadViaPlayback, true);
+    assert.equal(sourceById.unknown_fixture.capabilities.playback, false);
+    assert.equal(sourceById.unknown_fixture.capabilities.download, false);
+    if (process.env.HUSHPLAYER_PROTOCOL_FORCE_FAILURE === "1") {
+        assert.fail("forced lifecycle cleanup failure");
+    }
 
     const playback = await request("resolvePlayback", {
         sourceId: "open_fixture",
@@ -188,9 +268,8 @@ async function main() {
 
     const shutdown = await request("shutdown");
     assert.equal(shutdown.success, true);
-    await new Promise((resolve, reject) => {
-        child.once("close", (code) => code === 0 ? resolve() : reject(new Error(`runner exit ${code}`)));
-    });
+    assert.equal(await waitForChildExit(child, requestTimeoutMs), true);
+    assert.equal(child.exitCode, 0);
     process.stdout.write("playback protocol self-test: OK\n");
 }
 
@@ -199,7 +278,13 @@ main()
         process.stderr.write(`${error.stack || error}\n`);
         process.exitCode = 1;
     })
-    .finally(() => {
+    .finally(async () => {
+        try {
+            await stopRunnerChild(runnerChild);
+        } catch (error) {
+            process.stderr.write(`runner cleanup failed: ${error.stack || error}\n`);
+            process.exitCode = 1;
+        }
         if (testRoot.startsWith(`${stagingRoot}${path.sep}`)) {
             fs.rmSync(testRoot, { recursive: true, force: true });
         }

@@ -165,14 +165,14 @@ def test_lyrics_cache_and_stale_guard() -> None:
         )
         service.request_lyrics(embedded)
         assert client.cancelled == [1]
-        assert ready[-1][1] == embedded.key
+        assert ready[-1][1] == embedded.stable_identity
         assert ready[-1][2]["type"] == "lrc"
         client.lyricFinished.emit(
             1,
             pending.source_id,
             {"rawLrc": "[00:00.00]Stale line"},
         )
-        assert ready[-1][1] == embedded.key
+        assert ready[-1][1] == embedded.stable_identity
         restored = LyricsCache(Path(temp_dir) / "online_lyrics.json").get(embedded)
         assert restored and restored["type"] == "lrc"
         service.deleteLater()
