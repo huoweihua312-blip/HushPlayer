@@ -112,6 +112,185 @@ class PlaylistMembership:
         return changed
 
     @classmethod
+    def add_members(
+        cls,
+        playlist: dict,
+        members,
+        normalize_local: Callable[[str], str],
+    ) -> dict:
+        """Add one normalized input batch without repeatedly scanning a playlist."""
+        raw_members = list(members or [])
+        result = cls._batch_result(len(raw_members))
+        if not raw_members:
+            return result
+
+        cached_normalize_local = cls._cached_normalizer(normalize_local)
+        result["normalized_changed"] = cls.normalize_playlist(
+            playlist,
+            cached_normalize_local,
+        )
+
+        existing_keys: set[tuple[str, str]] = set()
+        max_added_at = 0
+        existing_local_members: list[dict] = []
+        existing_remote_members: list[dict] = []
+        for member in playlist["members"]:
+            kind = str(member.get("kind") or "")
+            key = (kind, str(member.get("id") or ""))
+            existing_keys.add(key)
+            max_added_at = max(
+                max_added_at,
+                cls._positive_int(member.get("added_at")),
+            )
+            if kind == cls.LOCAL:
+                existing_local_members.append(member)
+            else:
+                existing_remote_members.append(member)
+
+        input_keys: set[tuple[str, str]] = set()
+        new_local_members: list[dict] = []
+        new_remote_members: list[dict] = []
+        for raw_member in raw_members:
+            kind, identifier, requested_added_at = cls._normalize_member_input(
+                raw_member,
+                cached_normalize_local,
+            )
+            if not identifier:
+                result["invalid"] += 1
+                continue
+
+            key = (kind, identifier)
+            if key in input_keys:
+                result["skipped_duplicate"] += 1
+                result["skipped"] += 1
+                continue
+            input_keys.add(key)
+
+            if key in existing_keys:
+                result["skipped_existing"] += 1
+                result["skipped"] += 1
+                continue
+
+            target_key = "songs" if kind == cls.LOCAL else "remoteSongs"
+            playlist[target_key].append(identifier)
+            timestamp = max(
+                requested_added_at or int(time.time() * 1000),
+                max_added_at + 1,
+            )
+            new_member = {
+                "kind": kind,
+                "id": identifier,
+                "added_at": timestamp,
+            }
+            if kind == cls.LOCAL:
+                new_local_members.append(new_member)
+            else:
+                new_remote_members.append(new_member)
+            existing_keys.add(key)
+            max_added_at = timestamp
+            result["added"] += 1
+
+        if result["added"]:
+            playlist["members"] = [
+                *existing_local_members,
+                *new_local_members,
+                *existing_remote_members,
+                *new_remote_members,
+            ]
+        result["changed"] = result["added"] > 0
+        return result
+
+    @classmethod
+    def remove_members(
+        cls,
+        playlist: dict,
+        members,
+        normalize_local: Callable[[str], str],
+    ) -> dict:
+        """Remove one normalized input batch with order-preserving filters."""
+        raw_members = list(members or [])
+        result = cls._batch_result(len(raw_members))
+        if not raw_members:
+            return result
+
+        cached_normalize_local = cls._cached_normalizer(normalize_local)
+        result["normalized_changed"] = cls.normalize_playlist(
+            playlist,
+            cached_normalize_local,
+        )
+
+        existing_keys: set[tuple[str, str]] = set()
+        local_ids: list[str] = []
+        for member in playlist["members"]:
+            kind = str(member.get("kind") or "")
+            identifier = str(member.get("id") or "")
+            existing_keys.add((kind, identifier))
+            if kind == cls.LOCAL:
+                local_ids.append(identifier)
+
+        input_keys: set[tuple[str, str]] = set()
+        removal_keys: set[tuple[str, str]] = set()
+        for raw_member in raw_members:
+            kind, identifier, _requested_added_at = cls._normalize_member_input(
+                raw_member,
+                cached_normalize_local,
+            )
+            if not identifier:
+                result["invalid"] += 1
+                continue
+
+            key = (kind, identifier)
+            if key in input_keys:
+                result["skipped_duplicate"] += 1
+                result["skipped"] += 1
+                continue
+            input_keys.add(key)
+
+            if key not in existing_keys:
+                result["skipped_missing"] += 1
+                result["skipped"] += 1
+                continue
+            removal_keys.add(key)
+
+        if not removal_keys:
+            return result
+
+        local_removals = {
+            identifier
+            for kind, identifier in removal_keys
+            if kind == cls.LOCAL
+        }
+        remote_removals = {
+            identifier
+            for kind, identifier in removal_keys
+            if kind == cls.REMOTE
+        }
+        if local_removals:
+            playlist["songs"] = [
+                stored_value
+                for stored_value, identifier in zip(playlist["songs"], local_ids)
+                if identifier not in local_removals
+            ]
+        if remote_removals:
+            playlist["remoteSongs"] = [
+                identifier
+                for identifier in playlist["remoteSongs"]
+                if identifier not in remote_removals
+            ]
+        playlist["members"] = [
+            member
+            for member in playlist["members"]
+            if (
+                str(member.get("kind") or ""),
+                str(member.get("id") or ""),
+            )
+            not in removal_keys
+        ]
+        result["removed"] = len(removal_keys)
+        result["changed"] = True
+        return result
+
+    @classmethod
     def add_member(
         cls,
         playlist: dict,
@@ -252,6 +431,59 @@ class PlaylistMembership:
         if kind == cls.LOCAL:
             identifier = normalize_local(identifier)
         return kind, identifier
+
+    @classmethod
+    def _normalize_member_input(
+        cls,
+        member,
+        normalize_local: Callable[[str], str],
+    ) -> tuple[str, str, int]:
+        if isinstance(member, dict):
+            kind = member.get("kind")
+            identifier = member.get("id")
+            added_at = member.get("added_at")
+        elif isinstance(member, (list, tuple)) and len(member) >= 2:
+            kind = member[0]
+            identifier = member[1]
+            added_at = member[2] if len(member) >= 3 else None
+        else:
+            return "", "", 0
+        kind, identifier = cls._normalize_member(
+            kind,
+            identifier,
+            normalize_local,
+        )
+        return kind, identifier, cls._positive_int(added_at)
+
+    @staticmethod
+    def _cached_normalizer(
+        normalizer: Callable[[str], str],
+    ) -> Callable[[str], str]:
+        cache: dict[str, str] = {}
+
+        def normalize_once(value: str) -> str:
+            cache_key = str(value or "")
+            if cache_key not in cache:
+                cache[cache_key] = normalizer(value)
+            return cache[cache_key]
+
+        return normalize_once
+
+    @staticmethod
+    def _batch_result(input_count: int) -> dict:
+        return {
+            "input_count": max(0, int(input_count or 0)),
+            "added": 0,
+            "removed": 0,
+            "skipped": 0,
+            "skipped_existing": 0,
+            "skipped_missing": 0,
+            "skipped_duplicate": 0,
+            "invalid": 0,
+            "failed": 0,
+            "changed": False,
+            "normalized_changed": False,
+        }
 
     @staticmethod
     def _normalize_ids(values, normalizer: Callable[[object], str]) -> list[str]:

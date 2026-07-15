@@ -4910,6 +4910,128 @@ class MainWindow(QMainWindow):
         self.playlist_membership_snapshots[playlist_id] = snapshot
         return snapshot
 
+    def capture_playlist_transaction_state(self) -> dict:
+        return {
+            "playlists": deepcopy(self.playlists),
+            "membership_snapshots": deepcopy(self.playlist_membership_snapshots),
+            "library_list_dirty": getattr(self, "library_list_dirty", False),
+            "library_data_revision": getattr(self, "library_data_revision", 0),
+            "last_library_view_key": getattr(self, "last_library_view_key", None),
+            "current_library_view": getattr(self, "current_library_view", "all"),
+            "library_sort_field": getattr(self, "library_sort_field", None),
+            "library_sort_descending": getattr(
+                self,
+                "library_sort_descending",
+                False,
+            ),
+            "playlists_migration_pending": getattr(
+                self,
+                "playlists_migration_pending",
+                False,
+            ),
+        }
+
+    def restore_playlist_transaction_state(self, state: dict) -> None:
+        self.playlists = state["playlists"]
+        self.playlist_membership_snapshots = state["membership_snapshots"]
+        self.library_list_dirty = state["library_list_dirty"]
+        self.library_data_revision = state["library_data_revision"]
+        self.last_library_view_key = state["last_library_view_key"]
+        self.current_library_view = state["current_library_view"]
+        self.library_sort_field = state["library_sort_field"]
+        self.library_sort_descending = state["library_sort_descending"]
+        self.playlists_migration_pending = state["playlists_migration_pending"]
+
+    def show_playlist_membership_save_failure(self, error=None) -> None:
+        load_error = str(getattr(self, "playlists_load_error", "") or "")
+        message = load_error or str(error or "歌单文件未保存，成员修改已撤销。")
+        print(f"歌单成员修改失败：{message}")
+        if not load_error and hasattr(self, "content_stack"):
+            QMessageBox.warning(self, "歌单未保存", message)
+
+    def save_normalized_playlist_batch(self, playlist_ids: set[str]) -> bool:
+        previous_ids = getattr(
+            self,
+            "playlist_membership_normalized_ids",
+            None,
+        )
+        self.playlist_membership_normalized_ids = set(playlist_ids)
+        try:
+            return self.save_playlists()
+        finally:
+            if previous_ids is None:
+                del self.playlist_membership_normalized_ids
+            else:
+                self.playlist_membership_normalized_ids = previous_ids
+
+    def update_playlist_members(
+        self,
+        playlist_id: str,
+        members,
+        present: bool,
+    ) -> dict:
+        raw_members = list(members or [])
+        result = PlaylistMembership._batch_result(len(raw_members))
+        playlist = self.playlists.get(playlist_id)
+        if not isinstance(playlist, dict):
+            result["failed"] = len(raw_members)
+            return result
+        if not raw_members:
+            return result
+
+        previous_state = self.capture_playlist_transaction_state()
+        try:
+            if present:
+                result = PlaylistMembership.add_members(
+                    playlist,
+                    raw_members,
+                    self.normalize_song_path,
+                )
+            else:
+                result = PlaylistMembership.remove_members(
+                    playlist,
+                    raw_members,
+                    self.normalize_song_path,
+                )
+        except Exception:
+            self.restore_playlist_transaction_state(previous_state)
+            raise
+
+        if not result["changed"]:
+            return result
+
+        self.invalidate_playlist_membership_snapshot(playlist_id)
+        try:
+            saved = self.save_normalized_playlist_batch({playlist_id})
+        except Exception as error:
+            self.restore_playlist_transaction_state(previous_state)
+            self.show_playlist_membership_save_failure(error)
+            raise
+
+        if not saved:
+            attempted_count = int(result["added"] or 0) + int(
+                result["removed"] or 0
+            )
+            self.restore_playlist_transaction_state(previous_state)
+            result["attempted_added"] = result["added"]
+            result["attempted_removed"] = result["removed"]
+            result["added"] = 0
+            result["removed"] = 0
+            result["failed"] = attempted_count
+            result["changed"] = False
+            result["rolled_back"] = True
+            self.show_playlist_membership_save_failure()
+            return result
+
+        self.mark_library_list_dirty()
+        return result
+
+    def add_playlist_members(self, playlist_id: str, members) -> dict:
+        return self.update_playlist_members(playlist_id, members, True)
+
+    def remove_playlist_members(self, playlist_id: str, members) -> dict:
+        return self.update_playlist_members(playlist_id, members, False)
+
     def set_playlist_member(
         self,
         playlist_id: str,
@@ -4917,39 +5039,18 @@ class MainWindow(QMainWindow):
         identifier: str,
         present: bool,
     ) -> bool:
-        playlist = self.playlists.get(playlist_id)
-        if not isinstance(playlist, dict):
-            return False
-        previous = deepcopy(playlist)
-        if present:
-            changed = PlaylistMembership.add_member(
-                playlist,
-                kind,
-                identifier,
-                self.normalize_song_path,
-            )
-        else:
-            changed = PlaylistMembership.remove_member(
-                playlist,
-                kind,
-                identifier,
-                self.normalize_song_path,
-            )
-        if not changed:
-            return False
-        self.invalidate_playlist_membership_snapshot(playlist_id)
-        if not self.save_playlists():
-            self.playlists[playlist_id] = previous
-            self.invalidate_playlist_membership_snapshot(playlist_id)
-            return False
-        self.mark_library_list_dirty()
-        return True
+        result = self.update_playlist_members(
+            playlist_id,
+            [(kind, identifier)],
+            present,
+        )
+        return bool(result["changed"])
 
     def add_local_path_to_playlist(self, path: str, playlist_id: str) -> bool:
         return self.set_playlist_member(
             playlist_id,
             PlaylistMembership.LOCAL,
-            self.normalize_song_path(path),
+            path,
             True,
         )
 
@@ -4958,34 +5059,17 @@ class MainWindow(QMainWindow):
         paths: list[str],
         playlist_id: str,
     ) -> int:
-        playlist = self.playlists.get(playlist_id)
-        if not isinstance(playlist, dict):
-            return 0
-        previous = deepcopy(playlist)
-        added_count = 0
-        for path in paths:
-            if PlaylistMembership.add_member(
-                playlist,
-                PlaylistMembership.LOCAL,
-                self.normalize_song_path(path),
-                self.normalize_song_path,
-            ):
-                added_count += 1
-        if added_count <= 0:
-            return 0
-        self.invalidate_playlist_membership_snapshot(playlist_id)
-        if not self.save_playlists():
-            self.playlists[playlist_id] = previous
-            self.invalidate_playlist_membership_snapshot(playlist_id)
-            return 0
-        self.mark_library_list_dirty()
-        return added_count
+        result = self.add_playlist_members(
+            playlist_id,
+            [(PlaylistMembership.LOCAL, path) for path in paths],
+        )
+        return int(result["added"] or 0)
 
     def remove_local_path_from_playlist(self, path: str, playlist_id: str) -> bool:
         return self.set_playlist_member(
             playlist_id,
             PlaylistMembership.LOCAL,
-            self.normalize_song_path(path),
+            path,
             False,
         )
 
@@ -5195,7 +5279,7 @@ class MainWindow(QMainWindow):
             return
         if not self.add_remote_id_to_playlist(stable_id, playlist_id):
             return
-        self.refresh_remote_song_item(stable_id)
+        self.refresh_remote_song_item(stable_id, mark_dirty=False)
         self.refresh_playlist_membership_views()
         self.set_online_status_message(
             f"已加入“{self.get_playlist_name(playlist_id)}”。"
@@ -5300,6 +5384,7 @@ class MainWindow(QMainWindow):
         self,
         stable_id: str,
         resolving: bool = False,
+        mark_dirty: bool = True,
     ) -> bool:
         stable_id = str(stable_id or "").strip()
         record = self.remote_tracks.get(stable_id)
@@ -5334,7 +5419,8 @@ class MainWindow(QMainWindow):
             item.setHidden(not self.song_matches_current_view(song_data))
             if identity:
                 self.song_identity_to_item[identity] = item
-            self.mark_library_list_dirty()
+            if mark_dirty:
+                self.mark_library_list_dirty()
             return True
         self.refresh_song_item_display(item, song_data)
         return True
@@ -5471,6 +5557,7 @@ class MainWindow(QMainWindow):
             return []
 
         selected_paths = []
+        seen_paths = set()
 
         for item in self.song_list.selectedItems():
             song_data = self.get_song_data_from_item(item)
@@ -5478,10 +5565,11 @@ class MainWindow(QMainWindow):
             if not song_data:
                 continue
 
-            song_path = self.normalize_song_path(song_data.get("path", ""))
+            song_path = str(song_data.get("path", "") or "").strip()
 
-            if song_path and song_path not in selected_paths:
+            if song_path and song_path not in seen_paths:
                 selected_paths.append(song_path)
+                seen_paths.add(song_path)
 
         return selected_paths
 
@@ -5489,19 +5577,39 @@ class MainWindow(QMainWindow):
         if playlist_id == "liked" or playlist_id not in self.playlists:
             return
 
-        added_count = self.add_local_paths_to_playlist(song_paths, playlist_id)
+        result = self.add_playlist_members(
+            playlist_id,
+            [
+                (PlaylistMembership.LOCAL, song_path)
+                for song_path in song_paths
+            ],
+        )
+        added_count = int(result["added"] or 0)
 
         playlist_name = self.get_playlist_name(playlist_id)
 
+        if result["failed"]:
+            self.show_playlist_sidebar_hint(
+                f"未能保存到「{playlist_name}」，本次修改已撤销"
+            )
+            return
+
         if added_count <= 0:
-            self.show_playlist_sidebar_hint(f"所选歌曲已经在「{playlist_name}」中")
+            if result["invalid"]:
+                self.show_playlist_sidebar_hint("所选内容中没有可加入的有效歌曲")
+            else:
+                self.show_playlist_sidebar_hint(
+                    f"所选歌曲已经在「{playlist_name}」中"
+                )
             return
 
         if self.current_library_view == f"playlist:{playlist_id}":
             self.sort_song_list_for_current_view(force=True)
             self.filter_song_list(self.search_input.text())
 
-        skipped_count = max(0, len(song_paths) - added_count)
+        skipped_count = int(result["skipped"] or 0) + int(
+            result["invalid"] or 0
+        )
 
         if skipped_count > 0:
             message = f"已添加 {added_count} 首到「{playlist_name}」，跳过 {skipped_count} 首重复歌曲"
@@ -6550,30 +6658,44 @@ class MainWindow(QMainWindow):
 
         print(f"已添加到歌单「{selected_name}」：", song_path)
 
+    def get_selected_playlist_members(self) -> list[tuple[str, str]]:
+        members = []
+        for item in self.get_selected_song_items():
+            song_data = self.get_song_data_from_item(item)
+            if not song_data:
+                continue
+            if song_data.get("recordKind") == "remote":
+                stable_id = str(song_data.get("remoteStableId") or "").strip()
+                if not stable_id:
+                    remote = self.get_remote_record_from_song_data(song_data)
+                    stable_id = remote[0] if remote is not None else ""
+                if stable_id:
+                    members.append((PlaylistMembership.REMOTE, stable_id))
+                continue
+            song_path = str(song_data.get("path") or "").strip()
+            if song_path:
+                members.append((PlaylistMembership.LOCAL, song_path))
+        return members
+
     def remove_current_song_from_current_playlist(self) -> None:
-        song_path = self.get_current_selected_song_path()
-
-        if not song_path:
-            QMessageBox.information(self, "提示", "请先选择一首真实歌曲。")
-            return
-
         if self.current_library_view == "liked":
-            if self.remove_local_path_from_playlist(song_path, "liked"):
-                self.update_like_button()
-                self.update_side_info_panel()
-                self.refresh_playlist_membership_views()
-
-            return
-
-        if not self.current_library_view.startswith("playlist:"):
+            playlist_id = "liked"
+        elif self.current_library_view.startswith("playlist:"):
+            playlist_id = self.current_library_view.split("playlist:", 1)[1]
+        else:
             QMessageBox.information(self, "提示", "请先切换到某个歌单视图。")
             return
 
-        playlist_id = self.current_library_view.split("playlist:", 1)[1]
-        if self.remove_local_path_from_playlist(song_path, playlist_id):
-            self.refresh_playlist_membership_views()
+        members = self.get_selected_playlist_members()
+        if not members:
+            QMessageBox.information(self, "提示", "请先选择要移除的歌曲。")
+            return
 
-            print("已从当前歌单移除：", song_path)
+        result = self.remove_playlist_members(playlist_id, members)
+        if not result["changed"]:
+            return
+        self.refresh_playlist_membership_views()
+        print(f"已从当前歌单移除 {result['removed']} 首歌曲")
 
     def _create_side_info_row(self, name: str, value_widget: QWidget) -> QFrame:
         row = QFrame()
@@ -12482,10 +12604,16 @@ class MainWindow(QMainWindow):
                 "fixed": True,
             }
 
-        PlaylistMembership.normalize_document(
-            self.playlists,
-            self.normalize_song_path,
+        normalized_ids = set(
+            getattr(self, "playlist_membership_normalized_ids", set()) or set()
         )
+        for playlist_id, playlist in self.playlists.items():
+            if playlist_id in normalized_ids or not isinstance(playlist, dict):
+                continue
+            PlaylistMembership.normalize_playlist(
+                playlist,
+                self.normalize_song_path,
+            )
 
         temporary_path = self.playlists_file.with_suffix(".json.tmp")
         temporary_path.write_text(
@@ -13406,33 +13534,55 @@ class MainWindow(QMainWindow):
     def remove_selected_song(self) -> None:
         self.remove_selected_songs_from_library()
 
-    def remove_songs_from_playlists_and_queue(self, removed_paths: set[str]) -> None:
+    def remove_songs_from_playlists_and_queue(
+        self,
+        removed_paths: set[str],
+        mark_dirty: bool = True,
+    ) -> bool:
         if not removed_paths:
-            return
+            return True
 
-        previous_playlists = deepcopy(self.playlists)
+        previous_state = self.capture_playlist_transaction_state()
         playlists_changed = False
+        members = [
+            (PlaylistMembership.LOCAL, path)
+            for path in removed_paths
+        ]
 
-        for playlist in self.playlists.values():
-            if not isinstance(playlist, dict):
-                continue
-
-            for path in removed_paths:
-                playlists_changed = PlaylistMembership.remove_member(
+        try:
+            for playlist in self.playlists.values():
+                if not isinstance(playlist, dict):
+                    continue
+                result = PlaylistMembership.remove_members(
                     playlist,
-                    PlaylistMembership.LOCAL,
-                    path,
+                    members,
                     self.normalize_song_path,
-                ) or playlists_changed
+                )
+                playlists_changed = bool(result["changed"]) or playlists_changed
+        except Exception:
+            self.restore_playlist_transaction_state(previous_state)
+            raise
 
         if playlists_changed:
             self.invalidate_playlist_membership_snapshot()
-            if self.save_playlists():
+            try:
+                saved = self.save_normalized_playlist_batch(
+                    {
+                        playlist_id
+                        for playlist_id, playlist in self.playlists.items()
+                        if isinstance(playlist, dict)
+                    }
+                )
+            except Exception as error:
+                self.restore_playlist_transaction_state(previous_state)
+                self.show_playlist_membership_save_failure(error)
+                return False
+            if not saved:
+                self.restore_playlist_transaction_state(previous_state)
+                self.show_playlist_membership_save_failure()
+                return False
+            if mark_dirty:
                 self.mark_library_list_dirty()
-                self.refresh_playlist_view_buttons()
-            else:
-                self.playlists = previous_playlists
-                self.invalidate_playlist_membership_snapshot()
 
         if isinstance(getattr(self, "play_queue", None), list):
             cleaned_queue = [
@@ -13448,6 +13598,7 @@ class MainWindow(QMainWindow):
                 self.play_queue = cleaned_queue
                 self.save_play_queue()
                 self.refresh_play_queue_page()
+        return True
 
     def remove_selected_songs_from_library(self) -> None:
         selected_items = self.get_selected_song_items() if hasattr(self, "get_selected_song_items") else []
@@ -13487,6 +13638,12 @@ class MainWindow(QMainWindow):
         if reply != QMessageBox.StandardButton.Yes:
             return
 
+        if not self.remove_songs_from_playlists_and_queue(
+            removed_paths,
+            mark_dirty=False,
+        ):
+            return
+
         rows = sorted({self.song_list.row(item) for item, _ in songs_to_remove}, reverse=True)
 
         for row in rows:
@@ -13497,8 +13654,6 @@ class MainWindow(QMainWindow):
                     del taken_item
 
         current_removed = self.normalize_song_path(self.current_song_path) in removed_paths
-
-        self.remove_songs_from_playlists_and_queue(removed_paths)
 
         if current_removed:
             self.reset_now_playing_info()
@@ -15899,9 +16054,7 @@ class MainWindow(QMainWindow):
             )
         if self.current_library_view == "liked" or self.current_library_view.startswith("playlist:"):
             remove_action = menu.addAction("从当前歌单移除")
-            remove_action.triggered.connect(
-                lambda checked=False, target_id=stable_id: self.remove_remote_from_current_playlist(target_id)
-            )
+            remove_action.triggered.connect(self.remove_current_song_from_current_playlist)
         menu.addSeparator()
         info_action = menu.addAction("查看歌曲信息")
         info_action.triggered.connect(
@@ -15916,9 +16069,11 @@ class MainWindow(QMainWindow):
             playlist_id = self.current_library_view.split("playlist:", 1)[1]
         else:
             return
-        if stable_id in self.get_playlist_remote_ids(playlist_id):
-            if not self.remove_remote_id_from_playlist(stable_id, playlist_id):
-                return
+        result = self.remove_playlist_members(
+            playlist_id,
+            [(PlaylistMembership.REMOTE, stable_id)],
+        )
+        if result["changed"]:
             self.refresh_playlist_membership_views()
 
     def open_remote_song_folder(self, local_path: str) -> None:
