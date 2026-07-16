@@ -65,8 +65,8 @@ def check_metadata_generator(temp_root: Path) -> None:
     version_info_path = Path(metadata["version_info_file"])
     version_info = version_info_path.read_text(encoding="utf-8")
     compile(version_info, str(version_info_path), "eval")
-    assert "filevers=(0, 5, 0, 2)" in version_info
-    assert "prodvers=(0, 5, 0, 2)" in version_info
+    assert "filevers=(0, 5, 0, 3)" in version_info
+    assert "prodvers=(0, 5, 0, 3)" in version_info
     assert "FileVersion', '0.5.0-beta.3'" in version_info
     assert "ProductVersion', '0.5.0-beta.3'" in version_info
 
@@ -182,7 +182,7 @@ OutputBaseFilename=Macro-{#MyAppVersion}-{#MyAppArchitecture}
     )
     assert (
         output_dir
-        / "Macro-0.5.0-beta.2-win-x64.exe"
+        / "Macro-0.5.0-beta.3-win-x64.exe"
     ).is_file()
 
 
