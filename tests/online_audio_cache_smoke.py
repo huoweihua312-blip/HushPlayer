@@ -20,12 +20,14 @@ if str(PROJECT_ROOT) not in sys.path:
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PySide6.QtCore import QProcess, QThread, QUrl
+from PySide6.QtCore import QPoint, QPointF, QProcess, QThread, QUrl, Qt
+from PySide6.QtGui import QWheelEvent
 from PySide6.QtMultimedia import QMediaPlayer
-from PySide6.QtWidgets import QApplication, QMainWindow, QPushButton
+from PySide6.QtWidgets import QApplication, QLabel, QMainWindow, QPushButton
 
 from app.models.media_item import MediaItem
 from app.services.online_audio_cache import OnlineAudioCacheService
+import app.ui.main_window as main_window_module
 from app.ui.main_window import MainWindow, SettingsDialog
 
 
@@ -179,6 +181,132 @@ def test_cache_service(app: QApplication, server: FixtureServer) -> None:
             "清理未完成缓存",
             "清理全部音频缓存",
         } <= button_texts
+
+        dialog.resize(520, 520)
+        dialog.show()
+        dialog.settings_scroll.setFixedHeight(260)
+        app.processEvents()
+        vertical_bar = dialog.settings_scroll.verticalScrollBar()
+        horizontal_bar = dialog.settings_scroll.horizontalScrollBar()
+        assert vertical_bar.maximum() > 0
+        assert (
+            dialog.settings_scroll.horizontalScrollBarPolicy()
+            == Qt.ScrollBarPolicy.ScrollBarAlwaysOff
+        )
+        assert horizontal_bar.maximum() == 0, {
+            "maximum": horizontal_bar.maximum(),
+            "content_width": dialog.settings_scroll_content.width(),
+            "viewport_width": dialog.settings_scroll.viewport().width(),
+            "minimum_hint": dialog.settings_scroll_content.minimumSizeHint().width(),
+            "size_hint": dialog.settings_scroll_content.sizeHint().width(),
+        }
+        assert dialog.settings_scroll_content.width() <= (
+            dialog.settings_scroll.viewport().width()
+        )
+        title_label = next(
+            label
+            for label in dialog.findChildren(QLabel)
+            if label.objectName() == "settingsDialogTitle"
+        )
+        save_button = next(
+            button
+            for button in dialog.findChildren(QPushButton)
+            if button.text() == "保存设置"
+        )
+        assert not dialog.settings_scroll_content.isAncestorOf(title_label)
+        assert not dialog.settings_scroll_content.isAncestorOf(save_button)
+
+        bottom_button = next(
+            button
+            for button in dialog.findChildren(QPushButton)
+            if button.text() == "清理全部音频缓存"
+        )
+        vertical_bar.setValue(vertical_bar.maximum())
+        app.processEvents()
+        bottom_top = bottom_button.mapTo(
+            dialog.settings_scroll.viewport(), QPoint(0, 0)
+        ).y()
+        assert bottom_top < dialog.settings_scroll.viewport().height()
+        assert bottom_top + bottom_button.height() > 0
+
+        vertical_bar.setValue(0)
+        viewport_wheel_event = QWheelEvent(
+            QPointF(2, 2),
+            QPointF(2, 2),
+            QPoint(),
+            QPoint(0, -120),
+            Qt.MouseButton.NoButton,
+            Qt.KeyboardModifier.NoModifier,
+            Qt.ScrollPhase.NoScrollPhase,
+            False,
+        )
+        QApplication.sendEvent(
+            dialog.settings_scroll.viewport(), viewport_wheel_event
+        )
+        assert vertical_bar.value() > 0
+
+        vertical_bar.setValue(0)
+        slider_value = dialog.alpha_slider.value()
+        wheel_event = QWheelEvent(
+            QPointF(2, 2),
+            QPointF(2, 2),
+            QPoint(),
+            QPoint(0, -120),
+            Qt.MouseButton.NoButton,
+            Qt.KeyboardModifier.NoModifier,
+            Qt.ScrollPhase.NoScrollPhase,
+            False,
+        )
+        assert dialog.eventFilter(dialog.alpha_slider, wheel_event)
+        assert vertical_bar.value() > 0
+        assert dialog.alpha_slider.value() == slider_value
+
+        vertical_bar.setValue(0)
+        combo_index = dialog.floating_color_combo.currentIndex()
+        touchpad_event = QWheelEvent(
+            QPointF(2, 2),
+            QPointF(2, 2),
+            QPoint(0, -24),
+            QPoint(),
+            Qt.MouseButton.NoButton,
+            Qt.KeyboardModifier.NoModifier,
+            Qt.ScrollPhase.ScrollUpdate,
+            False,
+        )
+        assert dialog.eventFilter(dialog.floating_color_combo, touchpad_event)
+        assert vertical_bar.value() > 0
+        assert dialog.floating_color_combo.currentIndex() == combo_index
+
+        tall_height = dialog.settings_scroll_content.sizeHint().height() + 24
+        dialog.settings_scroll.setFixedHeight(tall_height)
+        app.processEvents()
+        assert vertical_bar.maximum() == 0
+        assert dialog.restore_checkbox.isEnabled()
+        assert dialog.floating_color_combo.count() >= 1
+        assert dialog.music_scan_import_mode_combo.count() >= 1
+        assert all(button.isEnabled() for button in dialog.findChildren(QPushButton))
+        original_restore = dialog.restore_checkbox.isChecked()
+        dialog.restore_checkbox.setChecked(not original_restore)
+        assert dialog.restore_checkbox.isChecked() is (not original_restore)
+        dialog.alpha_slider.setValue(50)
+        assert dialog.alpha_slider.value() == 50
+        assert dialog.alpha_label.text() == "50%"
+        dialog.music_scan_import_mode_combo.setCurrentIndex(1)
+        assert dialog.music_scan_import_mode_combo.currentIndex() == 1
+
+        opened_urls: list[QUrl] = []
+        original_desktop_services = main_window_module.QDesktopServices
+        main_window_module.QDesktopServices = SimpleNamespace(
+            openUrl=lambda url: opened_urls.append(url) or True
+        )
+        try:
+            open_host = SimpleNamespace(online_audio_cache=service)
+            assert MainWindow.open_online_audio_cache_directory(open_host)
+        finally:
+            main_window_module.QDesktopServices = original_desktop_services
+        assert len(opened_urls) == 1
+        assert Path(opened_urls[0].toLocalFile()).resolve() == cache_root.resolve()
+
         dialog.deleteLater()
         settings_host.deleteLater()
         app.processEvents()

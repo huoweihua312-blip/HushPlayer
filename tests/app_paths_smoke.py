@@ -10,10 +10,80 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from app.core.app_paths import AppPaths
+from PySide6.QtCore import QCoreApplication
+
+from app.core.app_paths import APP_NAME, AppPaths
+
+
+def is_within(path: Path, directory: Path) -> bool:
+    try:
+        path.resolve().relative_to(directory.resolve())
+        return True
+    except (OSError, ValueError):
+        return False
+
+
+def test_standard_cache_identity() -> None:
+    environment_names = (
+        "HUSHPLAYER_BUNDLED_RESOURCE_DIR",
+        "HUSHPLAYER_APP_DATA_DIR",
+        "HUSHPLAYER_CACHE_DIR",
+        "HUSHPLAYER_LOG_DIR",
+    )
+    previous_environment = {
+        name: os.environ.get(name) for name in environment_names
+    }
+    missing = object()
+    previous_frozen = getattr(sys, "frozen", missing)
+    previous_meipass = getattr(sys, "_MEIPASS", missing)
+    try:
+        for name in environment_names:
+            os.environ.pop(name, None)
+        QCoreApplication.setOrganizationName("unstable-test-name")
+        QCoreApplication.setApplicationName("unstable-test-name")
+        development_paths = AppPaths.resolve()
+        assert QCoreApplication.organizationName() == APP_NAME
+        assert QCoreApplication.applicationName() == APP_NAME
+
+        with tempfile.TemporaryDirectory(prefix="hushplayer_frozen_paths_") as temp_dir:
+            sys.frozen = True
+            sys._MEIPASS = str(Path(temp_dir) / "HushPlayer" / "_internal")
+            frozen_paths = AppPaths.resolve()
+
+        assert QCoreApplication.applicationName() == APP_NAME
+        assert frozen_paths.cache_dir == development_paths.cache_dir
+        cache_dir = development_paths.cache_dir.resolve()
+        assert cache_dir.is_absolute()
+        assert not is_within(
+            frozen_paths.cache_dir,
+            frozen_paths.bundled_resource_dir,
+        )
+        assert not is_within(cache_dir, PROJECT_ROOT)
+        assert not is_within(cache_dir, Path.cwd())
+        assert not is_within(cache_dir, Path(sys.executable).resolve().parent)
+        local_app_data = str(os.environ.get("LOCALAPPDATA") or "").strip()
+        if os.name == "nt" and local_app_data:
+            assert is_within(cache_dir, Path(local_app_data))
+    finally:
+        if previous_frozen is missing:
+            if hasattr(sys, "frozen"):
+                del sys.frozen
+        else:
+            sys.frozen = previous_frozen
+        if previous_meipass is missing:
+            if hasattr(sys, "_MEIPASS"):
+                del sys._MEIPASS
+        else:
+            sys._MEIPASS = previous_meipass
+        for name, value in previous_environment.items():
+            if value is None:
+                os.environ.pop(name, None)
+            else:
+                os.environ[name] = value
 
 
 def main() -> int:
+    test_standard_cache_identity()
     with tempfile.TemporaryDirectory(prefix="hushplayer_paths_") as temp_dir:
         root = Path(temp_dir)
         bundle = root / "bundle"

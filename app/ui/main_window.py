@@ -2695,6 +2695,29 @@ class SettingsDialog(QDialog):
         layout.addWidget(title)
         layout.addWidget(subtitle)
 
+        self.settings_scroll = QScrollArea(self)
+        self.settings_scroll.setObjectName("settingsScrollArea")
+        self.settings_scroll.setWidgetResizable(True)
+        self.settings_scroll.setVerticalScrollBarPolicy(
+            Qt.ScrollBarPolicy.ScrollBarAsNeeded
+        )
+        self.settings_scroll.setHorizontalScrollBarPolicy(
+            Qt.ScrollBarPolicy.ScrollBarAlwaysOff
+        )
+        self.settings_scroll.setFrameShape(QFrame.Shape.NoFrame)
+
+        self.settings_scroll_content = QWidget()
+        self.settings_scroll_content.setObjectName("settingsScrollContent")
+        self.settings_scroll_content.setSizePolicy(
+            QSizePolicy.Policy.Expanding,
+            QSizePolicy.Policy.Preferred,
+        )
+        self.settings_content_layout = QVBoxLayout(self.settings_scroll_content)
+        self.settings_content_layout.setContentsMargins(0, 0, 8, 0)
+        self.settings_content_layout.setSpacing(18)
+        self.settings_scroll.setWidget(self.settings_scroll_content)
+        layout.addWidget(self.settings_scroll, 1)
+
         playback_card = QFrame()
         playback_card.setObjectName("settingsCard")
         playback_layout = QVBoxLayout(playback_card)
@@ -2942,6 +2965,11 @@ class SettingsDialog(QDialog):
         self.audio_cache_path_label = QLabel()
         self.audio_cache_path_label.setObjectName("settingsHint")
         self.audio_cache_path_label.setWordWrap(True)
+        self.audio_cache_path_label.setSizePolicy(
+            QSizePolicy.Policy.Ignored,
+            QSizePolicy.Policy.Preferred,
+        )
+        self.audio_cache_path_label.setMinimumWidth(0)
         self.audio_cache_path_label.setTextInteractionFlags(
             Qt.TextInteractionFlag.TextSelectableByMouse
         )
@@ -2983,11 +3011,12 @@ class SettingsDialog(QDialog):
         )
         self.refresh_audio_cache_status()
 
-        layout.addWidget(playback_card)
-        layout.addWidget(immersive_card)
-        layout.addWidget(floating_card)
-        layout.addWidget(scan_card)
-        layout.addWidget(cache_card)
+        self.settings_content_layout.addWidget(playback_card)
+        self.settings_content_layout.addWidget(immersive_card)
+        self.settings_content_layout.addWidget(floating_card)
+        self.settings_content_layout.addWidget(scan_card)
+        self.settings_content_layout.addWidget(cache_card)
+        self.settings_content_layout.addStretch(1)
 
         button_row = QHBoxLayout()
         button_row.setContentsMargins(0, 4, 0, 0)
@@ -3007,7 +3036,42 @@ class SettingsDialog(QDialog):
 
         layout.addLayout(button_row)
 
+        self._settings_wheel_passthrough_controls = (
+            self.alpha_slider,
+            self.floating_color_combo,
+            self.floating_opacity_slider,
+            self.floating_font_slider,
+            self.floating_width_slider,
+            self.music_scan_import_mode_combo,
+        )
+        for control in self._settings_wheel_passthrough_controls:
+            control.installEventFilter(self)
+
         self.apply_style()
+
+    def eventFilter(self, watched, event) -> bool:
+        if (
+            event.type() == QEvent.Type.Wheel
+            and watched in getattr(self, "_settings_wheel_passthrough_controls", ())
+        ):
+            scroll_bar = self.settings_scroll.verticalScrollBar()
+            if scroll_bar.maximum() > scroll_bar.minimum():
+                pixel_delta = int(event.pixelDelta().y())
+                if pixel_delta:
+                    distance = pixel_delta
+                else:
+                    angle_delta = int(event.angleDelta().y())
+                    if not angle_delta:
+                        return super().eventFilter(watched, event)
+                    distance = int(
+                        angle_delta
+                        / 120
+                        * max(30, scroll_bar.singleStep() * 3)
+                    )
+                scroll_bar.setValue(scroll_bar.value() - distance)
+                event.accept()
+                return True
+        return super().eventFilter(watched, event)
 
     def apply_style(self) -> None:
         apply_dark_dialog_style(
@@ -3016,6 +3080,7 @@ class SettingsDialog(QDialog):
             "QDialog#settingsDialog QLabel { color: #b5bbc7; }"
             "QLabel#settingsDialogTitle { color: #ffffff; font-size: 26px; font-weight: 900; }"
             "QLabel#settingsDialogSubtitle { color: #8f98aa; font-size: 13px; }"
+            "QScrollArea#settingsScrollArea, QWidget#settingsScrollContent { background: transparent; border: none; }"
             "QFrame#settingsCard { background: #151922; border: 1px solid rgba(255,255,255,0.07); border-radius: 18px; }"
             "QLabel#settingsCardTitle { color: #ffffff; font-size: 16px; font-weight: 800; }"
             "QLabel#settingsHint { color: #8f98aa; font-size: 12px; }"
@@ -4195,6 +4260,7 @@ class MainWindow(QMainWindow):
         print("播放统计保存位置：", self.stats_file)
         print("封面缓存位置：", self.cover_cache_dir)
         print("歌词缓存位置：", self.lyrics_cache_dir)
+        print("音频缓存根目录：", self.online_audio_cache.cache_root)
         print("歌词绑定保存位置：", self.lyrics_bindings_file)
 
         audio_started_at = time.perf_counter()

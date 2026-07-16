@@ -7,7 +7,7 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
-from PySide6.QtCore import QStandardPaths
+from PySide6.QtCore import QCoreApplication, QStandardPaths
 
 
 APP_NAME = "HushPlayer"
@@ -34,6 +34,15 @@ def _resolved_environment_path(name: str) -> Path | None:
     return Path(value).expanduser().resolve()
 
 
+def ensure_qt_application_identity() -> None:
+    """Keep QStandardPaths stable in development and frozen runtimes."""
+
+    if QCoreApplication.organizationName() != APP_NAME:
+        QCoreApplication.setOrganizationName(APP_NAME)
+    if QCoreApplication.applicationName() != APP_NAME:
+        QCoreApplication.setApplicationName(APP_NAME)
+
+
 @dataclass(frozen=True, slots=True)
 class AppPaths:
     """Single source of truth for bundled and user-writable paths."""
@@ -47,6 +56,7 @@ class AppPaths:
 
     @classmethod
     def resolve(cls) -> "AppPaths":
+        ensure_qt_application_identity()
         frozen = bool(getattr(sys, "frozen", False))
         bundled_override = _resolved_environment_path(
             "HUSHPLAYER_BUNDLED_RESOURCE_DIR"
@@ -84,11 +94,16 @@ class AppPaths:
             location = QStandardPaths.writableLocation(
                 QStandardPaths.StandardLocation.CacheLocation
             )
-            cache_dir = (
-                Path(location).resolve()
-                if location
-                else application_data_dir / "cache"
-            )
+            if location:
+                cache_dir = Path(location).resolve()
+            elif os.name == "nt":
+                local_app_data = Path(
+                    os.environ.get("LOCALAPPDATA")
+                    or Path.home() / "AppData" / "Local"
+                )
+                cache_dir = (local_app_data / APP_NAME / "cache").resolve()
+            else:
+                cache_dir = application_data_dir / "cache"
 
         log_dir = _resolved_environment_path("HUSHPLAYER_LOG_DIR")
         if log_dir is None:
