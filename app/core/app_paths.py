@@ -9,9 +9,8 @@ from pathlib import Path
 
 from PySide6.QtCore import QCoreApplication, QStandardPaths
 
+from app.core.version import APP_NAME, APP_VERSION
 
-APP_NAME = "HushPlayer"
-APP_VERSION = "0.5.0-beta.1"
 
 USER_DATA_FILES = (
     "ignored_imports.json",

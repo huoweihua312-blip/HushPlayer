@@ -7,6 +7,7 @@ import time
 from PySide6.QtCore import QObject, QUrl, QUrlQuery, Signal
 from PySide6.QtNetwork import QNetworkAccessManager, QNetworkReply, QNetworkRequest
 
+from app.core.version import APP_USER_AGENT
 from app.models.media_item import MediaItem
 from app.services.lyrics_cache import LyricsCache
 from app.services.online_source_client import OnlineSourceClient
@@ -150,7 +151,10 @@ class OnlineLyricsService(QObject):
         url = QUrl("https://lrclib.net/api/search")
         url.setQuery(query)
         request = QNetworkRequest(url)
-        request.setRawHeader(b"User-Agent", b"HushPlayer/0.8 (lyrics client)")
+        request.setRawHeader(
+            b"User-Agent",
+            f"{APP_USER_AGENT} (lyrics client)".encode("ascii"),
+        )
         request.setRawHeader(b"Accept", b"application/json")
         reply = self.network.get(request)
         reply.finished.connect(lambda current=reply: self._on_lrclib_finished(current))

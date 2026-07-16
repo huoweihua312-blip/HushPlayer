@@ -7,6 +7,8 @@ from PySide6.QtCore import QObject, QUrl, Signal
 from PySide6.QtGui import QImage
 from PySide6.QtNetwork import QNetworkAccessManager, QNetworkReply, QNetworkRequest
 
+from app.core.version import APP_USER_AGENT
+
 
 class OnlineArtworkService(QObject):
     """Asynchronously fetch and cache the currently playing online cover."""
@@ -45,7 +47,10 @@ class OnlineArtworkService(QObject):
                 self.imageReady.emit(generation, track_key, data)
                 return generation
         request = QNetworkRequest(url)
-        request.setRawHeader(b"User-Agent", b"HushPlayer/0.8 (artwork client)")
+        request.setRawHeader(
+            b"User-Agent",
+            f"{APP_USER_AGENT} (artwork client)".encode("ascii"),
+        )
         reply = self.network.get(request)
         reply.finished.connect(lambda current=reply: self._finish(current))
         self._reply = reply

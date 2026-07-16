@@ -23,6 +23,7 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
 )
 
+from app.core.version import APP_USER_AGENT
 from app.services.online_source_client import OnlineSourceClient
 from app.services.source_registry import MAX_SOURCE_BYTES, SourceRegistryError, SourceRegistryManager
 
@@ -311,7 +312,10 @@ class OnlineSearchPage(QFrame):
             QNetworkRequest.Attribute.RedirectPolicyAttribute,
             QNetworkRequest.RedirectPolicy.NoLessSafeRedirectPolicy,
         )
-        request.setRawHeader(b"User-Agent", b"HushPlayer/1.0 custom-source-register")
+        request.setRawHeader(
+            b"User-Agent",
+            f"{APP_USER_AGENT} custom-source-register".encode("ascii"),
+        )
         request.setRawHeader(b"Accept", b"application/javascript, application/json, text/plain, */*")
         reply = self.network_manager.get(request)
         self._source_download_reply = reply

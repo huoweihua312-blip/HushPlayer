@@ -14,6 +14,7 @@ from mutagen import File as MutagenFile
 from app.models.media_item import MediaItem
 from app.models.playback_queue_item import PlaybackQueueItem
 from app.core.app_paths import AppPaths
+from app.core.version import APP_USER_AGENT
 from app.services.lyrics_cache import LyricsCache
 from app.services.online_artwork_service import OnlineArtworkService
 from app.services.online_audio_cache import OnlineAudioCacheService
@@ -3961,7 +3962,7 @@ class MainWindow(QMainWindow):
         self.media_interactions = MediaInteractionController(self)
 
         self.http_headers = {
-            "User-Agent": "HushPlayer/0.5.4.3 (local music player prototype)",
+            "User-Agent": f"{APP_USER_AGENT} (local music player)",
             "Accept": "application/json, image/*",
         }
 
@@ -10857,7 +10858,7 @@ class MainWindow(QMainWindow):
             return cached["candidates"], query
 
         headers = {
-            "User-Agent": "HushPlayer/0.5 metadata matcher (local personal music player)",
+            "User-Agent": f"{APP_USER_AGENT} metadata matcher (local personal music player)",
             "Accept": "application/json",
         }
 
