@@ -7,6 +7,7 @@ import shutil
 import sys
 import time
 from copy import deepcopy
+from dataclasses import replace
 from pathlib import Path
 
 import requests
@@ -28,6 +29,12 @@ from app.services.remote_track_store import RemoteTrackStore, RemoteTrackStoreEr
 from app.services.source_registry import SourceRegistryManager
 from app.services.unified_search_service import UnifiedSearchService
 from app.ui.custom_source_manager_page import CustomSourceManagerPage
+from app.ui.immersive_appearance import (
+    APPEARANCE_SETTING_KEYS,
+    ImmersiveAppearanceConfig,
+    ImmersiveAppearanceDialog,
+    ImmersiveBackgroundView,
+)
 from app.ui.library_page import LibraryPage
 from app.ui.media_interaction_controller import MediaInteractionController
 from app.ui.search_page import SearchPage
@@ -44,7 +51,6 @@ from PySide6.QtWidgets import (
     QDialog,
     QFileDialog,
     QFrame,
-    QGraphicsBlurEffect,
     QHBoxLayout,
     QInputDialog,
     QLabel,
@@ -833,6 +839,13 @@ class LyricsView(QScrollArea):
         self.scroll_animation.setDuration(520)
         self.scroll_animation.setEasingCurve(QEasingCurve.Type.OutCubic)
 
+        self.layout_refresh_timer = QTimer(self)
+        self.layout_refresh_timer.setSingleShot(True)
+        self.layout_refresh_timer.timeout.connect(self._restore_scroll_after_layout)
+        self._pending_layout_index = -1
+        self._pending_scroll_ratio = 0.0
+        self.layout_refresh_count = 0
+
         self.set_placeholder("这里会显示歌词", "支持本地 .lrc 歌词滚动")
 
     def clear_content(self) -> None:
@@ -970,6 +983,12 @@ class LyricsView(QScrollArea):
 
         if index < 0 or index >= len(self.labels):
             return
+
+        self.scroll_to_index(index, animate=True)
+
+    def scroll_to_index(self, index: int, *, animate: bool) -> None:
+        if index < 0 or index >= len(self.labels):
+            return
         self.content.layout().activate()
 
         current_label = self.labels[index]
@@ -979,9 +998,41 @@ class LyricsView(QScrollArea):
         target_value = max(0, min(target_value, self.verticalScrollBar().maximum()))
 
         self.scroll_animation.stop()
-        self.scroll_animation.setStartValue(self.verticalScrollBar().value())
-        self.scroll_animation.setEndValue(target_value)
-        self.scroll_animation.start()
+        if animate:
+            self.scroll_animation.setStartValue(self.verticalScrollBar().value())
+            self.scroll_animation.setEndValue(target_value)
+            self.scroll_animation.start()
+        else:
+            self.verticalScrollBar().setValue(target_value)
+
+    def refresh_layout_preserving_current(self) -> None:
+        scroll_bar = self.verticalScrollBar()
+        maximum = max(0, scroll_bar.maximum())
+        self._pending_layout_index = self.current_index
+        self._pending_scroll_ratio = (
+            scroll_bar.value() / maximum if maximum > 0 else 0.0
+        )
+        self.scroll_animation.stop()
+        self.lyrics_layout.invalidate()
+        for label in self.labels:
+            label.updateGeometry()
+        self.content.updateGeometry()
+        self.layout_refresh_timer.start(0)
+
+    def _restore_scroll_after_layout(self) -> None:
+        self.lyrics_layout.activate()
+        self.content.adjustSize()
+        self.layout_refresh_count += 1
+        if (
+            not self.plain_text_mode
+            and self._pending_layout_index == self.current_index
+            and 0 <= self.current_index < len(self.labels)
+        ):
+            self.scroll_to_index(self.current_index, animate=False)
+            return
+        scroll_bar = self.verticalScrollBar()
+        target = round(max(0, scroll_bar.maximum()) * self._pending_scroll_ratio)
+        scroll_bar.setValue(target)
 
 
 class CoverSearchWorker(QObject):
@@ -2368,6 +2419,9 @@ class SettingsDialog(QDialog):
         self.setMinimumWidth(520)
 
         settings = self.main_window.get_hush_settings()
+        self.immersive_appearance_config = ImmersiveAppearanceConfig.from_settings(
+            settings
+        )
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(24, 22, 24, 22)
@@ -2430,8 +2484,16 @@ class SettingsDialog(QDialog):
         immersive_title = QLabel("沉浸歌词")
         immersive_title.setObjectName("settingsCardTitle")
 
-        self.cover_background_checkbox = QCheckBox("默认使用封面模糊背景")
-        self.cover_background_checkbox.setChecked(bool(settings.get("immersive_cover_background_enabled", True)))
+        self.immersive_background_mode_combo = QComboBox()
+        self.immersive_background_mode_combo.addItem("默认 / 纯色背景", "default")
+        self.immersive_background_mode_combo.addItem("当前歌曲封面", "cover")
+        self.immersive_background_mode_combo.addItem("自定义本地图片", "custom")
+        immersive_mode_index = self.immersive_background_mode_combo.findData(
+            self.immersive_appearance_config.background_mode
+        )
+        self.immersive_background_mode_combo.setCurrentIndex(
+            max(0, immersive_mode_index)
+        )
 
         self.auto_hide_checkbox = QCheckBox("默认自动隐藏沉浸歌词 UI")
         self.auto_hide_checkbox.setChecked(bool(settings.get("immersive_auto_hide_ui", True)))
@@ -2444,20 +2506,25 @@ class SettingsDialog(QDialog):
         self.alpha_label.setObjectName("settingsValueLabel")
 
         self.alpha_slider = QSlider(Qt.Orientation.Horizontal)
-        self.alpha_slider.setRange(35, 100)
-        self.alpha_slider.setValue(int(settings.get("immersive_background_alpha", 68)))
+        self.alpha_slider.setRange(0, 90)
+        self.alpha_slider.setValue(self.immersive_appearance_config.darkness)
         self.alpha_slider.valueChanged.connect(self.update_alpha_label)
 
-        alpha_row.addWidget(QLabel("遮罩不透明度"))
+        alpha_row.addWidget(QLabel("背景暗度"))
         alpha_row.addWidget(self.alpha_slider, 1)
         alpha_row.addWidget(self.alpha_label)
 
         self.update_alpha_label(self.alpha_slider.value())
 
         immersive_layout.addWidget(immersive_title)
-        immersive_layout.addWidget(self.cover_background_checkbox)
+        immersive_layout.addWidget(QLabel("背景模式"))
+        immersive_layout.addWidget(self.immersive_background_mode_combo)
         immersive_layout.addWidget(self.auto_hide_checkbox)
         immersive_layout.addLayout(alpha_row)
+        immersive_hint = QLabel("自定义图片、模糊、透明度、填充方式和歌词字号可在沉浸歌词右上角“背景设置”中调整。")
+        immersive_hint.setWordWrap(True)
+        immersive_hint.setObjectName("settingsHint")
+        immersive_layout.addWidget(immersive_hint)
 
         floating_card = QFrame()
         floating_card.setObjectName("settingsCard")
@@ -2917,13 +2984,18 @@ class SettingsDialog(QDialog):
         self.music_scan_folder_list.takeItem(row)
 
     def collect_settings_updates(self) -> dict:
-        return {
+        self.immersive_appearance_config = replace(
+            self.immersive_appearance_config,
+            background_mode=str(
+                self.immersive_background_mode_combo.currentData() or "default"
+            ),
+            darkness=int(self.alpha_slider.value()),
+        )
+        updates = {
             "auto_check_updates_on_startup": self.auto_update_checkbox.isChecked(),
             "update_check_delay_seconds": int(self.update_delay_combo.currentData()),
             "restore_last_playback": self.restore_checkbox.isChecked(),
-            "immersive_cover_background_enabled": self.cover_background_checkbox.isChecked(),
             "immersive_auto_hide_ui": self.auto_hide_checkbox.isChecked(),
-            "immersive_background_alpha": int(self.alpha_slider.value()),
             "floating_lyrics_color": self.floating_color_combo.currentData(),
             "floating_lyrics_opacity": int(self.floating_opacity_slider.value()),
             "floating_lyrics_font_size": int(self.floating_font_slider.value()),
@@ -2933,6 +3005,8 @@ class SettingsDialog(QDialog):
             "auto_scan_music_folders_on_startup": self.auto_scan_checkbox.isChecked(),
             "music_scan_import_mode": self.music_scan_import_mode_combo.currentData(),
         }
+        updates.update(self.immersive_appearance_config.to_settings())
+        return updates
 
     def on_update_check_started(self, _manual: bool) -> None:
         self.check_update_button.setText("正在检查更新…")
@@ -3221,14 +3295,13 @@ class ImmersiveLyricsWindow(QWidget):
 
         self.main_window = main_window
         self.transparent_mode = True
-        self.cover_background_enabled = bool(
-            main_window.get_user_setting("immersive_cover_background_enabled", True)
+        self.appearance_config = ImmersiveAppearanceConfig.from_settings(
+            main_window.get_hush_settings()
         )
-        self.background_alpha = int(
-            main_window.get_user_setting("immersive_background_alpha", 68)
-        )
-        self.cover_background_pixmap = None
+        self.cover_background_enabled = self.appearance_config.background_mode == "cover"
+        self.background_alpha = self.appearance_config.darkness
         self.ui_visible = True
+        self.appearance_dialog: ImmersiveAppearanceDialog | None = None
         self.auto_hide_enabled = bool(
             main_window.get_user_setting("immersive_auto_hide_ui", True)
         )
@@ -3247,14 +3320,18 @@ class ImmersiveLyricsWindow(QWidget):
         self.hide_ui_timer.setSingleShot(True)
         self.hide_ui_timer.timeout.connect(self.hide_controls_if_needed)
 
-        self.cover_background_label = QLabel(self)
-        self.cover_background_label.setObjectName("immersiveCoverBackground")
-        self.cover_background_label.setScaledContents(True)
-        self.cover_background_label.hide()
+        self.font_scale_timer = QTimer(self)
+        self.font_scale_timer.setSingleShot(True)
+        self.font_scale_timer.setInterval(45)
+        self.font_scale_timer.timeout.connect(self.apply_pending_font_scale)
 
-        self.cover_blur_effect = QGraphicsBlurEffect(self.cover_background_label)
-        self.cover_blur_effect.setBlurRadius(42)
-        self.cover_background_label.setGraphicsEffect(self.cover_blur_effect)
+        self.background_view = ImmersiveBackgroundView(self)
+        self.background_view.setGeometry(self.rect())
+        self.background_view.set_config(self.appearance_config)
+        self.background_view.availabilityChanged.connect(
+            self.on_background_availability_changed
+        )
+        self.background_view.lower()
 
         outer_layout = QVBoxLayout(self)
         outer_layout.setContentsMargins(0, 0, 0, 0)
@@ -3314,10 +3391,10 @@ class ImmersiveLyricsWindow(QWidget):
         self.transparent_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.transparent_btn.clicked.connect(self.toggle_transparent_mode)
 
-        self.cover_bg_btn = QPushButton("切换纯色")
+        self.cover_bg_btn = QPushButton("背景设置")
         self.cover_bg_btn.setObjectName("immersiveButton")
         self.cover_bg_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.cover_bg_btn.clicked.connect(self.toggle_cover_background)
+        self.cover_bg_btn.clicked.connect(self.open_appearance_settings)
 
         self.auto_hide_btn = QPushButton("常显 UI")
         self.auto_hide_btn.setObjectName("immersiveButton")
@@ -3348,11 +3425,11 @@ class ImmersiveLyricsWindow(QWidget):
         alpha_box.setContentsMargins(0, 0, 0, 0)
         alpha_box.setSpacing(10)
 
-        self.alpha_label = QLabel("遮罩不透明度 68%")
+        self.alpha_label = QLabel("背景暗度 68%")
         self.alpha_label.setObjectName("immersiveOpacityLabel")
 
         self.alpha_slider = TransparentOpacitySlider()
-        self.alpha_slider.setRange(35, 100)
+        self.alpha_slider.setRange(0, 90)
         self.alpha_slider.setValue(self.background_alpha)
         self.alpha_slider.setFixedWidth(240)
         self.alpha_slider.setAutoFillBackground(False)
@@ -3453,26 +3530,40 @@ class ImmersiveLyricsWindow(QWidget):
 
     def apply_immersive_style(self) -> None:
         self.setWindowOpacity(1.0)
+        config = self.appearance_config
+        self.background_alpha = config.darkness
+        self.cover_background_enabled = config.background_mode == "cover"
+        font_ratio = config.lyrics_font_scale / 100.0
+        normal_font = 18.0 * font_ratio
+        near_font = 33.0 * font_ratio
+        current_font = 88.5 * font_ratio
+        placeholder_title_font = 21.0 * font_ratio
+        placeholder_subtitle_font = 11.25 * font_ratio
+        normal_padding = max(18, round(42 * font_ratio))
+        near_padding = max(28, round(70 * font_ratio))
+        current_padding = max(42, round(104 * font_ratio))
 
         if self.transparent_mode:
-            alpha = max(0, min(255, int(self.background_alpha / 100 * 255)))
-            background = f"rgba(5, 6, 9, {alpha})"
             button_background = "rgba(31, 35, 44, 190)"
-            mode_name = "封面模糊背景" if self.cover_background_enabled else "半透明纯色背景"
-            footer_text = f"移动鼠标显示控制栏 · Esc 退出沉浸 · 当前：{mode_name} · 遮罩不透明度 {self.background_alpha}%"
+            mode_name = {
+                "default": "默认 / 纯色背景",
+                "cover": "当前歌曲封面",
+                "custom": "自定义图片",
+            }.get(config.background_mode, "默认 / 纯色背景")
+            footer_text = (
+                f"移动鼠标显示控制栏 · Esc 退出沉浸 · 当前：{mode_name}"
+                f" · 背景暗度 {config.darkness}% · 歌词字号 {config.lyrics_font_scale}%"
+            )
             button_text = "切换纯黑"
             slider_enabled = True
         else:
-            background = "#050609"
             button_background = "#1f232c"
-            footer_text = "移动鼠标显示控制栏 · Esc 退出沉浸 · 当前：纯黑背景"
+            footer_text = (
+                "移动鼠标显示控制栏 · Esc 退出沉浸 · 当前：纯黑背景"
+                f" · 歌词字号 {config.lyrics_font_scale}%"
+            )
             button_text = "切换半透明"
             slider_enabled = False
-
-        if self.cover_background_enabled:
-            cover_button_text = "切换纯色"
-        else:
-            cover_button_text = "切换封面"
 
         if self.auto_hide_enabled:
             auto_hide_text = "常显 UI"
@@ -3481,14 +3572,16 @@ class ImmersiveLyricsWindow(QWidget):
 
         self.footer.setText(footer_text)
         self.transparent_btn.setText(button_text)
-        self.cover_bg_btn.setText(cover_button_text)
+        self.cover_bg_btn.setText("背景设置")
         self.auto_hide_btn.setText(auto_hide_text)
-        self.alpha_label.setText(f"遮罩不透明度 {self.background_alpha}%")
+        self.alpha_label.setText(f"背景暗度 {config.darkness}%")
         self.alpha_slider.setEnabled(slider_enabled)
+        self.background_view.set_transparent_mode(self.transparent_mode)
+        self.background_view.set_config(config)
 
         self.setStyleSheet(
             "QWidget#immersiveLyricsWindow { background: transparent; color: #ffffff; font-family: 'Microsoft YaHei UI'; }"
-            f"QFrame#immersiveBackgroundPanel {{ background: {background}; }}"
+            "QFrame#immersiveBackgroundPanel { background: transparent; }"
             "QFrame#immersiveControlHeader { background: rgba(0, 0, 0, 10); border: none; border-radius: 16px; }"
             "QLabel#immersiveSongTitle { color: #ffffff; font-size: 30px; font-weight: 900; }"
             "QLabel#immersiveSongArtist { color: #d0d5df; font-size: 15px; }"
@@ -3501,18 +3594,42 @@ class ImmersiveLyricsWindow(QWidget):
             "QSlider#immersiveOpacitySlider { background: transparent; border: none; }"
             "QScrollArea#immersiveLyricsView, QScrollArea#lyricsView { background: transparent; border: none; }"
             "QWidget#lyricsContent { background: transparent; }"
-            "QLabel#lyricPlaceholderTitle { color: #ffffff; font-size: 28px; font-weight: 900; }"
-            "QLabel#lyricPlaceholderSubtitle { color: #c1c7d2; font-size: 15px; }"
-            "QLabel#lyricLine { color: rgba(215,222,235,90); font-size: 24px; font-weight: 600; padding: 42px 10px; }"
-            "QLabel#lyricLine[lyricState='near'] { color: rgba(236,240,248,155); font-size: 44px; font-weight: 800; padding: 70px 10px; }"
-            "QLabel#lyricLine[lyricState='current'] { color: #ffffff; font-size: 118px; font-weight: 950; padding: 104px 10px; }"
+            f"QLabel#lyricPlaceholderTitle {{ color: #ffffff; font-size: {placeholder_title_font:.2f}pt; font-weight: 900; }}"
+            f"QLabel#lyricPlaceholderSubtitle {{ color: #c1c7d2; font-size: {placeholder_subtitle_font:.2f}pt; }}"
+            f"QLabel#lyricLine {{ color: rgba(215,222,235,90); font-size: {normal_font:.2f}pt; font-weight: 600; padding: {normal_padding}px 10px; }}"
+            f"QLabel#lyricLine[lyricState='near'] {{ color: rgba(236,240,248,155); font-size: {near_font:.2f}pt; font-weight: 800; padding: {near_padding}px 10px; }}"
+            f"QLabel#lyricLine[lyricState='current'] {{ color: #ffffff; font-size: {current_font:.2f}pt; font-weight: 950; padding: {current_padding}px 10px; }}"
         )
 
-        self.refresh_cover_background()
-
     def change_background_alpha(self, value: int) -> None:
-        self.background_alpha = int(value)
-        self.apply_immersive_style()
+        config = replace(self.appearance_config, darkness=int(value))
+        self.apply_appearance_config(config, persist=True)
+
+    def refresh_appearance_control_text(self) -> None:
+        config = self.appearance_config
+        if self.transparent_mode:
+            mode_name = {
+                "default": "默认 / 纯色背景",
+                "cover": "当前歌曲封面",
+                "custom": "自定义图片",
+            }.get(config.background_mode, "默认 / 纯色背景")
+            footer_text = (
+                f"移动鼠标显示控制栏 · Esc 退出沉浸 · 当前：{mode_name}"
+                f" · 背景暗度 {config.darkness}% · 歌词字号 {config.lyrics_font_scale}%"
+            )
+            self.transparent_btn.setText("切换纯黑")
+            self.alpha_slider.setEnabled(True)
+        else:
+            footer_text = (
+                "移动鼠标显示控制栏 · Esc 退出沉浸 · 当前：纯黑背景"
+                f" · 歌词字号 {config.lyrics_font_scale}%"
+            )
+            self.transparent_btn.setText("切换半透明")
+            self.alpha_slider.setEnabled(False)
+        self.footer.setText(footer_text)
+        self.cover_bg_btn.setText("背景设置")
+        self.auto_hide_btn.setText("常显 UI" if self.auto_hide_enabled else "隐藏 UI")
+        self.alpha_label.setText(f"背景暗度 {config.darkness}%")
 
     def toggle_transparent_mode(self) -> None:
         self.transparent_mode = not self.transparent_mode
@@ -3520,57 +3637,78 @@ class ImmersiveLyricsWindow(QWidget):
         self.show_controls_temporarily()
 
     def toggle_cover_background(self) -> None:
-        self.cover_background_enabled = not self.cover_background_enabled
-        self.apply_immersive_style()
+        self.open_appearance_settings()
+
+    def open_appearance_settings(self) -> None:
+        dialog = self.appearance_dialog
+        if dialog is not None and dialog.isVisible():
+            dialog.raise_()
+            dialog.activateWindow()
+            return
+        if self.appearance_config.background_mode == "custom":
+            self.background_view.revalidate_custom_image()
+        dialog = ImmersiveAppearanceDialog(self.appearance_config, self)
+        dialog.configChanged.connect(
+            lambda config: self.apply_appearance_config(config, persist=True)
+        )
+        dialog.finished.connect(lambda _result: self._clear_appearance_dialog(dialog))
+        dialog.set_availability(
+            not self.background_view.fallback_active,
+            self.background_view.status_text,
+        )
+        self.appearance_dialog = dialog
+        dialog.show()
+        dialog.raise_()
+        dialog.activateWindow()
         self.show_controls_temporarily()
 
-    def update_background_cover(self, pixmap) -> None:
-        if pixmap is None or pixmap.isNull():
-            self.cover_background_pixmap = None
-        else:
-            self.cover_background_pixmap = pixmap.copy()
+    def _clear_appearance_dialog(self, dialog: ImmersiveAppearanceDialog) -> None:
+        if self.appearance_dialog is dialog:
+            self.appearance_dialog = None
+        dialog.deleteLater()
 
-        self.refresh_cover_background()
+    def on_background_availability_changed(self, available: bool, message: str) -> None:
+        dialog = self.appearance_dialog
+        if dialog is not None:
+            dialog.set_availability(available, message)
+
+    def apply_appearance_config(
+        self,
+        config: ImmersiveAppearanceConfig,
+        *,
+        persist: bool,
+    ) -> None:
+        if not isinstance(config, ImmersiveAppearanceConfig):
+            return
+        previous = self.appearance_config
+        font_changed = previous.lyrics_font_scale != config.lyrics_font_scale
+        mode_changed = previous.background_mode != config.background_mode
+        self.appearance_config = config
+        self.background_alpha = config.darkness
+        self.cover_background_enabled = config.background_mode == "cover"
+        self.alpha_slider.blockSignals(True)
+        self.alpha_slider.setValue(config.darkness)
+        self.alpha_slider.blockSignals(False)
+        self.background_view.set_config(config)
+        if mode_changed:
+            self.apply_immersive_style()
+        elif not font_changed:
+            self.refresh_appearance_control_text()
+        if font_changed:
+            self.font_scale_timer.start()
+        if persist:
+            self.main_window.save_hush_settings(config.to_settings())
+
+    def apply_pending_font_scale(self) -> None:
+        self.apply_immersive_style()
+        self.lyrics_view.refresh_layout_preserving_current()
+
+    def update_background_cover(self, track_key: str, pixmap) -> None:
+        self.background_view.set_cover_pixmap(track_key, pixmap)
 
     def refresh_cover_background(self) -> None:
-        if not hasattr(self, "cover_background_label"):
-            return
-
-        if (
-            not self.transparent_mode
-            or not self.cover_background_enabled
-            or self.cover_background_pixmap is None
-            or self.cover_background_pixmap.isNull()
-        ):
-            self.cover_background_label.hide()
-            return
-
-        target_size = self.size()
-
-        if target_size.width() <= 0 or target_size.height() <= 0:
-            self.cover_background_label.hide()
-            return
-
-        scaled = self.cover_background_pixmap.scaled(
-            target_size,
-            Qt.AspectRatioMode.KeepAspectRatioByExpanding,
-            Qt.TransformationMode.SmoothTransformation,
-        )
-
-        crop_x = max(0, (scaled.width() - target_size.width()) // 2)
-        crop_y = max(0, (scaled.height() - target_size.height()) // 2)
-
-        cropped = scaled.copy(
-            crop_x,
-            crop_y,
-            target_size.width(),
-            target_size.height(),
-        )
-
-        self.cover_background_label.setGeometry(self.rect())
-        self.cover_background_label.setPixmap(cropped)
-        self.cover_background_label.show()
-        self.cover_background_label.lower()
+        self.background_view.setGeometry(self.rect())
+        self.background_view.lower()
         self.background_panel.raise_()
 
     def resizeEvent(self, event) -> None:
@@ -3634,12 +3772,18 @@ class ImmersiveLyricsWindow(QWidget):
 
     def showEvent(self, event) -> None:
         super().showEvent(event)
+        self.refresh_cover_background()
         self.show_controls_temporarily()
 
     def closeEvent(self, event) -> None:
         self.setWindowOpacity(1.0)
         self.setCursor(Qt.CursorShape.ArrowCursor)
         self.hide_ui_timer.stop()
+        self.font_scale_timer.stop()
+        self.background_view.shutdown()
+        if self.appearance_dialog is not None:
+            self.appearance_dialog.close()
+            self.appearance_dialog = None
 
         if getattr(self.main_window, "immersive_lyrics_window", None) is self:
             self.main_window.immersive_lyrics_window = None
@@ -6795,21 +6939,38 @@ class MainWindow(QMainWindow):
 
         return str(title), f"{artist} · {album}", status or "歌词状态未知"
 
-    def get_immersive_background_pixmap(self, playing_path: str | None):
+    def get_immersive_track_key(self, playing_path: str | None = None) -> str:
         current = getattr(self, "current_media_item", None)
         if isinstance(current, MediaItem) and current.media_type == "online":
+            return f"online:{current.stable_identity}"
+        normalized_path = self.normalize_song_path(
+            playing_path
+            if playing_path is not None
+            else getattr(self, "current_song_path", "")
+        )
+        return f"local:{normalized_path}" if normalized_path else ""
+
+    def get_immersive_background_pixmap(self, playing_path: str | None):
+        current = getattr(self, "current_media_item", None)
+        track_key = self.get_immersive_track_key(playing_path)
+        if isinstance(current, MediaItem) and current.media_type == "online":
             try:
-                pixmap = self.cover_label.pixmap()
-                return pixmap if pixmap and not pixmap.isNull() else None
+                if getattr(self, "_displayed_cover_track_key", "") == track_key:
+                    pixmap = self.cover_label.pixmap()
+                    return pixmap if pixmap and not pixmap.isNull() else None
             except Exception:
-                return None
+                pass
+            return None
         normalized_path = self.normalize_song_path(playing_path)
 
         if not normalized_path:
             return None
 
         try:
-            if hasattr(self, "cover_label"):
+            if (
+                hasattr(self, "cover_label")
+                and getattr(self, "_displayed_cover_track_key", "") == track_key
+            ):
                 current_pixmap = self.cover_label.pixmap()
 
                 if current_pixmap and not current_pixmap.isNull():
@@ -6860,15 +7021,24 @@ class MainWindow(QMainWindow):
 
         return None
 
+    def sync_immersive_background(self) -> None:
+        immersive_window = getattr(self, "immersive_lyrics_window", None)
+        if immersive_window is None:
+            return
+        playing_path = self.normalize_song_path(getattr(self, "current_song_path", ""))
+        track_key = self.get_immersive_track_key(playing_path)
+        immersive_window.update_background_cover(
+            track_key,
+            self.get_immersive_background_pixmap(playing_path),
+        )
+
     def sync_immersive_lyrics(self) -> None:
         if self.immersive_lyrics_window is None:
             return
         title, artist_album, status = self.get_playing_song_display_data()
         self.immersive_lyrics_window.update_song_info(title, artist_album, status)
         playing_path = self.normalize_song_path(self.current_song_path)
-        self.immersive_lyrics_window.update_background_cover(
-            self.get_immersive_background_pixmap(playing_path)
-        )
+        self.sync_immersive_background()
         current = getattr(self, "current_media_item", None)
         if isinstance(current, MediaItem) and current.media_type == "online":
             if self.displayed_lyrics_track_key != current.stable_identity:
@@ -11296,20 +11466,13 @@ class MainWindow(QMainWindow):
         immersive_window = getattr(self, "immersive_lyrics_window", None)
 
         if immersive_window is not None:
-            immersive_window.cover_background_enabled = bool(
-                self.get_user_setting("immersive_cover_background_enabled", True)
-            )
             immersive_window.auto_hide_enabled = bool(
                 self.get_user_setting("immersive_auto_hide_ui", True)
             )
-            immersive_window.background_alpha = int(
-                self.get_user_setting("immersive_background_alpha", 68)
+            immersive_window.apply_appearance_config(
+                ImmersiveAppearanceConfig.from_settings(self.get_hush_settings()),
+                persist=False,
             )
-
-            if hasattr(immersive_window, "alpha_slider"):
-                immersive_window.alpha_slider.blockSignals(True)
-                immersive_window.alpha_slider.setValue(immersive_window.background_alpha)
-                immersive_window.alpha_slider.blockSignals(False)
 
             if immersive_window.auto_hide_enabled:
                 immersive_window.show_controls_temporarily()
@@ -12718,7 +12881,6 @@ class MainWindow(QMainWindow):
         settings["play_mode"] = play_mode
 
         integer_defaults = {
-            "immersive_background_alpha": 68,
             "floating_lyrics_opacity": 100,
             "floating_lyrics_font_size": 42,
             "floating_lyrics_width": 980,
@@ -12733,6 +12895,11 @@ class MainWindow(QMainWindow):
             except (TypeError, ValueError):
                 print(f"设置项 {key} 类型无效，使用默认值 {default_value}。")
                 settings[key] = default_value
+
+        if APPEARANCE_SETTING_KEYS.intersection(settings):
+            settings.update(
+                ImmersiveAppearanceConfig.from_settings(settings).to_settings()
+            )
 
         if "auto_check_updates_on_startup" in settings and not isinstance(
             settings["auto_check_updates_on_startup"],
@@ -13965,6 +14132,8 @@ class MainWindow(QMainWindow):
         self.cover_label.clear()
         self.cover_label.setPixmap(QPixmap())
         self.cover_label.setText("Hush")
+        self._displayed_cover_track_key = ""
+        self.sync_immersive_background()
 
     def cleanup_thread_reference(self, thread: QThread, kind: str) -> None:
         try:
@@ -14679,6 +14848,8 @@ class MainWindow(QMainWindow):
     def show_cover_pixmap(self, pixmap: QPixmap) -> None:
         self.cover_label.setText("")
         self.cover_label.setPixmap(pixmap)
+        self._displayed_cover_track_key = self.get_immersive_track_key()
+        self.sync_immersive_background()
 
     def extract_album_cover(self, path: Path) -> bytes | None:
         try:

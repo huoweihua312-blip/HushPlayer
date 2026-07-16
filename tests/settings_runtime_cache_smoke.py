@@ -225,12 +225,49 @@ def assert_load_compatibility(window: MainWindow, root: Path) -> None:
         assert loaded["volume"] == 65
         assert loaded["play_mode"] == "list_loop"
         assert loaded["immersive_background_alpha"] == 68
+        assert loaded["immersive_background_mode"] == "cover"
+        assert loaded["immersive_background_blur"] == 40
+        assert loaded["immersive_background_darkness"] == 68
+        assert loaded["immersive_background_image_opacity"] == 100
+        assert loaded["immersive_background_fill_mode"] == "cover"
+        assert loaded["immersive_lyrics_font_scale"] == 100
         assert loaded["floating_lyrics_opacity"] == 100
         assert loaded["floating_lyrics_font_size"] == 42
         assert loaded["floating_lyrics_width"] == 980
         assert loaded["floating_lyrics_height"] == 135
         assert loaded["music_scan_folders"] == []
         assert loaded["unknown_future_field"] == {"nested": [1, 2, 3]}
+
+        appearance_path = cases_dir / "appearance.json"
+        write_json(
+            appearance_path,
+            {
+                "volume": 65,
+                "play_mode": "list_loop",
+                "immersive_background_mode": "custom",
+                "immersive_background_custom_path": "C:/missing/background.webp",
+                "immersive_background_blur": 99,
+                "immersive_background_darkness": -5,
+                "immersive_background_image_opacity": 500,
+                "immersive_background_fill_mode": "contain",
+                "immersive_lyrics_font_scale": 113,
+                "immersive_cover_background_enabled": True,
+                "immersive_background_alpha": 88,
+                "appearance_future_field": "保留",
+            },
+        )
+        window.settings_file = appearance_path
+        loaded = window.load_settings()
+        assert loaded["immersive_background_mode"] == "custom"
+        assert loaded["immersive_background_custom_path"] == "C:/missing/background.webp"
+        assert loaded["immersive_background_blur"] == 40
+        assert loaded["immersive_background_darkness"] == 0
+        assert loaded["immersive_background_image_opacity"] == 100
+        assert loaded["immersive_background_fill_mode"] == "contain"
+        assert loaded["immersive_lyrics_font_scale"] == 115
+        assert loaded["immersive_cover_background_enabled"] is False
+        assert loaded["immersive_background_alpha"] == 0
+        assert loaded["appearance_future_field"] == "保留"
 
         old_version_path = cases_dir / "old_version.json"
         write_json(
