@@ -15,7 +15,7 @@ VSVersionInfo(
         '040904B0',
         [
           StringStruct('CompanyName', 'HushPlayer'),
-          StringStruct('FileDescription', 'HushPlayer Debug'),
+          StringStruct('FileDescription', 'HushPlayer'),
           StringStruct('FileVersion', '0.5.0-beta.1'),
           StringStruct('InternalName', 'HushPlayer'),
           StringStruct('LegalCopyright', 'HushPlayer contributors'),
