@@ -547,6 +547,18 @@ class AppUpdateService(QObject):
             self._download_failure = failure
             reply.abort()
             return
+
+        status = reply.attribute(
+            QNetworkRequest.Attribute.HttpStatusCodeAttribute
+        )
+        try:
+            status_code = int(status or 0)
+        except (TypeError, ValueError):
+            status_code = 0
+
+        if 300 <= status_code < 400:
+            return
+
         content_length = bytes(reply.rawHeader("Content-Length")).decode(
             "ascii",
             errors="ignore",

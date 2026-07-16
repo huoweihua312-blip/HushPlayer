@@ -50,6 +50,9 @@ class FixtureServer:
                 body = bytes(route.get("body", b""))
                 status = int(route.get("status", 200))
                 self.send_response(status)
+                location = route.get("location")
+                if location:
+                    self.send_header("Location", str(location))
                 self.send_header(
                     "Content-Type",
                     str(route.get("content_type", "application/octet-stream")),
@@ -370,6 +373,35 @@ def service_checks(root: Path, server: FixtureServer, setup: bytes) -> None:
     assert not stale.exists()
     assert unrelated.read_bytes() == b"keep"
     assert user_sentinel.read_text(encoding="utf-8") == '{"preserved": true}'
+
+    # A GitHub-style redirect can report a Content-Length that belongs
+    # to the redirect response rather than to the final installer.
+    server.routes["/setup.exe"] = {
+        "body": setup,
+        "content_type": "application/octet-stream",
+    }
+    server.routes["/redirect-setup.exe"] = {
+        "status": 302,
+        "location": f"{server.base_url}/setup.exe",
+        "body": b"",
+        "content_length": 0,
+    }
+    redirect_document = manifest_document(
+        f"{server.base_url}/redirect-setup.exe",
+        setup,
+    )
+    redirect_manifest = parse_update_manifest(
+        encoded_manifest(redirect_document),
+        allow_insecure_localhost=True,
+    )
+    before_failure_count = len(download_failures)
+    before_verified_count = len(verified)
+    assert service.start_download(redirect_manifest)
+    assert wait_until(lambda: len(verified) > before_verified_count)
+    assert len(download_failures) == before_failure_count
+    redirected_path = Path(verified[-1][1])
+    verify_installer_file(redirected_path, redirect_manifest)
+
     service.shutdown()
 
 
