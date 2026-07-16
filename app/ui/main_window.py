@@ -14,7 +14,8 @@ from mutagen import File as MutagenFile
 from app.models.media_item import MediaItem
 from app.models.playback_queue_item import PlaybackQueueItem
 from app.core.app_paths import AppPaths
-from app.core.version import APP_USER_AGENT
+from app.core.version import APP_USER_AGENT, APP_VERSION
+from app.services.app_update_service import AppUpdateService, UpdateManifest
 from app.services.lyrics_cache import LyricsCache
 from app.services.online_artwork_service import OnlineArtworkService
 from app.services.online_audio_cache import OnlineAudioCacheService
@@ -31,6 +32,7 @@ from app.ui.library_page import LibraryPage
 from app.ui.media_interaction_controller import MediaInteractionController
 from app.ui.search_page import SearchPage
 from app.ui.track_list_view import SearchEntryLineEdit
+from app.ui.update_dialog import UpdateDialog
 from PySide6.QtCore import QEasingCurve, QEvent, QItemSelectionModel, QObject, QPropertyAnimation, QRectF, QRunnable, QSize, Qt, QThread, QThreadPool, QTimer, QUrl, Signal, Slot
 from PySide6.QtGui import QColor, QDesktopServices, QFont, QFontMetrics, QIcon, QKeySequence, QPainter, QPainterPath, QPalette, QPen, QPixmap, QShortcut
 from PySide6.QtMultimedia import QAudioOutput, QMediaDevices, QMediaPlayer
@@ -2366,7 +2368,7 @@ class SettingsDialog(QDialog):
         title = QLabel("设置")
         title.setObjectName("settingsDialogTitle")
 
-        subtitle = QLabel("管理播放恢复、歌词显示与本地音乐文件夹。")
+        subtitle = QLabel("管理应用更新、播放恢复、歌词显示与本地音乐文件夹。")
         subtitle.setObjectName("settingsDialogSubtitle")
         subtitle.setWordWrap(True)
 
@@ -2684,6 +2686,66 @@ class SettingsDialog(QDialog):
         cache_layout.addWidget(self.audio_cache_path_label)
         cache_layout.addLayout(audio_cache_button_row)
 
+        update_card = QFrame()
+        update_card.setObjectName("settingsCard")
+        update_layout = QVBoxLayout(update_card)
+        update_layout.setContentsMargins(18, 16, 18, 16)
+        update_layout.setSpacing(12)
+
+        update_title = QLabel("应用更新")
+        update_title.setObjectName("settingsCardTitle")
+        update_version = QLabel(f"当前版本：{APP_VERSION}")
+        update_version.setObjectName("settingsHint")
+        self.auto_update_checkbox = QCheckBox("启动后自动检查更新")
+        self.auto_update_checkbox.setChecked(
+            bool(settings.get("auto_check_updates_on_startup", False))
+        )
+
+        update_delay_row = QHBoxLayout()
+        update_delay_row.setContentsMargins(0, 0, 0, 0)
+        update_delay_row.setSpacing(12)
+        update_delay_row.addWidget(QLabel("启动后延迟"))
+        self.update_delay_combo = QComboBox()
+        for seconds, label in (
+            (5, "5 秒"),
+            (15, "15 秒"),
+            (30, "30 秒"),
+            (60, "1 分钟"),
+        ):
+            self.update_delay_combo.addItem(label, seconds)
+        configured_delay = self.main_window.normalize_update_check_delay_seconds(
+            settings.get("update_check_delay_seconds", 15)
+        )
+        delay_index = self.update_delay_combo.findData(configured_delay)
+        if delay_index < 0:
+            self.update_delay_combo.addItem(f"{configured_delay} 秒", configured_delay)
+            delay_index = self.update_delay_combo.count() - 1
+        self.update_delay_combo.setCurrentIndex(delay_index)
+        update_delay_row.addWidget(self.update_delay_combo)
+        update_delay_row.addStretch(1)
+
+        self.check_update_button = QPushButton("检查更新")
+        self.check_update_button.setObjectName("settingsSecondaryButton")
+        self.check_update_button.clicked.connect(
+            lambda: self.main_window.check_for_updates(manual=True)
+        )
+        self.check_update_button.setEnabled(
+            not self.main_window.update_service.is_checking
+            and not self.main_window.update_service.is_downloading
+        )
+        self.main_window.update_service.checkStarted.connect(
+            self.on_update_check_started
+        )
+        self.main_window.update_service.checkCompleted.connect(
+            self.on_update_check_completed
+        )
+
+        update_layout.addWidget(update_title)
+        update_layout.addWidget(update_version)
+        update_layout.addWidget(self.auto_update_checkbox)
+        update_layout.addLayout(update_delay_row)
+        update_layout.addWidget(self.check_update_button)
+
         self.main_window.online_audio_cache.statisticsChanged.connect(
             self.refresh_audio_cache_status
         )
@@ -2694,6 +2756,7 @@ class SettingsDialog(QDialog):
         self.settings_content_layout.addWidget(floating_card)
         self.settings_content_layout.addWidget(scan_card)
         self.settings_content_layout.addWidget(cache_card)
+        self.settings_content_layout.addWidget(update_card)
         self.settings_content_layout.addStretch(1)
 
         button_row = QHBoxLayout()
@@ -2847,6 +2910,8 @@ class SettingsDialog(QDialog):
 
     def collect_settings_updates(self) -> dict:
         return {
+            "auto_check_updates_on_startup": self.auto_update_checkbox.isChecked(),
+            "update_check_delay_seconds": int(self.update_delay_combo.currentData()),
             "restore_last_playback": self.restore_checkbox.isChecked(),
             "immersive_cover_background_enabled": self.cover_background_checkbox.isChecked(),
             "immersive_auto_hide_ui": self.auto_hide_checkbox.isChecked(),
@@ -2860,6 +2925,16 @@ class SettingsDialog(QDialog):
             "auto_scan_music_folders_on_startup": self.auto_scan_checkbox.isChecked(),
             "music_scan_import_mode": self.music_scan_import_mode_combo.currentData(),
         }
+
+    def on_update_check_started(self, _manual: bool) -> None:
+        self.check_update_button.setText("正在检查更新…")
+        self.check_update_button.setEnabled(False)
+
+    def on_update_check_completed(self) -> None:
+        self.check_update_button.setText("检查更新")
+        self.check_update_button.setEnabled(
+            not self.main_window.update_service.is_downloading
+        )
 
     def scan_music_folders_now(self) -> None:
         self.main_window.save_hush_settings(
@@ -3895,6 +3970,17 @@ class MainWindow(QMainWindow):
         self.settings_save_timer.setSingleShot(True)
         self.settings_save_timer.setInterval(350)
         self.settings_save_timer.timeout.connect(self.flush_settings)
+        self.update_service = self.measure_startup_step(
+            "应用更新服务对象（无网络请求）",
+            lambda: AppUpdateService(self),
+        )
+        self.update_service.updateAvailable.connect(self.on_update_available)
+        self.update_service.noUpdate.connect(self.on_update_no_update)
+        self.update_service.checkFailed.connect(self.on_update_check_failed)
+        self.update_service.installerLaunched.connect(
+            self.on_update_installer_launched
+        )
+        self.update_dialog: UpdateDialog | None = None
         self.current_volume = int(settings.get("volume", 65))
         self.play_mode = settings.get("play_mode", "list_loop")
         self.unified_search_local_only = bool(
@@ -4205,7 +4291,24 @@ class MainWindow(QMainWindow):
             )
         self.schedule_startup_task(120, "桌面歌词自动打开检查", self.auto_open_floating_lyrics_if_enabled)
         self.schedule_startup_task(1800, "启动文件夹扫描派发", self.auto_scan_music_folders_on_startup)
+        if bool(settings.get("auto_check_updates_on_startup", False)):
+            update_delay_seconds = self.normalize_update_check_delay_seconds(
+                settings.get("update_check_delay_seconds", 15)
+            )
+            self.schedule_startup_task(
+                update_delay_seconds * 1000,
+                "自动检查应用更新",
+                lambda: self.check_for_updates(manual=False),
+            )
         print(f"[perf] 主窗口启动调度：{(time.perf_counter() - startup_started_at) * 1000:.1f} ms")
+
+    @staticmethod
+    def normalize_update_check_delay_seconds(value) -> int:
+        try:
+            seconds = int(value)
+        except (TypeError, ValueError):
+            return 15
+        return max(5, min(300, seconds))
 
     def schedule_startup_task(self, delay_ms: int, label: str, callback) -> None:
         QTimer.singleShot(
@@ -11231,6 +11334,60 @@ class MainWindow(QMainWindow):
             floating_window.apply_style()
             floating_window.save_preferences()
 
+    def update_message_parent(self) -> QWidget:
+        active_modal = QApplication.activeModalWidget()
+        return active_modal if active_modal is not None else self
+
+    def check_for_updates(self, *, manual: bool) -> bool:
+        if self.update_service.is_checking or self.update_service.is_downloading:
+            if manual:
+                QMessageBox.information(
+                    self.update_message_parent(),
+                    "应用更新",
+                    "当前已有更新检查或下载正在进行。",
+                )
+            return False
+        return self.update_service.check_for_updates(manual=manual)
+
+    def on_update_available(self, manifest: object, _manual: bool) -> None:
+        if not isinstance(manifest, UpdateManifest):
+            return
+        parent = self.update_message_parent()
+        dialog = UpdateDialog(self.update_service, manifest, parent)
+        self.update_dialog = dialog
+        self.apply_windows_dark_title_bar(dialog)
+        QTimer.singleShot(
+            0,
+            lambda dialog=dialog: self.apply_windows_dark_title_bar(dialog),
+        )
+        dialog.exec()
+        if self.update_dialog is dialog:
+            self.update_dialog = None
+
+    def on_update_no_update(self, manual: bool) -> None:
+        if manual:
+            QMessageBox.information(
+                self.update_message_parent(),
+                "应用更新",
+                f"当前已是最新版本（{APP_VERSION}）。",
+            )
+        else:
+            print(f"自动检查更新：当前已是最新版本 {APP_VERSION}。")
+
+    def on_update_check_failed(self, message: str, manual: bool) -> None:
+        if manual:
+            QMessageBox.warning(
+                self.update_message_parent(),
+                "检查更新失败",
+                message,
+            )
+        else:
+            print(f"自动检查更新失败：{message}")
+
+    def on_update_installer_launched(self, path: str) -> None:
+        print("更新安装程序已启动，正在进入正式退出流程：", path)
+        self.close()
+
     def open_settings_dialog(self) -> None:
         self.set_sidebar_active("settings")
         dialog = SettingsDialog(self)
@@ -12561,6 +12718,7 @@ class MainWindow(QMainWindow):
             "floating_lyrics_font_size": 42,
             "floating_lyrics_width": 980,
             "floating_lyrics_height": 135,
+            "update_check_delay_seconds": 15,
         }
         for key, default_value in integer_defaults.items():
             if key not in settings:
@@ -12570,6 +12728,13 @@ class MainWindow(QMainWindow):
             except (TypeError, ValueError):
                 print(f"设置项 {key} 类型无效，使用默认值 {default_value}。")
                 settings[key] = default_value
+
+        if "auto_check_updates_on_startup" in settings and not isinstance(
+            settings["auto_check_updates_on_startup"],
+            bool,
+        ):
+            print("设置项 auto_check_updates_on_startup 类型无效，使用默认值 False。")
+            settings["auto_check_updates_on_startup"] = False
 
         if "music_scan_folders" in settings and not isinstance(
             settings["music_scan_folders"], list
@@ -16264,6 +16429,14 @@ class MainWindow(QMainWindow):
             QMessageBox.information(self, "提示", "请先选择一首真实歌曲。")
             return
         self.show_media_item_info(self.media_item_from_song_data(song_data).to_dict())
+
+    def release_media_player_for_shutdown(self) -> None:
+        player = getattr(self, "media_player", None)
+        if player is None:
+            return
+        player.stop()
+        player.setSource(QUrl())
+
     def closeEvent(self, event) -> None:
         if not self.shutdown_music_scan_workers():
             print("音乐导入任务仍在安全退出，已暂缓关闭窗口。")
@@ -16294,6 +16467,7 @@ class MainWindow(QMainWindow):
             self.cancel_pending_local_search()
 
         self.save_playback_session()
+        self.release_media_player_for_shutdown()
         floating_window = getattr(self, "floating_lyrics_window", None)
 
         if floating_window is not None:
@@ -16313,9 +16487,13 @@ class MainWindow(QMainWindow):
         unified_search_service = getattr(self, "unified_search_service", None)
 
         online_download_manager = getattr(self, "online_download_manager", None)
+        update_service = getattr(self, "update_service", None)
 
         if online_download_manager is not None:
             online_download_manager.cancel()
+
+        if update_service is not None:
+            update_service.shutdown()
 
         if unified_search_service is not None:
             unified_search_service.shutdown()
