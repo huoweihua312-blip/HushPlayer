@@ -109,8 +109,8 @@ def manifest_document(
     setup_url: str,
     setup: bytes,
     *,
-    version: str = "0.5.0-beta.4",
-    numeric_version: str = "0.5.0.4",
+    version: str = "0.5.0-beta.5",
+    numeric_version: str = "0.5.0.5",
     sha256: str | None = None,
     setup_size: int | None = None,
 ) -> dict:
@@ -145,11 +145,11 @@ def parser_checks(setup: bytes) -> None:
     valid = manifest_document("https://example.com/HushPlayer-setup.exe", setup)
     manifest = parse_update_manifest(encoded_manifest(valid))
     assert manifest.is_newer
-    assert manifest.numeric_version == (0, 5, 0, 4)
-    assert manifest.installer_filename == "HushPlayer-0.5.0-beta.4-win-x64-setup.exe"
+    assert manifest.numeric_version == (0, 5, 0, 5)
+    assert manifest.installer_filename == "HushPlayer-0.5.0-beta.5-win-x64-setup.exe"
 
-    same = dict(valid, version="0.5.0-beta.3", numeric_version="0.5.0.3")
-    old = dict(valid, version="0.5.0-beta.2", numeric_version="0.5.0.2")
+    same = dict(valid, version="0.5.0-beta.4", numeric_version="0.5.0.4")
+    old = dict(valid, version="0.5.0-beta.3", numeric_version="0.5.0.3")
     assert not parse_update_manifest(encoded_manifest(same)).is_newer
     assert not parse_update_manifest(encoded_manifest(old)).is_newer
 
@@ -166,7 +166,7 @@ def parser_checks(setup: bytes) -> None:
         "安装包大小",
     )
     assert_manifest_rejected(
-        dict(valid, numeric_version="0.5.0.5"),
+        dict(valid, numeric_version="0.5.0.6"),
         "version 与 numeric_version",
     )
     try:
@@ -263,8 +263,8 @@ def service_checks(root: Path, server: FixtureServer, setup: bytes) -> None:
         manifest_document(
             f"{server.base_url}/setup.exe",
             setup,
-            version="0.5.0-beta.3",
-            numeric_version="0.5.0.3",
+            version="0.5.0-beta.4",
+            numeric_version="0.5.0.4",
         ),
     )
     assert service.check_for_updates(manual=False)

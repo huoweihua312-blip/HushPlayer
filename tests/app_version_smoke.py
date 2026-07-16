@@ -20,9 +20,9 @@ from app.core.version import (
 
 
 def main() -> None:
-    assert APP_VERSION == "0.5.0-beta.3"
-    assert APP_NUMERIC_VERSION == (0, 5, 0, 3)
-    assert APP_NUMERIC_VERSION_TEXT == "0.5.0.3"
+    assert APP_VERSION == "0.5.0-beta.4"
+    assert APP_NUMERIC_VERSION == (0, 5, 0, 4)
+    assert APP_NUMERIC_VERSION_TEXT == "0.5.0.4"
     assert UPDATE_CHANNEL == "beta"
     assert UPDATE_ARCHITECTURE == "win-x64"
     assert UPDATE_MANIFEST_URL == (
