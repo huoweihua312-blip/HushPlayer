@@ -23,6 +23,34 @@ def directory_if_present(relative_path, destination):
     return [(str(source), destination)]
 
 
+EXCLUDED_NODE_DIRECTORY_NAMES = {
+    "__tests__",
+    "fixture",
+    "fixtures",
+    "test",
+    "tests",
+}
+
+
+def production_node_package_files(source, destination):
+    entries = []
+    for file_path in sorted(source.rglob("*")):
+        if not file_path.is_file():
+            continue
+        relative = file_path.relative_to(source)
+        if any(
+            part.lower() in EXCLUDED_NODE_DIRECTORY_NAMES
+            for part in relative.parts[:-1]
+        ):
+            continue
+        relative_parent = relative.parent.as_posix()
+        target = destination
+        if relative_parent != ".":
+            target = f"{destination}/{relative_parent}"
+        entries.append((str(file_path), target))
+    return entries
+
+
 datas = []
 datas += directory_if_present("assets", "assets")
 datas += directory_if_present("app/resources", "app/resources")
@@ -56,8 +84,11 @@ for relative_path, metadata in sorted(package_entries.items()):
     ):
         continue
     selected_package_paths.append(normalized)
-    datas.append(
-        (str(source_path), f"source_runtime/{normalized}")
+    datas.extend(
+        production_node_package_files(
+            source_path,
+            f"source_runtime/{normalized}",
+        )
     )
 
 hiddenimports = collect_submodules("mutagen")
