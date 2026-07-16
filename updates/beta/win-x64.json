@@ -1,16 +1,17 @@
 {
-  "schema_version": 1,
-  "channel": "beta",
-  "version": "0.5.0-beta.2",
-  "numeric_version": "0.5.0.2",
-  "architecture": "win-x64",
-  "mandatory": false,
-  "setup_url": "https://github.com/huoweihua312-blip/HushPlayer/releases/download/v0.5.0-beta.2/HushPlayer-0.5.0-beta.2-win-x64-setup.exe",
-  "setup_size": 67614084,
-  "sha256": "798eb6b2756a023009943c6513f1a5e8d823c53fe9bd4d325c573caf0140bc8e",
-  "release_notes": [
-    "新增 Windows 默认播放设备热切换",
-    "新增在线检查、下载并安装更新",
-    "修复若干稳定性问题"
-  ]
+    "schema_version":  1,
+    "channel":  "beta",
+    "version":  "0.5.0-beta.3",
+    "numeric_version":  "0.5.0.3",
+    "architecture":  "win-x64",
+    "mandatory":  false,
+    "setup_url":  "https://github.com/huoweihua312-blip/HushPlayer/releases/download/v0.5.0-beta.3/HushPlayer-0.5.0-beta.3-win-x64-setup.exe",
+    "setup_size":  67636552,
+    "sha256":  "f2da004eda2e92cbb054e7c0fffa3eeaf1b86efc78b3553e27080fef4343c7b7",
+    "release_notes":  [
+                          "沉浸式歌词支持自定义图片背景、模糊、暗度、透明度和填充方式调节",
+                          "新增沉浸式歌词字体大小调节",
+                          "新增按歌曲保存的歌词时间偏移，支持本地与在线歌曲",
+                          "改进沉浸歌词背景渲染、切歌竞态保护和相关稳定性"
+                      ]
 }
