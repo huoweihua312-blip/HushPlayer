@@ -1,0 +1,16 @@
+{
+  "schema_version": 1,
+  "channel": "beta",
+  "version": "0.5.0-beta.2",
+  "numeric_version": "0.5.0.2",
+  "architecture": "win-x64",
+  "mandatory": false,
+  "setup_url": "https://github.com/huoweihua312-blip/HushPlayer/releases/download/v0.5.0-beta.2/HushPlayer-0.5.0-beta.2-win-x64-setup.exe",
+  "setup_size": 67614084,
+  "sha256": "798eb6b2756a023009943c6513f1a5e8d823c53fe9bd4d325c573caf0140bc8e",
+  "release_notes": [
+    "新增 Windows 默认播放设备热切换",
+    "新增在线检查、下载并安装更新",
+    "修复若干稳定性问题"
+  ]
+}
