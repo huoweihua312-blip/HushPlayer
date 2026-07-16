@@ -3609,6 +3609,43 @@ class MainWindow(QMainWindow):
         self.setWindowIcon(icon)
 
     @staticmethod
+    def audio_device_name(device) -> str:
+        if device is None or device.isNull():
+            return "无可用设备"
+
+        return device.description() or "未命名设备"
+
+    @Slot()
+    def schedule_default_audio_output_sync(self) -> None:
+        self.default_audio_output_sync_timer.start()
+
+    @Slot()
+    def sync_default_audio_output(self) -> None:
+        self.apply_default_audio_output(QMediaDevices.defaultAudioOutput())
+
+    def apply_default_audio_output(self, default_device) -> bool:
+        current_device = self.audio_output.device()
+
+        if default_device.isNull():
+            print(
+                "[audio] 系统默认输出设备暂不可用，继续使用当前设备：",
+                self.audio_device_name(current_device),
+            )
+            return False
+
+        if (
+            not current_device.isNull()
+            and bytes(current_device.id()) == bytes(default_device.id())
+        ):
+            return False
+
+        old_device_name = self.audio_device_name(current_device)
+        new_device_name = self.audio_device_name(default_device)
+        self.audio_output.setDevice(default_device)
+        print(f"[audio] 默认输出设备切换：{old_device_name} -> {new_device_name}")
+        return True
+
+    @staticmethod
     def measure_startup_step(label: str, callback):
         started_at = time.perf_counter()
 
@@ -3941,13 +3978,24 @@ class MainWindow(QMainWindow):
         print("歌词绑定保存位置：", self.lyrics_bindings_file)
 
         audio_started_at = time.perf_counter()
+        self.media_devices = QMediaDevices(self)
+        self.default_audio_output_sync_timer = QTimer(self)
+        self.default_audio_output_sync_timer.setSingleShot(True)
+        self.default_audio_output_sync_timer.setInterval(250)
+        self.default_audio_output_sync_timer.timeout.connect(
+            self.sync_default_audio_output
+        )
+        self.media_devices.audioOutputsChanged.connect(
+            self.schedule_default_audio_output_sync
+        )
         default_device = QMediaDevices.defaultAudioOutput()
-        print("默认音频输出设备：", default_device.description())
+        print("默认音频输出设备：", self.audio_device_name(default_device))
 
         self.audio_output = QAudioOutput(default_device)
         self.media_player = QMediaPlayer()
         self.media_player.setAudioOutput(self.audio_output)
         self.audio_output.setVolume(self.current_volume / 100)
+        self.sync_default_audio_output()
         print(f"[perf] 音频初始化：{(time.perf_counter() - audio_started_at) * 1000:.1f} ms")
 
         self.setWindowTitle("HushPlayer")
