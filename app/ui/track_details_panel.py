@@ -12,7 +12,6 @@ from PySide6.QtWidgets import (
     QPushButton,
     QScrollArea,
     QVBoxLayout,
-    QWidget,
 )
 
 from app.models.media_item import MediaItem

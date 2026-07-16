@@ -42,7 +42,6 @@ from PySide6.QtWidgets import (
     QFileDialog,
     QFrame,
     QGraphicsBlurEffect,
-    QGridLayout,
     QHBoxLayout,
     QInputDialog,
     QLabel,
@@ -52,9 +51,7 @@ from PySide6.QtWidgets import (
     QMainWindow,
     QMenu,
     QMessageBox,
-    QPlainTextEdit,
     QPushButton,
-    QRadioButton,
     QScrollArea,
     QSizePolicy,
     QSlider,
@@ -62,10 +59,7 @@ from PySide6.QtWidgets import (
     QStackedWidget,
     QStyle,
     QStyledItemDelegate,
-    QTableWidget,
-    QTextEdit,
     QToolTip,
-    QTreeWidget,
     QVBoxLayout,
     QWidget,
 )
@@ -293,100 +287,6 @@ def apply_dark_application_theme(app: QApplication) -> None:
 def apply_dark_dialog_style(dialog: QDialog, extra_qss: str = "") -> None:
     dialog.setPalette(create_dark_palette())
     dialog.setStyleSheet(f"{build_dark_dialog_qss()}\n{extra_qss}")
-
-
-def _color_luminance(color: QColor) -> float:
-    channels = []
-
-    for value in (color.red(), color.green(), color.blue()):
-        channel = value / 255.0
-        channels.append(channel / 12.92 if channel <= 0.04045 else ((channel + 0.055) / 1.055) ** 2.4)
-
-    return 0.2126 * channels[0] + 0.7152 * channels[1] + 0.0722 * channels[2]
-
-
-def _contrast_ratio(first: QColor, second: QColor) -> float:
-    lighter = max(_color_luminance(first), _color_luminance(second))
-    darker = min(_color_luminance(first), _color_luminance(second))
-    return (lighter + 0.05) / (darker + 0.05)
-
-
-def _composite_color(color: QColor, background: QColor) -> QColor:
-    alpha = color.alphaF()
-
-    if alpha >= 0.999:
-        return QColor(color)
-
-    return QColor.fromRgbF(
-        color.redF() * alpha + background.redF() * (1.0 - alpha),
-        color.greenF() * alpha + background.greenF() * (1.0 - alpha),
-        color.blueF() * alpha + background.blueF() * (1.0 - alpha),
-        1.0,
-    )
-
-
-def audit_dark_ui_contrast(roots: QWidget | list[QWidget]) -> list[str]:
-    """开发/离屏测试使用；正常运行不会主动调用或打印。"""
-    root_widgets = roots if isinstance(roots, list) else [roots]
-    text_widgets = (QLabel, QPushButton, QLineEdit, QTextEdit, QPlainTextEdit, QComboBox, QCheckBox, QRadioButton, QAbstractItemView, QMenu)
-    input_widgets = (QLineEdit, QTextEdit, QPlainTextEdit, QComboBox, QAbstractItemView)
-    warnings = []
-
-    for root in root_widgets:
-        candidates = [root, *root.findChildren(QWidget)]
-        root_palette = root.palette()
-        root_active_window = root_palette.color(QPalette.ColorGroup.Active, QPalette.ColorRole.Window)
-        root_disabled_window = root_palette.color(QPalette.ColorGroup.Disabled, QPalette.ColorRole.Window)
-
-        for widget in candidates:
-            if not isinstance(widget, text_widgets):
-                continue
-
-            palette = widget.palette()
-
-            if isinstance(widget, input_widgets):
-                foreground_role = QPalette.ColorRole.Text
-                background_role = QPalette.ColorRole.Base
-            elif isinstance(widget, QPushButton):
-                foreground_role = QPalette.ColorRole.ButtonText
-                background_role = QPalette.ColorRole.Button
-            else:
-                foreground_role = QPalette.ColorRole.WindowText
-                background_role = QPalette.ColorRole.Window
-
-            active_text = palette.color(QPalette.ColorGroup.Active, foreground_role)
-            active_background = palette.color(QPalette.ColorGroup.Active, background_role)
-            disabled_text = palette.color(QPalette.ColorGroup.Disabled, foreground_role)
-            disabled_background = palette.color(QPalette.ColorGroup.Disabled, background_role)
-            active_background = _composite_color(active_background, root_active_window)
-            disabled_background = _composite_color(disabled_background, root_disabled_window)
-            active_text = _composite_color(active_text, active_background)
-            disabled_text = _composite_color(disabled_text, disabled_background)
-            object_path = f"{root.objectName() or type(root).__name__}/{widget.objectName() or type(widget).__name__}"
-
-            if _contrast_ratio(active_text, active_background) < 3.0:
-                warnings.append(f"[ui-audit] low contrast {object_path} active")
-
-            if _contrast_ratio(disabled_text, disabled_background) < 2.0:
-                warnings.append(f"[ui-audit] low contrast {object_path} disabled")
-
-            if isinstance(widget, QAbstractItemView):
-                highlight = palette.color(QPalette.ColorGroup.Active, QPalette.ColorRole.Highlight)
-                highlighted_text = palette.color(QPalette.ColorGroup.Active, QPalette.ColorRole.HighlightedText)
-                highlight = _composite_color(highlight, active_background)
-                highlighted_text = _composite_color(highlighted_text, highlight)
-
-                if _contrast_ratio(highlighted_text, highlight) < 3.0:
-                    warnings.append(f"[ui-audit] low contrast {object_path} selected")
-
-            if isinstance(widget, (QLineEdit, QTextEdit, QPlainTextEdit)):
-                placeholder = palette.color(QPalette.ColorGroup.Active, QPalette.ColorRole.PlaceholderText)
-                placeholder = _composite_color(placeholder, active_background)
-
-                if _contrast_ratio(placeholder, active_background) < 2.5:
-                    warnings.append(f"[ui-audit] low contrast {object_path} placeholder")
-
-    return warnings
 
 
 class NavButton(QPushButton):
@@ -644,14 +544,6 @@ class MultiLineElidedLabel(QLabel):
 SONG_TABLE_MARKER_WIDTH = 18
 SONG_TABLE_DURATION_WIDTH = 58
 SONG_TABLE_COLUMN_GAP = 14
-
-
-def configure_song_table_columns(layout: QGridLayout) -> None:
-    layout.setColumnMinimumWidth(0, SONG_TABLE_MARKER_WIDTH)
-    layout.setColumnStretch(1, 4)
-    layout.setColumnStretch(2, 2)
-    layout.setColumnStretch(3, 2)
-    layout.setColumnMinimumWidth(4, SONG_TABLE_DURATION_WIDTH)
 
 
 class SongLibraryDelegate(QStyledItemDelegate):
@@ -2454,221 +2346,6 @@ class FloatingLyricsWindow(QWidget):
             pass
 
         super().closeEvent(event)
-
-class PlayQueueDialog(QDialog):
-    def __init__(self, main_window) -> None:
-        super().__init__(main_window)
-
-        self.main_window = main_window
-        self.setWindowTitle("播放队列")
-        self.setObjectName("playQueueDialog")
-        self.setMinimumSize(620, 520)
-
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(22, 20, 22, 20)
-        layout.setSpacing(14)
-
-        title = QLabel("播放队列")
-        title.setObjectName("playQueueDialogTitle")
-
-        subtitle = QLabel("这里显示接下来会优先播放的歌曲。队列里的歌会先于列表循环 / 随机播放。")
-        subtitle.setObjectName("playQueueDialogSubtitle")
-        subtitle.setWordWrap(True)
-
-        self.queue_list = QListWidget()
-        self.queue_list.setObjectName("playQueueList")
-        self.queue_list.itemDoubleClicked.connect(self.play_selected_song)
-
-        main_buttons = QHBoxLayout()
-        main_buttons.setContentsMargins(0, 0, 0, 0)
-        main_buttons.setSpacing(10)
-
-        self.play_btn = QPushButton("立即播放")
-        self.play_btn.setObjectName("queuePrimaryButton")
-        self.play_btn.clicked.connect(self.play_selected_song)
-
-        self.remove_btn = QPushButton("移除")
-        self.remove_btn.setObjectName("queueSecondaryButton")
-        self.remove_btn.clicked.connect(self.remove_selected_song)
-
-        self.move_up_btn = QPushButton("上移")
-        self.move_up_btn.setObjectName("queueSecondaryButton")
-        self.move_up_btn.clicked.connect(self.move_selected_song_up)
-
-        self.move_down_btn = QPushButton("下移")
-        self.move_down_btn.setObjectName("queueSecondaryButton")
-        self.move_down_btn.clicked.connect(self.move_selected_song_down)
-
-        self.clear_btn = QPushButton("清空队列")
-        self.clear_btn.setObjectName("queueDangerButton")
-        self.clear_btn.clicked.connect(self.clear_queue)
-
-        self.close_btn = QPushButton("关闭")
-        self.close_btn.setObjectName("queueSecondaryButton")
-        self.close_btn.clicked.connect(self.accept)
-
-        main_buttons.addWidget(self.play_btn)
-        main_buttons.addWidget(self.remove_btn)
-        main_buttons.addWidget(self.move_up_btn)
-        main_buttons.addWidget(self.move_down_btn)
-        main_buttons.addStretch(1)
-        main_buttons.addWidget(self.clear_btn)
-        main_buttons.addWidget(self.close_btn)
-
-        self.hint_label = QLabel("双击队列里的歌曲可以立即播放。")
-        self.hint_label.setObjectName("playQueueHint")
-
-        layout.addWidget(title)
-        layout.addWidget(subtitle)
-        layout.addWidget(self.queue_list, 1)
-        layout.addLayout(main_buttons)
-        layout.addWidget(self.hint_label)
-
-        self.apply_style()
-        if hasattr(self.main_window, "apply_windows_dark_title_bar"):
-            QTimer.singleShot(0, lambda: self.main_window.apply_windows_dark_title_bar(self))
-        self.refresh_queue_list()
-
-    def apply_style(self) -> None:
-        apply_dark_dialog_style(
-            self,
-            "QDialog#playQueueDialog { background: #0f1117; color: #e8ecf5; font-family: 'Segoe UI', 'Microsoft YaHei UI', 'Microsoft YaHei'; }"
-            "QLabel#playQueueDialogTitle { color: #ffffff; font-size: 26px; font-weight: 900; }"
-            "QLabel#playQueueDialogSubtitle { color: #8f98aa; font-size: 13px; }"
-            "QLabel#playQueueHint { color: #8f98aa; font-size: 12px; }"
-            "QListWidget#playQueueList { background: #11131a; color: #e8ecf5; border: 1px solid rgba(255,255,255,0.08); border-radius: 18px; padding: 8px; outline: none; }"
-            "QListWidget#playQueueList::item { padding: 12px 10px; border-radius: 12px; margin: 3px; }"
-            "QListWidget#playQueueList::item:hover { background: rgba(255,255,255,0.07); }"
-            "QListWidget#playQueueList::item:selected { background: rgba(59,130,246,0.18); color: #ffffff; border: 1px solid rgba(59,130,246,0.38); }"
-            "QPushButton#queuePrimaryButton { background: #3b82f6; color: #ffffff; border: none; border-radius: 12px; padding: 10px 16px; font-size: 13px; font-weight: 700; }"
-            "QPushButton#queuePrimaryButton:hover { background: #5594ff; }"
-            "QPushButton#queueSecondaryButton { background: rgba(255,255,255,0.07); color: #dfe4ee; border: none; border-radius: 12px; padding: 10px 16px; font-size: 13px; }"
-            "QPushButton#queueSecondaryButton:hover { background: rgba(255,255,255,0.11); color: #ffffff; }"
-            "QPushButton#queuePrimaryButton:disabled, QPushButton#queueSecondaryButton:disabled, QPushButton#queueDangerButton:disabled { background: #151922; color: #7b8494; border: 1px solid #2a303b; }"
-            "QPushButton#queueDangerButton { background: rgba(239,68,68,0.15); color: #ffd7dd; border: none; border-radius: 12px; padding: 10px 16px; font-size: 13px; }"
-            "QPushButton#queueDangerButton:hover { background: rgba(239,68,68,0.26); color: #ffffff; }"
-        )
-
-    def refresh_queue_list(self) -> None:
-        if not hasattr(self.main_window, "play_queue"):
-            self.main_window.play_queue = []
-
-        valid_queue = []
-        for value in self.main_window.play_queue:
-            queue_item = self.main_window.playback_queue_item_from_value(value)
-            if queue_item is None:
-                continue
-            if queue_item.kind == "local" and not Path(queue_item.local_path).is_file():
-                continue
-            valid_queue.append(queue_item)
-
-        if valid_queue != self.main_window.play_queue:
-            self.main_window.play_queue = valid_queue
-            self.main_window.save_play_queue()
-
-        self.queue_list.clear()
-
-        for index, queue_item in enumerate(self.main_window.play_queue, start=1):
-            song_title = self.main_window.get_song_title_for_queue(queue_item)
-            kind_text = "在线" if queue_item.kind == "remote" else "本地"
-            item = QListWidgetItem(f"{index}. {song_title}  [{kind_text}]")
-            item.setData(Qt.ItemDataRole.UserRole, queue_item.to_mapping())
-            self.queue_list.addItem(item)
-
-        if self.queue_list.count() > 0 and self.queue_list.currentRow() < 0:
-            self.queue_list.setCurrentRow(0)
-
-        self.update_hint()
-
-    def update_hint(self) -> None:
-        count = self.queue_list.count()
-
-        if count == 0:
-            self.hint_label.setText("播放队列是空的。可以在音乐库里右键歌曲，选择“下一首播放”或“加入播放队列”。")
-        else:
-            self.hint_label.setText(f"队列里有 {count} 首歌。双击歌曲可以立即播放。")
-
-    def get_selected_index(self) -> int:
-        row = self.queue_list.currentRow()
-
-        if row < 0 or row >= len(self.main_window.play_queue):
-            QMessageBox.information(self, "播放队列", "请先选择队列里的一首歌。")
-            return -1
-
-        return row
-
-    def play_selected_song(self) -> None:
-        row = self.get_selected_index()
-
-        if row < 0:
-            return
-
-        queue_item = self.main_window.play_queue.pop(row)
-        self.main_window.save_play_queue()
-        self.main_window.remember_queue_return_state()
-        if self.main_window.play_queue_item(queue_item, update_context=False):
-            self.refresh_queue_list()
-            self.accept()
-        else:
-            QMessageBox.information(self, "播放队列", "这首歌无法播放，可能文件已经不存在。")
-            self.refresh_queue_list()
-
-    def remove_selected_song(self) -> None:
-        row = self.get_selected_index()
-
-        if row < 0:
-            return
-
-        self.main_window.play_queue.pop(row)
-        self.main_window.save_play_queue()
-        self.refresh_queue_list()
-
-        if self.queue_list.count() > 0:
-            self.queue_list.setCurrentRow(min(row, self.queue_list.count() - 1))
-
-    def move_selected_song_up(self) -> None:
-        row = self.get_selected_index()
-
-        if row <= 0:
-            return
-
-        queue = self.main_window.play_queue
-        queue[row - 1], queue[row] = queue[row], queue[row - 1]
-        self.main_window.save_play_queue()
-        self.refresh_queue_list()
-        self.queue_list.setCurrentRow(row - 1)
-
-    def move_selected_song_down(self) -> None:
-        row = self.get_selected_index()
-
-        if row < 0 or row >= len(self.main_window.play_queue) - 1:
-            return
-
-        queue = self.main_window.play_queue
-        queue[row + 1], queue[row] = queue[row], queue[row + 1]
-        self.main_window.save_play_queue()
-        self.refresh_queue_list()
-        self.queue_list.setCurrentRow(row + 1)
-
-    def clear_queue(self) -> None:
-        if not self.main_window.play_queue:
-            QMessageBox.information(self, "播放队列", "播放队列已经是空的。")
-            return
-
-        reply = QMessageBox.question(
-            self,
-            "清空播放队列",
-            "确定要清空当前播放队列吗？",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-            QMessageBox.StandardButton.No,
-        )
-
-        if reply != QMessageBox.StandardButton.Yes:
-            return
-
-        self.main_window.play_queue.clear()
-        self.main_window.save_play_queue()
-        self.refresh_queue_list()
 
 class SettingsDialog(QDialog):
     def __init__(self, main_window) -> None:
