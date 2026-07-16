@@ -1,8 +1,16 @@
 #define MyAppName "HushPlayer"
-#define MyAppVersion "0.5.0-beta.1"
-#define MyAppNumericVersion "0.5.0.1"
 #define MyAppPublisher "HushPlayer Project"
 #define MyAppExeName "HushPlayer.exe"
+
+#ifndef MyAppVersion
+  #error MyAppVersion must be supplied by build_windows_installer.ps1
+#endif
+#ifndef MyAppNumericVersion
+  #error MyAppNumericVersion must be supplied by build_windows_installer.ps1
+#endif
+#ifndef MyAppArchitecture
+  #error MyAppArchitecture must be supplied by build_windows_installer.ps1
+#endif
 
 [Setup]
 ; 这个 AppId 以后所有 HushPlayer 更新版本都不要修改
@@ -24,6 +32,7 @@ VersionInfoProductTextVersion={#MyAppVersion}
 DefaultDirName={localappdata}\Programs\{#MyAppName}
 DefaultGroupName={#MyAppName}
 PrivilegesRequired=lowest
+UsePreviousAppDir=yes
 
 ; HushPlayer 当前只发布 Windows x64
 ArchitecturesAllowed=x64compatible
@@ -31,7 +40,7 @@ ArchitecturesInstallIn64BitMode=x64compatible
 
 ; 安装包输出位置
 OutputDir=..\..\dist\installer
-OutputBaseFilename=HushPlayer-{#MyAppVersion}-win-x64-setup
+OutputBaseFilename=HushPlayer-{#MyAppVersion}-{#MyAppArchitecture}-setup
 
 SetupIconFile=..\..\assets\icons\HushPlayer.ico
 UninstallDisplayIcon={app}\{#MyAppExeName}

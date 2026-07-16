@@ -14,7 +14,7 @@ if (-not (Test-Path -LiteralPath (Join-Path $ProjectRoot "main.py") -PathType Le
 $Python = Join-Path $ProjectRoot ".venv\Scripts\python.exe"
 $VenvRebuildHelp = @(
     "Preserve the existing .venv under a unique backup name, then rebuild it from the project root:"
-    "  & <path-to-python-3.12-x64> -m venv .venv"
+    "  & <path-to-python-3.13-x64> -m venv .venv"
     "  .\.venv\Scripts\python.exe -m pip install --upgrade pip setuptools wheel"
     "  .\.venv\Scripts\python.exe -m pip install --require-hashes --requirement requirements-lock.txt"
 ) -join [Environment]::NewLine
@@ -31,7 +31,7 @@ $PreviousErrorActionPreference = $ErrorActionPreference
 $ErrorActionPreference = "Continue"
 try {
     $PythonProbe = @(
-        & $Python -c "import platform, struct, sys, PyInstaller, PySide6; assert sys.version_info[:2] == (3, 12); assert struct.calcsize('P') * 8 == 64; print('Python=' + platform.python_version()); print('PythonExecutable=' + sys.executable); print('PyInstaller=' + PyInstaller.__version__); print('PySide6=' + PySide6.__version__); print('Architecture=x64')" 2>&1
+        & $Python -c "import platform, struct, sys, PyInstaller, PySide6; assert sys.version_info[:2] == (3, 13); assert struct.calcsize('P') * 8 == 64; print('Python=' + platform.python_version()); print('PythonExecutable=' + sys.executable); print('PyInstaller=' + PyInstaller.__version__); print('PySide6=' + PySide6.__version__); print('Architecture=x64')" 2>&1
     )
     $PythonProbeExitCode = $LASTEXITCODE
 } catch {
@@ -61,11 +61,16 @@ $Spec = Join-Path $ProjectRoot "packaging\HushPlayer.debug.spec"
 if (-not (Test-Path -LiteralPath $Spec -PathType Leaf)) {
     throw "The PyInstaller spec is missing: $Spec"
 }
+$VersionMetadataHelper = Join-Path $ProjectRoot "packaging\prepare_version_metadata.py"
+if (-not (Test-Path -LiteralPath $VersionMetadataHelper -PathType Leaf)) {
+    throw "The version metadata helper is missing: $VersionMetadataHelper"
+}
 if ($DiagnosticOnly) {
     Write-Host "ProjectRoot=$ProjectRoot"
     Write-Host "RequirementsLock=$RequirementsLock"
     Write-Host "NodeRuntimeHelper=$NodeRuntimeHelper"
     Write-Host "Spec=$Spec"
+    Write-Host "VersionMetadataHelper=$VersionMetadataHelper"
     Write-Host "DiagnosticOnly=OK"
     return
 }
@@ -97,7 +102,20 @@ function Remove-ProjectOutputDirectory([string]$Name) {
 Remove-ProjectOutputDirectory "build"
 Remove-ProjectOutputDirectory "dist"
 
+$VersionOutputDir = Join-Path $ProjectRoot "build\version"
+$VersionJson = @(& $Python $VersionMetadataHelper --output-dir $VersionOutputDir)
+if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+$VersionMetadata = ($VersionJson -join [Environment]::NewLine) | ConvertFrom-Json
+$VersionInfoFile = [System.IO.Path]::GetFullPath([string]$VersionMetadata.version_info_file)
+if (-not (Test-Path -LiteralPath $VersionInfoFile -PathType Leaf)) {
+    throw "Generated Windows version info is missing: $VersionInfoFile"
+}
+$env:HUSHPLAYER_VERSION_INFO = $VersionInfoFile
 $env:HUSHPLAYER_NODE_EXE = $NodeExe
+Write-Host "AppVersion=$($VersionMetadata.app_version)"
+Write-Host "NumericVersion=$($VersionMetadata.numeric_version)"
+Write-Host "UpdateArchitecture=$($VersionMetadata.architecture)"
+
 & $Python -m PyInstaller --noconfirm --clean --workpath (Join-Path $ProjectRoot "build\pyinstaller") --distpath (Join-Path $ProjectRoot "dist") $Spec
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 

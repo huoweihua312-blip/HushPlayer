@@ -78,6 +78,14 @@ AUDIO_EXTENSIONS = {
 }
 
 
+def normalize_update_check_delay_seconds(value) -> int:
+    try:
+        seconds = int(value)
+    except (TypeError, ValueError):
+        return 15
+    return max(5, min(300, seconds))
+
+
 # 轻量深色主题 token：供应用 Palette、通用弹窗和主窗口精细 QSS 共用。
 DARK_THEME_TOKENS = {
     "app_bg": "#0d0f14",
@@ -2713,7 +2721,7 @@ class SettingsDialog(QDialog):
             (60, "1 分钟"),
         ):
             self.update_delay_combo.addItem(label, seconds)
-        configured_delay = self.main_window.normalize_update_check_delay_seconds(
+        configured_delay = normalize_update_check_delay_seconds(
             settings.get("update_check_delay_seconds", 15)
         )
         delay_index = self.update_delay_combo.findData(configured_delay)
@@ -2726,19 +2734,19 @@ class SettingsDialog(QDialog):
 
         self.check_update_button = QPushButton("检查更新")
         self.check_update_button.setObjectName("settingsSecondaryButton")
-        self.check_update_button.clicked.connect(
-            lambda: self.main_window.check_for_updates(manual=True)
-        )
-        self.check_update_button.setEnabled(
-            not self.main_window.update_service.is_checking
-            and not self.main_window.update_service.is_downloading
-        )
-        self.main_window.update_service.checkStarted.connect(
-            self.on_update_check_started
-        )
-        self.main_window.update_service.checkCompleted.connect(
-            self.on_update_check_completed
-        )
+        self.update_service = getattr(self.main_window, "update_service", None)
+        if self.update_service is None:
+            update_card.hide()
+        else:
+            self.check_update_button.clicked.connect(
+                lambda: self.main_window.check_for_updates(manual=True)
+            )
+            self.check_update_button.setEnabled(
+                not self.update_service.is_checking
+                and not self.update_service.is_downloading
+            )
+            self.update_service.checkStarted.connect(self.on_update_check_started)
+            self.update_service.checkCompleted.connect(self.on_update_check_completed)
 
         update_layout.addWidget(update_title)
         update_layout.addWidget(update_version)
@@ -2933,7 +2941,8 @@ class SettingsDialog(QDialog):
     def on_update_check_completed(self) -> None:
         self.check_update_button.setText("检查更新")
         self.check_update_button.setEnabled(
-            not self.main_window.update_service.is_downloading
+            self.update_service is not None
+            and not self.update_service.is_downloading
         )
 
     def scan_music_folders_now(self) -> None:
@@ -4304,11 +4313,7 @@ class MainWindow(QMainWindow):
 
     @staticmethod
     def normalize_update_check_delay_seconds(value) -> int:
-        try:
-            seconds = int(value)
-        except (TypeError, ValueError):
-            return 15
-        return max(5, min(300, seconds))
+        return normalize_update_check_delay_seconds(value)
 
     def schedule_startup_task(self, delay_ms: int, label: str, callback) -> None:
         QTimer.singleShot(

@@ -10,10 +10,13 @@ from PyInstaller.utils.hooks import collect_submodules
 PROJECT_ROOT = Path(SPECPATH).resolve().parent
 ICON_FILE = PROJECT_ROOT / "assets" / "icons" / "HushPlayer.ico"
 NODE_EXE = Path(os.environ["HUSHPLAYER_NODE_EXE"]).resolve()
+VERSION_INFO_FILE = Path(os.environ["HUSHPLAYER_VERSION_INFO"]).resolve()
 if not ICON_FILE.is_file():
     raise SystemExit(f"Application icon not found: {ICON_FILE}")
 if not NODE_EXE.is_file():
     raise SystemExit(f"Bundled Node executable not found: {NODE_EXE}")
+if not VERSION_INFO_FILE.is_file():
+    raise SystemExit(f"Generated Windows version info not found: {VERSION_INFO_FILE}")
 
 
 def directory_if_present(relative_path, destination):
@@ -124,7 +127,7 @@ exe = EXE(
     target_arch="x86_64",
     codesign_identity=None,
     entitlements_file=None,
-    version=str(PROJECT_ROOT / "packaging" / "version_info.txt"),
+    version=str(VERSION_INFO_FILE),
     icon=str(ICON_FILE),
 )
 

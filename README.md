@@ -1,23 +1,23 @@
 # HushPlayer
 
-HushPlayer 的 Windows 开发与打包环境使用 64 位 CPython 3.12。项目根目录中的 `.venv` 是脚本唯一默认使用的 Python 环境；构建脚本不会静默改用系统 Python。
+HushPlayer 的 Windows 开发与打包环境使用 64 位 CPython 3.13。项目根目录中的 `.venv` 是脚本唯一默认使用的 Python 环境；构建脚本不会静默改用系统 Python。
 
 ## 创建开发环境
 
-先确认使用的是 64 位 Python 3.12。若 Python 安装在默认的当前用户目录，可在项目根目录执行：
+先确认使用的是 64 位 Python 3.13。若 Python 安装在默认的当前用户目录，可在项目根目录执行：
 
 ```powershell
-$Python312 = Join-Path $env:LOCALAPPDATA "Programs\Python\Python312\python.exe"
-& $Python312 --version
-& $Python312 -m venv .venv
+$Python313 = Join-Path $env:LOCALAPPDATA "Programs\Python\Python313\python.exe"
+& $Python313 --version
+& $Python313 -m venv .venv
 .\.venv\Scripts\python.exe -m pip install --upgrade pip setuptools wheel
 .\.venv\Scripts\python.exe -m pip install --require-hashes --requirement requirements-lock.txt
 ```
 
-如果 Python 安装在其他位置，请将 `$Python312` 设置为实际的 Python 3.12 x64 可执行文件。不要在已有损坏环境上修补；先将旧 `.venv` 重命名为唯一的备份名称。
+如果 Python 安装在其他位置，请将 `$Python313` 设置为实际的 Python 3.13 x64 可执行文件。不要在已有损坏环境上修补；先将旧 `.venv` 重命名为唯一的备份名称。
 
 - `requirements.txt` 记录应用运行依赖。
-- `requirements-lock.txt` 是经过验证的 CPython 3.12 / Windows x64 开发与打包锁文件，包含精确版本和哈希。
+- `requirements-lock.txt` 是经过验证的 CPython 3.13 / Windows x64 开发与打包锁文件，包含精确版本和哈希。
 
 ## 验证环境
 
@@ -31,4 +31,12 @@ $Python312 = Join-Path $env:LOCALAPPDATA "Programs\Python\Python312\python.exe"
 ```powershell
 .\packaging\build_windows_debug.ps1 -DiagnosticOnly
 .\packaging\build_windows_release.ps1 -DiagnosticOnly
+.\packaging\build_windows_installer.ps1 -DiagnosticOnly
+```
+
+正式生成安装程序时，先运行 release 构建，再调用安装器脚本。版本号和安装器文件名都由 `app/core/version.py` 生成，不要直接修改 Inno Setup 文件中的版本：
+
+```powershell
+.\packaging\build_windows_release.ps1
+.\packaging\build_windows_installer.ps1
 ```

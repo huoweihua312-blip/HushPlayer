@@ -1,11 +1,11 @@
-# CPython 3.12 / Windows x64 build lock. Each entry is pinned to the
+# CPython 3.13 / Windows x64 build lock. Each entry is pinned to the
 # exact wheel verified for the official HushPlayer Windows build environment.
 altgraph==0.17.5 \
     --hash=sha256:f3a22400bce1b0c701683820ac4f3b159cd301acab067c51c653e06961600597
 certifi==2026.6.17 \
     --hash=sha256:2227dcbaafe0d2f59279d1762ddddc37783ed4354594f194ffc31d20f41fc3db
 charset-normalizer==3.4.9 \
-    --hash=sha256:4b3dac63058cc36820b0dd072f89898604e2d39686fe05321729d00d8ac185a0
+    --hash=sha256:fe2c7201c642b7c308f1675355ad7ff7b66acfe3541625efe5a3ad38f29d6115
 idna==3.18 \
     --hash=sha256:7f952cbe720b688055e3f87de14f5c3e5fdaa8bc3928985c4077ca689de849a2
 mutagen==1.48.1 \
