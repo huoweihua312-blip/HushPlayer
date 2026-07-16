@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import shutil
@@ -16,6 +17,39 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
+
+def _default_real_play_queue_path() -> Path | None:
+    if os.name != "nt":
+        return None
+    app_data = str(os.environ.get("APPDATA") or "").strip()
+    if not app_data:
+        return None
+    return Path(app_data) / "HushPlayer" / "HushPlayer" / "data" / "play_queue.json"
+
+
+def _file_fingerprint(path: Path | None) -> dict[str, object]:
+    if path is None or not path.is_file():
+        return {"exists": False}
+    digest = hashlib.sha256()
+    with path.open("rb") as file:
+        for chunk in iter(lambda: file.read(1024 * 1024), b""):
+            digest.update(chunk)
+    stat = path.stat()
+    return {
+        "exists": True,
+        "size": stat.st_size,
+        "mtime_ns": stat.st_mtime_ns,
+        "sha256": digest.hexdigest(),
+    }
+
+
+REAL_PLAY_QUEUE_PATH = _default_real_play_queue_path()
+REAL_PLAY_QUEUE_BEFORE = _file_fingerprint(REAL_PLAY_QUEUE_PATH)
+
+from _smoke_storage import activate_isolated_app_storage
+
+
+ISOLATED_STORAGE = activate_isolated_app_storage("hushplayer-online-playback-")
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PySide6.QtCore import QUrl, Qt
@@ -435,6 +469,9 @@ def test_main_window_online_entry() -> None:
     MainWindow.restore_playback_session = lambda self: None
     try:
         window = MainWindow()
+        assert window.play_queue_file.resolve().is_relative_to(
+            ISOLATED_STORAGE.root
+        )
         window.show_pending_playback_restore(
             {
                 "title": "Local restore fixture",
@@ -714,6 +751,16 @@ def main() -> int:
         resolved_staging = STAGING_ROOT.resolve()
         if resolved_root.parent == resolved_staging and resolved_root.name.startswith("hushplayer_qprocess_"):
             shutil.rmtree(resolved_root, ignore_errors=True)
+        real_play_queue_after = _file_fingerprint(REAL_PLAY_QUEUE_PATH)
+        assert real_play_queue_after == REAL_PLAY_QUEUE_BEFORE, (
+            "online playback smoke modified the real user play queue: "
+            f"before={REAL_PLAY_QUEUE_BEFORE}, after={real_play_queue_after}"
+        )
+        print(
+            "real play queue unchanged:",
+            REAL_PLAY_QUEUE_PATH,
+            real_play_queue_after,
+        )
 
 
 if __name__ == "__main__":

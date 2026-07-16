@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import os
 import sys
-import tempfile
 import time
 from pathlib import Path
 from types import SimpleNamespace
@@ -12,6 +11,11 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
+
+from _smoke_storage import activate_isolated_app_storage
+
+
+ISOLATED_STORAGE = activate_isolated_app_storage("hushplayer-audio-device-")
 
 from PySide6.QtWidgets import QApplication
 
@@ -130,14 +134,9 @@ def test_single_player_and_audio_output_initialization() -> None:
 
 def main() -> int:
     app = QApplication.instance() or QApplication(sys.argv)
-    with tempfile.TemporaryDirectory(prefix="hushplayer-audio-device-") as temp_dir:
-        root = Path(temp_dir)
-        os.environ["HUSHPLAYER_APP_DATA_DIR"] = str(root / "appdata")
-        os.environ["HUSHPLAYER_CACHE_DIR"] = str(root / "cache")
-        os.environ["HUSHPLAYER_LOG_DIR"] = str(root / "logs")
-        test_device_application_rules()
-        test_main_window_lifetime_startup_and_debounce(app)
-        test_single_player_and_audio_output_initialization()
+    test_device_application_rules()
+    test_main_window_lifetime_startup_and_debounce(app)
+    test_single_player_and_audio_output_initialization()
     print("default audio output hot switch smoke: OK")
     return 0
 
