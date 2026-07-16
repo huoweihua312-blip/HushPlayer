@@ -1,16 +1,13 @@
 [CmdletBinding()]
 param(
-    [string]$PythonPath = ""
+    [string]$PythonPath = "",
+    [switch]$DiagnosticOnly
 )
 
 $ErrorActionPreference = "Stop"
 Set-StrictMode -Version Latest
 
 $ProjectRoot = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot ".."))
-$CurrentRoot = [System.IO.Path]::GetFullPath((Get-Location).Path)
-if ($CurrentRoot.TrimEnd("\") -ne $ProjectRoot.TrimEnd("\")) {
-    throw "Run this script from the HushPlayer project root: $ProjectRoot"
-}
 if (-not (Test-Path -LiteralPath (Join-Path $ProjectRoot "main.py") -PathType Leaf)) {
     throw "main.py was not found in the project root."
 }
@@ -21,10 +18,10 @@ $Python = if ($PythonPath) {
     Join-Path $ProjectRoot ".venv\Scripts\python.exe"
 }
 if (-not (Test-Path -LiteralPath $Python -PathType Leaf)) {
-    throw "Python interpreter was not found: $Python"
+    throw "Project virtual environment Python was not found: $Python. Rebuild .venv with Python 3.12 x64 and requirements-lock.txt."
 }
 
-& $Python -c "import platform, struct, sys, PyInstaller, PySide6; assert struct.calcsize('P') * 8 == 64; print('Python=' + platform.python_version()); print('PythonExecutable=' + sys.executable); print('PyInstaller=' + PyInstaller.__version__); print('PySide6=' + PySide6.__version__); print('Architecture=x64')"
+& $Python -c "import platform, struct, sys, PyInstaller, PySide6; assert sys.version_info[:2] == (3, 12); assert struct.calcsize('P') * 8 == 64; print('Python=' + platform.python_version()); print('PythonExecutable=' + sys.executable); print('PyInstaller=' + PyInstaller.__version__); print('PySide6=' + PySide6.__version__); print('Architecture=x64')"
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 & $Python -m PyInstaller --version
 if ($LASTEXITCODE -ne 0) {
@@ -34,6 +31,22 @@ if ($LASTEXITCODE -ne 0) {
 $NodeRuntimeHelper = Join-Path $PSScriptRoot "prepare_node_runtime.ps1"
 if (-not (Test-Path -LiteralPath $NodeRuntimeHelper -PathType Leaf)) {
     throw "The fixed Node.js runtime preparation helper is missing: $NodeRuntimeHelper"
+}
+$RequirementsLock = Join-Path $ProjectRoot "requirements-lock.txt"
+if (-not (Test-Path -LiteralPath $RequirementsLock -PathType Leaf)) {
+    throw "The reproducible Windows dependency lock is missing: $RequirementsLock"
+}
+$Spec = Join-Path $ProjectRoot "packaging\HushPlayer.release.spec"
+if (-not (Test-Path -LiteralPath $Spec -PathType Leaf)) {
+    throw "The PyInstaller spec is missing: $Spec"
+}
+if ($DiagnosticOnly) {
+    Write-Host "ProjectRoot=$ProjectRoot"
+    Write-Host "RequirementsLock=$RequirementsLock"
+    Write-Host "NodeRuntimeHelper=$NodeRuntimeHelper"
+    Write-Host "Spec=$Spec"
+    Write-Host "DiagnosticOnly=OK"
+    return
 }
 . $NodeRuntimeHelper
 $NodeRuntime = Prepare-HushPlayerNodeRuntime -ProjectRoot $ProjectRoot
@@ -64,7 +77,6 @@ Remove-ProjectOutputDirectory "build"
 Remove-ProjectOutputDirectory "dist"
 
 $env:HUSHPLAYER_NODE_EXE = $NodeExe
-$Spec = Join-Path $ProjectRoot "packaging\HushPlayer.release.spec"
 & $Python -m PyInstaller --noconfirm --clean --workpath (Join-Path $ProjectRoot "build\pyinstaller") --distpath (Join-Path $ProjectRoot "dist") $Spec
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
