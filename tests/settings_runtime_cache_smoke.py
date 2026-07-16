@@ -212,6 +212,7 @@ def assert_load_compatibility(window: MainWindow, root: Path) -> None:
                 "volume": {"bad": True},
                 "play_mode": ["shuffle"],
                 "immersive_background_alpha": {"bad": True},
+                "lyrics_timing_offsets_ms": ["bad"],
                 "floating_lyrics_opacity": [],
                 "floating_lyrics_font_size": None,
                 "floating_lyrics_width": {"bad": True},
@@ -231,6 +232,7 @@ def assert_load_compatibility(window: MainWindow, root: Path) -> None:
         assert loaded["immersive_background_image_opacity"] == 100
         assert loaded["immersive_background_fill_mode"] == "cover"
         assert loaded["immersive_lyrics_font_scale"] == 100
+        assert loaded["lyrics_timing_offsets_ms"] == {}
         assert loaded["floating_lyrics_opacity"] == 100
         assert loaded["floating_lyrics_font_size"] == 42
         assert loaded["floating_lyrics_width"] == 980
@@ -251,6 +253,11 @@ def assert_load_compatibility(window: MainWindow, root: Path) -> None:
                 "immersive_background_image_opacity": 500,
                 "immersive_background_fill_mode": "contain",
                 "immersive_lyrics_font_scale": 113,
+                "lyrics_timing_offsets_ms": {
+                    "local:fixture": 550,
+                    "online:fixture": -99_000,
+                    "invalid": "bad",
+                },
                 "immersive_cover_background_enabled": True,
                 "immersive_background_alpha": 88,
                 "appearance_future_field": "保留",
@@ -265,6 +272,10 @@ def assert_load_compatibility(window: MainWindow, root: Path) -> None:
         assert loaded["immersive_background_image_opacity"] == 100
         assert loaded["immersive_background_fill_mode"] == "contain"
         assert loaded["immersive_lyrics_font_scale"] == 115
+        assert loaded["lyrics_timing_offsets_ms"] == {
+            "local:fixture": 600,
+            "online:fixture": -10_000,
+        }
         assert loaded["immersive_cover_background_enabled"] is False
         assert loaded["immersive_background_alpha"] == 0
         assert loaded["appearance_future_field"] == "保留"

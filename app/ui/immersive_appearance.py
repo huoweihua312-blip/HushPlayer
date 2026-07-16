@@ -19,6 +19,8 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from app.services.lyrics_timing import normalize_lyrics_offset_ms
+
 
 BACKGROUND_MODES = {"default", "cover", "custom"}
 BACKGROUND_FILL_MODES = {"cover", "contain"}
@@ -643,11 +645,15 @@ class ImmersiveBackgroundView(QWidget):
 
 class ImmersiveAppearanceDialog(QDialog):
     configChanged = Signal(object)
+    lyricsOffsetChanged = Signal(str, int)
 
     def __init__(
         self,
         config: ImmersiveAppearanceConfig,
         parent: QWidget | None = None,
+        *,
+        track_identity: str = "",
+        lyrics_offset_ms: int = 0,
     ) -> None:
         super().__init__(parent)
         self.setWindowTitle("沉浸歌词外观")
@@ -655,6 +661,8 @@ class ImmersiveAppearanceDialog(QDialog):
         self.setMinimumWidth(520)
         self.config = config
         self._updating = False
+        self._offset_updating = False
+        self.track_identity = str(track_identity or "")
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(22, 20, 22, 20)
@@ -662,7 +670,9 @@ class ImmersiveAppearanceDialog(QDialog):
 
         title = QLabel("沉浸歌词外观")
         title.setObjectName("appearanceTitle")
-        subtitle = QLabel("背景处理会在停止操作约 150ms 后更新；歌词字号近实时预览。")
+        subtitle = QLabel(
+            "背景处理会在停止操作约 150ms 后更新；歌词字号和当前歌曲时间偏移即时预览。"
+        )
         subtitle.setObjectName("appearanceSubtitle")
         subtitle.setWordWrap(True)
         layout.addWidget(title)
@@ -710,6 +720,32 @@ class ImmersiveAppearanceDialog(QDialog):
             "%",
         )
 
+        offset_row = QHBoxLayout()
+        offset_row.setSpacing(8)
+        offset_row.addWidget(QLabel("歌词时间偏移"))
+        self.offset_minus_button = QPushButton("-0.5 秒")
+        self.offset_minus_button.clicked.connect(lambda: self._adjust_offset(-5))
+        offset_row.addWidget(self.offset_minus_button)
+        self.offset_slider = QSlider(Qt.Orientation.Horizontal)
+        self.offset_slider.setRange(-100, 100)
+        self.offset_slider.setSingleStep(1)
+        self.offset_slider.setPageStep(5)
+        self.offset_slider.valueChanged.connect(self._offset_slider_changed)
+        offset_row.addWidget(self.offset_slider, 1)
+        self.offset_plus_button = QPushButton("+0.5 秒")
+        self.offset_plus_button.clicked.connect(lambda: self._adjust_offset(5))
+        offset_row.addWidget(self.offset_plus_button)
+        self.offset_zero_button = QPushButton("归零")
+        self.offset_zero_button.clicked.connect(lambda: self.offset_slider.setValue(0))
+        offset_row.addWidget(self.offset_zero_button)
+        self.offset_value = QLabel("0.0 秒")
+        self.offset_value.setMinimumWidth(66)
+        self.offset_value.setAlignment(
+            Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
+        )
+        offset_row.addWidget(self.offset_value)
+        form.addLayout(offset_row)
+
         self.status_label = QLabel("等待预览")
         self.status_label.setObjectName("appearanceStatus")
         self.status_label.setWordWrap(True)
@@ -738,6 +774,7 @@ class ImmersiveAppearanceDialog(QDialog):
             slider.valueChanged.connect(self._controls_changed)
 
         self._load_config(config)
+        self.set_track_timing(track_identity, lyrics_offset_ms)
         self.setStyleSheet(
             "QDialog#immersiveAppearanceDialog { background: #10131a; color: #f3f4f6; }"
             "QLabel { color: #d7dce6; }"
@@ -817,6 +854,44 @@ class ImmersiveAppearanceDialog(QDialog):
         )
         self.choose_button.setEnabled(mode == "custom")
         self.configChanged.emit(self.config)
+
+    @staticmethod
+    def _format_offset(offset_ms: int) -> str:
+        seconds = int(offset_ms) / 1000.0
+        return f"{seconds:+.1f} 秒" if offset_ms else "0.0 秒"
+
+    def set_track_timing(self, track_identity: str, offset_ms: int) -> None:
+        self.track_identity = str(track_identity or "").strip()
+        normalized = normalize_lyrics_offset_ms(offset_ms)
+        self._offset_updating = True
+        self.offset_slider.setValue(int(normalized / 100))
+        self.offset_value.setText(self._format_offset(normalized))
+        enabled = bool(self.track_identity)
+        for control in (
+            self.offset_minus_button,
+            self.offset_slider,
+            self.offset_plus_button,
+            self.offset_zero_button,
+        ):
+            control.setEnabled(enabled)
+        if not enabled:
+            self.offset_value.setToolTip("当前没有正在播放的歌曲")
+        else:
+            self.offset_value.setToolTip(
+                "正值让歌词向前推进；负值让歌词向后推迟"
+            )
+        self._offset_updating = False
+
+    def _adjust_offset(self, steps: int) -> None:
+        if self.offset_slider.isEnabled():
+            self.offset_slider.setValue(self.offset_slider.value() + int(steps))
+
+    def _offset_slider_changed(self, value: int) -> None:
+        offset_ms = normalize_lyrics_offset_ms(int(value) * 100)
+        self.offset_value.setText(self._format_offset(offset_ms))
+        if self._offset_updating or not self.track_identity:
+            return
+        self.lyricsOffsetChanged.emit(self.track_identity, offset_ms)
 
     def choose_custom_image(self) -> None:
         path, _ = QFileDialog.getOpenFileName(

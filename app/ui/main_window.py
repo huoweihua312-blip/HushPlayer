@@ -18,6 +18,13 @@ from app.core.app_paths import AppPaths
 from app.core.version import APP_USER_AGENT, APP_VERSION
 from app.services.app_update_service import AppUpdateService, UpdateManifest
 from app.services.lyrics_cache import LyricsCache
+from app.services.lyrics_timing import (
+    LYRICS_TIMING_OFFSETS_KEY,
+    effective_lyrics_position_ms as calculate_effective_lyrics_position_ms,
+    lyrics_offset_for_settings,
+    normalize_lyrics_timing_offsets,
+    update_lyrics_timing_offsets,
+)
 from app.services.online_artwork_service import OnlineArtworkService
 from app.services.online_audio_cache import OnlineAudioCacheService
 from app.services.online_download_manager import OnlineDownloadManager
@@ -3302,6 +3309,8 @@ class ImmersiveLyricsWindow(QWidget):
         self.background_alpha = self.appearance_config.darkness
         self.ui_visible = True
         self.appearance_dialog: ImmersiveAppearanceDialog | None = None
+        self.track_identity = ""
+        self.lyrics_offset_ms = 0
         self.auto_hide_enabled = bool(
             main_window.get_user_setting("immersive_auto_hide_ui", True)
         )
@@ -3647,10 +3656,16 @@ class ImmersiveLyricsWindow(QWidget):
             return
         if self.appearance_config.background_mode == "custom":
             self.background_view.revalidate_custom_image()
-        dialog = ImmersiveAppearanceDialog(self.appearance_config, self)
+        dialog = ImmersiveAppearanceDialog(
+            self.appearance_config,
+            self,
+            track_identity=self.track_identity,
+            lyrics_offset_ms=self.lyrics_offset_ms,
+        )
         dialog.configChanged.connect(
             lambda config: self.apply_appearance_config(config, persist=True)
         )
+        dialog.lyricsOffsetChanged.connect(self.request_lyrics_offset_change)
         dialog.finished.connect(lambda _result: self._clear_appearance_dialog(dialog))
         dialog.set_availability(
             not self.background_view.fallback_active,
@@ -3671,6 +3686,25 @@ class ImmersiveLyricsWindow(QWidget):
         dialog = self.appearance_dialog
         if dialog is not None:
             dialog.set_availability(available, message)
+
+    def update_track_timing(self, track_identity: str, offset_ms: int) -> None:
+        self.track_identity = str(track_identity or "").strip()
+        self.lyrics_offset_ms = int(offset_ms)
+        dialog = self.appearance_dialog
+        if dialog is not None:
+            dialog.set_track_timing(self.track_identity, self.lyrics_offset_ms)
+
+    def request_lyrics_offset_change(
+        self,
+        track_identity: str,
+        offset_ms: int,
+    ) -> None:
+        identity = str(track_identity or "").strip()
+        if not identity or identity != self.track_identity:
+            return
+        setter = getattr(self.main_window, "set_lyrics_offset", None)
+        if callable(setter) and setter(identity, offset_ms):
+            self.update_track_timing(identity, offset_ms)
 
     def apply_appearance_config(
         self,
@@ -4055,6 +4089,8 @@ class MainWindow(QMainWindow):
         self.last_musicbrainz_request_time = 0.0
 
         self.current_lyrics: list[tuple[int, str]] = []
+        self._current_lyrics_offset_identity = ""
+        self._current_lyrics_offset_ms = 0
         self.shortcuts: list[QShortcut] = []
 
         self.paths = AppPaths.resolve()
@@ -5942,6 +5978,77 @@ class MainWindow(QMainWindow):
             return ""
         return MediaItem.from_local({"path": playing_path}).stable_identity
 
+    def get_lyrics_offset_ms(self, track_identity: str | None = None) -> int:
+        identity = str(track_identity or self.current_track_identity() or "").strip()
+        if identity == getattr(self, "_current_lyrics_offset_identity", ""):
+            return int(getattr(self, "_current_lyrics_offset_ms", 0) or 0)
+        offset_ms = lyrics_offset_for_settings(self.get_hush_settings(), identity)
+        self._current_lyrics_offset_identity = identity
+        self._current_lyrics_offset_ms = offset_ms
+        return offset_ms
+
+    def effective_lyrics_position_ms(
+        self,
+        player_position_ms: int,
+        track_identity: str | None = None,
+    ) -> int:
+        return calculate_effective_lyrics_position_ms(
+            player_position_ms,
+            self.get_lyrics_offset_ms(track_identity),
+        )
+
+    def set_lyrics_offset(self, track_identity: str, offset_ms: int) -> bool:
+        identity = str(track_identity or "").strip()
+        if not identity or identity != self.current_track_identity():
+            return False
+        settings = self.get_hush_settings()
+        updated = update_lyrics_timing_offsets(
+            settings.get(LYRICS_TIMING_OFFSETS_KEY, {}),
+            identity,
+            offset_ms,
+        )
+        self.save_hush_settings({LYRICS_TIMING_OFFSETS_KEY: updated})
+        normalized_offset = int(updated.get(identity, 0))
+        self._current_lyrics_offset_identity = identity
+        self._current_lyrics_offset_ms = normalized_offset
+        immersive_window = getattr(self, "immersive_lyrics_window", None)
+        if immersive_window is not None:
+            immersive_window.update_track_timing(identity, normalized_offset)
+        self.refresh_current_lyrics_position()
+        self.sync_floating_lyrics()
+        return True
+
+    def refresh_current_lyrics_position(
+        self,
+        player_position_ms: int | None = None,
+    ) -> bool:
+        lyrics = getattr(self, "current_lyrics", None)
+        if not lyrics:
+            return False
+        current = getattr(self, "current_media_item", None)
+        if isinstance(current, MediaItem) and current.media_type == "online":
+            if self.displayed_lyrics_track_key != current.stable_identity:
+                return False
+        else:
+            current_path = self.normalize_song_path(
+                getattr(self, "current_song_path", "")
+            )
+            displayed_path = self.normalize_song_path(
+                getattr(self, "displayed_lyrics_song_path", "")
+            )
+            if not current_path or displayed_path != current_path:
+                return False
+        if player_position_ms is None:
+            player_position_ms = self.media_player.position()
+        effective_position = self.effective_lyrics_position_ms(player_position_ms)
+        self.lyrics_view.update_by_position(effective_position, lyrics)
+        if hasattr(self, "full_lyrics_view"):
+            self.full_lyrics_view.update_by_position(effective_position, lyrics)
+        immersive_window = getattr(self, "immersive_lyrics_window", None)
+        if immersive_window is not None:
+            immersive_window.update_position(effective_position, lyrics)
+        return True
+
     def rebuild_song_identity_index(self) -> None:
         index: dict[str, QListWidgetItem] = {}
         if hasattr(self, "song_list"):
@@ -7035,6 +7142,11 @@ class MainWindow(QMainWindow):
     def sync_immersive_lyrics(self) -> None:
         if self.immersive_lyrics_window is None:
             return
+        track_identity = self.current_track_identity()
+        self.immersive_lyrics_window.update_track_timing(
+            track_identity,
+            self.get_lyrics_offset_ms(track_identity),
+        )
         title, artist_album, status = self.get_playing_song_display_data()
         self.immersive_lyrics_window.update_song_info(title, artist_album, status)
         playing_path = self.normalize_song_path(self.current_song_path)
@@ -7048,7 +7160,8 @@ class MainWindow(QMainWindow):
             elif self.current_lyrics:
                 self.immersive_lyrics_window.set_lyrics(self.current_lyrics)
                 self.immersive_lyrics_window.update_position(
-                    self.media_player.position(), self.current_lyrics
+                    self.effective_lyrics_position_ms(self.media_player.position()),
+                    self.current_lyrics,
                 )
             else:
                 self.immersive_lyrics_window.set_lyrics([])
@@ -7059,7 +7172,8 @@ class MainWindow(QMainWindow):
         if playing_path and displayed_path == playing_path and self.current_lyrics:
             self.immersive_lyrics_window.set_lyrics(self.current_lyrics)
             self.immersive_lyrics_window.update_position(
-                self.media_player.position(), self.current_lyrics
+                self.effective_lyrics_position_ms(self.media_player.position()),
+                self.current_lyrics,
             )
         else:
             self.immersive_lyrics_window.set_lyrics([])
@@ -8204,7 +8318,8 @@ class MainWindow(QMainWindow):
             elif self.current_lyrics:
                 self.full_lyrics_view.set_lyrics(self.current_lyrics)
                 self.full_lyrics_view.update_by_position(
-                    self.media_player.position(), self.current_lyrics
+                    self.effective_lyrics_position_ms(self.media_player.position()),
+                    self.current_lyrics,
                 )
             else:
                 state = getattr(self, "current_online_lyrics_state", "")
@@ -8245,7 +8360,7 @@ class MainWindow(QMainWindow):
         if self.current_lyrics:
             self.full_lyrics_view.set_lyrics(self.current_lyrics)
             self.full_lyrics_view.update_by_position(
-                self.media_player.position(),
+                self.effective_lyrics_position_ms(self.media_player.position()),
                 self.current_lyrics,
             )
             self.full_lyrics_status.setText("正在显示播放中的歌词")
@@ -11851,7 +11966,8 @@ class MainWindow(QMainWindow):
                 and self.current_lyrics
             ):
                 previous_line, current_line, next_line = self.get_lyric_context_by_position(
-                    self.media_player.position(), self.current_lyrics
+                    self.effective_lyrics_position_ms(self.media_player.position()),
+                    self.current_lyrics,
                 )
                 window.set_lines(previous_line, current_line, next_line)
             elif self.current_plain_lyrics:
@@ -11872,7 +11988,7 @@ class MainWindow(QMainWindow):
             window.set_lines("", title, "当前歌曲暂无同步歌词")
             return
 
-        position = self.media_player.position()
+        position = self.effective_lyrics_position_ms(self.media_player.position())
         previous_line, current_line, next_line = self.get_lyric_context_by_position(
             position,
             self.current_lyrics,
@@ -12899,6 +13015,11 @@ class MainWindow(QMainWindow):
         if APPEARANCE_SETTING_KEYS.intersection(settings):
             settings.update(
                 ImmersiveAppearanceConfig.from_settings(settings).to_settings()
+            )
+
+        if LYRICS_TIMING_OFFSETS_KEY in settings:
+            settings[LYRICS_TIMING_OFFSETS_KEY] = normalize_lyrics_timing_offsets(
+                settings[LYRICS_TIMING_OFFSETS_KEY]
             )
 
         if "auto_check_updates_on_startup" in settings and not isinstance(
@@ -16187,22 +16308,14 @@ class MainWindow(QMainWindow):
             and current.media_type == "online"
             and self.displayed_lyrics_track_key == current.stable_identity
         ):
-            self.lyrics_view.update_by_position(position, self.current_lyrics)
-            if hasattr(self, "full_lyrics_view"):
-                self.full_lyrics_view.update_by_position(position, self.current_lyrics)
-            if self.immersive_lyrics_window is not None:
-                self.immersive_lyrics_window.update_position(position, self.current_lyrics)
+            self.refresh_current_lyrics_position(position)
             return
 
         current_playing_path = self.normalize_song_path(self.current_song_path)
         displayed_lyrics_path = self.normalize_song_path(self.displayed_lyrics_song_path)
 
         if current_playing_path and displayed_lyrics_path == current_playing_path:
-            self.lyrics_view.update_by_position(position, self.current_lyrics)
-            if hasattr(self, "full_lyrics_view"):
-                self.full_lyrics_view.update_by_position(position, self.current_lyrics)
-                if self.immersive_lyrics_window is not None:
-                    self.immersive_lyrics_window.update_position(position, self.current_lyrics)
+            self.refresh_current_lyrics_position(position)
 
     def on_duration_changed(self, duration: int) -> None:
         self.current_duration = duration
