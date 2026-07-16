@@ -16,6 +16,7 @@ from app.models.playback_queue_item import PlaybackQueueItem
 from app.core.app_paths import AppPaths
 from app.services.lyrics_cache import LyricsCache
 from app.services.online_artwork_service import OnlineArtworkService
+from app.services.online_audio_cache import OnlineAudioCacheService
 from app.services.online_download_manager import OnlineDownloadManager
 from app.services.online_lyrics_service import OnlineLyricsService
 from app.services.online_source_client import OnlineSourceClient
@@ -30,7 +31,7 @@ from app.ui.media_interaction_controller import MediaInteractionController
 from app.ui.search_page import SearchPage
 from app.ui.track_list_view import SearchEntryLineEdit
 from PySide6.QtCore import QEasingCurve, QEvent, QItemSelectionModel, QObject, QPropertyAnimation, QRectF, QRunnable, QSize, Qt, QThread, QThreadPool, QTimer, QUrl, Signal, Slot
-from PySide6.QtGui import QColor, QFont, QFontMetrics, QIcon, QKeySequence, QPainter, QPainterPath, QPalette, QPen, QPixmap, QShortcut
+from PySide6.QtGui import QColor, QDesktopServices, QFont, QFontMetrics, QIcon, QKeySequence, QPainter, QPainterPath, QPalette, QPen, QPixmap, QShortcut
 from PySide6.QtMultimedia import QAudioOutput, QMediaDevices, QMediaPlayer
 from PySide6.QtWidgets import (
     QApplication,
@@ -2931,9 +2932,56 @@ class SettingsDialog(QDialog):
         clear_missing_btn.setObjectName("settingsSecondaryButton")
         clear_missing_btn.clicked.connect(self.clear_missing_cache)
 
+        audio_cache_title = QLabel("音频缓存")
+        audio_cache_title.setObjectName("settingsCardTitle")
+
+        self.audio_cache_summary_label = QLabel()
+        self.audio_cache_summary_label.setObjectName("settingsHint")
+        self.audio_cache_summary_label.setWordWrap(True)
+
+        self.audio_cache_path_label = QLabel()
+        self.audio_cache_path_label.setObjectName("settingsHint")
+        self.audio_cache_path_label.setWordWrap(True)
+        self.audio_cache_path_label.setTextInteractionFlags(
+            Qt.TextInteractionFlag.TextSelectableByMouse
+        )
+
+        audio_cache_button_row = QHBoxLayout()
+        audio_cache_button_row.setContentsMargins(0, 0, 0, 0)
+        audio_cache_button_row.setSpacing(10)
+
+        open_audio_cache_btn = QPushButton("打开缓存目录")
+        open_audio_cache_btn.setObjectName("settingsSecondaryButton")
+        open_audio_cache_btn.clicked.connect(self.open_audio_cache_directory)
+
+        clear_incomplete_audio_cache_btn = QPushButton("清理未完成缓存")
+        clear_incomplete_audio_cache_btn.setObjectName("settingsSecondaryButton")
+        clear_incomplete_audio_cache_btn.clicked.connect(
+            self.clear_incomplete_audio_cache
+        )
+
+        clear_all_audio_cache_btn = QPushButton("清理全部音频缓存")
+        clear_all_audio_cache_btn.setObjectName("settingsSecondaryButton")
+        clear_all_audio_cache_btn.clicked.connect(self.clear_all_audio_cache)
+
+        audio_cache_button_row.addWidget(open_audio_cache_btn)
+        audio_cache_button_row.addWidget(clear_incomplete_audio_cache_btn)
+        audio_cache_button_row.addWidget(clear_all_audio_cache_btn)
+        audio_cache_button_row.addStretch()
+
         cache_layout.addWidget(cache_title)
         cache_layout.addWidget(cache_hint)
         cache_layout.addWidget(clear_missing_btn)
+        cache_layout.addSpacing(4)
+        cache_layout.addWidget(audio_cache_title)
+        cache_layout.addWidget(self.audio_cache_summary_label)
+        cache_layout.addWidget(self.audio_cache_path_label)
+        cache_layout.addLayout(audio_cache_button_row)
+
+        self.main_window.online_audio_cache.statisticsChanged.connect(
+            self.refresh_audio_cache_status
+        )
+        self.refresh_audio_cache_status()
 
         layout.addWidget(playback_card)
         layout.addWidget(immersive_card)
@@ -3105,6 +3153,66 @@ class SettingsDialog(QDialog):
     def clear_missing_cache(self) -> None:
         removed_count = self.main_window.clear_missing_cache_files()
         QMessageBox.information(self, "缓存", f"已清理 {removed_count} 个失败缓存文件。")
+
+    @staticmethod
+    def format_cache_bytes(value: int) -> str:
+        size = float(max(0, int(value or 0)))
+        for unit in ("B", "KB", "MB", "GB"):
+            if size < 1024.0 or unit == "GB":
+                return f"{size:.0f} {unit}" if unit == "B" else f"{size:.1f} {unit}"
+            size /= 1024.0
+        return "0 B"
+
+    def refresh_audio_cache_status(self) -> None:
+        stats = self.main_window.online_audio_cache.statistics()
+        self.audio_cache_summary_label.setText(
+            "已缓存歌曲：{count} 首（{complete}）\n"
+            "未完成缓存：{incomplete}".format(
+                count=int(stats.get("complete_count") or 0),
+                complete=self.format_cache_bytes(stats.get("complete_bytes") or 0),
+                incomplete=self.format_cache_bytes(
+                    stats.get("incomplete_bytes") or 0
+                ),
+            )
+        )
+        self.audio_cache_path_label.setText(
+            f"缓存目录：{self.main_window.online_audio_cache.cache_root}"
+        )
+
+    def open_audio_cache_directory(self) -> None:
+        self.main_window.open_online_audio_cache_directory()
+
+    def clear_incomplete_audio_cache(self) -> None:
+        removed = self.main_window.clear_incomplete_online_audio_cache()
+        self.refresh_audio_cache_status()
+        QMessageBox.information(self, "音频缓存", f"已清理 {removed} 个未完成缓存。")
+
+    def clear_all_audio_cache(self) -> None:
+        message = (
+            "仅删除在线音频缓存，不会删除本地音乐、收藏、歌单、播放记录、"
+            "歌词缓存、封面缓存或用户导入的音源配置。\n\n是否继续？"
+        )
+        result = QMessageBox.question(
+            self,
+            "清理全部音频缓存",
+            message,
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        if result != QMessageBox.StandardButton.Yes:
+            return
+
+        outcome = self.main_window.clear_all_online_audio_cache()
+        self.refresh_audio_cache_status()
+        skipped = int(outcome.get("skipped") or 0)
+        suffix = ""
+        if skipped:
+            suffix = "；当前正在播放的缓存已跳过"
+        QMessageBox.information(
+            self,
+            "音频缓存",
+            f"已清理 {int(outcome.get('removed') or 0)} 个缓存{suffix}。",
+        )
 
 
 class MetadataMatchDialog(QDialog):
@@ -3899,6 +4007,8 @@ class MainWindow(QMainWindow):
         self.pending_online_playback_generation = 0
         self.pending_online_playback_identity = ""
         self.pending_online_keep_target_on_failure = False
+        self.pending_online_preserve_session = False
+        self.pending_online_resume_position = 0
         self.pending_online_metadata_request = 0
         self.pending_online_metadata_identity = ""
         self.pending_online_ui_snapshot: dict | None = None
@@ -3917,6 +4027,16 @@ class MainWindow(QMainWindow):
         self.last_end_advance_at = 0.0
         self.online_loop_retry_identity = ""
         self.online_loop_retry_count = 0
+        self.current_online_cache_key = ""
+        self.online_resume_in_progress = False
+        self.online_resume_retry_started = False
+        self.online_resume_generation = 0
+        self.online_resume_identity = ""
+        self.online_resume_position = 0
+        self.online_resume_timer = QTimer(self)
+        self.online_resume_timer.setSingleShot(True)
+        self.online_resume_timer.setInterval(2500)
+        self.online_resume_timer.timeout.connect(self.on_online_resume_timeout)
         self.current_plain_lyrics = ""
         self.displayed_lyrics_track_key = ""
         self.current_online_lyrics_state = ""
@@ -3970,6 +4090,10 @@ class MainWindow(QMainWindow):
         self.online_download_manager = self.measure_startup_step(
             "下载管理器对象（无网络请求）",
             lambda: OnlineDownloadManager(self),
+        )
+        self.online_audio_cache = self.measure_startup_step(
+            "在线音频缓存索引",
+            lambda: OnlineAudioCacheService(self.paths.cache_dir / "audio", self),
         )
         self.remote_track_store = RemoteTrackStore(self.remote_tracks_file)
         try:
@@ -4186,9 +4310,15 @@ class MainWindow(QMainWindow):
             self.remove_unified_track_from_current_playlist
         )
         self.unified_search_panel.infoRequested.connect(self.show_online_track_info)
+        self.unified_search_panel.deleteCacheRequested.connect(
+            self.delete_online_track_cache
+        )
         self.unified_search_panel.set_collection_providers(
             self.get_online_track_collection_state,
             self.get_online_playlist_choices,
+        )
+        self.unified_search_panel.set_cache_state_provider(
+            self.get_online_audio_cache_state
         )
         self.online_lyrics_service.statusChanged.connect(
             self.on_online_lyrics_status_changed
@@ -4206,6 +4336,7 @@ class MainWindow(QMainWindow):
         self.online_download_manager.progress.connect(self.on_online_download_progress)
         self.online_download_manager.finished.connect(self.on_online_download_finished)
         self.online_download_manager.failed.connect(self.on_online_download_failed)
+        self.online_audio_cache.cacheFailed.connect(self.on_online_audio_cache_failed)
         now_playing_panel = self.measure_startup_step("正在播放侧栏 UI", self._create_now_playing_panel)
         self.now_playing_panel = now_playing_panel
 
@@ -5246,6 +5377,55 @@ class MainWindow(QMainWindow):
                 and stable_id in self.get_playlist_remote_ids(current_playlist_id)
             ),
         }
+
+    def get_online_audio_cache_state(self, track: dict) -> dict:
+        service = getattr(self, "online_audio_cache", None)
+        if service is None:
+            return {"complete": False, "size": 0, "cacheKey": ""}
+        record = service.valid_cache(track, touch=False)
+        return {
+            "complete": bool(record),
+            "size": int((record or {}).get("file_size") or 0),
+            "cacheKey": str((record or {}).get("cache_key") or ""),
+        }
+
+    def online_source_allows_audio_cache(self, media_item: MediaItem) -> bool:
+        if not isinstance(media_item, MediaItem) or media_item.media_type != "online":
+            return False
+        source = self.get_registered_source_safely(media_item.source_id) or {}
+        policy = str(source.get("contentPolicy") or "unknown").strip().casefold()
+        capabilities = source.get("capabilities")
+        capabilities = capabilities if isinstance(capabilities, dict) else {}
+        return bool(
+            source.get("enabled") is not False
+            and policy in {"open", "user_owned"}
+            and (capabilities.get("playback") is True or capabilities.get("download") is True)
+        )
+
+    def start_online_audio_cache(self, media_item: MediaItem, resolution: dict) -> bool:
+        service = getattr(self, "online_audio_cache", None)
+        if service is None or not self.online_source_allows_audio_cache(media_item):
+            return False
+        return bool(service.start_cache(media_item, resolution))
+
+    def on_online_audio_cache_failed(self, cache_key: str, message: str) -> None:
+        key_text = str(cache_key or "")[:10]
+        print(f"[audio-cache] 缓存失败 {key_text or 'unknown'}：{message}")
+
+    def delete_online_track_cache(self, track: dict) -> None:
+        service = getattr(self, "online_audio_cache", None)
+        if service is None:
+            return
+        result = service.delete_cache(
+            track,
+            protected_cache_key=str(getattr(self, "current_online_cache_key", "") or ""),
+        )
+        if result.get("skipped"):
+            self.set_online_status_message("当前歌曲正在使用该缓存，已跳过删除。")
+        elif result.get("removed"):
+            self.set_online_status_message("已删除此在线歌曲的音频缓存。")
+        else:
+            self.set_online_status_message("这首在线歌曲没有可删除的完整缓存。")
 
     def like_online_track(self, track: dict) -> None:
         self.add_online_track_to_playlist(track, "liked")
@@ -7467,6 +7647,7 @@ class MainWindow(QMainWindow):
 
     def begin_playback_generation(self, identity: str) -> int:
         identity = str(identity or "")
+        self.reset_online_resume_recovery()
         self.playback_generation = int(getattr(self, "playback_generation", 0) or 0) + 1
         self.current_queue_identity = identity
         self.media_loading_generation = self.playback_generation
@@ -7483,6 +7664,8 @@ class MainWindow(QMainWindow):
         playback_generation: int | None = None,
         queue_identity: str = "",
         keep_target_on_failure: bool = False,
+        preserve_session: bool = False,
+        resume_position: int = 0,
     ) -> None:
         if not isinstance(track, dict):
             return
@@ -7506,32 +7689,241 @@ class MainWindow(QMainWindow):
         if previous_request:
             self.online_source_client.cancel_request(previous_request)
         self.cancel_pending_online_metadata()
-        self.capture_online_playback_ui_snapshot()
+        cache_record = self.online_audio_cache.valid_cache(media_item)
+        if cache_record:
+            self.pending_online_playback_request = 0
+            self.pending_online_playback_generation = 0
+            self.pending_online_playback_identity = ""
+            self.pending_online_keep_target_on_failure = False
+            self.pending_online_preserve_session = False
+            self.pending_online_resume_position = 0
+            self.pending_online_track = None
+            self.pending_online_media_item = None
+            self.pending_online_ui_snapshot = None
+            cache_path = str(cache_record.get("local_path") or "")
+            started = self.start_online_media_source(
+                media_item,
+                QUrl.fromLocalFile(cache_path),
+                playback_generation,
+                identity,
+                preserve_session=preserve_session,
+                restore_position=resume_position,
+                cache_key=str(cache_record.get("cache_key") or ""),
+            )
+            if preserve_session and not started:
+                self.finish_online_resume_failure("缓存恢复结果已过期。")
+            return
+        if not preserve_session:
+            self.capture_online_playback_ui_snapshot()
         self.pending_online_media_item = media_item
         self.pending_online_track = dict(track)
         self.pending_online_playback_generation = playback_generation
         self.pending_online_playback_identity = identity
         self.pending_online_keep_target_on_failure = bool(keep_target_on_failure)
+        self.pending_online_preserve_session = bool(preserve_session)
+        self.pending_online_resume_position = max(0, int(resume_position or 0))
         self.pending_online_playback_request = self.online_source_client.resolve_playback(
             source_id,
             track,
         )
-        self.pending_online_metadata_identity = media_item.stable_identity
-        self.pending_online_metadata_request = self.online_source_client.get_metadata(
-            source_id,
-            track,
-            timeout_ms=10000,
-        )
-        self.present_online_media_item(media_item, resolving=True)
+        if preserve_session:
+            self.set_online_status_message("正在刷新在线播放地址…")
+        else:
+            self.pending_online_metadata_identity = media_item.stable_identity
+            self.pending_online_metadata_request = self.online_source_client.get_metadata(
+                source_id,
+                track,
+                timeout_ms=10000,
+            )
+            self.present_online_media_item(media_item, resolving=True)
         stable_id = str(track.get("remoteStableId") or "")
         if stable_id:
             self.refresh_remote_song_item(stable_id, resolving=True)
+
+    def start_online_media_source(
+        self,
+        media_item: MediaItem,
+        source: QUrl,
+        playback_generation: int,
+        identity: str,
+        *,
+        preserve_session: bool = False,
+        restore_position: int = 0,
+        cache_key: str = "",
+    ) -> bool:
+        identity = str(identity or media_item.stable_identity)
+        if (
+            playback_generation != self.playback_generation
+            or identity != self.current_queue_identity
+            or not source.isValid()
+        ):
+            return False
+        if preserve_session:
+            current = getattr(self, "current_media_item", None)
+            if (
+                not isinstance(current, MediaItem)
+                or current.media_type != "online"
+                or current.stable_identity != media_item.stable_identity
+                or self.current_track_identity() != identity
+            ):
+                self.reset_online_resume_recovery()
+                return False
+            self.current_media_item = media_item
+            self.current_online_track = media_item.to_legacy_online()
+            self.current_online_cache_key = str(cache_key or "")
+            self.pending_restore_position = max(0, int(restore_position or 0))
+            self.media_loading_generation = playback_generation
+            self.media_player.stop()
+            self.media_player.setSource(source)
+            self.media_player.play()
+            self.set_online_status_message(
+                "正在从本地音频缓存恢复播放…"
+                if cache_key
+                else "正在使用新的在线播放地址恢复播放…"
+            )
+            return True
+
+        self.reset_online_resume_recovery()
+        self.flush_current_listen_time()
+        self.current_track_kind = "online"
+        self.current_media_item = media_item
+        self.current_online_track = media_item.to_legacy_online()
+        self.current_online_cache_key = str(cache_key or "")
+        self.pending_lazy_restore_song_data = None
+        self.current_song_path = None
+        self.invalidate_media_worker_request("cover")
+        self.invalidate_media_worker_request("lyrics")
+        self.current_queue_identity = identity
+        self.current_duration = 0
+        self.pending_restore_position = 0
+        self.reset_playback_stats_session()
+        self.current_lyrics = []
+        self.current_plain_lyrics = ""
+        self.current_online_lyrics_state = "loading"
+        self.displayed_lyrics_track_key = ""
+        self.displayed_lyrics_song_path = None
+        self.refresh_playing_song_indicators()
+        self.present_online_media_item(media_item)
+        self.lyrics_view.set_placeholder("正在加载歌词", "优先使用歌曲来源，其次联网匹配")
+        self.online_lyrics_service.request_lyrics(media_item)
+        self.set_online_status_message(
+            "正在从本地音频缓存播放…" if cache_key else "正在加载在线歌曲…"
+        )
+        self.media_loading_generation = playback_generation
+        self.media_player.stop()
+        self.media_player.setSource(source)
+        self.progress_slider.setValue(0)
+        self.media_player.play()
+        return True
+
+    def finish_online_resume_failure(self, message: str) -> None:
+        self.pending_online_media_item = None
+        self.pending_online_ui_snapshot = None
+        self.pending_online_keep_target_on_failure = False
+        self.pending_online_preserve_session = False
+        self.pending_online_resume_position = 0
+        self.reset_online_resume_recovery()
+        self.set_online_status_message(str(message or "在线歌曲恢复失败。"))
+
+    def reset_online_resume_recovery(self) -> None:
+        timer = getattr(self, "online_resume_timer", None)
+        if timer is not None:
+            timer.stop()
+        self.online_resume_in_progress = False
+        self.online_resume_retry_started = False
+        self.online_resume_generation = 0
+        self.online_resume_identity = ""
+        self.online_resume_position = 0
+
+    def resume_online_playback(self) -> None:
+        if self.online_resume_in_progress:
+            return
+        current = getattr(self, "current_media_item", None)
+        if not isinstance(current, MediaItem) or current.media_type != "online":
+            self.play_current_song()
+            return
+        identity = self.current_track_identity() or current.stable_identity
+        position = max(
+            0,
+            int(self.media_player.position()),
+            int(getattr(self, "last_recorded_position", 0) or 0),
+        )
+        cache_record = self.online_audio_cache.valid_cache(current)
+        if cache_record:
+            generation = self.begin_playback_generation(identity)
+            self.online_resume_in_progress = True
+            self.online_resume_generation = generation
+            self.online_resume_identity = identity
+            self.online_resume_position = position
+            if not self.start_online_media_source(
+                current,
+                QUrl.fromLocalFile(str(cache_record.get("local_path") or "")),
+                generation,
+                identity,
+                preserve_session=True,
+                restore_position=position,
+                cache_key=str(cache_record.get("cache_key") or ""),
+            ):
+                self.finish_online_resume_failure("无法切换到本地音频缓存。")
+            return
+
+        self.online_resume_in_progress = True
+        self.online_resume_retry_started = False
+        self.online_resume_generation = self.playback_generation
+        self.online_resume_identity = identity
+        self.online_resume_position = position
+        if self.media_player.source().isValid():
+            self.media_player.play()
+            self.online_resume_timer.start()
+        else:
+            self.retry_online_resume()
+
+    def on_online_resume_timeout(self) -> None:
+        if (
+            self.online_resume_in_progress
+            and self.media_player.playbackState()
+            != QMediaPlayer.PlaybackState.PlayingState
+        ):
+            self.retry_online_resume()
+
+    def retry_online_resume(self) -> None:
+        if not self.online_resume_in_progress:
+            return
+        if self.online_resume_retry_started:
+            self.finish_online_resume_failure("在线播放地址刷新后仍无法恢复播放。")
+            return
+        current = getattr(self, "current_media_item", None)
+        identity = str(self.online_resume_identity or "")
+        generation = int(self.online_resume_generation or 0)
+        if (
+            not isinstance(current, MediaItem)
+            or current.media_type != "online"
+            or current.stable_identity != identity
+            or self.current_track_identity() != identity
+            or generation != self.playback_generation
+        ):
+            self.reset_online_resume_recovery()
+            return
+        self.online_resume_retry_started = True
+        self.online_resume_timer.stop()
+        self.media_player.stop()
+        self.media_player.setSource(QUrl())
+        self.request_online_playback(
+            current.to_legacy_online(),
+            playback_generation=generation,
+            queue_identity=identity,
+            keep_target_on_failure=True,
+            preserve_session=True,
+            resume_position=self.online_resume_position,
+        )
 
     def finish_online_playback_failure(self) -> None:
         keep_target = bool(
             getattr(self, "pending_online_keep_target_on_failure", False)
         )
         self.pending_online_keep_target_on_failure = False
+        self.pending_online_preserve_session = False
+        self.pending_online_resume_position = 0
         if not keep_target:
             self.restore_online_playback_ui_snapshot()
             return
@@ -7568,19 +7960,33 @@ class MainWindow(QMainWindow):
         keep_target_on_failure = bool(
             getattr(self, "pending_online_keep_target_on_failure", False)
         )
+        preserve_session = bool(
+            getattr(self, "pending_online_preserve_session", False)
+        )
+        resume_position = max(
+            0,
+            int(getattr(self, "pending_online_resume_position", 0) or 0),
+        )
         self.pending_online_playback_request = 0
         self.pending_online_playback_generation = 0
         self.pending_online_playback_identity = ""
         self.pending_online_keep_target_on_failure = False
+        self.pending_online_preserve_session = False
+        self.pending_online_resume_position = 0
         self.pending_online_track = None
         if (
             pending_generation != self.playback_generation
             or pending_identity != self.current_queue_identity
         ):
             self.cancel_pending_online_metadata()
+            if preserve_session:
+                self.reset_online_resume_recovery()
             return
         if not isinstance(track, dict) or str(track.get("sourceId") or "") != source_id:
             self.cancel_pending_online_metadata()
+            if preserve_session:
+                self.finish_online_resume_failure("在线播放地址刷新结果与当前歌曲不匹配。")
+                return
             self.pending_online_keep_target_on_failure = keep_target_on_failure
             self.finish_online_playback_failure()
             return
@@ -7589,6 +7995,9 @@ class MainWindow(QMainWindow):
             self.refresh_remote_song_item(stable_id, resolving=False)
         if resolution.get("headers"):
             self.cancel_pending_online_metadata()
+            if preserve_session:
+                self.finish_online_resume_failure("该音源需要附加请求头，当前播放模式暂不支持。")
+                return
             self.pending_online_keep_target_on_failure = keep_target_on_failure
             self.finish_online_playback_failure()
             self.set_online_status_message(
@@ -7599,47 +8008,43 @@ class MainWindow(QMainWindow):
         url = QUrl(str(resolution.get("url") or ""))
         if not url.isValid() or url.scheme().lower() not in {"http", "https"}:
             self.cancel_pending_online_metadata()
+            if preserve_session:
+                self.finish_online_resume_failure("音源返回了无效的播放地址。")
+                return
             self.pending_online_keep_target_on_failure = keep_target_on_failure
             self.finish_online_playback_failure()
             self.set_online_status_message("音源返回了无效的播放地址。")
             return
 
-        self.flush_current_listen_time()
+        resolved_media = dict(resolution)
+        resolved_quality = str(
+            resolved_media.get("quality") or resolved_media.get("bitrate") or ""
+        ).strip()
+        if not resolved_quality:
+            resolved_media["quality"] = str(
+                getattr(pending_media_item, "quality", "") or "standard"
+            )
         media_item = (
             pending_media_item
             if isinstance(pending_media_item, MediaItem)
             else MediaItem.from_online(track)
-        ).with_resolution(resolution)
+        ).with_resolution(resolved_media)
         self.pending_online_media_item = None
         self.pending_online_ui_snapshot = None
         self.pending_online_keep_target_on_failure = False
-        self.current_track_kind = "online"
-        self.current_media_item = media_item
-        self.current_online_track = media_item.to_legacy_online()
-        self.pending_lazy_restore_song_data = None
-        self.current_song_path = None
-        self.invalidate_media_worker_request("cover")
-        self.invalidate_media_worker_request("lyrics")
-        self.current_queue_identity = pending_identity or media_item.stable_identity
-        self.current_duration = 0
-        self.pending_restore_position = 0
-        self.reset_playback_stats_session()
-        self.current_lyrics = []
-        self.current_plain_lyrics = ""
-        self.current_online_lyrics_state = "loading"
-        self.displayed_lyrics_track_key = ""
-        self.displayed_lyrics_song_path = None
-        self.refresh_playing_song_indicators()
-        self.present_online_media_item(media_item)
-        self.lyrics_view.set_placeholder("正在加载歌词", "优先使用歌曲来源，其次联网匹配")
-        self.online_lyrics_service.request_lyrics(media_item)
-
-        self.set_online_status_message("正在加载在线歌曲…")
-        self.media_loading_generation = pending_generation
-        self.media_player.stop()
-        self.media_player.setSource(url)
-        self.progress_slider.setValue(0)
-        self.media_player.play()
+        started = self.start_online_media_source(
+            media_item,
+            url,
+            pending_generation,
+            pending_identity or media_item.stable_identity,
+            preserve_session=preserve_session,
+            restore_position=resume_position,
+        )
+        if not started:
+            if preserve_session:
+                self.finish_online_resume_failure("在线播放地址刷新结果已过期。")
+            return
+        self.start_online_audio_cache(media_item, resolved_media)
 
     def request_online_download(self, track: dict) -> None:
         if not isinstance(track, dict):
@@ -7708,14 +8113,22 @@ class MainWindow(QMainWindow):
     def on_online_source_request_failed(self, request_id: int, action: str, message: str) -> None:
         if action == "resolvePlayback" and request_id == self.pending_online_playback_request:
             track = self.pending_online_track
+            preserve_session = bool(
+                getattr(self, "pending_online_preserve_session", False)
+            )
             self.pending_online_playback_request = 0
             self.pending_online_playback_generation = 0
             self.pending_online_playback_identity = ""
+            self.pending_online_preserve_session = False
+            self.pending_online_resume_position = 0
             self.pending_online_track = None
             self.media_loading_generation = 0
             self.cancel_pending_online_metadata()
-            self.finish_online_playback_failure()
-            self.set_online_status_message(f"获取播放地址失败：{message}")
+            if preserve_session:
+                self.finish_online_resume_failure(f"刷新播放地址失败：{message}")
+            else:
+                self.finish_online_playback_failure()
+                self.set_online_status_message(f"获取播放地址失败：{message}")
             stable_id = (
                 str(track.get("remoteStableId") or "")
                 if isinstance(track, dict)
@@ -11601,6 +12014,39 @@ class MainWindow(QMainWindow):
 
         return removed_count
 
+    def open_online_audio_cache_directory(self) -> bool:
+        cache_root = self.online_audio_cache.cache_root
+        try:
+            cache_root.mkdir(parents=True, exist_ok=True)
+        except OSError as error:
+            QMessageBox.warning(self, "打开失败", str(error))
+            return False
+
+        opened = QDesktopServices.openUrl(QUrl.fromLocalFile(str(cache_root)))
+        if not opened:
+            QMessageBox.warning(self, "打开失败", "无法打开音频缓存目录。")
+        return bool(opened)
+
+    def protected_online_audio_cache_key(self) -> str:
+        current = self.current_media_item
+        if not isinstance(current, MediaItem) or current.media_type != "online":
+            return ""
+        return str(getattr(self, "current_online_cache_key", "") or "")
+
+    def clear_incomplete_online_audio_cache(self) -> int:
+        outcome = self.online_audio_cache.clear_incomplete(
+            protected_cache_key=self.protected_online_audio_cache_key()
+        )
+        return int(outcome.get("removed") or 0)
+
+    def clear_all_online_audio_cache(self) -> dict:
+        outcome = self.online_audio_cache.clear_all(
+            protected_cache_key=self.protected_online_audio_cache_key()
+        )
+        if int(outcome.get("skipped") or 0):
+            self.set_online_status_message("当前正在播放的音频缓存已保留。")
+        return outcome
+
     def load_play_queue(self) -> list[PlaybackQueueItem]:
         if not self.play_queue_file.exists():
             return []
@@ -13358,6 +13804,8 @@ class MainWindow(QMainWindow):
         self.pending_online_playback_generation = 0
         self.pending_online_playback_identity = ""
         self.pending_online_keep_target_on_failure = False
+        self.pending_online_preserve_session = False
+        self.pending_online_resume_position = 0
         self.pending_online_track = None
         self.cancel_pending_online_metadata()
         if self.pending_online_ui_snapshot is not None:
@@ -13367,6 +13815,8 @@ class MainWindow(QMainWindow):
             self.presented_online_identity = ""
             self.presented_online_cover_url = ""
         self.current_track_kind = "local"
+        self.current_online_cache_key = ""
+        self.reset_online_resume_recovery()
         self.current_online_track = None
         self.current_media_item = local_media_item
         self.current_plain_lyrics = ""
@@ -13458,6 +13908,8 @@ class MainWindow(QMainWindow):
         self.pending_online_playback_generation = 0
         self.pending_online_playback_identity = ""
         self.pending_online_keep_target_on_failure = False
+        self.pending_online_preserve_session = False
+        self.pending_online_resume_position = 0
         self.pending_online_track = None
         self.pending_online_media_item = None
         self.pending_online_ui_snapshot = None
@@ -13469,6 +13921,8 @@ class MainWindow(QMainWindow):
         self.current_queue_identity = ""
         self.current_media_item = None
         self.current_track_kind = "local"
+        self.current_online_cache_key = ""
+        self.reset_online_resume_recovery()
         self.current_online_track = None
         self.online_lyrics_service.cancel()
         self.online_artwork_service.cancel()
@@ -15211,6 +15665,22 @@ class MainWindow(QMainWindow):
             and getattr(self, "current_track_kind", "local") == "online"
         ):
             identity = self.current_track_identity() or current_media.stable_identity
+            cache_record = self.online_audio_cache.valid_cache(current_media)
+            if (
+                cache_record
+                and str(cache_record.get("cache_key") or "")
+                != str(getattr(self, "current_online_cache_key", "") or "")
+            ):
+                generation = self.begin_playback_generation(identity)
+                self.last_recorded_position = 0
+                return self.start_online_media_source(
+                    current_media,
+                    QUrl.fromLocalFile(str(cache_record.get("local_path") or "")),
+                    generation,
+                    identity,
+                    preserve_session=True,
+                    cache_key=str(cache_record.get("cache_key") or ""),
+                )
             if self.media_player.source().isValid():
                 self.media_player.setPosition(0)
                 self.progress_slider.setValue(0)
@@ -15262,8 +15732,10 @@ class MainWindow(QMainWindow):
         self.browse_media_item(media_item.to_dict())
 
         if queue_item.kind == "remote" and not media_item.is_local_available:
+            cached_media = self.online_audio_cache.valid_cache(media_item, touch=False)
             self.flush_current_listen_time()
             self.current_track_kind = "online"
+            self.current_online_cache_key = ""
             self.current_media_item = media_item
             self.current_online_track = media_item.to_legacy_online()
             self.current_song_path = None
@@ -15272,7 +15744,7 @@ class MainWindow(QMainWindow):
             self.refresh_playing_song_indicators()
             self.media_player.stop()
             self.media_player.setSource(QUrl())
-            if media_item.availability != "available":
+            if media_item.availability != "available" and not cached_media:
                 self.media_loading_generation = 0
                 self.present_online_media_item(media_item)
                 self.set_online_status_message("该在线来源当前不可用。")
@@ -15413,10 +15885,11 @@ class MainWindow(QMainWindow):
         print("当前播放状态：", state)
 
         if state == QMediaPlayer.PlaybackState.PlayingState:
+            self.reset_online_resume_recovery()
             self.media_player.pause()
             self.play_btn.setText("播放")
-        elif getattr(self, "current_track_kind", "local") == "online" and self.media_player.source().isValid():
-            self.media_player.play()
+        elif getattr(self, "current_track_kind", "local") == "online":
+            self.resume_online_playback()
         else:
             self.play_current_song()
 
@@ -15738,6 +16211,14 @@ class MainWindow(QMainWindow):
         if self.is_seeking or self.current_duration <= 0:
             return
 
+        pending_position = int(getattr(self, "pending_restore_position", 0) or 0)
+        if (
+            pending_position > 0
+            and getattr(self, "current_track_kind", "local") == "online"
+            and position < min(1000, pending_position)
+        ):
+            return
+
         if (
             position >= 1000
             and getattr(self, "current_track_kind", "local") == "online"
@@ -15785,6 +16266,9 @@ class MainWindow(QMainWindow):
         if state == QMediaPlayer.PlaybackState.PlayingState:
             self.play_btn.setText("暂停")
 
+            if self.online_resume_in_progress:
+                self.reset_online_resume_recovery()
+
             if int(getattr(self, "pending_restore_position", 0) or 0) > 0:
                 self.apply_pending_restore_position()
                 QTimer.singleShot(180, self.finalize_pending_restore_position)
@@ -15801,9 +16285,20 @@ class MainWindow(QMainWindow):
             if self.media_loading_generation == self.playback_generation:
                 self.media_loading_generation = 0
             if getattr(self, "current_track_kind", "local") == "online":
-                self.set_online_status_message("在线歌曲正在播放。")
+                self.set_online_status_message(
+                    "正在使用本地音频缓存播放。"
+                    if getattr(self, "current_online_cache_key", "")
+                    else "在线歌曲正在播放。"
+                )
             else:
                 self.apply_pending_restore_position()
+
+        if (
+            status == QMediaPlayer.MediaStatus.InvalidMedia
+            and self.online_resume_in_progress
+        ):
+            self.retry_online_resume()
+            return
 
         if status == QMediaPlayer.MediaStatus.EndOfMedia:
             generation = int(getattr(self, "playback_generation", 0) or 0)
@@ -15822,6 +16317,16 @@ class MainWindow(QMainWindow):
         print("错误信息：", real_error_text)
 
         if real_error_text and getattr(self, "current_track_kind", "local") == "online":
+            if self.online_resume_in_progress:
+                if int(getattr(self, "pending_online_playback_request", 0) or 0):
+                    return
+                if not self.online_resume_retry_started:
+                    self.retry_online_resume()
+                else:
+                    self.finish_online_resume_failure(
+                        f"在线播放地址刷新后仍无法恢复：{real_error_text}"
+                    )
+                return
             queue_item = self.playback_queue.current_item
             identity = self.current_track_identity()
             current_media = getattr(self, "current_media_item", None)
@@ -16009,9 +16514,14 @@ class MainWindow(QMainWindow):
         track["capabilities"] = dict(source.get("capabilities") or {})
         local_path = str(record.get("local_path") or "")
         local_exists = bool(local_path and Path(local_path).is_file())
+        cache_state = self.get_online_audio_cache_state(track)
         menu = QMenu(self)
         play_action = menu.addAction("播放")
-        play_action.setEnabled(local_exists or self.is_remote_source_available(record))
+        play_action.setEnabled(
+            local_exists
+            or bool(cache_state.get("complete"))
+            or self.is_remote_source_available(record)
+        )
         play_action.triggered.connect(
             lambda checked=False, selected_item=item: self.play_selected_song(selected_item)
         )
@@ -16028,6 +16538,12 @@ class MainWindow(QMainWindow):
             )
             download_action.triggered.connect(
                 lambda checked=False, current_track=track: self.request_online_download(current_track)
+            )
+        if cache_state.get("complete"):
+            delete_cache_action = menu.addAction("删除此歌曲缓存")
+            delete_cache_action.triggered.connect(
+                lambda checked=False, current_track=track:
+                self.delete_online_track_cache(current_track)
             )
         menu.addSeparator()
         liked_ids = self.get_playlist_remote_ids("liked")
@@ -16177,6 +16693,11 @@ class MainWindow(QMainWindow):
         if self.immersive_lyrics_window is not None:
             self.immersive_lyrics_window.close()
             self.immersive_lyrics_window = None
+
+        self.reset_online_resume_recovery()
+        online_audio_cache = getattr(self, "online_audio_cache", None)
+        if online_audio_cache is not None:
+            online_audio_cache.shutdown()
 
         online_source_client = getattr(self, "online_source_client", None)
         unified_search_service = getattr(self, "unified_search_service", None)

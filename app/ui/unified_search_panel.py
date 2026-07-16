@@ -30,6 +30,7 @@ class UnifiedSearchResultsPanel(QFrame):
     addToPlaylistRequested = Signal(dict, str)
     removeFromCurrentPlaylistRequested = Signal(dict)
     infoRequested = Signal(dict)
+    deleteCacheRequested = Signal(dict)
 
     def __init__(self, parent=None, standalone: bool = False) -> None:
         super().__init__(parent)
@@ -44,6 +45,7 @@ class UnifiedSearchResultsPanel(QFrame):
         self._source_order: list[str] = []
         self._group_headers: dict[str, QListWidgetItem] = {}
         self.collection_state_provider = lambda _track: {}
+        self.cache_state_provider = lambda _track: {}
         self.playlist_provider = lambda: []
         self.playing_key_provider = lambda: ""
         self._build_ui()
@@ -91,6 +93,9 @@ class UnifiedSearchResultsPanel(QFrame):
     def set_collection_providers(self, state_provider, playlist_provider) -> None:
         self.collection_state_provider = state_provider or (lambda _track: {})
         self.playlist_provider = playlist_provider or (lambda: [])
+
+    def set_cache_state_provider(self, provider) -> None:
+        self.cache_state_provider = provider or (lambda _track: {})
 
     def set_playing_key_provider(self, provider) -> None:
         self.playing_key_provider = provider or (lambda: "")
@@ -616,10 +621,19 @@ class UnifiedSearchResultsPanel(QFrame):
         track = item.data(Qt.ItemDataRole.UserRole)
         if not isinstance(track, dict):
             return
-        if track.get("availability") != "available":
+        try:
+            cache_state = self.cache_state_provider(track) or {}
+        except Exception:
+            cache_state = {}
+        cache_available = bool(cache_state.get("complete"))
+        if track.get("availability") != "available" and not cache_available:
             self.set_status("该在线来源当前不可用。")
             return
-        if not track.get("can_play") and not track.get("local_file_path"):
+        if (
+            not track.get("can_play")
+            and not track.get("local_file_path")
+            and not cache_available
+        ):
             self.set_status("该来源没有可用的播放能力。")
             return
         self.playRequested.emit(dict(track))
@@ -637,14 +651,23 @@ class UnifiedSearchResultsPanel(QFrame):
             state = self.collection_state_provider(track) or {}
         except Exception:
             state = {}
+        try:
+            cache_state = self.cache_state_provider(track) or {}
+        except Exception:
+            cache_state = {}
+        cache_available = bool(cache_state.get("complete"))
         menu = QMenu(self)
         play_action = menu.addAction("播放")
-        play_action.setEnabled(bool(track.get("local_file_path")) or (available and bool(track.get("can_play"))))
+        play_action.setEnabled(
+            bool(track.get("local_file_path"))
+            or cache_available
+            or (available and bool(track.get("can_play")))
+        )
         play_action.triggered.connect(
             lambda checked=False, current_item=item: self.request_playback(current_item)
         )
         queue_action = menu.addAction("下一首播放")
-        queue_action.setEnabled(bool(track.get("local_file_path")) or (available and bool(track.get("can_play"))))
+        queue_action.setEnabled(play_action.isEnabled())
         queue_action.triggered.connect(
             lambda checked=False, current_track=dict(track): self.queueNextRequested.emit(current_track)
         )
@@ -654,6 +677,12 @@ class UnifiedSearchResultsPanel(QFrame):
         download_action.triggered.connect(
             lambda checked=False, current_track=dict(track): self.downloadRequested.emit(current_track)
         )
+        if cache_state.get("complete"):
+            delete_cache_action = menu.addAction("删除此歌曲缓存")
+            delete_cache_action.triggered.connect(
+                lambda checked=False, current_track=dict(track):
+                self.deleteCacheRequested.emit(current_track)
+            )
         menu.addSeparator()
         if state.get("liked"):
             like_action = menu.addAction("取消收藏")

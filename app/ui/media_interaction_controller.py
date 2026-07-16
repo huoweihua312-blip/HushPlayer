@@ -124,9 +124,14 @@ class MediaInteractionController(QObject):
     def show_context_menu(self, value: dict, global_position) -> None:
         item = MediaItem.from_mapping(value)
         menu = QMenu(self.window)
+        cache_state = (
+            self.window.get_online_audio_cache_state(item.to_dict())
+            if item.media_type == "online"
+            else {}
+        )
         playable = item.is_local_available or (
             item.can_play and item.availability == "available"
-        )
+        ) or bool(cache_state.get("complete"))
         play_action = menu.addAction("播放")
         play_action.setEnabled(playable)
         play_action.triggered.connect(
@@ -202,6 +207,12 @@ class MediaInteractionController(QObject):
             download_action.triggered.connect(
                 lambda checked=False, track=item.to_dict():
                 self.window.request_online_download(track)
+            )
+        if item.media_type == "online" and cache_state.get("complete"):
+            delete_cache_action = menu.addAction("删除此歌曲缓存")
+            delete_cache_action.triggered.connect(
+                lambda checked=False, track=item.to_dict():
+                self.window.delete_online_track_cache(track)
             )
         menu.addSeparator()
         if item.media_type == "local":
