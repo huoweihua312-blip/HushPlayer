@@ -73,9 +73,12 @@ UI_TYPOGRAPHY = {
 UI_CONTROL_SIZES = {
     "navigation_height": 40,
     "navigation_icon": 18,
+    "search_height": 38,
     "compact_button_height": 34,
     "icon_button": 36,
-    "track_row_height": 58,
+    "track_row_height": 52,
     "track_like_width": 28,
+    "player_cover": 48,
+    "player_center_max_width": 800,
     "scrollbar_width": 10,
 }

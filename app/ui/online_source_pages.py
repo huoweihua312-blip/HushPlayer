@@ -25,8 +25,12 @@ from PySide6.QtWidgets import (
 from app.core.version import APP_USER_AGENT
 from app.services.online_source_client import OnlineSourceClient
 from app.services.source_registry import MAX_SOURCE_BYTES, SourceRegistryError, SourceRegistryManager
-from app.ui.design_system import UI_SPACING
-from app.ui.track_list_view import IndentedLikeDelegate, LikeAwareListWidget
+from app.ui.design_system import UI_CONTROL_SIZES, UI_SPACING
+from app.ui.track_list_view import (
+    OnlineTrackDelegate,
+    OnlineTrackHeader,
+    OnlineTrackListWidget,
+)
 
 
 def _format_duration(value) -> str:
@@ -123,16 +127,21 @@ class OnlineSearchPage(QFrame):
         self.status_label.setWordWrap(True)
         layout.addWidget(self.status_label)
 
-        self.result_list = LikeAwareListWidget()
+        self.result_list = OnlineTrackListWidget()
         self.result_list.setObjectName("onlineSearchResults")
-        self.result_list.setItemDelegate(IndentedLikeDelegate(self.result_list))
+        self.result_list.setItemDelegate(OnlineTrackDelegate(parent=self.result_list))
         self.result_list.setUniformItemSizes(True)
         self.result_list.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
         self.result_list.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.result_list.itemSelectionChanged.connect(self.update_detail_buttons)
         self.result_list.itemDoubleClicked.connect(self.request_playback)
         self.result_list.likeToggleRequested.connect(self._toggle_result_like)
+        self.result_list.moreRequested.connect(
+            lambda _track, position: self.show_result_context_menu(position)
+        )
         self.result_list.customContextMenuRequested.connect(self.show_result_context_menu)
+        self.result_header = OnlineTrackHeader(self)
+        layout.addWidget(self.result_header)
         layout.addWidget(self.result_list, 1)
 
         action_row = QHBoxLayout()
@@ -433,7 +442,7 @@ class OnlineSearchPage(QFrame):
             item = QListWidgetItem(f"{title}\n{artist} · {album}   |   {source_name}   |   {duration}")
             item.setData(Qt.ItemDataRole.UserRole, result)
             item.setToolTip(f"歌曲：{title}\n歌手：{artist}\n专辑：{album}\n来源：{source_name}")
-            item.setSizeHint(QSize(0, 52))
+            item.setSizeHint(QSize(0, UI_CONTROL_SIZES["track_row_height"]))
             self.result_list.addItem(item)
 
         if results:

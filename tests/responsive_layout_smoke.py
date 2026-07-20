@@ -30,6 +30,7 @@ EXPECTED_MODES = {
     1450: "full",
     1600: "full",
     1920: "full",
+    2560: "full",
 }
 
 

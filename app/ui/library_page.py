@@ -401,7 +401,10 @@ class LibraryPage(QFrame):
         self.page_layout = layout
         layout.setContentsMargins(24, 24, 24, 20)
         layout.setSpacing(UI_SPACING["md"])
-        header = QVBoxLayout()
+        self.page_header = QFrame()
+        self.page_header.setObjectName("pageHeader")
+        self.page_header.setMinimumHeight(58)
+        header = QVBoxLayout(self.page_header)
         header.setContentsMargins(0, 0, 0, 0)
         header.setSpacing(UI_SPACING["sm"])
         title_row = QHBoxLayout()
@@ -450,18 +453,12 @@ class LibraryPage(QFrame):
         self.import_button.clicked.connect(self.importFilesRequested)
 
         title_row.addLayout(title_box, 1)
-        title_row.addWidget(self.switcher, alignment=Qt.AlignmentFlag.AlignTop)
-
-        action_row = QHBoxLayout()
-        action_row.setContentsMargins(0, 0, 0, 0)
-        action_row.setSpacing(UI_SPACING["xs"])
-        action_row.addStretch()
-        action_row.addWidget(self.random_button)
-        action_row.addWidget(self.more_button)
-        action_row.addWidget(self.folder_button)
-        action_row.addWidget(self.import_button)
+        title_row.addWidget(self.switcher, alignment=Qt.AlignmentFlag.AlignVCenter)
+        title_row.addWidget(self.random_button, alignment=Qt.AlignmentFlag.AlignVCenter)
+        title_row.addWidget(self.more_button, alignment=Qt.AlignmentFlag.AlignVCenter)
+        title_row.addWidget(self.folder_button, alignment=Qt.AlignmentFlag.AlignVCenter)
+        title_row.addWidget(self.import_button, alignment=Qt.AlignmentFlag.AlignVCenter)
         header.addLayout(title_row)
-        header.addLayout(action_row)
 
         self.content_stack = QStackedWidget()
         self.track_view = TrackListView(
@@ -482,14 +479,14 @@ class LibraryPage(QFrame):
         self.content_stack.addWidget(self.track_view)
         self.content_stack.addWidget(self.artist_view)
         self.content_stack.addWidget(self.album_view)
-        layout.addLayout(header)
+        layout.addWidget(self.page_header)
         layout.addWidget(self.content_stack, 1)
         t = DARK_THEME_TOKENS
         self.setStyleSheet(
-            f"QFrame#libraryViewSwitcher {{ background: {t['sidebar_bg']}; border: 1px solid {t['border']}; border-radius: {UI_RADII['card']}px; }}"
+            "QFrame#libraryViewSwitcher { background: transparent; border: none; }"
             f"QPushButton#libraryViewSwitchButton {{ background: transparent; color: {t['text_muted']}; border: none; border-radius: {UI_RADII['control']}px; padding: 7px 12px; font-weight: 650; }}"
             f"QPushButton#libraryViewSwitchButton:hover {{ background: {t['hover']}; color: {t['text']}; }}"
-            f"QPushButton#libraryViewSwitchButton[active='true'] {{ background: {t['accent_soft']}; color: {t['text']}; }}"
+            f"QPushButton#libraryViewSwitchButton[active='true'] {{ background: {t['accent_soft']}; color: {t['accent_hover']}; }}"
         )
 
     def set_responsive_mode(self, mode: str) -> None:
@@ -514,6 +511,7 @@ class LibraryPage(QFrame):
             else MediaItem.from_mapping(item).to_dict()
             for item in tracks
         ]
+        self.page_subtitle.setText(f"{len(self._scope_tracks)} 首歌曲")
         self._scope_cache_key = str(cache_key or "")
         if self.current_mode == "artists":
             self.artist_view.set_tracks(self._scope_tracks, self._scope_cache_key + ":artist")

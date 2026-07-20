@@ -980,22 +980,17 @@ class SongLibraryDelegate(QStyledItemDelegate):
         )
 
         if selected and is_playing:
-            background = QColor(76, 141, 255, 62)
-            border = QColor(76, 141, 255, 158)
-        elif selected:
             background = QColor(76, 141, 255, 48)
-            border = QColor(76, 141, 255, 118)
+        elif selected:
+            background = QColor(76, 141, 255, 38)
         elif is_playing:
-            background = QColor(76, 141, 255, 27)
-            border = QColor(76, 141, 255, 70)
+            background = QColor(76, 141, 255, 20)
         elif hovered:
-            background = QColor(255, 255, 255, 14)
-            border = QColor(255, 255, 255, 10)
+            background = QColor(255, 255, 255, 13)
         else:
             background = QColor(0, 0, 0, 0)
-            border = QColor(0, 0, 0, 0)
 
-        painter.setPen(QPen(border, 1))
+        painter.setPen(Qt.PenStyle.NoPen)
         painter.setBrush(background)
         painter.drawRoundedRect(
             row_rect,
@@ -1041,7 +1036,11 @@ class SongLibraryDelegate(QStyledItemDelegate):
             option,
             rects["title"],
             str(song_data.get("title") or "未知歌曲"),
-            DARK_THEME_TOKENS["text"],
+            (
+                DARK_THEME_TOKENS["accent_hover"]
+                if is_playing
+                else DARK_THEME_TOKENS["text"]
+            ),
             is_playing,
         )
         self._draw_text(painter, option, rects["artist"], str(song_data.get("artist") or "未知艺术家"), DARK_THEME_TOKENS["text_secondary"])
@@ -6013,6 +6012,9 @@ class MainWindow(QMainWindow):
         self.player_right_box.setMaximumWidth(right_limits[1])
         self.floating_lyrics_button.setVisible(mode == "full")
         self.player_more_button.setVisible(mode != "full")
+        self.bottom_cover_label.setVisible(mode != "narrow")
+        self.volume_slider.setVisible(mode != "narrow")
+        self.volume_value_label.setVisible(mode != "narrow")
         current = getattr(self, "current_media_item", None)
         self.bottom_source_badge.setVisible(
             mode == "full"
@@ -7286,6 +7288,9 @@ class MainWindow(QMainWindow):
             player_position_ms = self.media_player.position()
         effective_position = self.effective_lyrics_position_ms(player_position_ms)
         self.lyrics_view.update_by_position(effective_position, lyrics)
+        preview_updater = getattr(self, "update_now_lyrics_preview", None)
+        if callable(preview_updater):
+            preview_updater(effective_position)
         if hasattr(self, "full_lyrics_view"):
             self.full_lyrics_view.update_by_position(effective_position, lyrics)
         immersive_window = getattr(self, "immersive_lyrics_window", None)
@@ -7296,6 +7301,55 @@ class MainWindow(QMainWindow):
                 self.current_track_identity(),
             )
         return True
+
+    def update_now_lyrics_preview(self, effective_position: int | None = None) -> None:
+        current_label = getattr(self, "now_current_lyric", None)
+        next_label = getattr(self, "now_next_lyric", None)
+        if current_label is None or next_label is None:
+            return
+
+        def update_label(label: QLabel, text: str) -> None:
+            value = str(text or "")
+            if label.text() != value:
+                label.setText(value)
+                label.setToolTip(value if value else "")
+
+        lyrics = getattr(self, "current_lyrics", None) or []
+        if lyrics:
+            index = int(getattr(self.lyrics_view, "current_index", -1))
+            if index < 0 or index >= len(lyrics):
+                position = (
+                    self.effective_lyrics_position_ms(self.media_player.position())
+                    if effective_position is None
+                    else int(effective_position)
+                )
+                index = bisect_right(
+                    [int(timestamp) for timestamp, _text in lyrics],
+                    position,
+                ) - 1
+                index = max(0, min(index, len(lyrics) - 1))
+            update_label(current_label, str(lyrics[index][1] or ""))
+            update_label(
+                next_label,
+                str(lyrics[index + 1][1] or "") if index + 1 < len(lyrics) else "",
+            )
+            return
+
+        if getattr(self, "current_plain_lyrics", ""):
+            update_label(current_label, "纯文本歌词")
+            update_label(next_label, "请在歌词页查看完整内容")
+            return
+
+        if not self.current_track_identity():
+            update_label(current_label, "这里会显示当前歌词")
+            update_label(next_label, "播放一首歌后即可查看")
+            return
+
+        status = ""
+        if hasattr(self, "lyrics_status_label"):
+            status = self.lyrics_status_label.text().replace("歌词：", "").strip()
+        update_label(current_label, status or "暂无同步歌词")
+        update_label(next_label, "")
 
     def rebuild_song_identity_index(self) -> None:
         index: dict[str, QListWidgetItem] = {}
@@ -8119,22 +8173,15 @@ class MainWindow(QMainWindow):
         if hasattr(self, "side_info_panel"):
             self.side_info_panel.hide()
 
-        self.lyrics_view.show()
-
-        lyrics_content = self.lyrics_view.widget()
-
-        if mode == "info":
-            if lyrics_content:
-                lyrics_content.hide()
-
-            self.lyrics_view.setEnabled(False)
-            self.lyrics_view.setFocusPolicy(Qt.FocusPolicy.NoFocus)
-        else:
-            if lyrics_content:
-                lyrics_content.show()
-
-            self.lyrics_view.setEnabled(True)
-            self.lyrics_view.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+        # The compact preview is always the visible right-rail experience.
+        # LyricsView remains connected and updated off-screen for compatibility.
+        self.lyrics_view.hide()
+        self.lyrics_view.setEnabled(False)
+        self.lyrics_view.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        if hasattr(self, "now_lyrics_heading"):
+            self.now_lyrics_heading.show()
+            self.now_current_lyric.show()
+            self.now_next_lyric.show()
 
     def format_last_played_text(self, timestamp: int) -> str:
         timestamp = int(timestamp or 0)
@@ -8779,9 +8826,10 @@ class MainWindow(QMainWindow):
         if isinstance(cover_pixmap, QPixmap) and not cover_pixmap.isNull():
             self.show_cover_pixmap(cover_pixmap)
         else:
-            self.cover_label.clear()
-            self.cover_label.setPixmap(QPixmap())
-            self.cover_label.setText(str(snapshot.get("cover_text") or "Hush"))
+            self.reset_cover()
+            self.cover_label.setText(
+                str(snapshot.get("cover_text") or "暂无封面")
+            )
         self.update_like_button()
         self.update_side_info_panel()
 
@@ -8837,12 +8885,7 @@ class MainWindow(QMainWindow):
             liked = bool(
                 self.get_online_track_collection_state(media_item.to_dict()).get("liked")
             )
-            self.like_btn.setText("♥ 已收藏" if liked else "♡ 收藏")
-            self.like_btn.setProperty("liked", liked)
-            self.like_btn.setEnabled(False)
-            self.like_btn.style().unpolish(self.like_btn)
-            self.like_btn.style().polish(self.like_btn)
-            self.like_btn.update()
+            self._apply_current_like_state(liked, False)
         else:
             self.update_like_button()
         self.update_side_info_panel()
@@ -9660,7 +9703,7 @@ class MainWindow(QMainWindow):
             QSizePolicy.Policy.Preferred,
         )
         self.search_input.setPlaceholderText("搜索音乐")
-        self.search_input.setMinimumHeight(UI_CONTROL_SIZES["navigation_height"])
+        self.search_input.setFixedHeight(UI_CONTROL_SIZES["search_height"])
         self.search_input.setClearButtonEnabled(True)
         self.search_input.addAction(
             create_navigation_icon("online_search"),
@@ -9676,7 +9719,8 @@ class MainWindow(QMainWindow):
         layout.addWidget(navigation_title)
         navigation_hint = QLabel("音乐库 · 歌单 · 在线 · 工具")
         navigation_hint.setObjectName("sidebarGroupHint")
-        layout.addWidget(navigation_hint)
+        navigation_hint.hide()
+        self.sidebar_navigation_hint = navigation_hint
 
         self.library_nav_button = NavButton(
             "全部歌曲", active=True, navigation_id="library_all"
@@ -9957,15 +10001,15 @@ class MainWindow(QMainWindow):
         )
 
         layout = QVBoxLayout(panel)
-        layout.setContentsMargins(22, 24, 22, 22)
-        layout.setSpacing(14)
+        layout.setContentsMargins(20, 22, 20, 18)
+        layout.setSpacing(12)
 
         title = QLabel("正在播放")
         title.setObjectName("sectionTitle")
         title.setAlignment(Qt.AlignmentFlag.AlignLeft)
         self.now_playing_title = title
 
-        self.cover_label = RoundedCoverLabel("Hush")
+        self.cover_label = RoundedCoverLabel("暂无封面")
         self.cover_label.setObjectName("coverLabel")
         self.cover_label.setFixedSize(236, 236)
 
@@ -9975,8 +10019,8 @@ class MainWindow(QMainWindow):
         self.now_info_box = now_info_box
 
         now_info_layout = QVBoxLayout(now_info_box)
-        now_info_layout.setContentsMargins(16, 14, 16, 14)
-        now_info_layout.setSpacing(8)
+        now_info_layout.setContentsMargins(0, 2, 0, 0)
+        now_info_layout.setSpacing(6)
 
         self.now_song_title = MultiLineElidedLabel("还没有播放音乐", max_lines=2)
         self.now_song_title.setObjectName("nowSongTitle")
@@ -10009,13 +10053,61 @@ class MainWindow(QMainWindow):
         self.now_open_folder_btn.setIconSize(QSize(16, 16))
         self.now_open_folder_btn.setEnabled(False)
         self.now_open_folder_btn.clicked.connect(self.open_current_song_folder)
+        self.now_open_folder_btn.hide()
         now_info_layout.addWidget(self.now_song_title)
         now_info_layout.addWidget(self.now_artist)
         now_info_layout.addWidget(self.now_stats)
         now_info_layout.addWidget(self.lyrics_status_label)
-        now_info_layout.addWidget(self.now_open_folder_btn, alignment=Qt.AlignmentFlag.AlignLeft)
+
+        action_row = QHBoxLayout()
+        action_row.setContentsMargins(0, 0, 0, 0)
+        action_row.setSpacing(UI_SPACING["xs"])
+        self.now_like_btn = QPushButton("♡ 收藏")
+        self.now_like_btn.setObjectName("nowLikeButton")
+        self.now_like_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.now_like_btn.setEnabled(False)
+        self.now_like_btn.clicked.connect(self.toggle_like_current_song)
+        self.now_more_btn = QPushButton("⋯")
+        self.now_more_btn.setObjectName("nowPlayingMoreButton")
+        self.now_more_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.now_more_btn.setFixedSize(36, 34)
+        self.now_more_btn.setToolTip("更多歌曲操作")
+        now_more_menu = QMenu(self.now_more_btn)
+        open_folder_action = now_more_menu.addAction("打开文件位置")
+        open_folder_action.triggered.connect(
+            lambda checked=False: self.open_current_song_folder()
+        )
+        info_action = now_more_menu.addAction("查看歌曲详情")
+        info_action.triggered.connect(
+            lambda checked=False: self.show_current_playing_info()
+        )
+        self.now_more_btn.setMenu(now_more_menu)
+        action_row.addWidget(self.now_like_btn)
+        action_row.addWidget(self.now_more_btn)
+        action_row.addStretch()
+
+        lyrics_divider = QFrame()
+        lyrics_divider.setObjectName("nowPlayingDivider")
+        lyrics_divider.setFrameShape(QFrame.Shape.HLine)
+        self.now_lyrics_heading = QLabel("歌词")
+        self.now_lyrics_heading.setObjectName("nowLyricsHeading")
+        self.now_current_lyric = QLabel("这里会显示当前歌词")
+        self.now_current_lyric.setObjectName("nowCurrentLyric")
+        self.now_current_lyric.setWordWrap(True)
+        self.now_current_lyric.setAlignment(
+            Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
+        )
+        self.now_next_lyric = QLabel("播放一首歌后即可查看")
+        self.now_next_lyric.setObjectName("nowNextLyric")
+        self.now_next_lyric.setWordWrap(True)
+        self.now_next_lyric.setAlignment(
+            Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
+        )
 
         self.lyrics_view = LyricsView()
+        # Keep the established view alive for lyric parsing/state compatibility;
+        # the compact right rail exposes only the current and next line.
+        self.lyrics_view.hide()
 
         self.side_info_panel = QFrame()
         self.side_info_panel.setObjectName("sideInfoPanel")
@@ -10072,19 +10164,24 @@ class MainWindow(QMainWindow):
         side_info_layout.addStretch()
 
         layout.addWidget(title)
-        layout.addSpacing(8)
+        layout.addSpacing(2)
         layout.addWidget(self.cover_label, alignment=Qt.AlignmentFlag.AlignHCenter)
         layout.addWidget(now_info_box)
-        layout.addSpacing(6)
-        layout.addWidget(self.lyrics_view, 1)
-        layout.addWidget(self.side_info_panel, 1)
+        layout.addLayout(action_row)
+        layout.addWidget(lyrics_divider)
+        layout.addWidget(self.now_lyrics_heading)
+        layout.addWidget(self.now_current_lyric)
+        layout.addWidget(self.now_next_lyric)
+        layout.addStretch(1)
+        layout.addWidget(self.lyrics_view)
+        layout.addWidget(self.side_info_panel)
 
         return panel
 
     def _create_player_bar(self) -> QFrame:
         bar = QFrame()
         bar.setObjectName("playerBar")
-        bar.setMinimumHeight(124)
+        bar.setMinimumHeight(116)
 
         layout = QHBoxLayout(bar)
         self.player_bar_layout = layout
@@ -10101,9 +10198,22 @@ class MainWindow(QMainWindow):
         )
         self.player_left_box = left_box
 
-        left_layout = QVBoxLayout(left_box)
+        left_layout = QHBoxLayout(left_box)
         left_layout.setContentsMargins(0, 0, 0, 0)
-        left_layout.setSpacing(5)
+        left_layout.setSpacing(UI_SPACING["xs"])
+
+        self.bottom_cover_label = RoundedCoverLabel("")
+        self.bottom_cover_label.setObjectName("bottomCoverLabel")
+        self.bottom_cover_label.radius = 10
+        self.bottom_cover_label.padding = 2
+        self.bottom_cover_label.setFixedSize(
+            UI_CONTROL_SIZES["player_cover"],
+            UI_CONTROL_SIZES["player_cover"],
+        )
+
+        bottom_text_layout = QVBoxLayout()
+        bottom_text_layout.setContentsMargins(0, 0, 0, 0)
+        bottom_text_layout.setSpacing(3)
 
         self.bottom_song_title = ElidedLabel("未播放")
         self.bottom_song_title.setObjectName("bottomSongTitle")
@@ -10127,15 +10237,32 @@ class MainWindow(QMainWindow):
         self.bottom_source_badge.setMaximumWidth(128)
         self.bottom_source_badge.hide()
 
-        left_layout.addStretch()
-        left_layout.addWidget(self.bottom_song_title)
-        left_layout.addWidget(self.bottom_song_artist)
-        left_layout.addWidget(self.bottom_source_badge, alignment=Qt.AlignmentFlag.AlignLeft)
-        left_layout.addStretch()
+        bottom_text_layout.addWidget(self.bottom_song_title)
+        bottom_text_layout.addWidget(self.bottom_song_artist)
+        bottom_text_layout.addWidget(
+            self.bottom_source_badge,
+            alignment=Qt.AlignmentFlag.AlignLeft,
+        )
+
+        self.like_btn = QPushButton("♡ 收藏")
+        self.like_btn.setObjectName("likeButton")
+        self.like_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.like_btn.setMinimumWidth(72)
+        self.like_btn.setMaximumWidth(96)
+        self.like_btn.setSizePolicy(
+            QSizePolicy.Policy.Preferred,
+            QSizePolicy.Policy.Preferred,
+        )
+        self.like_btn.clicked.connect(self.toggle_like_current_song)
+
+        left_layout.addWidget(self.bottom_cover_label)
+        left_layout.addLayout(bottom_text_layout, 1)
+        left_layout.addWidget(self.like_btn)
 
         center_box = QFrame()
         center_box.setObjectName("playerCenter")
         center_box.setMinimumWidth(260)
+        center_box.setMaximumWidth(UI_CONTROL_SIZES["player_center_max_width"])
         center_box.setSizePolicy(
             QSizePolicy.Policy.Expanding,
             QSizePolicy.Policy.Expanding,
@@ -10170,10 +10297,19 @@ class MainWindow(QMainWindow):
         self.play_btn.clicked.connect(self.toggle_play)
         self.next_btn.clicked.connect(self.play_next_song)
 
+        self.play_mode_btn = QPushButton("列表循环")
+        self.play_mode_btn.setObjectName("controlButton")
+        self.play_mode_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.play_mode_btn.setMinimumWidth(76)
+        self.play_mode_btn.setMaximumWidth(96)
+        self.play_mode_btn.setToolTip("切换播放模式")
+        self.play_mode_btn.clicked.connect(self.toggle_play_mode)
+
         controls_layout.addStretch()
         controls_layout.addWidget(self.prev_btn)
         controls_layout.addWidget(self.play_btn)
         controls_layout.addWidget(self.next_btn)
+        controls_layout.addWidget(self.play_mode_btn)
         controls_layout.addStretch()
 
         self.progress_slider = QSlider(Qt.Orientation.Horizontal)
@@ -10226,27 +10362,13 @@ class MainWindow(QMainWindow):
         right_layout.setContentsMargins(0, 0, 0, 0)
         right_layout.setSpacing(9)
 
-        self.like_btn = QPushButton("♡ 收藏")
-        self.like_btn.setObjectName("likeButton")
-        self.like_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.like_btn.setMinimumWidth(72)
-        self.like_btn.setMaximumWidth(96)
-        self.like_btn.setSizePolicy(
-            QSizePolicy.Policy.Preferred,
-            QSizePolicy.Policy.Preferred,
-        )
-        self.like_btn.clicked.connect(self.toggle_like_current_song)
-
-        self.play_mode_btn = QPushButton("列表循环")
-        self.play_mode_btn.setObjectName("controlButton")
-        self.play_mode_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.play_mode_btn.setMinimumWidth(76)
-        self.play_mode_btn.setMaximumWidth(96)
-        self.play_mode_btn.setSizePolicy(
-            QSizePolicy.Policy.Preferred,
-            QSizePolicy.Policy.Preferred,
-        )
-        self.play_mode_btn.clicked.connect(self.toggle_play_mode)
+        self.player_queue_button = QPushButton("队列")
+        self.player_queue_button.setObjectName("controlButton")
+        self.player_queue_button.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.player_queue_button.setMinimumWidth(54)
+        self.player_queue_button.setMaximumWidth(70)
+        self.player_queue_button.setToolTip("打开播放队列")
+        self.player_queue_button.clicked.connect(self.show_play_queue)
 
         self.floating_lyrics_button = QPushButton("桌面歌词")
         self.floating_lyrics_button.setObjectName("floatingLyricsToggleButton")
@@ -10276,8 +10398,7 @@ class MainWindow(QMainWindow):
         top_row = QHBoxLayout()
         top_row.setContentsMargins(0, 0, 0, 0)
         top_row.setSpacing(8)
-        top_row.addWidget(self.like_btn)
-        top_row.addWidget(self.play_mode_btn)
+        top_row.addWidget(self.player_queue_button)
         top_row.addWidget(self.floating_lyrics_button)
         top_row.addWidget(self.player_more_button)
         top_row.addStretch()
@@ -10313,13 +10434,13 @@ class MainWindow(QMainWindow):
         volume_row.addWidget(self.volume_value_label)
         volume_row.addStretch()
 
-        right_layout.addStretch()
         right_layout.addLayout(top_row)
         right_layout.addLayout(volume_row)
-        right_layout.addStretch()
 
         layout.addWidget(left_box, 1)
+        layout.addStretch(1)
         layout.addWidget(center_box, 3)
+        layout.addStretch(1)
         layout.addWidget(right_box, 1)
 
         self.media_player.positionChanged.connect(self.update_current_time_display)
@@ -14589,32 +14710,32 @@ class MainWindow(QMainWindow):
             liked = bool(
                 self.get_online_track_collection_state(current.to_dict()).get("liked")
             )
-            self.like_btn.setText("♥ 已收藏" if liked else "♡ 收藏")
-            self.like_btn.setProperty("liked", liked)
-            self.like_btn.setEnabled(True)
-            self.like_btn.style().unpolish(self.like_btn)
-            self.like_btn.style().polish(self.like_btn)
-            self.like_btn.update()
+            self._apply_current_like_state(liked, True)
             return
 
         target_path = self.normalize_song_path(self.current_song_path)
 
         if not target_path:
-            self.like_btn.setText("♡ 收藏")
-            self.like_btn.setProperty("liked", False)
-            self.like_btn.setEnabled(False)
+            self._apply_current_like_state(False, False)
         elif self.is_song_liked(target_path):
-            self.like_btn.setText("♥ 已收藏")
-            self.like_btn.setProperty("liked", True)
-            self.like_btn.setEnabled(True)
+            self._apply_current_like_state(True, True)
         else:
-            self.like_btn.setText("♡ 收藏")
-            self.like_btn.setProperty("liked", False)
-            self.like_btn.setEnabled(True)
+            self._apply_current_like_state(False, True)
 
-        self.like_btn.style().unpolish(self.like_btn)
-        self.like_btn.style().polish(self.like_btn)
-        self.like_btn.update()
+    def _apply_current_like_state(self, liked: bool, enabled: bool) -> None:
+        for button_name in ("like_btn", "now_like_btn"):
+            button = getattr(self, button_name, None)
+            if button is None:
+                continue
+            button.setText("♥ 已收藏" if liked else "♡ 收藏")
+            button.setIcon(create_favorite_icon(liked))
+            button.setIconSize(QSize(18, 18))
+            button.setToolTip("从我喜欢移除" if liked else "添加到我喜欢")
+            button.setProperty("liked", bool(liked))
+            button.setEnabled(bool(enabled))
+            button.style().unpolish(button)
+            button.style().polish(button)
+            button.update()
 
     def toggle_like_current_song(self) -> None:
         current = getattr(self, "current_media_item", None)
@@ -15112,6 +15233,7 @@ class MainWindow(QMainWindow):
         if hasattr(self, "side_lyrics_status_value"):
             self.side_lyrics_status_value.setText(message)
 
+        self.update_now_lyrics_preview()
         self.sync_immersive_lyrics()
 
         QApplication.processEvents()
@@ -15417,6 +15539,7 @@ class MainWindow(QMainWindow):
         if hasattr(self, "bottom_source_badge"):
             self.bottom_source_badge.hide()
         self.lyrics_view.set_placeholder("这里会显示歌词", "支持本地 .lrc 和联网同步歌词")
+        self.update_now_lyrics_preview()
         self.reset_cover()
         self.update_like_button()
         self.update_side_info_panel()
@@ -15634,7 +15757,12 @@ class MainWindow(QMainWindow):
     def reset_cover(self) -> None:
         self.cover_label.clear()
         self.cover_label.setPixmap(QPixmap())
-        self.cover_label.setText("Hush")
+        self.cover_label.setText("暂无封面")
+        bottom_cover = getattr(self, "bottom_cover_label", None)
+        if bottom_cover is not None:
+            bottom_cover.clear()
+            bottom_cover.setPixmap(QPixmap())
+            bottom_cover.setText("")
         self._displayed_cover_track_key = ""
         self.sync_immersive_background()
 
@@ -16118,6 +16246,7 @@ class MainWindow(QMainWindow):
             return
 
         if not isinstance(result, dict):
+            self.reset_cover()
             self.cover_label.setText("封面加载失败")
             self.mark_immersive_background_unavailable()
             return
@@ -16137,8 +16266,7 @@ class MainWindow(QMainWindow):
 
         message = result.get("message", "未找到封面")
         print("封面搜索结束：", message)
-        self.cover_label.clear()
-        self.cover_label.setPixmap(QPixmap())
+        self.reset_cover()
         self.cover_label.setText("无封面")
         self.mark_immersive_background_unavailable()
 
@@ -16353,6 +16481,10 @@ class MainWindow(QMainWindow):
     def show_cover_pixmap(self, pixmap: QPixmap) -> None:
         self.cover_label.setText("")
         self.cover_label.setPixmap(pixmap)
+        bottom_cover = getattr(self, "bottom_cover_label", None)
+        if bottom_cover is not None:
+            bottom_cover.setText("")
+            bottom_cover.setPixmap(pixmap)
         self._displayed_cover_track_key = self.get_immersive_track_key()
         self.sync_immersive_background()
 
@@ -18275,19 +18407,16 @@ class MainWindow(QMainWindow):
         }}
 
         QFrame#nowInfoBox {{
-            background: qlineargradient(
-                x1: 0, y1: 0,
-                x2: 1, y2: 1,
-                stop: 0 rgba(255, 255, 255, 0.070),
-                stop: 1 rgba(255, 255, 255, 0.032)
-            );
-            border: 1px solid {t["border"]};
-            border-radius: {UI_RADII["panel"]}px;
+            background: transparent;
+            border: none;
         }}
 
         QLabel#coverLabel {{
-            border: 1px solid {t["border_strong"]};
+            border: none;
             border-radius: {UI_RADII["card"]}px;
+            color: {t["text_muted"]};
+            font-size: 13px;
+            font-weight: 600;
         }}
 
         QLabel#nowSongTitle {{
@@ -18298,6 +18427,49 @@ class MainWindow(QMainWindow):
 
         QLabel#nowArtist {{
             color: {t["text_secondary"]};
+            font-size: 13px;
+        }}
+
+        QPushButton#nowLikeButton,
+        QPushButton#nowPlayingMoreButton {{
+            background: transparent;
+            color: {t["text_secondary"]};
+            border: 1px solid transparent;
+            border-radius: {UI_RADII["control"]}px;
+            padding: 7px 10px;
+        }}
+
+        QPushButton#nowLikeButton:hover,
+        QPushButton#nowPlayingMoreButton:hover {{
+            background: {t["hover"]};
+            color: {t["text"]};
+        }}
+
+        QPushButton#nowLikeButton[liked="true"] {{
+            color: {t["favorite"]};
+        }}
+
+        QFrame#nowPlayingDivider {{
+            color: {t["border"]};
+            background: {t["border"]};
+            border: none;
+            max-height: 1px;
+        }}
+
+        QLabel#nowLyricsHeading {{
+            color: {t["text_muted"]};
+            font-size: 11px;
+            font-weight: 700;
+        }}
+
+        QLabel#nowCurrentLyric {{
+            color: {t["text"]};
+            font-size: 16px;
+            font-weight: 700;
+        }}
+
+        QLabel#nowNextLyric {{
+            color: {t["text_muted"]};
             font-size: 13px;
         }}
 
@@ -18343,10 +18515,11 @@ class MainWindow(QMainWindow):
         }}
 
         QFrame#songTableHeader {{
-            background: rgba(255, 255, 255, 0.035);
-            border: 1px solid {t["border"]};
-            border-radius: 12px;
-            min-height: 38px;
+            background: transparent;
+            border: none;
+            border-bottom: 1px solid {t["border"]};
+            border-radius: 0;
+            min-height: 36px;
         }}
 
         QPushButton#songTableHeaderButton {{
@@ -18380,28 +18553,32 @@ class MainWindow(QMainWindow):
         QListWidget#songList {{
             background: {t["sidebar_bg"]};
             border: 1px solid {t["border"]};
-            border-radius: {UI_RADII["panel"]}px;
-            padding: 6px;
+            border-radius: {UI_RADII["card"]}px;
+            padding: 4px;
             outline: none;
         }}
 
         QListWidget#songList::item {{
             min-height: {UI_CONTROL_SIZES["track_row_height"]}px;
             background: transparent;
-            border: 1px solid transparent;
+            border: none;
             border-radius: {UI_RADII["button"]}px;
             padding: 0;
-            margin: 2px;
+            margin: 1px;
         }}
 
         QListWidget#songList::item:hover {{
             background: rgba(255, 255, 255, 0.055);
-            border-color: rgba(255, 255, 255, 0.035);
         }}
 
         QListWidget#songList::item:selected {{
             background: {t["selected_bg"]};
-            border-color: {t["selected_border"]};
+        }}
+
+        QLabel#bottomCoverLabel {{
+            background: {t["panel_bg"]};
+            border: none;
+            border-radius: 10px;
         }}
 
         QLabel#listEmptyHint {{
@@ -18509,14 +18686,14 @@ class MainWindow(QMainWindow):
         QPushButton#playlistSidebarButton:hover {{
             background: {t["hover"]};
             color: {t["text"]};
-            border: 1px solid {t["border"]};
+            border-color: transparent;
         }}
 
         QPushButton#sidebarButton[active="true"],
         QPushButton#playlistSidebarButton[active="true"] {{
             background: {t["active"]};
             color: {t["text"]};
-            border: 1px solid {t["border_strong"]};
+            border: 1px solid transparent;
             border-left: 3px solid {t["accent"]};
             font-weight: 700;
         }}

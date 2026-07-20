@@ -266,12 +266,16 @@ class SearchPage(QFrame):
         self.page_layout = layout
         layout.setContentsMargins(24, 24, 24, 20)
         layout.setSpacing(UI_SPACING["md"])
-        header = QHBoxLayout()
+        self.page_header = QFrame()
+        self.page_header.setObjectName("pageHeader")
+        self.page_header.setMinimumHeight(58)
+        header = QHBoxLayout(self.page_header)
+        header.setContentsMargins(0, 0, 0, 0)
         title_box = QVBoxLayout()
         self.title_label = QLabel("搜索")
         self.title_label.setObjectName("pageTitle")
         self.title_label.setWordWrap(True)
-        self.subtitle_label = QLabel("本地结果立即显示；在线结果会在停止输入后异步加载。")
+        self.subtitle_label = QLabel("输入歌曲、歌手或专辑")
         self.subtitle_label.setObjectName("pageSubtitle")
         self.subtitle_label.setWordWrap(True)
         title_box.addWidget(self.title_label)
@@ -355,14 +359,14 @@ class SearchPage(QFrame):
         online_layout.addWidget(self.online_results, 1)
         self.results_stack.addWidget(self.local_container)
         self.results_stack.addWidget(self.online_container)
-        layout.addLayout(header)
+        layout.addWidget(self.page_header)
         layout.addLayout(tab_row)
         layout.addWidget(self.results_stack, 1)
         t = DARK_THEME_TOKENS
         self.setStyleSheet(
-            f"QPushButton#searchTabButton {{ background: {t['card_bg']}; color: {t['text_muted']}; border: 1px solid {t['border']}; border-radius: {UI_RADII['button']}px; padding: 8px 16px; font-weight: 700; }}"
+            f"QPushButton#searchTabButton {{ background: transparent; color: {t['text_muted']}; border: none; border-bottom: 2px solid transparent; border-radius: 0; padding: 8px 14px; font-weight: 700; }}"
             f"QPushButton#searchTabButton:hover {{ background: {t['hover']}; color: {t['text']}; }}"
-            f"QPushButton#searchTabButton[active='true'] {{ background: {t['selected_bg']}; color: {t['text']}; border-color: {t['selected_border']}; }}"
+            f"QPushButton#searchTabButton[active='true'] {{ background: transparent; color: {t['accent_hover']}; border-bottom-color: {t['accent']}; }}"
             f"QToolButton#searchSourceSelector {{ background: {t['card_bg']}; color: {t['text']}; border: 1px solid {t['border']}; border-radius: {UI_RADII['control']}px; padding: 7px 12px; font-weight: 650; }}"
             f"QToolButton#searchSourceSelector:hover {{ background: {t['hover']}; border-color: {t['border_strong']}; }}"
             f"QToolButton#searchSourceSelector:disabled {{ color: {t['text_disabled']}; background: {t['app_bg']}; border-color: {t['border']}; }}"

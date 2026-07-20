@@ -14,8 +14,17 @@ from PySide6.QtWidgets import (
 )
 
 from app.models.media_item import MediaItem
-from app.ui.design_system import DARK_THEME_TOKENS, UI_RADII, UI_SPACING
-from app.ui.track_list_view import IndentedLikeDelegate, LikeAwareListWidget
+from app.ui.design_system import (
+    DARK_THEME_TOKENS,
+    UI_CONTROL_SIZES,
+    UI_RADII,
+    UI_SPACING,
+)
+from app.ui.track_list_view import (
+    OnlineTrackDelegate,
+    OnlineTrackHeader,
+    OnlineTrackListWidget,
+)
 
 
 class UnifiedSearchResultsPanel(QFrame):
@@ -65,10 +74,10 @@ class UnifiedSearchResultsPanel(QFrame):
         header.addWidget(title)
         header.addStretch()
         header.addWidget(self.status_label, 1)
-        self.result_list = LikeAwareListWidget()
+        self.result_list = OnlineTrackListWidget()
         self.result_list.setObjectName("unifiedSearchResultList")
         self.result_list.setItemDelegate(
-            IndentedLikeDelegate(self.result_list)
+            OnlineTrackDelegate(self.playing_key_provider, self.result_list)
         )
         self.result_list.setUniformItemSizes(False)
         self.result_list.setSpacing(2)
@@ -77,6 +86,7 @@ class UnifiedSearchResultsPanel(QFrame):
         self.result_list.itemClicked.connect(self._handle_item_clicked)
         self.result_list.itemDoubleClicked.connect(self.request_playback)
         self.result_list.likeToggleRequested.connect(self._toggle_result_like)
+        self.result_list.moreRequested.connect(self._show_more_menu)
         self.result_list.setMinimumHeight(160)
         if not self.standalone:
             self.result_list.setMaximumHeight(285)
@@ -84,15 +94,17 @@ class UnifiedSearchResultsPanel(QFrame):
         self.detail_label.setObjectName("pageSubtitle")
         self.detail_label.setWordWrap(True)
         layout.addLayout(header)
+        self.table_header = OnlineTrackHeader(self)
+        layout.addWidget(self.table_header)
         layout.addWidget(self.result_list)
         layout.addWidget(self.detail_label)
         t = DARK_THEME_TOKENS
         self.setStyleSheet(
-            f"QFrame#unifiedSearchPanel {{ background: transparent; border-top: 1px solid {t['border']}; }}"
+            "QFrame#unifiedSearchPanel { background: transparent; border: none; }"
             f"QListWidget#unifiedSearchResultList {{ background: {t['sidebar_bg']}; color: {t['text']}; border: 1px solid {t['border']}; border-radius: {UI_RADII['card']}px; padding: 6px; outline: none; }}"
-            f"QListWidget#unifiedSearchResultList::item {{ padding: 8px 10px; border-radius: {UI_RADII['control']}px; margin: 1px 0; border: 1px solid transparent; }}"
+            f"QListWidget#unifiedSearchResultList::item {{ padding: 0; border-radius: {UI_RADII['control']}px; margin: 1px 0; border: none; }}"
             f"QListWidget#unifiedSearchResultList::item:hover {{ background: {t['hover']}; }}"
-            f"QListWidget#unifiedSearchResultList::item:selected {{ background: {t['selected_bg']}; border: 1px solid {t['selected_border']}; }}"
+            f"QListWidget#unifiedSearchResultList::item:selected {{ background: {t['selected_bg']}; }}"
         )
         self.setVisible(self.standalone)
 
@@ -109,6 +121,13 @@ class UnifiedSearchResultsPanel(QFrame):
         signal = self.unlikeRequested if liked else self.likeRequested
         signal.emit(dict(track))
 
+    def _show_more_menu(self, track: dict, position) -> None:
+        item = self.result_list.itemAt(position)
+        if item is None or item.data(Qt.ItemDataRole.UserRole) != track:
+            return
+        self.result_list.setCurrentItem(item)
+        self.show_context_menu(position)
+
     def refresh_like_identity(self, identity: str) -> int:
         return self.result_list.refresh_like_identity(identity)
 
@@ -117,28 +136,13 @@ class UnifiedSearchResultsPanel(QFrame):
 
     def set_playing_key_provider(self, provider) -> None:
         self.playing_key_provider = provider or (lambda: "")
+        self.result_list.setItemDelegate(
+            OnlineTrackDelegate(self.playing_key_provider, self.result_list)
+        )
         self.refresh_playing_indicator()
 
     def refresh_playing_indicator(self) -> None:
-        playing_key = str(self.playing_key_provider() or "")
-        for row in range(self.result_list.count()):
-            item = self.result_list.item(row)
-            track = item.data(Qt.ItemDataRole.UserRole) if item is not None else None
-            if not isinstance(track, dict):
-                continue
-            try:
-                is_playing = (
-                    MediaItem.from_mapping(track).stable_identity == playing_key
-                )
-            except (TypeError, ValueError):
-                is_playing = False
-            font = self.result_list.font()
-            font.setBold(is_playing)
-            item.setFont(font)
-            item.setData(
-                Qt.ItemDataRole.ForegroundRole,
-                QColor(DARK_THEME_TOKENS["accent_hover"]) if is_playing else None,
-            )
+        self.result_list.viewport().update()
 
     def scroll_to_top(self) -> None:
         self.result_list.scrollToTop()
@@ -408,23 +412,13 @@ class UnifiedSearchResultsPanel(QFrame):
         item = QListWidgetItem(self._result_text(track))
         item.setData(Qt.ItemDataRole.UserRole, track)
         item.setToolTip(self._result_tooltip(track))
-        item.setSizeHint(QSize(0, 54))
+        item.setSizeHint(QSize(0, UI_CONTROL_SIZES["track_row_height"]))
         self._apply_playing_indicator(item, track)
         return item
 
     def _apply_playing_indicator(self, item: QListWidgetItem, track: dict) -> None:
-        playing_key = str(self.playing_key_provider() or "")
-        try:
-            is_playing = MediaItem.from_mapping(track).stable_identity == playing_key
-        except (TypeError, ValueError):
-            is_playing = False
-        font = self.result_list.font()
-        font.setBold(is_playing)
-        item.setFont(font)
-        item.setData(
-            Qt.ItemDataRole.ForegroundRole,
-            QColor(DARK_THEME_TOKENS["accent_hover"]) if is_playing else None,
-        )
+        # The delegate reads the live provider, so playback changes only repaint.
+        _ = item, track
 
     def _update_detail_text(self) -> None:
         has_results = bool(any(self._source_results.values()))
@@ -521,7 +515,7 @@ class UnifiedSearchResultsPanel(QFrame):
                 item = QListWidgetItem(self._result_text(track))
                 item.setData(Qt.ItemDataRole.UserRole, track)
                 item.setToolTip(self._result_tooltip(track))
-                item.setSizeHint(QSize(0, 54))
+                item.setSizeHint(QSize(0, UI_CONTROL_SIZES["track_row_height"]))
                 self.result_list.addItem(item)
                 if previous_key and self._track_key(track) == previous_key:
                     selected_item = item
@@ -743,12 +737,7 @@ class UnifiedSearchResultsPanel(QFrame):
     def _result_text(cls, track: dict) -> str:
         title = str(track.get("title") or "未知歌曲")
         artist = str(track.get("artist") or "未知艺术家")
-        album = str(track.get("album") or "未知专辑")
-        duration = cls._format_duration(track.get("duration"))
-        flags = [cls._local_status(track)]
-        flags.append("可播放" if track.get("can_play") else "不可播放")
-        flags.append("可下载" if track.get("can_download") else "不可下载")
-        return f"{title}\n{artist} · {album} · {duration}   {' · '.join(flags)}"
+        return f"{title} · {artist}"
 
     @classmethod
     def _result_tooltip(cls, track: dict) -> str:

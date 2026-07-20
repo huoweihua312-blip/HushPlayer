@@ -133,6 +133,8 @@ def draw_track_like_icon(
             else DARK_THEME_TOKENS["text_muted"]
         )
     )
+    if not liked and not hovered:
+        color.setAlpha(145)
     pen = QPen(color, 1.8)
     pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
     painter.setPen(pen)
@@ -282,6 +284,105 @@ class LikeAwareListWidget(QListWidget):
         return super().viewportEvent(event)
 
 
+class OnlineTrackListWidget(LikeAwareListWidget):
+    """Online list with a delegate-painted, non-playing more-actions target."""
+
+    moreRequested = Signal(dict, object)
+
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self._pressed_more_item: QListWidgetItem | None = None
+        self._hovered_more_item: QListWidgetItem | None = None
+
+    def more_rect_for_item(self, item: QListWidgetItem) -> QRectF:
+        return OnlineTrackDelegate.column_rects(self.visualItemRect(item))["more"]
+
+    def _more_item_at(self, position) -> QListWidgetItem | None:
+        point = position.toPoint() if hasattr(position, "toPoint") else position
+        item = self.itemAt(point)
+        if item is None or not isinstance(item.data(Qt.ItemDataRole.UserRole), dict):
+            return None
+        return item if self.more_rect_for_item(item).contains(point) else None
+
+    def is_index_more_hovered(self, index) -> bool:
+        item = self.itemFromIndex(index)
+        return item is not None and item is self._hovered_more_item
+
+    def is_index_more_pressed(self, index) -> bool:
+        item = self.itemFromIndex(index)
+        return item is not None and item is self._pressed_more_item
+
+    def _set_hovered_more_item(self, item: QListWidgetItem | None) -> None:
+        previous = self._hovered_more_item
+        if previous is item:
+            return
+        self._hovered_more_item = item
+        for changed in (previous, item):
+            if changed is not None and self.row(changed) >= 0:
+                self.viewport().update(self.visualItemRect(changed))
+        if item is not None:
+            self.viewport().setCursor(Qt.CursorShape.PointingHandCursor)
+
+    def mouseMoveEvent(self, event) -> None:
+        item = self._more_item_at(event.position())
+        self._set_hovered_more_item(item)
+        if item is not None:
+            self._set_hovered_like_item(None)
+            QListWidget.mouseMoveEvent(self, event)
+            self.viewport().setCursor(Qt.CursorShape.PointingHandCursor)
+            return
+        super().mouseMoveEvent(event)
+
+    def mousePressEvent(self, event) -> None:
+        if event.button() == Qt.MouseButton.LeftButton:
+            item = self._more_item_at(event.position())
+            if item is not None:
+                self._pressed_more_item = item
+                self._set_hovered_more_item(item)
+                self.viewport().update(self.visualItemRect(item))
+                event.accept()
+                return
+        super().mousePressEvent(event)
+
+    def mouseReleaseEvent(self, event) -> None:
+        pressed = self._pressed_more_item
+        if pressed is not None:
+            self._pressed_more_item = None
+            released = self._more_item_at(event.position())
+            if self.row(pressed) >= 0:
+                self.viewport().update(self.visualItemRect(pressed))
+            if released is pressed:
+                value = pressed.data(Qt.ItemDataRole.UserRole)
+                point = (
+                    event.position().toPoint()
+                    if hasattr(event.position(), "toPoint")
+                    else event.position()
+                )
+                if isinstance(value, dict):
+                    self.moreRequested.emit(dict(value), point)
+            event.accept()
+            return
+        super().mouseReleaseEvent(event)
+
+    def mouseDoubleClickEvent(self, event) -> None:
+        if self._more_item_at(event.position()) is not None:
+            event.accept()
+            return
+        super().mouseDoubleClickEvent(event)
+
+    def leaveEvent(self, event) -> None:
+        self._set_hovered_more_item(None)
+        super().leaveEvent(event)
+
+    def viewportEvent(self, event) -> bool:
+        if event.type() == QEvent.Type.ToolTip:
+            item = self._more_item_at(event.pos())
+            if item is not None:
+                QToolTip.showText(event.globalPos(), "更多操作", self.viewport())
+                return True
+        return super().viewportEvent(event)
+
+
 class IndentedLikeDelegate(QStyledItemDelegate):
     """Adds the common vector heart to otherwise standard list rows."""
 
@@ -375,16 +476,16 @@ class CanonicalTrackDelegate(QStyledItemDelegate):
             and item.stable_identity == str(self.playing_key_provider() or "")
         )
         if selected and is_playing:
-            background, border = QColor(76, 141, 255, 62), QColor(76, 141, 255, 158)
+            background = QColor(76, 141, 255, 48)
         elif selected:
-            background, border = QColor(76, 141, 255, 48), QColor(76, 141, 255, 118)
+            background = QColor(76, 141, 255, 38)
         elif is_playing:
-            background, border = QColor(76, 141, 255, 27), QColor(76, 141, 255, 70)
+            background = QColor(76, 141, 255, 20)
         elif hovered:
-            background, border = QColor(255, 255, 255, 14), QColor(255, 255, 255, 10)
+            background = QColor(255, 255, 255, 13)
         else:
-            background, border = QColor(0, 0, 0, 0), QColor(0, 0, 0, 0)
-        painter.setPen(QPen(border, 1))
+            background = QColor(0, 0, 0, 0)
+        painter.setPen(Qt.PenStyle.NoPen)
         painter.setBrush(background)
         painter.drawRoundedRect(
             row_rect,
@@ -418,7 +519,12 @@ class CanonicalTrackDelegate(QStyledItemDelegate):
             pressed=like_pressed,
         )
         self._draw(painter, option, rects["marker"], "▶" if is_playing else "", DARK_THEME_TOKENS["accent"], True)
-        self._draw(painter, option, rects["title"], item.title, DARK_THEME_TOKENS["text"], is_playing)
+        title_color = (
+            DARK_THEME_TOKENS["accent_hover"]
+            if is_playing
+            else DARK_THEME_TOKENS["text"]
+        )
+        self._draw(painter, option, rects["title"], item.title, title_color, is_playing)
         self._draw(painter, option, rects["artist"], item.artist, DARK_THEME_TOKENS["text_secondary"])
         self._draw(painter, option, rects["album"], item.album, DARK_THEME_TOKENS["text_secondary"])
         self._draw(painter, option, rects["duration"], duration, DARK_THEME_TOKENS["text_muted"], align_right=True)
@@ -454,6 +560,215 @@ class CanonicalTrackDelegate(QStyledItemDelegate):
         alignment = Qt.AlignmentFlag.AlignVCenter
         alignment |= Qt.AlignmentFlag.AlignRight if align_right else Qt.AlignmentFlag.AlignLeft
         painter.drawText(rect, alignment, elided)
+
+
+class OnlineTrackDelegate(QStyledItemDelegate):
+    """Paint online results with the same column and state language as local rows."""
+
+    def __init__(self, playing_key_provider=None, parent=None) -> None:
+        super().__init__(parent)
+        self.playing_key_provider = playing_key_provider or (lambda: "")
+
+    def sizeHint(self, option, index) -> QSize:
+        if not isinstance(index.data(Qt.ItemDataRole.UserRole), dict):
+            return super().sizeHint(option, index)
+        return QSize(0, UI_CONTROL_SIZES["track_row_height"])
+
+    @staticmethod
+    def column_rects(rect) -> dict[str, QRectF]:
+        row_rect = QRectF(rect.adjusted(2, 2, -2, -2))
+        content = row_rect.adjusted(12, 0, -12, 0)
+        width = max(0, int(content.width()))
+        gap = 10 if width >= 700 else 7
+        duration_width = 54
+        more_width = 30
+        source_width = 92 if width >= 700 else (76 if width >= 560 else 0)
+        marker_width = TRACK_MARKER_WIDTH
+        fixed = (
+            TRACK_LIKE_WIDTH
+            + marker_width
+            + source_width
+            + duration_width
+            + more_width
+        )
+        visible_flexible_columns = 3 if width >= 760 else 2
+        gap_count = 4 + visible_flexible_columns
+        flexible = max(0, width - fixed - gap * gap_count)
+        if width >= 760:
+            title_width = int(flexible * 0.48)
+            artist_width = int(flexible * 0.27)
+            album_width = max(0, flexible - title_width - artist_width)
+        else:
+            title_width = int(flexible * 0.58)
+            artist_width = max(0, flexible - title_width)
+            album_width = 0
+        x = content.left()
+        result = {"like": QRectF(x, content.top(), TRACK_LIKE_WIDTH, content.height())}
+        x += TRACK_LIKE_WIDTH + gap
+        result["marker"] = QRectF(x, content.top(), marker_width, content.height())
+        x += marker_width + gap
+        result["title"] = QRectF(x, content.top(), title_width, content.height())
+        x += title_width + gap
+        result["artist"] = QRectF(x, content.top(), artist_width, content.height())
+        x += artist_width + gap
+        result["album"] = QRectF(x, content.top(), album_width, content.height())
+        if album_width:
+            x += album_width + gap
+        result["source"] = QRectF(x, content.top(), source_width, content.height())
+        if source_width:
+            x += source_width + gap
+        result["duration"] = QRectF(x, content.top(), duration_width, content.height())
+        x += duration_width + gap
+        result["more"] = QRectF(x, content.top(), more_width, content.height())
+        return result
+
+    def paint(self, painter: QPainter, option, index) -> None:
+        raw = index.data(Qt.ItemDataRole.UserRole)
+        if not isinstance(raw, dict):
+            super().paint(painter, option, index)
+            return
+        try:
+            item = MediaItem.from_mapping(raw)
+        except (TypeError, ValueError):
+            super().paint(painter, option, index)
+            return
+        painter.save()
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        row_rect = QRectF(option.rect.adjusted(2, 2, -2, -2))
+        selected = bool(option.state & QStyle.StateFlag.State_Selected)
+        hovered = bool(option.state & QStyle.StateFlag.State_MouseOver)
+        is_playing = bool(
+            item.stable_identity
+            and item.stable_identity == str(self.playing_key_provider() or "")
+        )
+        if selected and is_playing:
+            background = QColor(76, 141, 255, 48)
+        elif selected:
+            background = QColor(76, 141, 255, 38)
+        elif is_playing:
+            background = QColor(76, 141, 255, 20)
+        elif hovered:
+            background = QColor(255, 255, 255, 13)
+        else:
+            background = QColor(0, 0, 0, 0)
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(background)
+        painter.drawRoundedRect(row_rect, UI_RADII["button"], UI_RADII["button"])
+        if is_playing:
+            painter.fillRect(
+                QRectF(row_rect.left(), row_rect.top() + 8, 3, row_rect.height() - 16),
+                QColor(DARK_THEME_TOKENS["accent"]),
+            )
+        rects = self.column_rects(option.rect)
+        view = self.parent()
+        liked = bool(
+            isinstance(view, LikeAwareListWidget) and view.is_value_liked(raw)
+        )
+        draw_track_like_icon(
+            painter,
+            rects["like"],
+            liked=liked,
+            hovered=bool(
+                isinstance(view, LikeAwareListWidget)
+                and view.is_index_like_hovered(index)
+            ),
+            pressed=bool(
+                isinstance(view, LikeAwareListWidget)
+                and view.is_index_like_pressed(index)
+            ),
+        )
+        unavailable = item.availability != "available" or not item.can_play
+        title_color = (
+            DARK_THEME_TOKENS["text_disabled"]
+            if unavailable
+            else (
+                DARK_THEME_TOKENS["accent_hover"]
+                if is_playing
+                else DARK_THEME_TOKENS["text"]
+            )
+        )
+        secondary = (
+            DARK_THEME_TOKENS["text_disabled"]
+            if unavailable
+            else DARK_THEME_TOKENS["text_secondary"]
+        )
+        duration = f"{item.duration // 60}:{item.duration % 60:02d}" if item.duration else "—"
+        CanonicalTrackDelegate._draw(
+            painter, option, rects["marker"], "▶" if is_playing else "", DARK_THEME_TOKENS["accent"], True
+        )
+        CanonicalTrackDelegate._draw(painter, option, rects["title"], item.title, title_color, is_playing)
+        CanonicalTrackDelegate._draw(painter, option, rects["artist"], item.artist, secondary)
+        if rects["album"].width() > 0:
+            CanonicalTrackDelegate._draw(painter, option, rects["album"], item.album, secondary)
+        if rects["source"].width() > 0:
+            CanonicalTrackDelegate._draw(
+                painter, option, rects["source"], item.source_name, DARK_THEME_TOKENS["text_muted"]
+            )
+        CanonicalTrackDelegate._draw(
+            painter, option, rects["duration"], duration, DARK_THEME_TOKENS["text_muted"], align_right=True
+        )
+        more_hovered = bool(
+            hasattr(view, "is_index_more_hovered")
+            and view.is_index_more_hovered(index)
+        )
+        more_pressed = bool(
+            hasattr(view, "is_index_more_pressed")
+            and view.is_index_more_pressed(index)
+        )
+        if more_hovered:
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.setBrush(QColor(255, 255, 255, 26 if not more_pressed else 38))
+            painter.drawEllipse(rects["more"].adjusted(3, 8, -3, -8))
+        CanonicalTrackDelegate._draw(
+            painter,
+            option,
+            rects["more"],
+            "⋯",
+            DARK_THEME_TOKENS["text"] if more_hovered else DARK_THEME_TOKENS["text_muted"],
+            align_right=True,
+        )
+        painter.restore()
+
+
+class OnlineTrackHeader(QFrame):
+    """Responsive header aligned to OnlineTrackDelegate's painted columns."""
+
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.setObjectName("onlineTableHeader")
+        self.setFixedHeight(36)
+
+    def paintEvent(self, event) -> None:
+        super().paintEvent(event)
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        painter.setPen(QPen(QColor(DARK_THEME_TOKENS["border"]), 1))
+        painter.drawLine(0, self.height() - 1, self.width(), self.height() - 1)
+        font = QFont(self.font())
+        font.setPointSizeF(max(8.0, font.pointSizeF() - 1.0))
+        font.setBold(True)
+        painter.setFont(font)
+        painter.setPen(QColor(DARK_THEME_TOKENS["text_muted"]))
+        rects = OnlineTrackDelegate.column_rects(self.rect())
+        for name, text in (
+            ("title", "歌曲标题"),
+            ("artist", "歌手"),
+            ("album", "专辑"),
+            ("source", "来源"),
+            ("duration", "时长"),
+            ("more", "更多"),
+        ):
+            rect = rects[name]
+            if rect.width() <= 0:
+                continue
+            alignment = Qt.AlignmentFlag.AlignVCenter
+            alignment |= (
+                Qt.AlignmentFlag.AlignRight
+                if name == "duration"
+                else Qt.AlignmentFlag.AlignLeft
+            )
+            painter.drawText(rect, alignment, text)
+        painter.end()
 
 
 class TrackListView(QFrame):
