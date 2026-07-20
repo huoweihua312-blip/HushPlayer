@@ -15,6 +15,7 @@ from PySide6.QtWidgets import (
 )
 
 from app.models.media_item import MediaItem
+from app.ui.design_system import DARK_THEME_TOKENS, UI_RADII, UI_SPACING
 
 
 class TrackDetailsPanel(QFrame):
@@ -36,8 +37,8 @@ class TrackDetailsPanel(QFrame):
 
     def _build_ui(self) -> None:
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(18, 18, 18, 18)
-        layout.setSpacing(14)
+        layout.setContentsMargins(16, 16, 16, 16)
+        layout.setSpacing(UI_SPACING["sm"])
         title = QLabel(self.item.title)
         title.setObjectName("trackDetailsTitle")
         title.setWordWrap(True)
@@ -70,13 +71,14 @@ class TrackDetailsPanel(QFrame):
         grid.setColumnStretch(1, 1)
         layout.addLayout(grid)
         layout.addStretch()
+        t = DARK_THEME_TOKENS
         self.setStyleSheet(
-            "QFrame#trackDetailsPanel { background: #151922; border: 1px solid #2a303b; border-radius: 16px; }"
-            "QLabel#trackDetailsTitle { color: #f3f4f6; font-size: 22px; font-weight: 800; }"
-            "QLabel#trackDetailsSubtitle { color: #aeb6c6; font-size: 13px; }"
-            "QLabel#trackDetailsBadge { background: rgba(76,141,255,0.18); color: #91b9ff; border: 1px solid rgba(76,141,255,0.38); border-radius: 9px; padding: 4px 6px; font-weight: 700; }"
-            "QLabel#trackDetailsName { color: #8a92a3; font-size: 12px; }"
-            "QLabel#trackDetailsValue { color: #e4e8f0; font-size: 13px; }"
+            f"QFrame#trackDetailsPanel {{ background: {t['card_bg']}; border: 1px solid {t['border']}; border-radius: {UI_RADII['panel']}px; }}"
+            f"QLabel#trackDetailsTitle {{ color: {t['text']}; font-size: 22px; font-weight: 800; }}"
+            f"QLabel#trackDetailsSubtitle {{ color: {t['text_secondary']}; font-size: 13px; }}"
+            f"QLabel#trackDetailsBadge {{ background: {t['accent_soft']}; color: {t['accent_hover']}; border: 1px solid {t['selected_border']}; border-radius: {UI_RADII['control']}px; padding: 4px 6px; font-weight: 700; }}"
+            f"QLabel#trackDetailsName {{ color: {t['text_muted']}; font-size: 12px; }}"
+            f"QLabel#trackDetailsValue {{ color: {t['text']}; font-size: 13px; }}"
         )
 
     @staticmethod

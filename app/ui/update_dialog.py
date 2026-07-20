@@ -15,6 +15,7 @@ from PySide6.QtWidgets import (
 )
 
 from app.services.app_update_service import AppUpdateService, UpdateManifest
+from app.ui.design_system import UI_SPACING
 
 
 class UpdateDialog(QDialog):
@@ -33,8 +34,8 @@ class UpdateDialog(QDialog):
         self.setModal(True)
 
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(24, 22, 24, 22)
-        layout.setSpacing(16)
+        layout.setContentsMargins(24, 20, 24, 20)
+        layout.setSpacing(UI_SPACING["md"])
 
         title = QLabel(f"发现新版本 {manifest.version}")
         title.setObjectName("settingsDialogTitle")
@@ -48,8 +49,8 @@ class UpdateDialog(QDialog):
         notice = QFrame()
         notice.setObjectName("settingsCard")
         notice_layout = QVBoxLayout(notice)
-        notice_layout.setContentsMargins(16, 14, 16, 14)
-        notice_layout.setSpacing(8)
+        notice_layout.setContentsMargins(16, 12, 16, 12)
+        notice_layout.setSpacing(UI_SPACING["xs"])
         mandatory_text = (
             "发布者将此版本标记为必须更新，但第一阶段仍由你确认下载和安装。"
             if manifest.mandatory
@@ -92,7 +93,7 @@ class UpdateDialog(QDialog):
         layout.addWidget(self.progress_label)
 
         button_row = QHBoxLayout()
-        button_row.setSpacing(10)
+        button_row.setSpacing(UI_SPACING["sm"])
         self.download_button = QPushButton("下载安装包")
         self.download_button.setObjectName("settingsPrimaryButton")
         self.download_button.clicked.connect(self.start_download)

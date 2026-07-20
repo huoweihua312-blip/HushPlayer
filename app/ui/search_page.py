@@ -18,6 +18,7 @@ from PySide6.QtWidgets import (
 )
 
 from app.models.media_item import MediaItem
+from app.ui.design_system import DARK_THEME_TOKENS, UI_RADII, UI_SPACING
 from app.ui.track_list_view import TrackListView
 from app.ui.unified_search_panel import UnifiedSearchResultsPanel
 
@@ -47,10 +48,10 @@ class SearchSourceSelector(QToolButton):
         panel.setMinimumWidth(300)
         panel_layout = QVBoxLayout(panel)
         panel_layout.setContentsMargins(12, 12, 12, 12)
-        panel_layout.setSpacing(8)
+        panel_layout.setSpacing(UI_SPACING["xs"])
 
         action_row = QHBoxLayout()
-        action_row.setSpacing(6)
+        action_row.setSpacing(UI_SPACING["xs"])
         self.select_all_button = QPushButton("全选")
         self.clear_button = QPushButton("取消全选")
         self.select_all_button.setObjectName("secondaryButton")
@@ -72,7 +73,7 @@ class SearchSourceSelector(QToolButton):
         self.source_container = QWidget(self.source_scroll)
         self.source_layout = QVBoxLayout(self.source_container)
         self.source_layout.setContentsMargins(0, 0, 0, 0)
-        self.source_layout.setSpacing(5)
+        self.source_layout.setSpacing(UI_SPACING["xxs"])
         self.source_scroll.setWidget(self.source_container)
         panel_layout.addWidget(self.source_scroll)
 
@@ -263,8 +264,8 @@ class SearchPage(QFrame):
     def _build_ui(self, local_only: bool) -> None:
         layout = QVBoxLayout(self)
         self.page_layout = layout
-        layout.setContentsMargins(28, 26, 28, 24)
-        layout.setSpacing(16)
+        layout.setContentsMargins(24, 24, 24, 20)
+        layout.setSpacing(UI_SPACING["md"])
         header = QHBoxLayout()
         title_box = QVBoxLayout()
         self.title_label = QLabel("搜索")
@@ -297,7 +298,7 @@ class SearchPage(QFrame):
         header.addWidget(self.back_button)
 
         tab_row = QHBoxLayout()
-        tab_row.setSpacing(4)
+        tab_row.setSpacing(UI_SPACING["xxs"])
         self.local_tab = QPushButton("本地结果")
         self.online_tab = QPushButton("在线结果")
         for button in (self.local_tab, self.online_tab):
@@ -313,7 +314,7 @@ class SearchPage(QFrame):
         self.local_container = QWidget()
         local_layout = QVBoxLayout(self.local_container)
         local_layout.setContentsMargins(0, 0, 0, 0)
-        local_layout.setSpacing(8)
+        local_layout.setSpacing(UI_SPACING["xs"])
         self.local_status_label = QLabel("点击左侧搜索框并输入关键词。")
         self.local_status_label.setObjectName("pageSubtitle")
         self.local_status_label.setAlignment(
@@ -357,14 +358,15 @@ class SearchPage(QFrame):
         layout.addLayout(header)
         layout.addLayout(tab_row)
         layout.addWidget(self.results_stack, 1)
+        t = DARK_THEME_TOKENS
         self.setStyleSheet(
-            "QPushButton#searchTabButton { background: #151922; color: #9ca5b5; border: 1px solid #2a303b; border-radius: 10px; padding: 8px 16px; font-weight: 700; }"
-            "QPushButton#searchTabButton:hover { background: #202631; color: #eef1f7; }"
-            "QPushButton#searchTabButton[active='true'] { background: rgba(76,141,255,0.20); color: #ffffff; border-color: rgba(76,141,255,0.55); }"
-            "QToolButton#searchSourceSelector { background: #151922; color: #eef1f7; border: 1px solid #303744; border-radius: 9px; padding: 7px 12px; font-weight: 650; }"
-            "QToolButton#searchSourceSelector:hover { background: #202631; border-color: #465066; }"
-            "QToolButton#searchSourceSelector:disabled { color: #737d8f; background: #12161d; border-color: #252b35; }"
-            "QFrame#searchSourceMenuPanel { background: #171c25; border: 1px solid #303744; border-radius: 10px; }"
+            f"QPushButton#searchTabButton {{ background: {t['card_bg']}; color: {t['text_muted']}; border: 1px solid {t['border']}; border-radius: {UI_RADII['button']}px; padding: 8px 16px; font-weight: 700; }}"
+            f"QPushButton#searchTabButton:hover {{ background: {t['hover']}; color: {t['text']}; }}"
+            f"QPushButton#searchTabButton[active='true'] {{ background: {t['selected_bg']}; color: {t['text']}; border-color: {t['selected_border']}; }}"
+            f"QToolButton#searchSourceSelector {{ background: {t['card_bg']}; color: {t['text']}; border: 1px solid {t['border']}; border-radius: {UI_RADII['control']}px; padding: 7px 12px; font-weight: 650; }}"
+            f"QToolButton#searchSourceSelector:hover {{ background: {t['hover']}; border-color: {t['border_strong']}; }}"
+            f"QToolButton#searchSourceSelector:disabled {{ color: {t['text_disabled']}; background: {t['app_bg']}; border-color: {t['border']}; }}"
+            f"QFrame#searchSourceMenuPanel {{ background: {t['card_bg_alt']}; border: 1px solid {t['border_strong']}; border-radius: {UI_RADII['button']}px; }}"
         )
         self.show_tab("local")
 
@@ -423,11 +425,11 @@ class SearchPage(QFrame):
         self.subtitle_label.setVisible(mode != "narrow")
         self.local_status_label.setVisible(self.current_tab() == "local")
         if mode == "full":
-            self.page_layout.setContentsMargins(28, 26, 28, 24)
+            self.page_layout.setContentsMargins(24, 24, 24, 20)
         elif mode == "compact":
-            self.page_layout.setContentsMargins(20, 20, 20, 18)
+            self.page_layout.setContentsMargins(20, 20, 20, 16)
         else:
-            self.page_layout.setContentsMargins(16, 16, 16, 14)
+            self.page_layout.setContentsMargins(16, 16, 16, 12)
         self._sync_source_selector_state()
 
     def set_collection_providers(self, local_state_provider, playlist_provider) -> None:

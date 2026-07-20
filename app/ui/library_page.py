@@ -19,6 +19,7 @@ from PySide6.QtWidgets import (
 )
 
 from app.models.media_item import MediaItem
+from app.ui.design_system import DARK_THEME_TOKENS, UI_RADII, UI_SPACING
 from app.ui.track_list_view import TrackListView
 
 
@@ -74,17 +75,17 @@ class GroupedLibraryView(QFrame):
     def _build_ui(self) -> None:
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(10)
+        layout.setSpacing(UI_SPACING["sm"])
         self.stack = QStackedWidget()
         self.grid_page = QFrame()
         grid_layout = QVBoxLayout(self.grid_page)
         grid_layout.setContentsMargins(0, 0, 0, 0)
-        grid_layout.setSpacing(8)
+        grid_layout.setSpacing(UI_SPACING["xs"])
         self.status_label = QLabel("首次打开时加载分组…")
         self.status_label.setObjectName("pageSubtitle")
         self.group_list = QListWidget()
         self.group_list.setObjectName("libraryGroupList")
-        self.group_list.setSpacing(4)
+        self.group_list.setSpacing(UI_SPACING["xxs"])
         self.group_list.setIconSize(QSize(48, 48))
         self.group_list.itemClicked.connect(self.open_group)
         grid_layout.addWidget(self.status_label)
@@ -93,7 +94,7 @@ class GroupedLibraryView(QFrame):
         self.detail_page = QFrame()
         detail_layout = QVBoxLayout(self.detail_page)
         detail_layout.setContentsMargins(0, 0, 0, 0)
-        detail_layout.setSpacing(10)
+        detail_layout.setSpacing(UI_SPACING["sm"])
         breadcrumb = QHBoxLayout()
         self.back_button = QPushButton("‹ 返回")
         self.back_button.setObjectName("secondaryButton")
@@ -128,11 +129,12 @@ class GroupedLibraryView(QFrame):
         self.stack.addWidget(self.grid_page)
         self.stack.addWidget(self.detail_page)
         layout.addWidget(self.stack)
+        t = DARK_THEME_TOKENS
         self.setStyleSheet(
-            "QListWidget#libraryGroupList { background: transparent; color: #e8ecf5; border: none; outline: none; }"
-            "QListWidget#libraryGroupList::item { background: #151922; border: 1px solid #2a303b; border-radius: 14px; padding: 10px 12px; margin: 2px; }"
-            "QListWidget#libraryGroupList::item:hover { background: #202631; border-color: #3a4352; }"
-            "QListWidget#libraryGroupList::item:selected { background: rgba(76,141,255,0.18); border-color: rgba(76,141,255,0.55); }"
+            f"QListWidget#libraryGroupList {{ background: transparent; color: {t['text']}; border: none; outline: none; }}"
+            f"QListWidget#libraryGroupList::item {{ background: {t['card_bg']}; border: 1px solid {t['border']}; border-radius: {UI_RADII['card']}px; padding: 10px 12px; margin: 2px; }}"
+            f"QListWidget#libraryGroupList::item:hover {{ background: {t['hover']}; border-color: {t['border_strong']}; }}"
+            f"QListWidget#libraryGroupList::item:selected {{ background: {t['selected_bg']}; border-color: {t['selected_border']}; }}"
         )
 
     @classmethod
@@ -289,9 +291,9 @@ class GroupedLibraryView(QFrame):
         pixmap = QPixmap(path) if path else QPixmap()
         if pixmap.isNull():
             pixmap = QPixmap(48, 48)
-            pixmap.fill(QColor("#202631"))
+            pixmap.fill(QColor(DARK_THEME_TOKENS["card_bg_high"]))
             painter = QPainter(pixmap)
-            painter.setPen(QColor("#9aa6bb"))
+            painter.setPen(QColor(DARK_THEME_TOKENS["text_muted"]))
             font = painter.font()
             font.setPointSize(20)
             font.setBold(True)
@@ -397,14 +399,14 @@ class LibraryPage(QFrame):
     def _build_ui(self) -> None:
         layout = QVBoxLayout(self)
         self.page_layout = layout
-        layout.setContentsMargins(28, 26, 28, 24)
-        layout.setSpacing(16)
+        layout.setContentsMargins(24, 24, 24, 20)
+        layout.setSpacing(UI_SPACING["md"])
         header = QVBoxLayout()
         header.setContentsMargins(0, 0, 0, 0)
-        header.setSpacing(10)
+        header.setSpacing(UI_SPACING["sm"])
         title_row = QHBoxLayout()
         title_row.setContentsMargins(0, 0, 0, 0)
-        title_row.setSpacing(12)
+        title_row.setSpacing(UI_SPACING["sm"])
         title_box = QVBoxLayout()
         self.page_title = QLabel("音乐库")
         self.page_title.setObjectName("pageTitle")
@@ -452,7 +454,7 @@ class LibraryPage(QFrame):
 
         action_row = QHBoxLayout()
         action_row.setContentsMargins(0, 0, 0, 0)
-        action_row.setSpacing(8)
+        action_row.setSpacing(UI_SPACING["xs"])
         action_row.addStretch()
         action_row.addWidget(self.random_button)
         action_row.addWidget(self.more_button)
@@ -482,11 +484,12 @@ class LibraryPage(QFrame):
         self.content_stack.addWidget(self.album_view)
         layout.addLayout(header)
         layout.addWidget(self.content_stack, 1)
+        t = DARK_THEME_TOKENS
         self.setStyleSheet(
-            "QFrame#libraryViewSwitcher { background: #10131a; border: 1px solid #2a303b; border-radius: 12px; }"
-            "QPushButton#libraryViewSwitchButton { background: transparent; color: #9ca5b5; border: none; border-radius: 8px; padding: 7px 13px; font-weight: 650; }"
-            "QPushButton#libraryViewSwitchButton:hover { background: #202631; color: #eef1f7; }"
-            "QPushButton#libraryViewSwitchButton[active='true'] { background: rgba(76,141,255,0.22); color: #ffffff; }"
+            f"QFrame#libraryViewSwitcher {{ background: {t['sidebar_bg']}; border: 1px solid {t['border']}; border-radius: {UI_RADII['card']}px; }}"
+            f"QPushButton#libraryViewSwitchButton {{ background: transparent; color: {t['text_muted']}; border: none; border-radius: {UI_RADII['control']}px; padding: 7px 12px; font-weight: 650; }}"
+            f"QPushButton#libraryViewSwitchButton:hover {{ background: {t['hover']}; color: {t['text']}; }}"
+            f"QPushButton#libraryViewSwitchButton[active='true'] {{ background: {t['accent_soft']}; color: {t['text']}; }}"
         )
 
     def set_responsive_mode(self, mode: str) -> None:
@@ -496,11 +499,11 @@ class LibraryPage(QFrame):
         self.folder_button.setVisible(not compact)
         self.page_subtitle.setVisible(mode != "narrow")
         if mode == "full":
-            self.page_layout.setContentsMargins(28, 26, 28, 24)
+            self.page_layout.setContentsMargins(24, 24, 24, 20)
         elif mode == "compact":
-            self.page_layout.setContentsMargins(20, 20, 20, 18)
+            self.page_layout.setContentsMargins(20, 20, 20, 16)
         else:
-            self.page_layout.setContentsMargins(16, 16, 16, 14)
+            self.page_layout.setContentsMargins(16, 16, 16, 12)
 
     def set_scope(self, title: str, tracks: list[dict], cache_key: str) -> None:
         self.page_title.setText(str(title or "音乐库"))

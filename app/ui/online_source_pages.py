@@ -25,6 +25,7 @@ from PySide6.QtWidgets import (
 from app.core.version import APP_USER_AGENT
 from app.services.online_source_client import OnlineSourceClient
 from app.services.source_registry import MAX_SOURCE_BYTES, SourceRegistryError, SourceRegistryManager
+from app.ui.design_system import UI_SPACING
 from app.ui.track_list_view import IndentedLikeDelegate, LikeAwareListWidget
 
 
@@ -76,8 +77,8 @@ class OnlineSearchPage(QFrame):
         self.setObjectName("onlineSearchPage")
 
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(30, 28, 30, 26)
-        layout.setSpacing(16)
+        layout.setContentsMargins(24, 24, 24, 20)
+        layout.setSpacing(UI_SPACING["md"])
 
         title = QLabel("在线搜索")
         title.setObjectName("pageTitle")
@@ -101,7 +102,7 @@ class OnlineSearchPage(QFrame):
         layout.addLayout(url_layout)
 
         search_row = QHBoxLayout()
-        search_row.setSpacing(10)
+        search_row.setSpacing(UI_SPACING["sm"])
         self.source_combo = QComboBox()
         self.source_combo.setMinimumWidth(190)
         self.keyword_input = QLineEdit()

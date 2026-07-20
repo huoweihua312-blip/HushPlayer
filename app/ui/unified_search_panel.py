@@ -14,6 +14,7 @@ from PySide6.QtWidgets import (
 )
 
 from app.models.media_item import MediaItem
+from app.ui.design_system import DARK_THEME_TOKENS, UI_RADII, UI_SPACING
 from app.ui.track_list_view import IndentedLikeDelegate, LikeAwareListWidget
 
 
@@ -53,8 +54,8 @@ class UnifiedSearchResultsPanel(QFrame):
     def _build_ui(self) -> None:
         self.setObjectName("unifiedSearchPanel")
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(0, 8, 0, 0)
-        layout.setSpacing(8)
+        layout.setContentsMargins(0, UI_SPACING["xs"], 0, 0)
+        layout.setSpacing(UI_SPACING["xs"])
         header = QHBoxLayout()
         title = QLabel("在线结果")
         title.setObjectName("settingsCardTitle")
@@ -85,12 +86,13 @@ class UnifiedSearchResultsPanel(QFrame):
         layout.addLayout(header)
         layout.addWidget(self.result_list)
         layout.addWidget(self.detail_label)
+        t = DARK_THEME_TOKENS
         self.setStyleSheet(
-            "QFrame#unifiedSearchPanel { background: transparent; border-top: 1px solid rgba(255,255,255,0.07); }"
-            "QListWidget#unifiedSearchResultList { background: #11151d; color: #e8ecf5; border: 1px solid #2a303b; border-radius: 14px; padding: 6px; outline: none; }"
-            "QListWidget#unifiedSearchResultList::item { padding: 7px 10px; border-radius: 9px; margin: 1px 0; }"
-            "QListWidget#unifiedSearchResultList::item:hover { background: rgba(255,255,255,0.06); }"
-            "QListWidget#unifiedSearchResultList::item:selected { background: rgba(59,130,246,0.20); border: 1px solid rgba(96,165,250,0.42); }"
+            f"QFrame#unifiedSearchPanel {{ background: transparent; border-top: 1px solid {t['border']}; }}"
+            f"QListWidget#unifiedSearchResultList {{ background: {t['sidebar_bg']}; color: {t['text']}; border: 1px solid {t['border']}; border-radius: {UI_RADII['card']}px; padding: 6px; outline: none; }}"
+            f"QListWidget#unifiedSearchResultList::item {{ padding: 8px 10px; border-radius: {UI_RADII['control']}px; margin: 1px 0; border: 1px solid transparent; }}"
+            f"QListWidget#unifiedSearchResultList::item:hover {{ background: {t['hover']}; }}"
+            f"QListWidget#unifiedSearchResultList::item:selected {{ background: {t['selected_bg']}; border: 1px solid {t['selected_border']}; }}"
         )
         self.setVisible(self.standalone)
 
@@ -135,7 +137,7 @@ class UnifiedSearchResultsPanel(QFrame):
             item.setFont(font)
             item.setData(
                 Qt.ItemDataRole.ForegroundRole,
-                QColor("#8fbcff") if is_playing else None,
+                QColor(DARK_THEME_TOKENS["accent_hover"]) if is_playing else None,
             )
 
     def scroll_to_top(self) -> None:
@@ -350,8 +352,8 @@ class UnifiedSearchResultsPanel(QFrame):
         group_font = group_item.font()
         group_font.setBold(True)
         group_item.setFont(group_font)
-        group_item.setForeground(QColor("#a9c8ff"))
-        group_item.setBackground(QColor("#171e2a"))
+        group_item.setForeground(QColor(DARK_THEME_TOKENS["accent_hover"]))
+        group_item.setBackground(QColor(DARK_THEME_TOKENS["card_bg_alt"]))
         group_item.setSizeHint(QSize(0, 38))
         insert_row = self.result_list.count()
         if source_id in self._source_order:
@@ -421,7 +423,7 @@ class UnifiedSearchResultsPanel(QFrame):
         item.setFont(font)
         item.setData(
             Qt.ItemDataRole.ForegroundRole,
-            QColor("#8fbcff") if is_playing else None,
+            QColor(DARK_THEME_TOKENS["accent_hover"]) if is_playing else None,
         )
 
     def _update_detail_text(self) -> None:
@@ -509,8 +511,8 @@ class UnifiedSearchResultsPanel(QFrame):
             group_font = group_item.font()
             group_font.setBold(True)
             group_item.setFont(group_font)
-            group_item.setForeground(QColor("#a9c8ff"))
-            group_item.setBackground(QColor("#171e2a"))
+            group_item.setForeground(QColor(DARK_THEME_TOKENS["accent_hover"]))
+            group_item.setBackground(QColor(DARK_THEME_TOKENS["card_bg_alt"]))
             group_item.setSizeHint(QSize(0, 38))
             self.result_list.addItem(group_item)
             if collapsed:

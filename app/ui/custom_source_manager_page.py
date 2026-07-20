@@ -7,6 +7,7 @@ from urllib.parse import urlsplit
 from PySide6.QtCore import Qt, QTimer, QUrl, Signal
 from PySide6.QtNetwork import QNetworkAccessManager, QNetworkReply, QNetworkRequest
 from PySide6.QtWidgets import (
+    QBoxLayout,
     QCheckBox,
     QComboBox,
     QFrame,
@@ -28,6 +29,7 @@ from app.services.source_registry import (
     SourceRegistryError,
     SourceRegistryManager,
 )
+from app.ui.design_system import DARK_THEME_TOKENS, UI_RADII, UI_SPACING
 
 
 class CustomSourceManagerPage(QFrame):
@@ -61,8 +63,9 @@ class CustomSourceManagerPage(QFrame):
     def _build_ui(self) -> None:
         self.setObjectName("customSourceManagerPage")
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(28, 26, 28, 24)
-        layout.setSpacing(14)
+        self.page_layout = layout
+        layout.setContentsMargins(24, 24, 24, 20)
+        layout.setSpacing(UI_SPACING["md"])
 
         header = QHBoxLayout()
         title_box = QVBoxLayout()
@@ -87,8 +90,8 @@ class CustomSourceManagerPage(QFrame):
         add_card = QFrame()
         add_card.setObjectName("settingsCard")
         add_layout = QVBoxLayout(add_card)
-        add_layout.setContentsMargins(16, 14, 16, 14)
-        add_layout.setSpacing(10)
+        add_layout.setContentsMargins(16, 16, 16, 16)
+        add_layout.setSpacing(UI_SPACING["sm"])
         add_title = QLabel("添加来源")
         add_title.setObjectName("settingsCardTitle")
         self.url_input = QPlainTextEdit()
@@ -114,7 +117,8 @@ class CustomSourceManagerPage(QFrame):
         layout.addWidget(add_card)
 
         content_row = QHBoxLayout()
-        content_row.setSpacing(14)
+        self.content_row = content_row
+        content_row.setSpacing(UI_SPACING["sm"])
         self.source_list = QListWidget()
         self.source_list.setObjectName("customSourceList")
         self.source_list.setMinimumWidth(430)
@@ -122,10 +126,11 @@ class CustomSourceManagerPage(QFrame):
         content_row.addWidget(self.source_list, 3)
 
         detail_card = QFrame()
+        self.detail_card = detail_card
         detail_card.setObjectName("settingsCard")
         detail_layout = QVBoxLayout(detail_card)
-        detail_layout.setContentsMargins(16, 14, 16, 14)
-        detail_layout.setSpacing(10)
+        detail_layout.setContentsMargins(16, 16, 16, 16)
+        detail_layout.setSpacing(UI_SPACING["sm"])
         detail_title = QLabel("来源详情")
         detail_title.setObjectName("settingsCardTitle")
         self.name_input = QLineEdit()
@@ -161,16 +166,33 @@ class CustomSourceManagerPage(QFrame):
         self.status_label.setWordWrap(True)
         layout.addWidget(self.status_label)
         self._set_detail_enabled(False)
+        t = DARK_THEME_TOKENS
         self.setStyleSheet(
-            "QFrame#settingsCard { background: #151922; border: 1px solid rgba(255,255,255,0.07); border-radius: 16px; }"
-            "QLabel#settingsCardTitle { color: #f3f4f6; font-size: 16px; font-weight: 800; }"
-            "QListWidget#customSourceList { background: #11151d; color: #e8ecf5; border: 1px solid #2a303b; border-radius: 14px; padding: 7px; outline: none; }"
-            "QListWidget#customSourceList::item { padding: 10px; border-radius: 10px; margin: 2px 0; }"
-            "QListWidget#customSourceList::item:hover { background: rgba(255,255,255,0.06); }"
-            "QListWidget#customSourceList::item:selected { background: rgba(59,130,246,0.20); border: 1px solid rgba(96,165,250,0.45); }"
-            "QPlainTextEdit#sourceUrlBatchInput, QFrame#customSourceManagerPage QLineEdit, QFrame#customSourceManagerPage QComboBox { background: #10141c; color: #eef2f8; border: 1px solid #303746; border-radius: 10px; padding: 8px; }"
-            "QPlainTextEdit#sourceUrlBatchInput:focus, QFrame#customSourceManagerPage QLineEdit:focus { border-color: #60a5fa; }"
+            f"QFrame#settingsCard {{ background: {t['card_bg']}; border: 1px solid {t['border']}; border-radius: {UI_RADII['panel']}px; }}"
+            f"QLabel#settingsCardTitle {{ color: {t['text']}; font-size: 16px; font-weight: 800; }}"
+            f"QListWidget#customSourceList {{ background: {t['sidebar_bg']}; color: {t['text']}; border: 1px solid {t['border']}; border-radius: {UI_RADII['card']}px; padding: 7px; outline: none; }}"
+            f"QListWidget#customSourceList::item {{ padding: 10px; border-radius: {UI_RADII['button']}px; margin: 2px 0; border: 1px solid transparent; }}"
+            f"QListWidget#customSourceList::item:hover {{ background: {t['hover']}; }}"
+            f"QListWidget#customSourceList::item:selected {{ background: {t['selected_bg']}; border: 1px solid {t['selected_border']}; }}"
+            f"QPlainTextEdit#sourceUrlBatchInput, QFrame#customSourceManagerPage QLineEdit, QFrame#customSourceManagerPage QComboBox {{ background: {t['sidebar_bg']}; color: {t['text']}; border: 1px solid {t['border_strong']}; border-radius: {UI_RADII['button']}px; padding: 8px; }}"
+            f"QPlainTextEdit#sourceUrlBatchInput:focus, QFrame#customSourceManagerPage QLineEdit:focus {{ border-color: {t['accent']}; }}"
         )
+
+    def set_responsive_mode(self, mode: str) -> None:
+        mode = mode if mode in {"full", "compact", "narrow"} else "full"
+        if mode == "narrow":
+            self.page_layout.setContentsMargins(16, 16, 16, 12)
+            self.content_row.setDirection(QBoxLayout.Direction.TopToBottom)
+            self.source_list.setMinimumWidth(0)
+            self.source_list.setMinimumHeight(180)
+            self.detail_card.setMinimumHeight(220)
+        else:
+            margins = (24, 24, 24, 20) if mode == "full" else (20, 20, 20, 16)
+            self.page_layout.setContentsMargins(*margins)
+            self.content_row.setDirection(QBoxLayout.Direction.LeftToRight)
+            self.source_list.setMinimumWidth(360 if mode == "compact" else 430)
+            self.source_list.setMinimumHeight(0)
+            self.detail_card.setMinimumHeight(0)
 
     def refresh_sources(self) -> None:
         self.status_label.setText("正在读取来源状态…")

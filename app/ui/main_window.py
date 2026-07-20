@@ -36,6 +36,13 @@ from app.services.remote_track_store import RemoteTrackStore, RemoteTrackStoreEr
 from app.services.source_registry import SourceRegistryManager
 from app.services.unified_search_service import UnifiedSearchService
 from app.ui.custom_source_manager_page import CustomSourceManagerPage
+from app.ui.design_system import (
+    DARK_THEME_TOKENS,
+    UI_CONTROL_SIZES,
+    UI_RADII,
+    UI_SPACING,
+    UI_TYPOGRAPHY,
+)
 from app.ui.immersive_appearance import (
     APPEARANCE_SETTING_KEYS,
     ImmersiveAppearanceConfig,
@@ -53,7 +60,7 @@ from app.ui.track_list_view import (
     draw_track_like_icon,
 )
 from app.ui.update_dialog import UpdateDialog
-from PySide6.QtCore import QEasingCurve, QEvent, QItemSelectionModel, QObject, QPropertyAnimation, QRectF, QRunnable, QSize, Qt, QThread, QThreadPool, QTimer, QUrl, Signal, Slot
+from PySide6.QtCore import QEasingCurve, QEvent, QItemSelectionModel, QObject, QPointF, QPropertyAnimation, QRectF, QRunnable, QSize, Qt, QThread, QThreadPool, QTimer, QUrl, Signal, Slot
 from PySide6.QtGui import QColor, QDesktopServices, QFont, QFontMetrics, QIcon, QKeySequence, QPainter, QPainterPath, QPalette, QPen, QPixmap, QShortcut
 from PySide6.QtMultimedia import QAudioOutput, QMediaDevices, QMediaPlayer
 from PySide6.QtWidgets import (
@@ -137,31 +144,6 @@ def normalize_update_check_delay_seconds(value) -> int:
     except (TypeError, ValueError):
         return 15
     return max(5, min(300, seconds))
-
-
-# 轻量深色主题 token：供应用 Palette、通用弹窗和主窗口精细 QSS 共用。
-DARK_THEME_TOKENS = {
-    "app_bg": "#0d0f14",
-    "shell_bg": "#141821",
-    "sidebar_bg": "#10131a",
-    "panel_bg": "#151922",
-    "card_bg": "#151922",
-    "card_bg_alt": "#1a1f2b",
-    "card_bg_high": "#202631",
-    "text": "#f3f4f6",
-    "text_secondary": "#b5bbc7",
-    "text_muted": "#8a92a3",
-    "text_weak": "#8a92a3",
-    "text_disabled": "#7b8494",
-    "placeholder": "#7f8898",
-    "border": "#2a303b",
-    "border_strong": "#3a4352",
-    "hover": "#202631",
-    "active": "#252c3a",
-    "accent": "#4c8dff",
-    "accent_soft": "rgba(76, 141, 255, 0.18)",
-    "danger": "#e15b64",
-}
 
 
 def create_dark_palette() -> QPalette:
@@ -353,6 +335,110 @@ def apply_dark_dialog_style(dialog: QDialog, extra_qss: str = "") -> None:
     dialog.setStyleSheet(f"{build_dark_dialog_qss()}\n{extra_qss}")
 
 
+_NAVIGATION_ICON_CACHE: dict[tuple[str, bool], QIcon] = {}
+
+
+def create_navigation_icon(navigation_id: str, active: bool = False) -> QIcon:
+    """Create one cached, font-independent sidebar icon."""
+    role = str(navigation_id or "default")
+    cache_key = (role, bool(active))
+    cached = _NAVIGATION_ICON_CACHE.get(cache_key)
+    if cached is not None:
+        return QIcon(cached)
+
+    pixmap = QPixmap(36, 36)
+    pixmap.fill(Qt.GlobalColor.transparent)
+    painter = QPainter(pixmap)
+    painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+    painter.scale(2.0, 2.0)
+    color = QColor(
+        DARK_THEME_TOKENS["accent"]
+        if active
+        else DARK_THEME_TOKENS["text_muted"]
+    )
+    pen = QPen(color, 1.45)
+    pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+    pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
+    painter.setPen(pen)
+    painter.setBrush(Qt.BrushStyle.NoBrush)
+
+    if role == "library_all":
+        for y in (5.0, 9.0, 13.0):
+            painter.drawEllipse(QRectF(3.0, y - 0.7, 1.4, 1.4))
+            painter.drawLine(QPointF(6.2, y), QPointF(15.0, y))
+    elif role == "liked":
+        heart = QPainterPath()
+        heart.moveTo(9.0, 15.0)
+        heart.cubicTo(7.8, 13.8, 3.0, 10.8, 3.0, 7.0)
+        heart.cubicTo(3.0, 4.2, 6.3, 2.9, 9.0, 5.7)
+        heart.cubicTo(11.7, 2.9, 15.0, 4.2, 15.0, 7.0)
+        heart.cubicTo(15.0, 10.8, 10.2, 13.8, 9.0, 15.0)
+        painter.drawPath(heart)
+    elif role in {"recent", "recent_added"}:
+        painter.drawEllipse(QRectF(3.0, 3.0, 12.0, 12.0))
+        painter.drawLine(QPointF(9.0, 5.5), QPointF(9.0, 9.0))
+        painter.drawLine(QPointF(9.0, 9.0), QPointF(11.7, 10.5))
+        if role == "recent_added":
+            painter.setBrush(QColor(DARK_THEME_TOKENS["sidebar_bg"]))
+            painter.drawEllipse(QRectF(10.5, 10.5, 6.0, 6.0))
+            painter.setBrush(Qt.BrushStyle.NoBrush)
+            painter.drawLine(QPointF(13.5, 12.0), QPointF(13.5, 15.0))
+            painter.drawLine(QPointF(12.0, 13.5), QPointF(15.0, 13.5))
+    elif role == "frequent":
+        for x, height in ((3.5, 5.0), (7.5, 9.0), (11.5, 12.0)):
+            painter.drawRoundedRect(QRectF(x, 15.0 - height, 2.5, height), 1.1, 1.1)
+    elif role == "artists":
+        painter.drawEllipse(QRectF(6.0, 3.0, 6.0, 6.0))
+        painter.drawArc(QRectF(3.0, 8.0, 12.0, 8.0), 0, 180 * 16)
+    elif role == "albums":
+        painter.drawRoundedRect(QRectF(3.0, 3.0, 12.0, 12.0), 2.0, 2.0)
+        painter.drawEllipse(QRectF(6.2, 6.2, 5.6, 5.6))
+        painter.drawEllipse(QRectF(8.3, 8.3, 1.4, 1.4))
+    elif role == "playlists":
+        painter.drawRoundedRect(QRectF(3.0, 3.5, 12.0, 11.0), 2.0, 2.0)
+        painter.drawLine(QPointF(5.5, 6.5), QPointF(12.5, 6.5))
+        painter.drawLine(QPointF(5.5, 9.0), QPointF(10.0, 9.0))
+        painter.drawLine(QPointF(5.5, 11.5), QPointF(11.5, 11.5))
+    elif role == "online_search":
+        painter.drawEllipse(QRectF(3.0, 3.0, 9.0, 9.0))
+        painter.drawLine(QPointF(10.5, 10.5), QPointF(15.0, 15.0))
+    elif role == "lyrics":
+        bubble = QPainterPath()
+        bubble.addRoundedRect(QRectF(2.5, 3.0, 13.0, 10.0), 2.3, 2.3)
+        bubble.moveTo(6.0, 13.0)
+        bubble.lineTo(5.0, 16.0)
+        bubble.lineTo(9.0, 13.0)
+        painter.drawPath(bubble)
+        painter.drawLine(QPointF(5.2, 6.4), QPointF(12.8, 6.4))
+        painter.drawLine(QPointF(5.2, 9.3), QPointF(10.8, 9.3))
+    elif role == "pending_imports":
+        painter.drawRoundedRect(QRectF(3.0, 4.0, 12.0, 10.5), 2.0, 2.0)
+        painter.drawLine(QPointF(3.5, 10.0), QPointF(7.0, 10.0))
+        painter.drawLine(QPointF(11.0, 10.0), QPointF(14.5, 10.0))
+        painter.drawArc(QRectF(7.0, 7.5, 4.0, 5.0), 180 * 16, 180 * 16)
+    elif role == "settings":
+        painter.drawEllipse(QRectF(4.0, 4.0, 10.0, 10.0))
+        painter.drawEllipse(QRectF(7.0, 7.0, 4.0, 4.0))
+        for start, end in (
+            ((9, 1.8), (9, 4.0)),
+            ((9, 14.0), (9, 16.2)),
+            ((1.8, 9), (4.0, 9)),
+            ((14.0, 9), (16.2, 9)),
+        ):
+            painter.drawLine(QPointF(*start), QPointF(*end))
+    else:
+        for center in (QPointF(5.0, 5.0), QPointF(13.0, 5.0), QPointF(9.0, 13.0)):
+            painter.drawEllipse(QRectF(center.x() - 1.6, center.y() - 1.6, 3.2, 3.2))
+        painter.drawLine(QPointF(6.5, 5.8), QPointF(11.5, 5.8))
+        painter.drawLine(QPointF(6.0, 6.4), QPointF(8.1, 11.4))
+        painter.drawLine(QPointF(12.0, 6.4), QPointF(9.9, 11.4))
+
+    painter.end()
+    icon = QIcon(pixmap)
+    _NAVIGATION_ICON_CACHE[cache_key] = icon
+    return QIcon(icon)
+
+
 class NavButton(QPushButton):
     def __init__(
         self,
@@ -368,10 +454,38 @@ class NavButton(QPushButton):
         self.setObjectName("sidebarButton")
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         self.setProperty("active", active)
-        self.setMinimumHeight(self.fontMetrics().height() + 18)
+        self.setMinimumHeight(UI_CONTROL_SIZES["navigation_height"])
+        self.setIconSize(
+            QSize(
+                UI_CONTROL_SIZES["navigation_icon"],
+                UI_CONTROL_SIZES["navigation_icon"],
+            )
+        )
         self.setSizePolicy(
             QSizePolicy.Policy.Expanding,
             QSizePolicy.Policy.Preferred,
+        )
+        self._refresh_navigation_icon()
+
+    def event(self, event) -> bool:
+        result = super().event(event)
+        if (
+            event.type() == QEvent.Type.DynamicPropertyChange
+            and hasattr(event, "propertyName")
+            and bytes(event.propertyName()) == b"active"
+        ):
+            self._refresh_navigation_icon()
+        return result
+
+    def _refresh_navigation_icon(self) -> None:
+        navigation_id = str(getattr(self, "navigation_id", "") or "")
+        if not navigation_id:
+            return
+        self.setIcon(
+            create_navigation_icon(
+                navigation_id,
+                bool(self.property("active")),
+            )
         )
 
     def mousePressEvent(self, event) -> None:
@@ -430,13 +544,10 @@ class SidebarNavigationList(QFrame):
         self._drop_index = -1
         self.navigation_layout = QVBoxLayout(self)
         self.navigation_layout.setContentsMargins(0, 0, 0, 0)
-        self.navigation_layout.setSpacing(7)
+        self.navigation_layout.setSpacing(UI_SPACING["xs"])
         self.drop_indicator = QFrame(self)
         self.drop_indicator.setObjectName("sidebarDropIndicator")
-        self.drop_indicator.setFixedHeight(2)
-        self.drop_indicator.setStyleSheet(
-            "QFrame#sidebarDropIndicator { background: #4c8dff; border-radius: 1px; }"
-        )
+        self.drop_indicator.setFixedHeight(3)
         self.drop_indicator.hide()
 
     def add_navigation_button(self, item_id: str, button: NavButton) -> None:
@@ -445,6 +556,7 @@ class SidebarNavigationList(QFrame):
             raise ValueError("侧栏导航 ID 必须唯一且非空")
         button.navigation_id = item_id
         button.navigation_container = self
+        button._refresh_navigation_icon()
         button.setToolTip("单击打开；按住并上下拖动可调整顺序")
         button.setAccessibleDescription("可上下拖动调整侧栏导航顺序")
         self.navigation_buttons[item_id] = button
@@ -786,7 +898,7 @@ class SongLibraryDelegate(QStyledItemDelegate):
         self.main_window = main_window
 
     def sizeHint(self, option, index) -> QSize:
-        return QSize(0, 58)
+        return QSize(0, UI_CONTROL_SIZES["track_row_height"])
 
     @staticmethod
     def column_rects(rect) -> dict[str, QRectF]:
@@ -840,7 +952,10 @@ class SongLibraryDelegate(QStyledItemDelegate):
             and track_identity == self.main_window.current_track_identity()
         )
 
-        if selected:
+        if selected and is_playing:
+            background = QColor(76, 141, 255, 62)
+            border = QColor(76, 141, 255, 158)
+        elif selected:
             background = QColor(76, 141, 255, 48)
             border = QColor(76, 141, 255, 118)
         elif is_playing:
@@ -855,11 +970,15 @@ class SongLibraryDelegate(QStyledItemDelegate):
 
         painter.setPen(QPen(border, 1))
         painter.setBrush(background)
-        painter.drawRoundedRect(row_rect, 10, 10)
+        painter.drawRoundedRect(
+            row_rect,
+            UI_RADII["button"],
+            UI_RADII["button"],
+        )
 
         if is_playing:
             accent_rect = QRectF(row_rect.left(), row_rect.top() + 8, 3, row_rect.height() - 16)
-            painter.fillRect(accent_rect, QColor("#4c8dff"))
+            painter.fillRect(accent_rect, QColor(DARK_THEME_TOKENS["accent"]))
 
         rects = self.column_rects(option.rect)
 
@@ -878,24 +997,29 @@ class SongLibraryDelegate(QStyledItemDelegate):
             isinstance(view, LikeAwareListWidget)
             and view.is_index_like_hovered(index)
         )
+        like_pressed = bool(
+            isinstance(view, LikeAwareListWidget)
+            and view.is_index_like_pressed(index)
+        )
         draw_track_like_icon(
             painter,
             rects["like"],
             liked=liked,
             hovered=like_hovered,
+            pressed=like_pressed,
         )
-        self._draw_text(painter, option, rects["marker"], "▶" if is_playing else "", "#4c8dff", True)
+        self._draw_text(painter, option, rects["marker"], "▶" if is_playing else "", DARK_THEME_TOKENS["accent"], True)
         self._draw_text(
             painter,
             option,
             rects["title"],
             str(song_data.get("title") or "未知歌曲"),
-            "#ffffff" if is_playing else "#f3f4f6",
+            DARK_THEME_TOKENS["text"],
             is_playing,
         )
-        self._draw_text(painter, option, rects["artist"], str(song_data.get("artist") or "未知艺术家"), "#b5bbc7")
-        self._draw_text(painter, option, rects["album"], str(song_data.get("album") or "未知专辑"), "#b5bbc7")
-        self._draw_text(painter, option, rects["duration"], duration_text, "#8a92a3", align_right=True)
+        self._draw_text(painter, option, rects["artist"], str(song_data.get("artist") or "未知艺术家"), DARK_THEME_TOKENS["text_secondary"])
+        self._draw_text(painter, option, rects["album"], str(song_data.get("album") or "未知专辑"), DARK_THEME_TOKENS["text_secondary"])
+        self._draw_text(painter, option, rects["duration"], duration_text, DARK_THEME_TOKENS["text_muted"], align_right=True)
         painter.restore()
 
     def helpEvent(self, event, view, option, index) -> bool:
@@ -2701,7 +2825,7 @@ class SettingsDialog(QDialog):
         playback_card = QFrame()
         playback_card.setObjectName("settingsCard")
         playback_layout = QVBoxLayout(playback_card)
-        playback_layout.setContentsMargins(18, 16, 18, 16)
+        playback_layout.setContentsMargins(16, 16, 16, 16)
         playback_layout.setSpacing(12)
 
         playback_title = QLabel("播放")
@@ -2716,7 +2840,7 @@ class SettingsDialog(QDialog):
         immersive_card = QFrame()
         immersive_card.setObjectName("settingsCard")
         immersive_layout = QVBoxLayout(immersive_card)
-        immersive_layout.setContentsMargins(18, 16, 18, 16)
+        immersive_layout.setContentsMargins(16, 16, 16, 16)
         immersive_layout.setSpacing(12)
 
         immersive_title = QLabel("沉浸歌词")
@@ -2767,7 +2891,7 @@ class SettingsDialog(QDialog):
         floating_card = QFrame()
         floating_card.setObjectName("settingsCard")
         floating_layout = QVBoxLayout(floating_card)
-        floating_layout.setContentsMargins(18, 16, 18, 16)
+        floating_layout.setContentsMargins(16, 16, 16, 16)
         floating_layout.setSpacing(12)
 
         floating_title = QLabel("桌面歌词")
@@ -2863,7 +2987,7 @@ class SettingsDialog(QDialog):
         scan_card = QFrame()
         scan_card.setObjectName("settingsCard")
         scan_layout = QVBoxLayout(scan_card)
-        scan_layout.setContentsMargins(18, 16, 18, 16)
+        scan_layout.setContentsMargins(16, 16, 16, 16)
         scan_layout.setSpacing(12)
 
         scan_title = QLabel("音乐文件夹 / 网盘同步目录")
@@ -2934,7 +3058,7 @@ class SettingsDialog(QDialog):
         cache_card = QFrame()
         cache_card.setObjectName("settingsCard")
         cache_layout = QVBoxLayout(cache_card)
-        cache_layout.setContentsMargins(18, 16, 18, 16)
+        cache_layout.setContentsMargins(16, 16, 16, 16)
         cache_layout.setSpacing(12)
 
         cache_title = QLabel("缓存")
@@ -3002,7 +3126,7 @@ class SettingsDialog(QDialog):
         update_card = QFrame()
         update_card.setObjectName("settingsCard")
         update_layout = QVBoxLayout(update_card)
-        update_layout.setContentsMargins(18, 16, 18, 16)
+        update_layout.setContentsMargins(16, 16, 16, 16)
         update_layout.setSpacing(12)
 
         update_title = QLabel("应用更新")
@@ -4523,7 +4647,7 @@ class MainWindow(QMainWindow):
 
         root_layout = QVBoxLayout(root)
         self.root_layout = root_layout
-        root_layout.setContentsMargins(18, 18, 18, 18)
+        root_layout.setContentsMargins(16, 16, 16, 16)
 
         shell = QFrame()
         shell.setObjectName("shell")
@@ -4943,31 +5067,31 @@ class MainWindow(QMainWindow):
         self._responsive_mode = mode
 
         if mode == "full":
-            root_margin = 18
+            root_margin = UI_SPACING["md"]
             sidebar_limits = (180, 230, 220)
             now_limits = (280, 340, 330)
             content_minimum = 600
             cover_size = 236
             player_margins = (24, 16, 24, 16)
-            player_spacing = 20
+            player_spacing = UI_SPACING["lg"]
             player_limits = ((200, 280), 340, (250, 320))
         elif mode == "compact":
-            root_margin = 12
+            root_margin = UI_SPACING["sm"]
             sidebar_limits = (170, 205, 196)
             now_limits = (220, 270, 250)
             content_minimum = 480
             cover_size = 184
-            player_margins = (18, 14, 18, 14)
-            player_spacing = 14
+            player_margins = (20, 12, 20, 12)
+            player_spacing = UI_SPACING["sm"]
             player_limits = ((170, 230), 300, (210, 260))
         else:
-            root_margin = 8
+            root_margin = UI_SPACING["xs"]
             sidebar_limits = (160, 185, 178)
             now_limits = (0, 0, 0)
             content_minimum = 520
             cover_size = 0
-            player_margins = (12, 12, 12, 12)
-            player_spacing = 10
+            player_margins = (12, 8, 12, 8)
+            player_spacing = UI_SPACING["xs"]
             player_limits = ((130, 190), 260, (190, 220))
 
         self.root_layout.setContentsMargins(
@@ -4998,6 +5122,9 @@ class MainWindow(QMainWindow):
             self.library_page.set_responsive_mode(mode)
         if hasattr(self, "search_page"):
             self.search_page.set_responsive_mode(mode)
+        custom_source_page = getattr(self, "custom_source_manager_page", None)
+        if custom_source_page is not None:
+            custom_source_page.set_responsive_mode(mode)
 
         left_limits, center_minimum, right_limits = player_limits
         self.player_bar_layout.setContentsMargins(*player_margins)
@@ -8657,7 +8784,7 @@ class MainWindow(QMainWindow):
         self.sidebar_content = content
 
         layout = QVBoxLayout(content)
-        layout.setContentsMargins(18, 22, 18, 18)
+        layout.setContentsMargins(16, 20, 16, 16)
         layout.setSpacing(10)
 
         title = QLabel("HushPlayer")
@@ -8679,19 +8806,23 @@ class MainWindow(QMainWindow):
             QSizePolicy.Policy.Preferred,
         )
         self.search_input.setPlaceholderText("搜索音乐")
-        self.search_input.setStyleSheet(
-            "QLineEdit#sidebarSearchInput { background: #151922; color: #f3f4f6; border: 1px solid #2a303b; "
-            "border-radius: 11px; padding: 9px 11px; selection-background-color: #4c8dff; }"
-            "QLineEdit#sidebarSearchInput:focus { border-color: #4c8dff; background: #1a1f2b; }"
+        self.search_input.setMinimumHeight(UI_CONTROL_SIZES["navigation_height"])
+        self.search_input.setClearButtonEnabled(True)
+        self.search_input.addAction(
+            create_navigation_icon("online_search"),
+            QLineEdit.ActionPosition.LeadingPosition,
         )
         self.search_input.focused.connect(self.show_search_page)
         self.search_input.textChanged.connect(self.request_search_filter)
         layout.addWidget(self.search_input)
 
         layout.addSpacing(12)
-        navigation_title = QLabel("导航")
+        navigation_title = QLabel("主要导航")
         navigation_title.setObjectName("sidebarSectionTitle")
         layout.addWidget(navigation_title)
+        navigation_hint = QLabel("音乐库 · 歌单 · 在线 · 工具")
+        navigation_hint.setObjectName("sidebarGroupHint")
+        layout.addWidget(navigation_hint)
 
         self.library_nav_button = NavButton(
             "全部歌曲", active=True, navigation_id="library_all"
@@ -8751,7 +8882,7 @@ class MainWindow(QMainWindow):
             self.show_custom_source_manager_page
         )
 
-        self.settings_nav_button = NavButton("设置")
+        self.settings_nav_button = NavButton("设置", navigation_id="settings")
         self.settings_nav_button.clicked.connect(self.open_settings_dialog)
 
         self.sidebar_navigation = SidebarNavigationList(content)
@@ -8784,7 +8915,7 @@ class MainWindow(QMainWindow):
 
         layout.addSpacing(12)
 
-        playlist_title = QLabel("歌单")
+        playlist_title = QLabel("自定义歌单")
         playlist_title.setObjectName("sidebarSectionTitle")
         layout.addWidget(playlist_title)
 
@@ -9140,11 +9271,6 @@ class MainWindow(QMainWindow):
         self.bottom_source_badge.setObjectName("bottomSourceBadge")
         self.bottom_source_badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.bottom_source_badge.setMaximumWidth(128)
-        self.bottom_source_badge.setStyleSheet(
-            "QLabel#bottomSourceBadge { background: rgba(76,141,255,0.18); color: #9fc1ff; "
-            "border: 1px solid rgba(76,141,255,0.38); border-radius: 8px; padding: 2px 7px; "
-            "font-size: 11px; font-weight: 700; }"
-        )
         self.bottom_source_badge.hide()
 
         left_layout.addStretch()
@@ -12562,8 +12688,8 @@ class MainWindow(QMainWindow):
         self.play_queue_page.setObjectName("playQueuePage")
 
         layout = QVBoxLayout(self.play_queue_page)
-        layout.setContentsMargins(28, 24, 28, 24)
-        layout.setSpacing(16)
+        layout.setContentsMargins(24, 24, 24, 20)
+        layout.setSpacing(UI_SPACING["md"])
 
         header = QHBoxLayout()
         header.setContentsMargins(0, 0, 0, 0)
@@ -12606,7 +12732,7 @@ class MainWindow(QMainWindow):
 
         button_row = QHBoxLayout()
         button_row.setContentsMargins(0, 0, 0, 0)
-        button_row.setSpacing(10)
+        button_row.setSpacing(UI_SPACING["sm"])
 
         self.queue_page_play_btn = QPushButton("立即播放")
         self.queue_page_play_btn.setObjectName("playQueuePagePrimaryButton")
@@ -12649,21 +12775,22 @@ class MainWindow(QMainWindow):
         layout.addLayout(button_row)
         layout.addWidget(self.play_queue_page_hint)
 
+        t = self.get_dark_theme_tokens()
         self.play_queue_page.setStyleSheet(
-            "QFrame#playQueuePage { background: transparent; color: #e8ecf5; }"
-            "QLabel#playQueuePageTitle { color: #ffffff; font-size: 28px; font-weight: 900; }"
-            "QLabel#playQueuePageSubtitle { color: #8f98aa; font-size: 13px; }"
-            "QLabel#playQueuePageHint { color: #8f98aa; font-size: 12px; }"
-            "QListWidget#playQueuePageList { background: #11131a; color: #e8ecf5; border: 1px solid rgba(255,255,255,0.08); border-radius: 18px; padding: 8px; outline: none; }"
-            "QListWidget#playQueuePageList::item { padding: 13px 12px; border-radius: 12px; margin: 3px; }"
-            "QListWidget#playQueuePageList::item:hover { background: rgba(255,255,255,0.07); }"
-            "QListWidget#playQueuePageList::item:selected { background: #3b82f6; color: #ffffff; }"
-            "QPushButton#playQueuePagePrimaryButton { background: #3b82f6; color: #ffffff; border: none; border-radius: 12px; padding: 10px 16px; font-size: 13px; font-weight: 700; }"
-            "QPushButton#playQueuePagePrimaryButton:hover { background: #5594ff; }"
-            "QPushButton#playQueuePageSecondaryButton { background: rgba(255,255,255,0.07); color: #dfe4ee; border: none; border-radius: 12px; padding: 10px 16px; font-size: 13px; }"
-            "QPushButton#playQueuePageSecondaryButton:hover { background: rgba(255,255,255,0.11); color: #ffffff; }"
-            "QPushButton#playQueuePageDangerButton { background: rgba(239,68,68,0.15); color: #ffd7dd; border: none; border-radius: 12px; padding: 10px 16px; font-size: 13px; }"
-            "QPushButton#playQueuePageDangerButton:hover { background: rgba(239,68,68,0.26); color: #ffffff; }"
+            f"QFrame#playQueuePage {{ background: transparent; color: {t['text']}; }}"
+            f"QLabel#playQueuePageTitle {{ color: {t['text']}; font-size: {UI_TYPOGRAPHY['page_title']}px; font-weight: 900; }}"
+            f"QLabel#playQueuePageSubtitle {{ color: {t['text_muted']}; font-size: {UI_TYPOGRAPHY['secondary']}px; }}"
+            f"QLabel#playQueuePageHint {{ color: {t['text_muted']}; font-size: {UI_TYPOGRAPHY['caption']}px; }}"
+            f"QListWidget#playQueuePageList {{ background: {t['sidebar_bg']}; color: {t['text']}; border: 1px solid {t['border']}; border-radius: {UI_RADII['panel']}px; padding: 8px; outline: none; }}"
+            f"QListWidget#playQueuePageList::item {{ padding: 12px; border-radius: {UI_RADII['button']}px; margin: 2px; border: 1px solid transparent; }}"
+            f"QListWidget#playQueuePageList::item:hover {{ background: {t['hover']}; }}"
+            f"QListWidget#playQueuePageList::item:selected {{ background: {t['selected_bg']}; border: 1px solid {t['selected_border']}; color: {t['text']}; }}"
+            f"QPushButton#playQueuePagePrimaryButton {{ background: {t['accent']}; color: #ffffff; border: 1px solid transparent; border-radius: {UI_RADII['button']}px; padding: 10px 16px; font-size: 13px; font-weight: 700; }}"
+            f"QPushButton#playQueuePagePrimaryButton:hover {{ background: {t['accent_hover']}; }}"
+            f"QPushButton#playQueuePageSecondaryButton {{ background: {t['card_bg_alt']}; color: {t['text_secondary']}; border: 1px solid {t['border']}; border-radius: {UI_RADII['button']}px; padding: 10px 16px; font-size: 13px; }}"
+            f"QPushButton#playQueuePageSecondaryButton:hover {{ background: {t['hover']}; color: {t['text']}; border-color: {t['border_strong']}; }}"
+            f"QPushButton#playQueuePageDangerButton {{ background: {t['favorite_soft']}; color: #ffd7dd; border: 1px solid rgba(225,91,100,0.28); border-radius: {UI_RADII['button']}px; padding: 10px 16px; font-size: 13px; }}"
+            f"QPushButton#playQueuePageDangerButton:hover {{ background: rgba(225,91,100,0.26); color: #ffffff; border-color: {t['favorite']}; }}"
         )
 
         stack.addWidget(self.play_queue_page)
@@ -16397,7 +16524,14 @@ class MainWindow(QMainWindow):
             "shuffle": "随机播放",
         }
 
-        self.play_mode_btn.setText(mode_text.get(self.play_mode, "列表循环"))
+        text = mode_text.get(self.play_mode, "列表循环")
+        self.play_mode_btn.setText(text)
+        self.play_mode_btn.setToolTip(f"当前模式：{text}；点击切换")
+        self.play_mode_btn.setAccessibleName(f"播放模式：{text}")
+        self.play_mode_btn.setProperty("modeActive", self.play_mode != "sequence")
+        self.play_mode_btn.style().unpolish(self.play_mode_btn)
+        self.play_mode_btn.style().polish(self.play_mode_btn)
+        self.play_mode_btn.update()
 
     def play_song_by_row(self, row: int) -> None:
         if row < 0 or row >= self.song_list.count():
@@ -17189,10 +17323,10 @@ class MainWindow(QMainWindow):
         t = self.get_dark_theme_tokens()
         return f"""
         QFrame#playerBar {{
-            background: #10141c;
+            background: {t["sidebar_bg"]};
             border-top: 1px solid {t["border"]};
-            border-bottom-left-radius: 22px;
-            border-bottom-right-radius: 22px;
+            border-bottom-left-radius: {UI_RADII["shell"]}px;
+            border-bottom-right-radius: {UI_RADII["shell"]}px;
         }}
 
         QFrame#playerLeft,
@@ -17218,6 +17352,13 @@ class MainWindow(QMainWindow):
             background: rgba(255, 255, 255, 0.145);
         }}
 
+        QPushButton#transportButton:disabled,
+        QPushButton#transportPlayButton:disabled {{
+            background: {t["panel_bg"]};
+            color: {t["text_disabled"]};
+            border-color: {t["border"]};
+        }}
+
         QPushButton#transportPlayButton {{
             background: {t["accent"]};
             border: 1px solid rgba(255, 255, 255, 0.16);
@@ -17226,11 +17367,11 @@ class MainWindow(QMainWindow):
         }}
 
         QPushButton#transportPlayButton:hover {{
-            background: #65a0ff;
+            background: {t["accent_hover"]};
         }}
 
         QPushButton#transportPlayButton:pressed {{
-            background: #3978dd;
+            background: {t["accent_pressed"]};
         }}
 
         QLabel#playerTimeLabel,
@@ -17272,10 +17413,16 @@ class MainWindow(QMainWindow):
             border-radius: 7px;
         }}
 
+        QSlider#progressSlider::groove:horizontal:hover,
+        QSlider#volumeSlider::groove:horizontal:hover {{
+            height: 6px;
+            border-radius: 3px;
+        }}
+
         QFrame#nowPlayingPanel {{
-            background: #11151d;
+            background: {t["sidebar_bg"]};
             border-left: 1px solid {t["border"]};
-            border-top-right-radius: 22px;
+            border-top-right-radius: {UI_RADII["shell"]}px;
         }}
 
         QFrame#nowInfoBox {{
@@ -17286,12 +17433,12 @@ class MainWindow(QMainWindow):
                 stop: 1 rgba(255, 255, 255, 0.032)
             );
             border: 1px solid {t["border"]};
-            border-radius: 18px;
+            border-radius: {UI_RADII["panel"]}px;
         }}
 
         QLabel#coverLabel {{
             border: 1px solid {t["border_strong"]};
-            border-radius: 20px;
+            border-radius: {UI_RADII["card"]}px;
         }}
 
         QLabel#nowSongTitle {{
@@ -17372,7 +17519,7 @@ class MainWindow(QMainWindow):
         }}
 
         QPushButton#songTableHeaderButton[sortActive="true"] {{
-            color: #8fb8ff;
+            color: {t["accent_hover"]};
         }}
 
         QLabel#songTableHeaderLabel {{
@@ -17382,18 +17529,18 @@ class MainWindow(QMainWindow):
         }}
 
         QListWidget#songList {{
-            background: #10141c;
+            background: {t["sidebar_bg"]};
             border: 1px solid {t["border"]};
-            border-radius: 16px;
+            border-radius: {UI_RADII["panel"]}px;
             padding: 6px;
             outline: none;
         }}
 
         QListWidget#songList::item {{
-            min-height: 58px;
+            min-height: {UI_CONTROL_SIZES["track_row_height"]}px;
             background: transparent;
             border: 1px solid transparent;
-            border-radius: 10px;
+            border-radius: {UI_RADII["button"]}px;
             padding: 0;
             margin: 2px;
         }}
@@ -17404,17 +17551,47 @@ class MainWindow(QMainWindow):
         }}
 
         QListWidget#songList::item:selected {{
-            background: rgba(76, 141, 255, 0.20);
-            border-color: rgba(76, 141, 255, 0.46);
+            background: {t["selected_bg"]};
+            border-color: {t["selected_border"]};
         }}
 
         QLabel#listEmptyHint {{
             background: rgba(255, 255, 255, 0.026);
             color: {t["text_muted"]};
             border: 1px dashed {t["border_strong"]};
-            border-radius: 18px;
+            border-radius: {UI_RADII["panel"]}px;
             padding: 28px;
-            font-size: 14px;
+            font-size: {UI_TYPOGRAPHY["body"]}px;
+        }}
+
+        QLabel#bottomSourceBadge {{
+            background: {t["accent_soft"]};
+            color: {t["accent_hover"]};
+            border: 1px solid {t["selected_border"]};
+            border-radius: {UI_RADII["small"]}px;
+            padding: 2px 7px;
+            font-size: {UI_TYPOGRAPHY["micro"]}px;
+            font-weight: 700;
+        }}
+
+        QPushButton#likeButton[liked="true"] {{
+            background: {t["favorite_soft"]};
+            color: {t["favorite"]};
+            border-color: rgba(225, 91, 100, 0.38);
+            font-weight: 700;
+        }}
+
+        QPushButton#likeButton[liked="true"]:hover {{
+            background: rgba(225, 91, 100, 0.24);
+            color: #ffffff;
+            border-color: {t["favorite"]};
+        }}
+
+        QPushButton#controlButton[modeActive="true"] {{
+            background: {t["accent_soft"]};
+            color: {t["accent_hover"]};
+            border-color: {t["selected_border"]};
+            font-weight: 700;
         }}
         """
 
@@ -17424,13 +17601,13 @@ class MainWindow(QMainWindow):
         QWidget#root {{
             background: {t["app_bg"]};
             color: {t["text"]};
-            font-family: "Segoe UI", "Microsoft YaHei UI", "Microsoft YaHei";
+            font-family: "Segoe UI Variable Text", "Segoe UI", "Microsoft YaHei UI", "Microsoft YaHei";
         }}
 
         QFrame#shell {{
             background: {t["shell_bg"]};
             border: 1px solid {t["border"]};
-            border-radius: 22px;
+            border-radius: {UI_RADII["shell"]}px;
         }}
 
         QFrame#sidebar {{
@@ -17439,8 +17616,33 @@ class MainWindow(QMainWindow):
         }}
 
         QLabel#sidebarHint,
+        QLabel#sidebarGroupHint,
         QLabel#appSubtitle {{
             color: {t["text_weak"]};
+        }}
+
+        QLabel#sidebarGroupHint {{
+            padding: 0 4px 4px 4px;
+            font-size: {UI_TYPOGRAPHY["micro"]}px;
+        }}
+
+        QLabel#sidebarSectionTitle {{
+            color: {t["text_muted"]};
+            font-size: {UI_TYPOGRAPHY["caption"]}px;
+            font-weight: 700;
+            padding: 8px 4px 2px 4px;
+        }}
+
+        QFrame#sidebarNavigationList {{
+            background: transparent;
+            border: none;
+        }}
+
+        QFrame#sidebarDropIndicator {{
+            background: {t["accent"]};
+            border-radius: 1px;
+            margin-left: 8px;
+            margin-right: 8px;
         }}
 
         QPushButton#sidebarButton,
@@ -17448,9 +17650,10 @@ class MainWindow(QMainWindow):
             background: transparent;
             color: {t["text_muted"]};
             border: 1px solid transparent;
-            border-radius: 12px;
-            padding: 9px 12px;
+            border-radius: {UI_RADII["button"]}px;
+            padding: 8px 10px;
             text-align: left;
+            font-size: {UI_TYPOGRAPHY["secondary"]}px;
         }}
 
         QPushButton#sidebarButton:hover,
@@ -17469,6 +17672,31 @@ class MainWindow(QMainWindow):
             font-weight: 700;
         }}
 
+        QPushButton#sidebarButton[dragging="true"] {{
+            background: {t["accent_soft"]};
+            color: {t["text"]};
+            border: 1px solid {t["accent"]};
+        }}
+
+        QLineEdit#sidebarSearchInput {{
+            background: {t["card_bg"]};
+            color: {t["text"]};
+            border: 1px solid {t["border"]};
+            border-radius: {UI_RADII["button"]}px;
+            padding: 8px 10px;
+            selection-background-color: {t["accent"]};
+            placeholder-text-color: {t["placeholder"]};
+        }}
+
+        QLineEdit#sidebarSearchInput:hover {{
+            border-color: {t["border_strong"]};
+        }}
+
+        QLineEdit#sidebarSearchInput:focus {{
+            background: {t["card_bg_alt"]};
+            border-color: {t["accent"]};
+        }}
+
         QPushButton#sidebarWideButton,
         QPushButton#sidebarMiniButton,
         QPushButton#playlistActionButton,
@@ -17478,7 +17706,7 @@ class MainWindow(QMainWindow):
             background: rgba(255, 255, 255, 0.055);
             color: {t["text_muted"]};
             border: 1px solid {t["border"]};
-            border-radius: 12px;
+            border-radius: {UI_RADII["button"]}px;
             padding: 9px 13px;
         }}
 
@@ -17504,20 +17732,20 @@ class MainWindow(QMainWindow):
             background: {t["accent"]};
             color: #ffffff;
             border: 1px solid rgba(255, 255, 255, 0.08);
-            border-radius: 13px;
+            border-radius: {UI_RADII["button"]}px;
             padding: 10px 15px;
             font-weight: 700;
         }}
 
         QPushButton#primaryButton:hover {{
-            background: #5594ff;
+            background: {t["accent_hover"]};
         }}
 
         QPushButton#dangerButton {{
-            background: rgba(239, 68, 68, 0.14);
+            background: {t["favorite_soft"]};
             color: #fecdd3;
-            border: 1px solid rgba(239, 68, 68, 0.22);
-            border-radius: 13px;
+            border: 1px solid rgba(225, 91, 100, 0.28);
+            border-radius: {UI_RADII["button"]}px;
             padding: 10px 15px;
         }}
 
@@ -17539,7 +17767,7 @@ class MainWindow(QMainWindow):
             background: {t["sidebar_bg"]};
             color: {t["text"]};
             border: 1px solid {t["border"]};
-            border-radius: 13px;
+            border-radius: {UI_RADII["button"]}px;
             padding: 9px 13px;
             selection-background-color: {t["accent"]};
             selection-color: #ffffff;
@@ -17569,7 +17797,7 @@ class MainWindow(QMainWindow):
             color: {t["text_muted"]};
             background: rgba(255, 255, 255, 0.035);
             border: 1px solid {t["border"]};
-            border-radius: 12px;
+            border-radius: {UI_RADII["card"]}px;
             padding: 7px 10px;
         }}
 
@@ -17578,7 +17806,7 @@ class MainWindow(QMainWindow):
             color: {t["text_muted"]};
             background: rgba(255, 255, 255, 0.035);
             border: 1px solid {t["border"]};
-            border-radius: 16px;
+            border-radius: {UI_RADII["panel"]}px;
             padding: 18px 20px;
             line-height: 1.45;
         }}
@@ -17588,7 +17816,7 @@ class MainWindow(QMainWindow):
             background: {t["sidebar_bg"]};
             color: #dfe5ef;
             border: 1px solid {t["border"]};
-            border-radius: 18px;
+            border-radius: {UI_RADII["panel"]}px;
             padding: 9px;
             outline: none;
             alternate-background-color: #141823;
@@ -17599,7 +17827,7 @@ class MainWindow(QMainWindow):
             min-height: 50px;
             padding: 10px 13px;
             margin: 3px 2px;
-            border-radius: 12px;
+            border-radius: {UI_RADII["card"]}px;
             border: 1px solid transparent;
         }}
 
@@ -17612,8 +17840,8 @@ class MainWindow(QMainWindow):
 
         QListWidget#songList::item:selected,
         QListWidget#pendingImportsList::item:selected {{
-            background: rgba(59, 130, 246, 0.18);
-            border: 1px solid rgba(59, 130, 246, 0.42);
+            background: {t["selected_bg"]};
+            border: 1px solid {t["selected_border"]};
             color: #ffffff;
         }}
 
@@ -17622,14 +17850,14 @@ class MainWindow(QMainWindow):
             background: {t["card_bg_alt"]};
             color: {t["text"]};
             border: 1px solid {t["border_strong"]};
-            border-radius: 12px;
+            border-radius: {UI_RADII["card"]}px;
             padding: 6px;
         }}
 
         QMenu::item,
         QMenu#songContextMenu::item {{
             padding: 8px 24px;
-            border-radius: 8px;
+            border-radius: {UI_RADII["control"]}px;
         }}
 
         QMenu::item:selected,
@@ -17772,7 +18000,7 @@ class MainWindow(QMainWindow):
 
         QScrollBar:vertical {{
             background: transparent;
-            width: 12px;
+            width: {UI_CONTROL_SIZES["scrollbar_width"]}px;
             margin: 8px 2px 8px 2px;
         }}
 
@@ -17797,20 +18025,20 @@ class MainWindow(QMainWindow):
 
         QLabel#pageTitle {{
             color: {t["text"]};
-            font-size: 24px;
+            font-size: {UI_TYPOGRAPHY["page_title"]}px;
             font-weight: 900;
         }}
 
         QLabel#pageSubtitle {{
             color: {t["text_weak"]};
-            font-size: 12px;
+            font-size: {UI_TYPOGRAPHY["caption"]}px;
         }}
 
         QPushButton#viewButton {{
             background: rgba(255, 255, 255, 0.045);
             color: {t["text_muted"]};
             border: 1px solid {t["border"]};
-            border-radius: 12px;
+            border-radius: {UI_RADII["button"]}px;
             padding: 9px 13px;
             min-height: 18px;
         }}

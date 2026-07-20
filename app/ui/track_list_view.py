@@ -21,12 +21,18 @@ from PySide6.QtWidgets import (
 )
 
 from app.models.media_item import MediaItem
+from app.ui.design_system import (
+    DARK_THEME_TOKENS,
+    UI_CONTROL_SIZES,
+    UI_RADII,
+    UI_SPACING,
+)
 
 
-TRACK_LIKE_WIDTH = 28
+TRACK_LIKE_WIDTH = UI_CONTROL_SIZES["track_like_width"]
 TRACK_MARKER_WIDTH = 18
 TRACK_DURATION_WIDTH = 62
-TRACK_COLUMN_GAP = 14
+TRACK_COLUMN_GAP = UI_SPACING["sm"]
 
 
 def configure_track_columns(layout: QGridLayout) -> None:
@@ -50,8 +56,11 @@ def draw_track_like_icon(
     *,
     liked: bool,
     hovered: bool = False,
+    pressed: bool = False,
 ) -> None:
     icon_size = min(20.0, max(14.0, min(rect.width(), rect.height()) - 8.0))
+    if pressed:
+        icon_size *= 0.90
     icon_rect = QRectF(0, 0, icon_size, icon_size)
     icon_rect.moveCenter(rect.center())
     if hovered:
@@ -115,7 +124,15 @@ def draw_track_like_icon(
         top + height * 0.88,
     )
     path.closeSubpath()
-    color = QColor("#e15b64" if liked else ("#f0f3f8" if hovered else "#aeb6c5"))
+    color = QColor(
+        DARK_THEME_TOKENS["favorite"]
+        if liked
+        else (
+            DARK_THEME_TOKENS["text"]
+            if hovered
+            else DARK_THEME_TOKENS["text_muted"]
+        )
+    )
     pen = QPen(color, 1.8)
     pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
     painter.setPen(pen)
@@ -152,6 +169,10 @@ class LikeAwareListWidget(QListWidget):
     def is_index_like_hovered(self, index) -> bool:
         item = self.itemFromIndex(index)
         return item is not None and item is self._hovered_like_item
+
+    def is_index_like_pressed(self, index) -> bool:
+        item = self.itemFromIndex(index)
+        return item is not None and item is self._pressed_like_item
 
     @staticmethod
     def identity_for_value(value: dict | None) -> str:
@@ -216,6 +237,7 @@ class LikeAwareListWidget(QListWidget):
             if item is not None:
                 self._pressed_like_item = item
                 self._set_hovered_like_item(item)
+                self.viewport().update(self.visualItemRect(item))
                 event.accept()
                 return
         super().mousePressEvent(event)
@@ -225,6 +247,8 @@ class LikeAwareListWidget(QListWidget):
         if pressed is not None:
             self._pressed_like_item = None
             released = self._like_item_at(event.position())
+            if self.row(pressed) >= 0:
+                self.viewport().update(self.visualItemRect(pressed))
             if released is pressed:
                 value = pressed.data(Qt.ItemDataRole.UserRole)
                 if isinstance(value, dict):
@@ -277,6 +301,10 @@ class IndentedLikeDelegate(QStyledItemDelegate):
             isinstance(view, LikeAwareListWidget)
             and view.is_index_like_hovered(index)
         )
+        pressed = bool(
+            isinstance(view, LikeAwareListWidget)
+            and view.is_index_like_pressed(index)
+        )
         painter.save()
         painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
         draw_track_like_icon(
@@ -284,6 +312,7 @@ class IndentedLikeDelegate(QStyledItemDelegate):
             track_like_rect(option.rect),
             liked=liked,
             hovered=hovered,
+            pressed=pressed,
         )
         painter.restore()
 
@@ -302,7 +331,7 @@ class CanonicalTrackDelegate(QStyledItemDelegate):
         self.playing_key_provider = playing_key_provider or (lambda: "")
 
     def sizeHint(self, option, index) -> QSize:
-        return QSize(0, 58)
+        return QSize(0, UI_CONTROL_SIZES["track_row_height"])
 
     @staticmethod
     def column_rects(rect) -> dict[str, QRectF]:
@@ -345,7 +374,9 @@ class CanonicalTrackDelegate(QStyledItemDelegate):
             item.stable_identity
             and item.stable_identity == str(self.playing_key_provider() or "")
         )
-        if selected:
+        if selected and is_playing:
+            background, border = QColor(76, 141, 255, 62), QColor(76, 141, 255, 158)
+        elif selected:
             background, border = QColor(76, 141, 255, 48), QColor(76, 141, 255, 118)
         elif is_playing:
             background, border = QColor(76, 141, 255, 27), QColor(76, 141, 255, 70)
@@ -355,7 +386,11 @@ class CanonicalTrackDelegate(QStyledItemDelegate):
             background, border = QColor(0, 0, 0, 0), QColor(0, 0, 0, 0)
         painter.setPen(QPen(border, 1))
         painter.setBrush(background)
-        painter.drawRoundedRect(row_rect, 10, 10)
+        painter.drawRoundedRect(
+            row_rect,
+            UI_RADII["button"],
+            UI_RADII["button"],
+        )
         if is_playing:
             painter.fillRect(
                 QRectF(row_rect.left(), row_rect.top() + 8, 3, row_rect.height() - 16),
@@ -371,17 +406,22 @@ class CanonicalTrackDelegate(QStyledItemDelegate):
             isinstance(view, LikeAwareListWidget)
             and view.is_index_like_hovered(index)
         )
+        like_pressed = bool(
+            isinstance(view, LikeAwareListWidget)
+            and view.is_index_like_pressed(index)
+        )
         draw_track_like_icon(
             painter,
             rects["like"],
             liked=liked,
             hovered=like_hovered,
+            pressed=like_pressed,
         )
-        self._draw(painter, option, rects["marker"], "▶" if is_playing else "", "#4c8dff", True)
-        self._draw(painter, option, rects["title"], item.title, "#ffffff" if is_playing else "#f3f4f6", is_playing)
-        self._draw(painter, option, rects["artist"], item.artist, "#b5bbc7")
-        self._draw(painter, option, rects["album"], item.album, "#b5bbc7")
-        self._draw(painter, option, rects["duration"], duration, "#8a92a3", align_right=True)
+        self._draw(painter, option, rects["marker"], "▶" if is_playing else "", DARK_THEME_TOKENS["accent"], True)
+        self._draw(painter, option, rects["title"], item.title, DARK_THEME_TOKENS["text"], is_playing)
+        self._draw(painter, option, rects["artist"], item.artist, DARK_THEME_TOKENS["text_secondary"])
+        self._draw(painter, option, rects["album"], item.album, DARK_THEME_TOKENS["text_secondary"])
+        self._draw(painter, option, rects["duration"], duration, DARK_THEME_TOKENS["text_muted"], align_right=True)
         painter.restore()
 
     def helpEvent(self, event, view, option, index) -> bool:
@@ -430,7 +470,7 @@ class TrackListView(QFrame):
         self.setObjectName(object_name)
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(6)
+        layout.setSpacing(UI_SPACING["xs"])
         self.header = QFrame()
         self.header.setObjectName("songTableHeader")
         header_layout = QGridLayout(self.header)
