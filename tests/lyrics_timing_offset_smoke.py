@@ -44,7 +44,12 @@ class FakeImmersiveWindow:
         self.positions: list[int] = []
         self.track_updates: list[tuple[str, int]] = []
 
-    def update_position(self, position: int, _lyrics) -> None:
+    def update_position(
+        self,
+        position: int,
+        _lyrics,
+        _track_identity: str = "",
+    ) -> None:
         self.positions.append(int(position))
 
     def update_track_timing(self, identity: str, offset_ms: int) -> None:

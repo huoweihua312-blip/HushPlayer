@@ -5,7 +5,7 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 
 from PySide6.QtCore import QObject, QRunnable, QSize, Qt, QThreadPool, QTimer, Signal
-from PySide6.QtGui import QColor, QImage, QImageReader, QPainter, QPixmap
+from PySide6.QtGui import QColor, QImage, QImageReader, QLinearGradient, QPainter, QPixmap
 from PySide6.QtWidgets import (
     QComboBox,
     QDialog,
@@ -402,11 +402,39 @@ class ImmersiveBackgroundView(QWidget):
         # QPixmap -> QImage conversion is intentionally restricted to the GUI thread.
         self._cover_source_image = pixmap.toImage() if valid_pixmap else QImage()
         if self.config.background_mode == "cover":
-            self._rendered_pixmap = QPixmap()
-            self._rendered_source_key = ""
-            self._set_fallback(True, "当前歌曲封面准备中，已显示默认背景")
-            self.update()
-            self._invalidate_and_schedule()
+            if valid_pixmap:
+                if self._rendered_pixmap.isNull() or self._fallback_active:
+                    self._set_fallback(True, "当前歌曲封面准备中，已显示默认背景")
+                else:
+                    self._set_fallback(False, "新背景准备中，继续显示上一首背景")
+                self._invalidate_and_schedule()
+            else:
+                # None means the main window is still preparing this track's cover.
+                # Keep the previous rendered background until success/failure is known.
+                self._generation += 1
+                self._pending_after_task = False
+                self._debounce_timer.stop()
+                if self._rendered_pixmap.isNull() or self._fallback_active:
+                    self._rendered_pixmap = QPixmap()
+                    self._rendered_source_key = ""
+                    self._set_fallback(True, "当前歌曲封面准备中，已显示默认背景")
+                else:
+                    self._set_fallback(False, "当前歌曲封面准备中，继续显示上一首背景")
+                self.update()
+
+    def mark_cover_unavailable(self, track_key: str) -> None:
+        if self.config.background_mode != "cover":
+            return
+        self._cover_track_key = str(track_key or "")
+        self._cover_source_key = ""
+        self._cover_source_image = QImage()
+        self._generation += 1
+        self._pending_after_task = False
+        self._debounce_timer.stop()
+        self._rendered_pixmap = QPixmap()
+        self._rendered_source_key = ""
+        self._set_fallback(True, "当前歌曲没有可用封面，已回退默认背景")
+        self.update()
 
     def revalidate_custom_image(self) -> None:
         if self.config.background_mode != "custom":
@@ -614,8 +642,15 @@ class ImmersiveBackgroundView(QWidget):
             overlay_alpha = int(round(255 * self.config.darkness / 100.0))
             painter.fillRect(rect, QColor(0, 0, 0, overlay_alpha))
         else:
-            base_alpha = int(round(255 * self.config.darkness / 100.0))
-            painter.fillRect(rect, QColor(5, 6, 9, base_alpha))
+            gradient = QLinearGradient(rect.topLeft(), rect.bottomRight())
+            gradient.setColorAt(0.0, QColor("#0b0e14"))
+            gradient.setColorAt(0.55, QColor("#111722"))
+            gradient.setColorAt(1.0, QColor("#171b26"))
+            painter.fillRect(rect, gradient)
+            overlay_alpha = int(
+                round(255 * self.config.darkness / 100.0 * 0.38)
+            )
+            painter.fillRect(rect, QColor(0, 0, 0, overlay_alpha))
 
     def resizeEvent(self, event) -> None:
         super().resizeEvent(event)

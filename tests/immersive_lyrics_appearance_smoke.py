@@ -181,8 +181,9 @@ def background_checks(app: QApplication, root: Path) -> tuple[dict, int]:
     )
 
     window.update_background_cover("local:track-b", QPixmap.fromImage(blue))
-    assert window.background_view.fallback_active
-    assert "track-a" not in window.background_view.rendered_source_key
+    assert not window.background_view.fallback_active
+    assert "track-a" in window.background_view.rendered_source_key
+    assert "继续显示上一首背景" in window.background_view.status_text
     assert wait_until(
         app,
         lambda: not window.background_view.fallback_active
@@ -190,6 +191,9 @@ def background_checks(app: QApplication, root: Path) -> tuple[dict, int]:
     )
 
     window.update_background_cover("local:track-c", None)
+    assert not window.background_view.fallback_active
+    assert "track-b" in window.background_view.rendered_source_key
+    window.mark_background_cover_unavailable("local:track-c")
     assert window.background_view.fallback_active
     assert "track-b" not in window.background_view.rendered_source_key
     assert wait_until(app, lambda: not window.background_view.task_running)
