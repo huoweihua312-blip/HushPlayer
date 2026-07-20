@@ -117,6 +117,8 @@ class PlaylistMembership:
         playlist: dict,
         members,
         normalize_local: Callable[[str], str],
+        *,
+        assume_normalized: bool = False,
     ) -> dict:
         """Add one normalized input batch without repeatedly scanning a playlist."""
         raw_members = list(members or [])
@@ -125,10 +127,12 @@ class PlaylistMembership:
             return result
 
         cached_normalize_local = cls._cached_normalizer(normalize_local)
-        result["normalized_changed"] = cls.normalize_playlist(
-            playlist,
-            cached_normalize_local,
-        )
+        result["normalized_changed"] = False
+        if not assume_normalized:
+            result["normalized_changed"] = cls.normalize_playlist(
+                playlist,
+                cached_normalize_local,
+            )
 
         existing_keys: set[tuple[str, str]] = set()
         max_added_at = 0
@@ -206,6 +210,8 @@ class PlaylistMembership:
         playlist: dict,
         members,
         normalize_local: Callable[[str], str],
+        *,
+        assume_normalized: bool = False,
     ) -> dict:
         """Remove one normalized input batch with order-preserving filters."""
         raw_members = list(members or [])
@@ -214,10 +220,12 @@ class PlaylistMembership:
             return result
 
         cached_normalize_local = cls._cached_normalizer(normalize_local)
-        result["normalized_changed"] = cls.normalize_playlist(
-            playlist,
-            cached_normalize_local,
-        )
+        result["normalized_changed"] = False
+        if not assume_normalized:
+            result["normalized_changed"] = cls.normalize_playlist(
+                playlist,
+                cached_normalize_local,
+            )
 
         existing_keys: set[tuple[str, str]] = set()
         local_ids: list[str] = []

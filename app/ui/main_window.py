@@ -45,7 +45,13 @@ from app.ui.immersive_appearance import (
 from app.ui.library_page import LibraryPage
 from app.ui.media_interaction_controller import MediaInteractionController
 from app.ui.search_page import SearchPage
-from app.ui.track_list_view import SearchEntryLineEdit
+from app.ui.track_list_view import (
+    IndentedLikeDelegate,
+    TRACK_LIKE_WIDTH,
+    LikeAwareListWidget,
+    SearchEntryLineEdit,
+    draw_track_like_icon,
+)
 from app.ui.update_dialog import UpdateDialog
 from PySide6.QtCore import QEasingCurve, QEvent, QItemSelectionModel, QObject, QPropertyAnimation, QRectF, QRunnable, QSize, Qt, QThread, QThreadPool, QTimer, QUrl, Signal, Slot
 from PySide6.QtGui import QColor, QDesktopServices, QFont, QFontMetrics, QIcon, QKeySequence, QPainter, QPainterPath, QPalette, QPen, QPixmap, QShortcut
@@ -89,6 +95,40 @@ AUDIO_EXTENSIONS = {
     ".aac",
     ".ogg",
 }
+
+SIDEBAR_NAVIGATION_DEFAULT_ORDER = (
+    "library_all",
+    "liked",
+    "recent",
+    "frequent",
+    "recent_added",
+    "artists",
+    "albums",
+    "playlists",
+    "online_search",
+    "lyrics",
+    "pending_imports",
+    "custom_sources",
+)
+
+
+def merge_sidebar_navigation_order(saved_order) -> list[str]:
+    defaults = list(SIDEBAR_NAVIGATION_DEFAULT_ORDER)
+    if not isinstance(saved_order, list) or not saved_order:
+        return defaults
+    valid_ids = set(defaults)
+    merged: list[str] = []
+    seen: set[str] = set()
+    for value in saved_order:
+        item_id = str(value or "").strip()
+        if item_id not in valid_ids or item_id in seen:
+            continue
+        merged.append(item_id)
+        seen.add(item_id)
+    if not merged:
+        return defaults
+    merged.extend(item_id for item_id in defaults if item_id not in seen)
+    return merged
 
 
 def normalize_update_check_delay_seconds(value) -> int:
@@ -314,8 +354,17 @@ def apply_dark_dialog_style(dialog: QDialog, extra_qss: str = "") -> None:
 
 
 class NavButton(QPushButton):
-    def __init__(self, text: str, active: bool = False) -> None:
+    def __init__(
+        self,
+        text: str,
+        active: bool = False,
+        navigation_id: str = "",
+    ) -> None:
         super().__init__(text)
+        self.navigation_id = str(navigation_id or "")
+        self.navigation_container = None
+        self._navigation_drag_origin = None
+        self._navigation_dragging = False
         self.setObjectName("sidebarButton")
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         self.setProperty("active", active)
@@ -324,6 +373,166 @@ class NavButton(QPushButton):
             QSizePolicy.Policy.Expanding,
             QSizePolicy.Policy.Preferred,
         )
+
+    def mousePressEvent(self, event) -> None:
+        if (
+            event.button() == Qt.MouseButton.LeftButton
+            and self.navigation_container is not None
+        ):
+            self._navigation_drag_origin = event.position().toPoint()
+            self._navigation_dragging = False
+        super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event) -> None:
+        container = self.navigation_container
+        origin = self._navigation_drag_origin
+        if (
+            container is not None
+            and origin is not None
+            and event.buttons() & Qt.MouseButton.LeftButton
+        ):
+            distance = (event.position().toPoint() - origin).manhattanLength()
+            if (
+                not self._navigation_dragging
+                and distance >= QApplication.startDragDistance()
+            ):
+                self._navigation_dragging = True
+                container.begin_navigation_drag(self)
+            if self._navigation_dragging:
+                container.update_navigation_drag(
+                    self,
+                    event.globalPosition().toPoint(),
+                )
+                event.accept()
+                return
+        super().mouseMoveEvent(event)
+
+    def mouseReleaseEvent(self, event) -> None:
+        if self._navigation_dragging and self.navigation_container is not None:
+            self.navigation_container.finish_navigation_drag(self)
+            self._navigation_dragging = False
+            self._navigation_drag_origin = None
+            self.setDown(False)
+            event.accept()
+            return
+        self._navigation_drag_origin = None
+        super().mouseReleaseEvent(event)
+
+
+class SidebarNavigationList(QFrame):
+    navigationOrderChanged = Signal(list)
+
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.setObjectName("sidebarNavigationList")
+        self.navigation_buttons: dict[str, NavButton] = {}
+        self._drag_button: NavButton | None = None
+        self._drop_index = -1
+        self.navigation_layout = QVBoxLayout(self)
+        self.navigation_layout.setContentsMargins(0, 0, 0, 0)
+        self.navigation_layout.setSpacing(7)
+        self.drop_indicator = QFrame(self)
+        self.drop_indicator.setObjectName("sidebarDropIndicator")
+        self.drop_indicator.setFixedHeight(2)
+        self.drop_indicator.setStyleSheet(
+            "QFrame#sidebarDropIndicator { background: #4c8dff; border-radius: 1px; }"
+        )
+        self.drop_indicator.hide()
+
+    def add_navigation_button(self, item_id: str, button: NavButton) -> None:
+        item_id = str(item_id or "").strip()
+        if not item_id or item_id in self.navigation_buttons:
+            raise ValueError("侧栏导航 ID 必须唯一且非空")
+        button.navigation_id = item_id
+        button.navigation_container = self
+        button.setToolTip("单击打开；按住并上下拖动可调整顺序")
+        button.setAccessibleDescription("可上下拖动调整侧栏导航顺序")
+        self.navigation_buttons[item_id] = button
+        self.navigation_layout.addWidget(button)
+
+    def ordered_ids(self) -> list[str]:
+        result: list[str] = []
+        for index in range(self.navigation_layout.count()):
+            widget = self.navigation_layout.itemAt(index).widget()
+            if isinstance(widget, NavButton) and widget.navigation_id:
+                result.append(widget.navigation_id)
+        if self._drag_button is not None and self._drag_button.navigation_id not in result:
+            insertion = max(0, min(self._drop_index, len(result)))
+            result.insert(insertion, self._drag_button.navigation_id)
+        return result
+
+    def apply_order(self, order) -> list[str]:
+        merged = merge_sidebar_navigation_order(order)
+        for button in self.navigation_buttons.values():
+            self.navigation_layout.removeWidget(button)
+        for item_id in merged:
+            button = self.navigation_buttons.get(item_id)
+            if button is not None:
+                self.navigation_layout.addWidget(button)
+        return self.ordered_ids()
+
+    def move_item(self, item_id: str, target_index: int) -> bool:
+        item_id = str(item_id or "")
+        order = self.ordered_ids()
+        if item_id not in order:
+            return False
+        order.remove(item_id)
+        target_index = max(0, min(int(target_index), len(order)))
+        order.insert(target_index, item_id)
+        if order == self.ordered_ids():
+            return False
+        self.apply_order(order)
+        self.navigationOrderChanged.emit(self.ordered_ids())
+        return True
+
+    def begin_navigation_drag(self, button: NavButton) -> None:
+        if button.navigation_id not in self.navigation_buttons:
+            return
+        self._drag_button = button
+        self._drop_index = max(0, self.navigation_layout.indexOf(button))
+        self.navigation_layout.removeWidget(button)
+        button.setProperty("dragging", True)
+        button.style().unpolish(button)
+        button.style().polish(button)
+        button.raise_()
+        self.drop_indicator.show()
+        self.navigation_layout.insertWidget(self._drop_index, self.drop_indicator)
+
+    def update_navigation_drag(self, button: NavButton, global_position) -> None:
+        if button is not self._drag_button:
+            return
+        local_y = self.mapFromGlobal(global_position).y()
+        candidates = [
+            candidate
+            for candidate in self.navigation_buttons.values()
+            if candidate is not button
+        ]
+        candidates.sort(key=lambda candidate: candidate.geometry().center().y())
+        target_index = len(candidates)
+        for index, candidate in enumerate(candidates):
+            if local_y < candidate.geometry().center().y():
+                target_index = index
+                break
+        if target_index == self._drop_index:
+            return
+        self.navigation_layout.removeWidget(self.drop_indicator)
+        self._drop_index = target_index
+        self.navigation_layout.insertWidget(target_index, self.drop_indicator)
+
+    def finish_navigation_drag(self, button: NavButton) -> None:
+        if button is not self._drag_button:
+            return
+        target_index = max(0, self._drop_index)
+        self.navigation_layout.removeWidget(self.drop_indicator)
+        self.drop_indicator.hide()
+        self.navigation_layout.insertWidget(target_index, button)
+        button.setProperty("dragging", False)
+        button.style().unpolish(button)
+        button.style().polish(button)
+        button.show()
+        self._drag_button = None
+        self._drop_index = -1
+        self.navigationOrderChanged.emit(self.ordered_ids())
 
 
 class PlayerIconButton(QPushButton):
@@ -565,6 +774,7 @@ class MultiLineElidedLabel(QLabel):
         self.setMaximumHeight(line_height * self.max_lines + 6)
 
 
+SONG_TABLE_LIKE_WIDTH = TRACK_LIKE_WIDTH
 SONG_TABLE_MARKER_WIDTH = 18
 SONG_TABLE_DURATION_WIDTH = 58
 SONG_TABLE_COLUMN_GAP = 14
@@ -583,18 +793,24 @@ class SongLibraryDelegate(QStyledItemDelegate):
         row_rect = QRectF(rect.adjusted(2, 2, -2, -2))
         content = row_rect.adjusted(12, 0, -12, 0)
         available_width = max(0, int(content.width()))
-        fixed_width = SONG_TABLE_MARKER_WIDTH + SONG_TABLE_DURATION_WIDTH
+        fixed_width = (
+            SONG_TABLE_LIKE_WIDTH
+            + SONG_TABLE_MARKER_WIDTH
+            + SONG_TABLE_DURATION_WIDTH
+        )
         gap = min(
             SONG_TABLE_COLUMN_GAP,
-            max(0, (available_width - fixed_width) // 4),
+            max(0, (available_width - fixed_width) // 5),
         )
-        flexible_width = max(0, available_width - fixed_width - gap * 4)
+        flexible_width = max(0, available_width - fixed_width - gap * 5)
         title_width = int(flexible_width * 0.5)
         artist_width = int(flexible_width * 0.25)
         album_width = max(0, flexible_width - title_width - artist_width)
         x = content.left()
 
         result: dict[str, QRectF] = {}
+        result["like"] = QRectF(x, content.top(), SONG_TABLE_LIKE_WIDTH, content.height())
+        x += SONG_TABLE_LIKE_WIDTH + gap
         result["marker"] = QRectF(x, content.top(), SONG_TABLE_MARKER_WIDTH, content.height())
         x += SONG_TABLE_MARKER_WIDTH + gap
         result["title"] = QRectF(x, content.top(), title_width, content.height())
@@ -652,6 +868,21 @@ class SongLibraryDelegate(QStyledItemDelegate):
             self.main_window.format_duration_text(duration_seconds)
             if duration_seconds > 0
             else "—"
+        )
+        view = self.parent()
+        liked = bool(
+            isinstance(view, LikeAwareListWidget)
+            and view.is_value_liked(song_data)
+        )
+        like_hovered = bool(
+            isinstance(view, LikeAwareListWidget)
+            and view.is_index_like_hovered(index)
+        )
+        draw_track_like_icon(
+            painter,
+            rects["like"],
+            liked=liked,
+            hovered=like_hovered,
         )
         self._draw_text(painter, option, rects["marker"], "▶" if is_playing else "", "#4c8dff", True)
         self._draw_text(
@@ -3833,6 +4064,7 @@ class MainWindow(QMainWindow):
     media_worker_destroyed_notice = Signal(str)
     media_thread_finished_notice = Signal(str)
     media_thread_destroyed_notice = Signal(str)
+    liked_state_changed = Signal(str, bool)
 
     MEDIA_WORKER_SHUTDOWN_TIMEOUT_MS = 1500
     MUSIC_SCAN_SHUTDOWN_TIMEOUT_MS = 1500
@@ -4235,6 +4467,7 @@ class MainWindow(QMainWindow):
         self.view_buttons = {}
         self.custom_view_buttons = []
         self.media_interactions = MediaInteractionController(self)
+        self.liked_state_changed.connect(self.on_liked_state_changed)
 
         self.http_headers = {
             "User-Agent": f"{APP_USER_AGENT} (local music player)",
@@ -5008,6 +5241,10 @@ class MainWindow(QMainWindow):
         if not raw_members:
             return result
 
+        # Loading/getting the cached snapshot already normalizes legacy data.
+        # Heart clicks can therefore mutate the current representation without
+        # rescanning the full playlist solely for normalization on every click.
+        self.get_playlist_membership_snapshot(playlist_id)
         previous_state = self.capture_playlist_transaction_state()
         try:
             if present:
@@ -5015,12 +5252,14 @@ class MainWindow(QMainWindow):
                     playlist,
                     raw_members,
                     self.normalize_song_path,
+                    assume_normalized=True,
                 )
             else:
                 result = PlaylistMembership.remove_members(
                     playlist,
                     raw_members,
                     self.normalize_song_path,
+                    assume_normalized=True,
                 )
         except Exception:
             self.restore_playlist_transaction_state(previous_state)
@@ -5269,10 +5508,16 @@ class MainWindow(QMainWindow):
             current_playlist_id = self.current_library_view.split("playlist:", 1)[1]
         return {
             "stableId": stable_id,
-            "liked": stable_id in self.get_playlist_remote_ids("liked"),
+            "liked": (
+                PlaylistMembership.REMOTE,
+                stable_id,
+            ) in self.get_playlist_member_index("liked"),
             "inCurrentPlaylist": bool(
                 current_playlist_id
-                and stable_id in self.get_playlist_remote_ids(current_playlist_id)
+                and (
+                    PlaylistMembership.REMOTE,
+                    stable_id,
+                ) in self.get_playlist_member_index(current_playlist_id)
             ),
         }
 
@@ -5326,18 +5571,13 @@ class MainWindow(QMainWindow):
             self.set_online_status_message("这首在线歌曲没有可删除的完整缓存。")
 
     def like_online_track(self, track: dict) -> None:
-        self.add_online_track_to_playlist(track, "liked")
+        self.set_media_item_liked(track, True)
 
     def unlike_online_track(self, track: dict) -> None:
-        track = MediaItem.from_mapping(track).to_legacy_online()
-        stable_id = RemoteTrackStore.stable_id_for_track(track)
-        if stable_id not in self.get_playlist_remote_ids("liked"):
+        if not self.is_media_item_liked(track):
             self.set_online_status_message("该在线歌曲尚未收藏。")
             return
-        if not self.remove_remote_id_from_playlist(stable_id, "liked"):
-            return
-        self.refresh_playlist_membership_views()
-        self.set_online_status_message("已取消收藏该在线歌曲。")
+        self.set_media_item_liked(track, False)
 
     def add_online_track_to_playlist(self, track: dict, playlist_id: str) -> None:
         track = MediaItem.from_mapping(track).to_legacy_online()
@@ -7313,6 +7553,8 @@ class MainWindow(QMainWindow):
             "pending": getattr(self, "pending_nav_button", None),
             "search": getattr(self, "search_nav_button", None),
             "custom_sources": getattr(self, "custom_sources_nav_button", None),
+            "artists": getattr(self, "artists_nav_button", None),
+            "albums": getattr(self, "albums_nav_button", None),
             "settings": getattr(self, "settings_nav_button", None),
         }
 
@@ -7391,6 +7633,21 @@ class MainWindow(QMainWindow):
         self.set_sidebar_active("library")
         self.show_library_container()
         self.set_library_view(view_name)
+
+    def show_sidebar_library_mode(self, mode: str) -> None:
+        if mode not in {"artists", "albums"}:
+            return
+        self.show_library_container()
+        self.set_library_view("all")
+        self.library_page.show_mode(mode)
+        self.set_sidebar_active(mode)
+
+    def save_sidebar_navigation_order(self, order: list[str]) -> None:
+        normalized = merge_sidebar_navigation_order(order)
+        self.save_hush_settings(
+            {"sidebar_navigation_order": normalized},
+            immediate=True,
+        )
 
     def return_to_library_view(self) -> None:
         reuse_cached_view = self.can_reuse_library_view_after_search()
@@ -8432,27 +8689,39 @@ class MainWindow(QMainWindow):
         layout.addWidget(self.search_input)
 
         layout.addSpacing(12)
-        library_title = QLabel("音乐库")
-        library_title.setObjectName("sidebarSectionTitle")
-        layout.addWidget(library_title)
+        navigation_title = QLabel("导航")
+        navigation_title.setObjectName("sidebarSectionTitle")
+        layout.addWidget(navigation_title)
 
-        self.library_nav_button = NavButton("全部歌曲", active=True)
+        self.library_nav_button = NavButton(
+            "全部歌曲", active=True, navigation_id="library_all"
+        )
         self.library_nav_button.clicked.connect(
             lambda checked=False: self.show_library_category("all")
         )
-        self.recent_nav_button = NavButton("最近播放")
+        self.recent_nav_button = NavButton("最近播放", navigation_id="recent")
         self.recent_nav_button.clicked.connect(
             lambda checked=False: self.show_library_category("recent_played")
         )
-        self.frequent_nav_button = NavButton("常听")
+        self.frequent_nav_button = NavButton("常听", navigation_id="frequent")
         self.frequent_nav_button.clicked.connect(
             lambda checked=False: self.show_library_category("frequent")
         )
-        self.liked_playlist_button = NavButton("我喜欢")
+        self.liked_playlist_button = NavButton("我喜欢", navigation_id="liked")
         self.liked_playlist_button.clicked.connect(self.show_liked_playlist_page)
-        self.recent_added_nav_button = NavButton("最近添加")
+        self.recent_added_nav_button = NavButton(
+            "最近添加", navigation_id="recent_added"
+        )
         self.recent_added_nav_button.clicked.connect(
             lambda checked=False: self.show_library_category("recent_added")
+        )
+        self.artists_nav_button = NavButton("歌手", navigation_id="artists")
+        self.artists_nav_button.clicked.connect(
+            lambda checked=False: self.show_sidebar_library_mode("artists")
+        )
+        self.albums_nav_button = NavButton("专辑", navigation_id="albums")
+        self.albums_nav_button.clicked.connect(
+            lambda checked=False: self.show_sidebar_library_mode("albums")
         )
         self.view_buttons.update(
             {
@@ -8463,30 +8732,21 @@ class MainWindow(QMainWindow):
                 "recent_added": self.recent_added_nav_button,
             }
         )
-        layout.addWidget(self.library_nav_button)
-        layout.addWidget(self.recent_nav_button)
-        layout.addWidget(self.frequent_nav_button)
-        layout.addWidget(self.liked_playlist_button)
-        layout.addWidget(self.recent_added_nav_button)
-
-        layout.addSpacing(12)
-        nav_title = QLabel("浏览")
-        nav_title.setObjectName("sidebarSectionTitle")
-        layout.addWidget(nav_title)
-
-        self.search_nav_button = NavButton("搜索")
+        self.search_nav_button = NavButton("搜索", navigation_id="online_search")
         self.search_nav_button.clicked.connect(self.show_search_page)
 
-        self.playlist_nav_button = NavButton("播放列表")
+        self.playlist_nav_button = NavButton("播放列表", navigation_id="playlists")
         self.playlist_nav_button.clicked.connect(self.show_play_queue)
 
-        self.lyrics_nav_button = NavButton("歌词")
+        self.lyrics_nav_button = NavButton("歌词", navigation_id="lyrics")
         self.lyrics_nav_button.clicked.connect(self.show_full_lyrics_page)
 
-        self.pending_nav_button = NavButton("待导入")
+        self.pending_nav_button = NavButton("待导入", navigation_id="pending_imports")
         self.pending_nav_button.clicked.connect(self.show_pending_imports_page)
 
-        self.custom_sources_nav_button = NavButton("自定义来源")
+        self.custom_sources_nav_button = NavButton(
+            "自定义来源", navigation_id="custom_sources"
+        )
         self.custom_sources_nav_button.clicked.connect(
             self.show_custom_source_manager_page
         )
@@ -8494,11 +8754,33 @@ class MainWindow(QMainWindow):
         self.settings_nav_button = NavButton("设置")
         self.settings_nav_button.clicked.connect(self.open_settings_dialog)
 
-        layout.addWidget(self.search_nav_button)
-        layout.addWidget(self.playlist_nav_button)
-        layout.addWidget(self.lyrics_nav_button)
-        layout.addWidget(self.pending_nav_button)
-        layout.addWidget(self.custom_sources_nav_button)
+        self.sidebar_navigation = SidebarNavigationList(content)
+        self.sidebar_navigation_buttons = {
+            "library_all": self.library_nav_button,
+            "liked": self.liked_playlist_button,
+            "recent": self.recent_nav_button,
+            "frequent": self.frequent_nav_button,
+            "recent_added": self.recent_added_nav_button,
+            "artists": self.artists_nav_button,
+            "albums": self.albums_nav_button,
+            "playlists": self.playlist_nav_button,
+            "online_search": self.search_nav_button,
+            "lyrics": self.lyrics_nav_button,
+            "pending_imports": self.pending_nav_button,
+            "custom_sources": self.custom_sources_nav_button,
+        }
+        for item_id in SIDEBAR_NAVIGATION_DEFAULT_ORDER:
+            self.sidebar_navigation.add_navigation_button(
+                item_id,
+                self.sidebar_navigation_buttons[item_id],
+            )
+        self.sidebar_navigation.apply_order(
+            self.settings.get("sidebar_navigation_order")
+        )
+        self.sidebar_navigation.navigationOrderChanged.connect(
+            self.save_sidebar_navigation_order
+        )
+        layout.addWidget(self.sidebar_navigation)
 
         layout.addSpacing(12)
 
@@ -8555,6 +8837,8 @@ class MainWindow(QMainWindow):
         # per-row automatic sort or change the playlist relationship order.
         self.song_list.setSortingEnabled(False)
         self.song_list.setItemDelegate(SongLibraryDelegate(self, self.song_list))
+        page.set_like_state_provider(self.is_media_item_liked)
+        page.trackLikeToggleRequested.connect(self.toggle_liked_media_item)
         self.song_list.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.song_list.customContextMenuRequested.connect(self.show_song_context_menu)
         self.song_list.itemClicked.connect(self.select_song)
@@ -9847,6 +10131,7 @@ class MainWindow(QMainWindow):
             self.song_list.setUpdatesEnabled(True)
 
         rows_filtered_at = time.perf_counter()
+        self.library_visible_count = visible_count
 
         if hasattr(self, "song_list_empty_hint"):
             if visible_count <= 0:
@@ -9958,6 +10243,10 @@ class MainWindow(QMainWindow):
         mode = str(mode)
         if hasattr(self, "library_page"):
             self.library_page.scroll_current_view_to_top()
+        if getattr(self, "current_library_view", "all") == "all":
+            self.set_sidebar_active(
+                mode if mode in {"artists", "albums"} else "library"
+            )
         if mode == getattr(self, "initial_library_content_view", "tracks"):
             return
         self.initial_library_content_view = mode
@@ -12302,8 +12591,17 @@ class MainWindow(QMainWindow):
         header.addLayout(title_box, 1)
         header.addWidget(self.play_queue_back_btn)
 
-        self.play_queue_page_list = QListWidget()
+        self.play_queue_page_list = LikeAwareListWidget()
         self.play_queue_page_list.setObjectName("playQueuePageList")
+        self.play_queue_page_list.setItemDelegate(
+            IndentedLikeDelegate(self.play_queue_page_list)
+        )
+        self.play_queue_page_list.set_like_state_provider(
+            self.is_media_item_liked
+        )
+        self.play_queue_page_list.likeToggleRequested.connect(
+            self.toggle_liked_media_item
+        )
         self.play_queue_page_list.itemDoubleClicked.connect(self.play_selected_queue_page_song)
 
         button_row = QHBoxLayout()
@@ -12434,7 +12732,7 @@ class MainWindow(QMainWindow):
             item = QListWidgetItem(
                 f"{index}. {media_item.title} - {media_item.artist}  [{kind_text}]"
             )
-            item.setData(Qt.ItemDataRole.UserRole, queue_item.to_mapping())
+            item.setData(Qt.ItemDataRole.UserRole, media_item.to_dict())
             self.play_queue_page_list.addItem(item)
         if self.play_queue_page_list.count() > 0 and self.play_queue_page_list.currentRow() < 0:
             self.play_queue_page_list.setCurrentRow(0)
@@ -13180,8 +13478,134 @@ class MainWindow(QMainWindow):
         if not normalized_path:
             return False
 
-        liked_songs = self.get_liked_song_paths()
-        return normalized_path in liked_songs
+        return (
+            PlaylistMembership.LOCAL,
+            normalized_path,
+        ) in self.get_playlist_member_index("liked")
+
+    def liked_membership_key(self, value: dict | MediaItem) -> tuple[str, str]:
+        try:
+            item = MediaItem.from_mapping(value)
+        except (TypeError, ValueError):
+            return "", ""
+        if item.media_type == "online":
+            stable_id = str(item.extra.get("remote_stable_id") or "").strip()
+            if not stable_id:
+                stable_id = RemoteTrackStore.stable_id_for_track(
+                    item.to_legacy_online()
+                )
+            return PlaylistMembership.REMOTE, stable_id
+        path = self.normalize_song_path(item.local_file_path)
+        return (PlaylistMembership.LOCAL, path) if path else ("", "")
+
+    def is_media_item_liked(self, value: dict | MediaItem) -> bool:
+        membership_key = self.liked_membership_key(value)
+        return bool(
+            membership_key[0]
+            and membership_key in self.get_playlist_member_index("liked")
+        )
+
+    def set_media_item_liked(
+        self,
+        value: dict | MediaItem,
+        liked: bool,
+    ) -> bool:
+        try:
+            item = MediaItem.from_mapping(value)
+        except (TypeError, ValueError):
+            return False
+        liked = bool(liked)
+        kind, identifier = self.liked_membership_key(item)
+        if not kind or not identifier:
+            return False
+        if self.is_media_item_liked(item) == liked:
+            return liked
+
+        if kind == PlaylistMembership.REMOTE and liked:
+            try:
+                identifier, _record = self.persist_remote_track(
+                    item.to_legacy_online()
+                )
+            except RemoteTrackStoreError as error:
+                QMessageBox.warning(self, "保存在线歌曲失败", str(error))
+                return False
+            changed = self.add_remote_id_to_playlist(identifier, "liked")
+            if changed:
+                self.refresh_remote_song_item(identifier, mark_dirty=False)
+        elif kind == PlaylistMembership.REMOTE:
+            changed = self.remove_remote_id_from_playlist(identifier, "liked")
+        elif liked:
+            changed = self.add_local_path_to_playlist(identifier, "liked")
+        else:
+            changed = self.remove_local_path_from_playlist(identifier, "liked")
+
+        if not changed:
+            return not liked
+        identity = item.stable_identity
+        self.liked_state_changed.emit(identity, liked)
+        if item.media_type == "online":
+            self.set_online_status_message(
+                "已收藏到“我喜欢”。" if liked else "已取消收藏该在线歌曲。"
+            )
+        else:
+            print(("已加入我喜欢：" if liked else "已取消收藏："), identifier)
+        return liked
+
+    def toggle_liked_media_item(self, value: dict | MediaItem) -> bool:
+        return self.set_media_item_liked(value, not self.is_media_item_liked(value))
+
+    def on_liked_state_changed(self, identity: str, liked: bool) -> None:
+        identity = str(identity or "")
+        main_item = self.find_song_item_by_identity(identity)
+        if isinstance(self.song_list, LikeAwareListWidget):
+            self.song_list.refresh_like_identity(identity)
+
+        if self.current_library_view == "liked" and main_item is not None:
+            scroll_bar = self.song_list.verticalScrollBar()
+            scroll_value = scroll_bar.value()
+            was_visible = not main_item.isHidden()
+            if liked:
+                main_item.setHidden(False)
+                if self.library_sort_field is None:
+                    row = self.song_list.row(main_item)
+                    if row > 0:
+                        selected = main_item.isSelected()
+                        current = self.song_list.currentItem() is main_item
+                        main_item = self.song_list.takeItem(row)
+                        self.song_list.insertItem(0, main_item)
+                        main_item.setSelected(selected)
+                        if current:
+                            self.song_list.setCurrentItem(
+                                main_item,
+                                QItemSelectionModel.SelectionFlag.NoUpdate,
+                            )
+            else:
+                main_item.setHidden(True)
+            visible_count = int(getattr(self, "library_visible_count", 0))
+            if liked and not was_visible:
+                visible_count += 1
+            elif not liked and was_visible:
+                visible_count = max(0, visible_count - 1)
+            self.library_visible_count = visible_count
+            self.song_list_empty_hint.setVisible(visible_count == 0)
+            self.song_list.setVisible(visible_count > 0)
+            self.song_table_header.setVisible(visible_count > 0)
+            scroll_bar.setValue(scroll_value)
+            QTimer.singleShot(0, lambda: scroll_bar.setValue(scroll_value))
+
+        page = getattr(self, "library_page", None)
+        if page is not None:
+            page.refresh_like_identity(identity)
+            if self.current_library_view == "liked" and not liked:
+                page.remove_visible_group_detail_identity(identity)
+        search_page = getattr(self, "search_page", None)
+        if search_page is not None:
+            search_page.refresh_like_identity(identity)
+        queue_list = getattr(self, "play_queue_page_list", None)
+        if isinstance(queue_list, LikeAwareListWidget):
+            queue_list.refresh_like_identity(identity)
+        self.update_like_button()
+        self.update_side_info_panel()
 
     def update_like_button(self) -> None:
         if not hasattr(self, "like_btn"):
@@ -13221,13 +13645,8 @@ class MainWindow(QMainWindow):
 
     def toggle_like_current_song(self) -> None:
         current = getattr(self, "current_media_item", None)
-        if isinstance(current, MediaItem) and current.media_type == "online":
-            state = self.get_online_track_collection_state(current.to_dict())
-            if state.get("liked"):
-                self.unlike_online_track(current.to_dict())
-            else:
-                self.like_online_track(current.to_dict())
-            self.update_like_button()
+        if isinstance(current, MediaItem):
+            self.toggle_liked_media_item(current)
             return
 
         target_path = self.normalize_song_path(self.current_song_path)
@@ -13236,18 +13655,7 @@ class MainWindow(QMainWindow):
             print("当前没有可收藏的真实歌曲。")
             return
 
-        if self.is_song_liked(target_path):
-            changed = self.remove_local_path_from_playlist(target_path, "liked")
-            print("已取消收藏：", target_path)
-        else:
-            changed = self.add_local_path_to_playlist(target_path, "liked")
-            print("已加入我喜欢：", target_path)
-
-        if not changed:
-            return
-        self.update_like_button()
-        self.update_side_info_panel()
-        self.refresh_playlist_membership_views()
+        self.toggle_liked_media_item({"path": target_path})
 
     def load_song_stats(self) -> dict:
         if not self.stats_file.exists():
@@ -16671,27 +17079,7 @@ class MainWindow(QMainWindow):
 
         if not song_data:
             return
-
-        song_path = self.normalize_song_path(song_data.get("path", ""))
-
-        if not song_path:
-            return
-
-        if self.is_song_liked(song_path):
-            changed = self.remove_local_path_from_playlist(song_path, "liked")
-            print("已取消收藏：", song_path)
-        else:
-            changed = self.add_local_path_to_playlist(song_path, "liked")
-            print("已加入我喜欢：", song_path)
-
-        if not changed:
-            return
-
-        if self.current_song_path and self.normalize_song_path(self.current_song_path) == song_path:
-            self.update_like_button()
-            self.update_side_info_panel()
-
-        self.refresh_playlist_membership_views()
+        self.toggle_liked_media_item(song_data)
 
     def open_selected_song_folder(self) -> None:
         song_path = self.get_current_selected_song_path()

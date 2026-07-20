@@ -7,6 +7,7 @@ from PySide6.QtCore import QObject
 from PySide6.QtWidgets import QMenu, QMessageBox
 
 from app.models.media_item import MediaItem
+from app.services.playlist_membership import PlaylistMembership
 from app.ui.track_details_panel import TrackDetailsDialog
 
 
@@ -29,7 +30,10 @@ class MediaInteractionController(QObject):
             "liked": self.window.is_song_liked(path),
             "inCurrentPlaylist": bool(
                 current_playlist_id
-                and path in self.window.get_playlist_song_paths(current_playlist_id)
+                and (
+                    PlaylistMembership.LOCAL,
+                    path,
+                ) in self.window.get_playlist_member_index(current_playlist_id)
             ),
         }
 
@@ -40,22 +44,7 @@ class MediaInteractionController(QObject):
         self._set_local_liked(value, False)
 
     def _set_local_liked(self, value: dict, liked: bool) -> None:
-        item = MediaItem.from_mapping(value)
-        path = self.window.normalize_song_path(item.local_file_path)
-        if not path:
-            return
-        changed = (
-            self.window.add_local_path_to_playlist(path, "liked")
-            if liked
-            else self.window.remove_local_path_from_playlist(path, "liked")
-        )
-        if not changed:
-            return
-        self.window.refresh_playlist_membership_views()
-        self.window.search_page.set_local_results(
-            self.window.search_input.text(),
-            self.window.collect_local_search_results(self.window.search_input.text()),
-        )
+        self.window.set_media_item_liked(value, liked)
 
     def add_local_to_playlist(self, value: dict, playlist_id: str) -> None:
         item = MediaItem.from_mapping(value)

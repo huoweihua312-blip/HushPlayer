@@ -8,13 +8,13 @@ from PySide6.QtWidgets import (
     QFrame,
     QHBoxLayout,
     QLabel,
-    QListWidget,
     QListWidgetItem,
     QMenu,
     QVBoxLayout,
 )
 
 from app.models.media_item import MediaItem
+from app.ui.track_list_view import IndentedLikeDelegate, LikeAwareListWidget
 
 
 class UnifiedSearchResultsPanel(QFrame):
@@ -64,14 +64,18 @@ class UnifiedSearchResultsPanel(QFrame):
         header.addWidget(title)
         header.addStretch()
         header.addWidget(self.status_label, 1)
-        self.result_list = QListWidget()
+        self.result_list = LikeAwareListWidget()
         self.result_list.setObjectName("unifiedSearchResultList")
+        self.result_list.setItemDelegate(
+            IndentedLikeDelegate(self.result_list)
+        )
         self.result_list.setUniformItemSizes(False)
         self.result_list.setSpacing(2)
         self.result_list.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.result_list.customContextMenuRequested.connect(self.show_context_menu)
         self.result_list.itemClicked.connect(self._handle_item_clicked)
         self.result_list.itemDoubleClicked.connect(self.request_playback)
+        self.result_list.likeToggleRequested.connect(self._toggle_result_like)
         self.result_list.setMinimumHeight(160)
         if not self.standalone:
             self.result_list.setMaximumHeight(285)
@@ -93,6 +97,18 @@ class UnifiedSearchResultsPanel(QFrame):
     def set_collection_providers(self, state_provider, playlist_provider) -> None:
         self.collection_state_provider = state_provider or (lambda _track: {})
         self.playlist_provider = playlist_provider or (lambda: [])
+        self.result_list.set_like_state_provider(self.collection_state_provider)
+
+    def _toggle_result_like(self, track: dict) -> None:
+        try:
+            liked = bool((self.collection_state_provider(track) or {}).get("liked"))
+        except Exception:
+            liked = False
+        signal = self.unlikeRequested if liked else self.likeRequested
+        signal.emit(dict(track))
+
+    def refresh_like_identity(self, identity: str) -> int:
+        return self.result_list.refresh_like_identity(identity)
 
     def set_cache_state_provider(self, provider) -> None:
         self.cache_state_provider = provider or (lambda _track: {})

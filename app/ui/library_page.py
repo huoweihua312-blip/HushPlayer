@@ -55,6 +55,7 @@ class GroupedLibraryView(QFrame):
     trackBrowsed = Signal(dict)
     trackPlayRequested = Signal(dict)
     trackContextRequested = Signal(dict, object)
+    trackLikeToggleRequested = Signal(dict)
 
     CHUNK_SIZE = 250
 
@@ -109,6 +110,9 @@ class GroupedLibraryView(QFrame):
             parent=self.detail_page,
         )
         self.detail_tracks.use_canonical_delegate()
+        self.detail_tracks.list_widget.likeToggleRequested.connect(
+            self.trackLikeToggleRequested
+        )
         self.detail_tracks.sortRequested.connect(self._sort_detail_tracks)
         self.detail_tracks.list_widget.itemClicked.connect(self._browse_detail)
         self.detail_tracks.list_widget.itemDoubleClicked.connect(self._play_detail)
@@ -215,6 +219,33 @@ class GroupedLibraryView(QFrame):
 
     def set_playing_key_provider(self, provider) -> None:
         self.detail_tracks.use_canonical_delegate(provider)
+
+    def set_like_state_provider(self, provider) -> None:
+        self.detail_tracks.set_like_state_provider(provider)
+
+    def refresh_like_identity(self, identity: str) -> int:
+        return self.detail_tracks.refresh_like_identity(identity)
+
+    def remove_detail_identity(self, identity: str) -> int:
+        target = str(identity or "")
+        if not target:
+            return 0
+        list_widget = self.detail_tracks.list_widget
+        scroll_bar = list_widget.verticalScrollBar()
+        scroll_value = scroll_bar.value()
+        removed = 0
+        for row in range(list_widget.count() - 1, -1, -1):
+            item = list_widget.item(row)
+            value = item.data(Qt.ItemDataRole.UserRole) if item is not None else None
+            if list_widget.identity_for_value(value) != target:
+                continue
+            list_widget.takeItem(row)
+            removed += 1
+        if removed:
+            self.detail_tracks.update_empty_state("这个分组没有歌曲")
+            scroll_bar.setValue(scroll_value)
+            QTimer.singleShot(0, lambda: scroll_bar.setValue(scroll_value))
+        return removed
 
     def refresh_playing_indicator(self) -> None:
         self.detail_tracks.list_widget.viewport().update()
@@ -351,6 +382,7 @@ class LibraryPage(QFrame):
     trackBrowsed = Signal(dict)
     trackPlayRequested = Signal(dict)
     trackContextRequested = Signal(dict, object)
+    trackLikeToggleRequested = Signal(dict)
     viewChanged = Signal(str)
 
     def __init__(self, parent: QWidget | None = None) -> None:
@@ -435,12 +467,16 @@ class LibraryPage(QFrame):
             empty_text="音乐库还是空的\n导入本地音乐后，就可以在这里浏览和播放。",
             selection_mode=QAbstractItemView.SelectionMode.ExtendedSelection,
         )
+        self.track_view.list_widget.likeToggleRequested.connect(
+            self.trackLikeToggleRequested
+        )
         self.artist_view = ArtistGridView()
         self.album_view = AlbumGridView()
         for view in (self.artist_view, self.album_view):
             view.trackBrowsed.connect(self.trackBrowsed)
             view.trackPlayRequested.connect(self.trackPlayRequested)
             view.trackContextRequested.connect(self.trackContextRequested)
+            view.trackLikeToggleRequested.connect(self.trackLikeToggleRequested)
         self.content_stack.addWidget(self.track_view)
         self.content_stack.addWidget(self.artist_view)
         self.content_stack.addWidget(self.album_view)
@@ -484,6 +520,26 @@ class LibraryPage(QFrame):
     def set_playing_key_provider(self, provider) -> None:
         self.artist_view.set_playing_key_provider(provider)
         self.album_view.set_playing_key_provider(provider)
+
+    def set_like_state_provider(self, provider) -> None:
+        self.track_view.set_like_state_provider(provider)
+        self.artist_view.set_like_state_provider(provider)
+        self.album_view.set_like_state_provider(provider)
+
+    def refresh_like_identity(self, identity: str) -> int:
+        return sum(
+            (
+                self.track_view.refresh_like_identity(identity),
+                self.artist_view.refresh_like_identity(identity),
+                self.album_view.refresh_like_identity(identity),
+            )
+        )
+
+    def remove_visible_group_detail_identity(self, identity: str) -> int:
+        return (
+            self.artist_view.remove_detail_identity(identity)
+            + self.album_view.remove_detail_identity(identity)
+        )
 
     def refresh_playing_indicator(self) -> None:
         self.artist_view.refresh_playing_indicator()

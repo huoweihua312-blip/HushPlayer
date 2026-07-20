@@ -15,7 +15,6 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QLineEdit,
-    QListWidget,
     QListWidgetItem,
     QMenu,
     QPlainTextEdit,
@@ -26,6 +25,7 @@ from PySide6.QtWidgets import (
 from app.core.version import APP_USER_AGENT
 from app.services.online_source_client import OnlineSourceClient
 from app.services.source_registry import MAX_SOURCE_BYTES, SourceRegistryError, SourceRegistryManager
+from app.ui.track_list_view import IndentedLikeDelegate, LikeAwareListWidget
 
 
 def _format_duration(value) -> str:
@@ -122,13 +122,15 @@ class OnlineSearchPage(QFrame):
         self.status_label.setWordWrap(True)
         layout.addWidget(self.status_label)
 
-        self.result_list = QListWidget()
+        self.result_list = LikeAwareListWidget()
         self.result_list.setObjectName("onlineSearchResults")
+        self.result_list.setItemDelegate(IndentedLikeDelegate(self.result_list))
         self.result_list.setUniformItemSizes(True)
         self.result_list.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
         self.result_list.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.result_list.itemSelectionChanged.connect(self.update_detail_buttons)
         self.result_list.itemDoubleClicked.connect(self.request_playback)
+        self.result_list.likeToggleRequested.connect(self._toggle_result_like)
         self.result_list.customContextMenuRequested.connect(self.show_result_context_menu)
         layout.addWidget(self.result_list, 1)
 
@@ -523,6 +525,18 @@ class OnlineSearchPage(QFrame):
     def set_collection_providers(self, state_provider, playlist_provider) -> None:
         self.collection_state_provider = state_provider or (lambda _track: {})
         self.playlist_provider = playlist_provider or (lambda: [])
+        self.result_list.set_like_state_provider(self.collection_state_provider)
+
+    def _toggle_result_like(self, result: dict) -> None:
+        try:
+            liked = bool((self.collection_state_provider(result) or {}).get("liked"))
+        except Exception:
+            liked = False
+        signal = self.unlike_requested if liked else self.like_requested
+        signal.emit(dict(result))
+
+    def refresh_like_identity(self, identity: str) -> int:
+        return self.result_list.refresh_like_identity(identity)
 
     def show_result_context_menu(self, position) -> None:
         item = self.result_list.itemAt(position)

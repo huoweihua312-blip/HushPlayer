@@ -327,6 +327,9 @@ class SearchPage(QFrame):
             empty_text="输入关键词后显示本地搜索结果",
         )
         self.local_view.use_canonical_delegate()
+        self.local_view.list_widget.likeToggleRequested.connect(
+            self._toggle_local_like
+        )
         self.local_view.sortRequested.connect(self._sort_local_results)
         self.local_view.list_widget.itemClicked.connect(self._browse_local)
         self.local_view.list_widget.itemDoubleClicked.connect(self._play_local)
@@ -430,6 +433,21 @@ class SearchPage(QFrame):
     def set_collection_providers(self, local_state_provider, playlist_provider) -> None:
         self.local_state_provider = local_state_provider or (lambda _track: {})
         self.playlist_provider = playlist_provider or (lambda: [])
+        self.local_view.set_like_state_provider(self.local_state_provider)
+
+    def _toggle_local_like(self, value: dict) -> None:
+        try:
+            liked = bool((self.local_state_provider(value) or {}).get("liked"))
+        except Exception:
+            liked = False
+        signal = self.localUnlikeRequested if liked else self.localLikeRequested
+        signal.emit(dict(value))
+
+    def refresh_like_identity(self, identity: str) -> int:
+        return (
+            self.local_view.refresh_like_identity(identity)
+            + self.online_results.refresh_like_identity(identity)
+        )
 
     def set_playing_key_provider(self, provider) -> None:
         self.local_view.use_canonical_delegate(provider)
