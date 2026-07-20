@@ -87,13 +87,11 @@ def run_test(app: QApplication) -> None:
 
         assert not hasattr(window, "player_queue_button")
         assert not hasattr(window, "floating_lyrics_button")
-        menu_texts = [
-            action.text() for action in window.player_more_button.menu().actions()
-        ]
-        assert "打开桌面歌词" in menu_texts
-        assert "打开歌词页" in menu_texts
-        assert "查看当前歌曲信息" not in menu_texts
-        assert all("队列" not in text for text in menu_texts)
+        assert not hasattr(window, "player_more_button")
+        assert not hasattr(window, "floating_lyrics_action")
+        assert not hasattr(window, "player_like_action")
+        assert window.immersive_lyrics_button.toolTip() == "打开沉浸歌词"
+        assert window.desktop_lyrics_button.toolTip() == "开启桌面歌词"
 
         assert window.like_btn.text() == ""
         assert window.now_like_btn.text() == ""
@@ -102,37 +100,26 @@ def run_test(app: QApplication) -> None:
         window._apply_current_like_state(True, True)
         assert window.like_btn.toolTip() == "从我喜欢移除"
         assert window.now_like_btn.toolTip() == "从我喜欢移除"
-        assert window.player_like_action.text() == "从我喜欢移除"
         assert not window.like_btn.icon().isNull()
         assert not window.now_like_btn.icon().isNull()
 
         lyrics = [
-            (0, "前两句"),
-            (1000, "上一句"),
-            (2000, "当前句"),
-            (3000, "下一句"),
-            (4000, "下两句"),
+            (index * 1000, f"第 {index + 1} 句")
+            for index in range(30)
         ]
         window.current_lyrics = lyrics
         window.lyrics_view.set_lyrics(lyrics)
-        window.lyrics_view.update_by_position(2500, lyrics)
-        label_ids = [id(label) for label in window.now_lyric_context_labels]
+        window.lyrics_view.update_by_position(14500, lyrics)
+        label_ids = [id(label) for label in window.lyrics_view.labels]
         list_items = [
             window.song_list.item(row) for row in range(window.song_list.count())
         ]
         started = time.perf_counter()
-        for position in range(2000, 3000, 5):
+        for position in range(14000, 15000, 5):
             window.lyrics_view.update_by_position(position, lyrics)
             window.update_now_lyrics_preview(position)
         preview_update_ms = (time.perf_counter() - started) * 1000
-        assert [id(label) for label in window.now_lyric_context_labels] == label_ids
-        assert [label.text() for label in window.now_lyric_context_labels] == [
-            "前两句",
-            "上一句",
-            "当前句",
-            "下一句",
-            "下两句",
-        ]
+        assert [id(label) for label in window.lyrics_view.labels] == label_ids
         assert [
             window.song_list.item(row) for row in range(window.song_list.count())
         ] == list_items
@@ -140,19 +127,16 @@ def run_test(app: QApplication) -> None:
         for width in (1100, 1450, 1600, 1920, 2560):
             process_layout(app, window, width)
             assert window.now_playing_panel.isVisible()
-            assert all(label.isVisible() for label in window.now_lyric_context_labels)
-            assert (
-                window.now_lyric_context_labels[-1].geometry().bottom()
-                <= window.now_lyrics_context_box.contentsRect().bottom()
-            )
+            assert window.lyrics_view.isVisible()
             assert not window.now_like_btn.geometry().intersects(
                 window.now_more_btn.geometry()
             )
 
         process_layout(app, window, 900)
         assert window.now_playing_panel.isHidden()
-        assert window.like_btn.isHidden()
-        assert window.player_more_button.isVisible()
+        assert window.like_btn.isVisible()
+        assert window.immersive_lyrics_button.isVisible()
+        assert window.desktop_lyrics_button.isVisible()
         assert window.player_left_box.geometry().right() <= (
             window.player_center_box.geometry().left()
         )
@@ -175,7 +159,7 @@ def run_test(app: QApplication) -> None:
             "main UI fourth polish smoke: OK",
             f"preview_200_updates_ms={preview_update_ms:.2f}",
             f"navigation_items={len(expected_order)}",
-            f"lyric_context_lines={len(window.now_lyric_context_labels)}",
+            f"lyric_labels={len(window.lyrics_view.labels)}",
         )
     finally:
         window.close()

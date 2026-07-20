@@ -71,33 +71,23 @@ def run_test(app: QApplication) -> None:
         assert window.now_info_box.layout().contentsMargins().left() == 0
         assert window.now_like_btn.isVisible()
         assert window.now_more_btn.isVisible()
-        assert window.lyrics_view.isHidden()
-        assert len(window.now_lyric_context_labels) == 5
+        assert window.lyrics_view.isVisible()
 
         window.current_lyrics = [
-            (0, "前两句歌词"),
-            (1000, "上一句歌词"),
-            (2000, "当前歌词"),
-            (3000, "下一句歌词"),
-            (4000, "下两句歌词"),
+            (index * 1000, f"第 {index + 1} 句歌词")
+            for index in range(20)
         ]
         window.lyrics_view.set_lyrics(window.current_lyrics)
         rebuild_count = window.lyrics_view.content_rebuild_count
-        window.lyrics_view.update_by_position(2500, window.current_lyrics)
-        window.update_now_lyrics_preview(2500)
-        assert [label.text() for label in window.now_lyric_context_labels] == [
-            "前两句歌词",
-            "上一句歌词",
-            "当前歌词",
-            "下一句歌词",
-            "下两句歌词",
-        ]
-        assert window.now_current_lyric.text() == "当前歌词"
-        assert window.now_next_lyric.text() == "下一句歌词"
-        for position in range(2500, 2600, 5):
+        label_ids = [id(label) for label in window.lyrics_view.labels]
+        window.lyrics_view.update_by_position(9500, window.current_lyrics)
+        window.update_now_lyrics_preview(9500)
+        assert window.lyrics_view.current_index == 9
+        for position in range(9500, 9600, 5):
             window.lyrics_view.update_by_position(position, window.current_lyrics)
             window.update_now_lyrics_preview(position)
         assert window.lyrics_view.content_rebuild_count == rebuild_count
+        assert [id(label) for label in window.lyrics_view.labels] == label_ids
 
         large_library = [
             {
@@ -155,14 +145,14 @@ def run_test(app: QApplication) -> None:
         assert window.progress_slider.x() < window.total_time_label.x()
         assert not hasattr(window, "player_queue_button")
         assert not hasattr(window, "floating_lyrics_button")
-        assert window.player_more_button.parent() is window.player_right_box
-        assert "打开桌面歌词" in [
-            action.text() for action in window.player_more_button.menu().actions()
-        ]
-        assert "查看当前歌曲信息" not in [
-            action.text() for action in window.player_more_button.menu().actions()
-        ]
-        assert window.play_mode_btn.parent() is window.player_center_box
+        assert not hasattr(window, "player_more_button")
+        assert window.immersive_lyrics_button.parent() is window.player_right_box
+        assert window.desktop_lyrics_button.parent() is window.player_right_box
+        assert window.like_btn.parent() is window.player_leading_controls
+        assert window.like_btn.mapToGlobal(window.like_btn.rect().center()).x() < (
+            window.prev_btn.mapToGlobal(window.prev_btn.rect().center()).x()
+        )
+        assert window.play_mode_btn.parent() is window.player_trailing_controls
         player_layout_count = window.player_bar_layout.count()
         center_geometry = window.player_center_box.geometry()
         for position in range(0, 180000, 3000):
@@ -172,10 +162,14 @@ def run_test(app: QApplication) -> None:
 
         process_layout(app, window, 900)
         assert window.now_playing_panel.isHidden()
-        assert window.bottom_cover_label.isHidden()
-        assert window.like_btn.isHidden()
-        assert window.player_more_button.isVisible()
-        assert window.volume_slider.isHidden()
+        assert window.bottom_cover_label.isVisible()
+        assert window.like_btn.isVisible()
+        assert window.immersive_lyrics_button.isVisible()
+        assert window.desktop_lyrics_button.isVisible()
+        assert window.immersive_lyrics_button.text() == ""
+        assert window.desktop_lyrics_button.text() == ""
+        assert window.volume_slider.isVisible()
+        assert window.volume_value_label.isHidden()
         assert window.player_left_box.geometry().right() <= window.player_center_box.geometry().left()
         assert window.player_center_box.geometry().right() <= window.player_right_box.geometry().left()
 
@@ -246,7 +240,6 @@ def run_test(app: QApplication) -> None:
         assert window.now_like_btn.text() == ""
         assert not window.like_btn.icon().isNull()
         assert not window.now_like_btn.icon().isNull()
-        assert window.player_like_action.text() == "从我喜欢移除"
         window._apply_current_like_state(False, True)
         assert window.like_btn.toolTip() == "添加到我喜欢"
         assert window.now_like_btn.toolTip() == "添加到我喜欢"

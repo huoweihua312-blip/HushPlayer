@@ -121,8 +121,8 @@ def run_test(app: QApplication) -> None:
         assert window.current_time_label.text() == "0:00"
         assert window.total_time_label.text() == "0:00"
         assert not window.lyrics_view.manual_browse_enabled
-        assert window.lyrics_view.target_position_ratio == 0.5
-        assert window.lyrics_view.scroll_animation.duration() == 520
+        assert window.lyrics_view.target_position_ratio == 0.45
+        assert window.lyrics_view.scroll_animation.duration() == 0
         assert DARK_THEME_TOKENS["favorite"] in window.build_player_product_qss()
         assert "modeActive" in window.build_player_product_qss()
 
