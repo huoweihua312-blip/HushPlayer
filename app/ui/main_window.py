@@ -107,19 +107,18 @@ AUDIO_EXTENSIONS = {
 }
 
 SIDEBAR_NAVIGATION_DEFAULT_ORDER = (
-    "library_all",
     "liked",
-    "recent",
-    "frequent",
-    "recent_added",
-    "artists",
-    "albums",
-    "playlists",
     "online_search",
-    "lyrics",
+    "library_all",
     "pending_imports",
     "custom_sources",
 )
+
+SIDEBAR_NAVIGATION_ID_ALIASES = {
+    "all_songs": "library_all",
+    "search": "online_search",
+    "pending_import": "pending_imports",
+}
 
 
 def merge_sidebar_navigation_order(saved_order) -> list[str]:
@@ -131,6 +130,7 @@ def merge_sidebar_navigation_order(saved_order) -> list[str]:
     seen: set[str] = set()
     for value in saved_order:
         item_id = str(value or "").strip()
+        item_id = SIDEBAR_NAVIGATION_ID_ALIASES.get(item_id, item_id)
         if item_id not in valid_ids or item_id in seen:
             continue
         merged.append(item_id)
@@ -560,7 +560,7 @@ class SidebarNavigationList(QFrame):
         button.navigation_id = item_id
         button.navigation_container = self
         button._refresh_navigation_icon()
-        button.setToolTip("单击打开；按住并上下拖动可调整顺序")
+        button.setToolTip(f"{button.text()}；单击打开，按住并上下拖动可调整顺序")
         button.setAccessibleDescription("可上下拖动调整侧栏导航顺序")
         self.navigation_buttons[item_id] = button
         self.navigation_layout.addWidget(button)
@@ -5543,8 +5543,6 @@ class MainWindow(QMainWindow):
         self.sidebar_panel = sidebar
         library_panel = self.measure_startup_step("音乐库页面 UI", self._create_library_panel)
         self.library_panel = library_panel
-        full_lyrics_page = self.measure_startup_step("歌词页面 UI", self._create_full_lyrics_page)
-        self.full_lyrics_page = full_lyrics_page
         pending_imports_page = self.measure_startup_step("待导入页面 UI", self._create_pending_imports_page)
         self.pending_imports_page = pending_imports_page
         search_page = self.measure_startup_step(
@@ -5643,7 +5641,6 @@ class MainWindow(QMainWindow):
         self.content_stack = QStackedWidget()
         self.content_stack.setObjectName("contentStack")
         self.content_stack.addWidget(library_panel)
-        self.content_stack.addWidget(full_lyrics_page)
         self.content_stack.addWidget(pending_imports_page)
         self.content_stack.addWidget(search_page)
         self.content_stack.addWidget(custom_source_manager_page)
@@ -5701,9 +5698,8 @@ class MainWindow(QMainWindow):
 
         self.schedule_startup_task(350, "恢复上次播放信息", self.restore_playback_session)
         self.schedule_startup_task(0, "设置按钮挂钩", self.install_settings_button_hook)
-        self.schedule_startup_task(0, "播放列表按钮挂钩", self.install_playlist_button_hook)
         self.schedule_startup_task(0, "桌面歌词功能初始化", self.install_floating_lyrics_feature)
-        self.schedule_startup_task(0, "桌面歌词按钮初始化", self.install_floating_lyrics_button)
+        self.schedule_startup_task(0, "桌面歌词菜单初始化", self.install_floating_lyrics_button)
         self.schedule_startup_task(0, "Windows 深色标题栏", self.apply_windows_dark_title_bar)
         if self.playlists_migration_pending:
             self.schedule_startup_task(
@@ -5950,7 +5946,7 @@ class MainWindow(QMainWindow):
             cover_size = 236
             player_margins = (24, 16, 24, 16)
             player_spacing = UI_SPACING["lg"]
-            player_limits = ((200, 280), 340, (250, 320))
+            player_limits = ((200, 280), 340, (160, 220))
         elif mode == "compact":
             root_margin = UI_SPACING["sm"]
             sidebar_limits = (170, 205, 196)
@@ -5959,7 +5955,7 @@ class MainWindow(QMainWindow):
             cover_size = 184
             player_margins = (20, 12, 20, 12)
             player_spacing = UI_SPACING["sm"]
-            player_limits = ((170, 230), 300, (210, 260))
+            player_limits = ((170, 230), 300, (150, 200))
         else:
             root_margin = UI_SPACING["xs"]
             sidebar_limits = (160, 185, 178)
@@ -5968,7 +5964,7 @@ class MainWindow(QMainWindow):
             cover_size = 0
             player_margins = (12, 8, 12, 8)
             player_spacing = UI_SPACING["xs"]
-            player_limits = ((130, 190), 260, (190, 220))
+            player_limits = ((130, 190), 260, (72, 96))
 
         self.root_layout.setContentsMargins(
             root_margin, root_margin, root_margin, root_margin
@@ -6010,9 +6006,9 @@ class MainWindow(QMainWindow):
         self.player_center_box.setMinimumWidth(center_minimum)
         self.player_right_box.setMinimumWidth(right_limits[0])
         self.player_right_box.setMaximumWidth(right_limits[1])
-        self.floating_lyrics_button.setVisible(mode == "full")
-        self.player_more_button.setVisible(mode != "full")
+        self.player_more_button.show()
         self.bottom_cover_label.setVisible(mode != "narrow")
+        self.like_btn.setVisible(mode != "narrow")
         self.volume_slider.setVisible(mode != "narrow")
         self.volume_value_label.setVisible(mode != "narrow")
         current = getattr(self, "current_media_item", None)
@@ -7058,7 +7054,7 @@ class MainWindow(QMainWindow):
         self.remember_library_view_key()
         self.set_sidebar_active("library")
         view_titles = {
-            "all": "全部歌曲",
+            "all": "本地歌曲",
             "liked": "我喜欢",
             "recent_played": "最近播放",
             "frequent": "常听歌曲",
@@ -7068,7 +7064,7 @@ class MainWindow(QMainWindow):
             playlist_id = self.current_library_view.split("playlist:", 1)[1]
             view_title = self.get_playlist_name(playlist_id)
         else:
-            view_title = view_titles.get(self.current_library_view, "全部歌曲")
+            view_title = view_titles.get(self.current_library_view, "本地歌曲")
         if hasattr(self, "library_page"):
             self.library_page.page_title.setText(view_title)
         completed_at = time.perf_counter()
@@ -7303,9 +7299,8 @@ class MainWindow(QMainWindow):
         return True
 
     def update_now_lyrics_preview(self, effective_position: int | None = None) -> None:
-        current_label = getattr(self, "now_current_lyric", None)
-        next_label = getattr(self, "now_next_lyric", None)
-        if current_label is None or next_label is None:
+        labels = list(getattr(self, "now_lyric_context_labels", ()))
+        if len(labels) < 5:
             return
 
         def update_label(label: QLabel, text: str) -> None:
@@ -7328,28 +7323,34 @@ class MainWindow(QMainWindow):
                     position,
                 ) - 1
                 index = max(0, min(index, len(lyrics) - 1))
-            update_label(current_label, str(lyrics[index][1] or ""))
-            update_label(
-                next_label,
-                str(lyrics[index + 1][1] or "") if index + 1 < len(lyrics) else "",
-            )
+            for label, offset in zip(labels, (-2, -1, 0, 1, 2)):
+                context_index = index + offset
+                text = (
+                    str(lyrics[context_index][1] or "")
+                    if 0 <= context_index < len(lyrics)
+                    else ""
+                )
+                update_label(label, text)
             return
 
         if getattr(self, "current_plain_lyrics", ""):
-            update_label(current_label, "纯文本歌词")
-            update_label(next_label, "请在歌词页查看完整内容")
+            values = ("", "", "纯文本歌词", "请在歌词页查看完整内容", "")
+            for label, text in zip(labels, values):
+                update_label(label, text)
             return
 
         if not self.current_track_identity():
-            update_label(current_label, "这里会显示当前歌词")
-            update_label(next_label, "播放一首歌后即可查看")
+            values = ("", "", "这里会显示当前歌词", "播放一首歌后即可查看", "")
+            for label, text in zip(labels, values):
+                update_label(label, text)
             return
 
         status = ""
         if hasattr(self, "lyrics_status_label"):
             status = self.lyrics_status_label.text().replace("歌词：", "").strip()
-        update_label(current_label, status or "暂无同步歌词")
-        update_label(next_label, "")
+        values = ("", "", status or "暂无同步歌词", "", "")
+        for label, text in zip(labels, values):
+            update_label(label, text)
 
     def rebuild_song_identity_index(self) -> None:
         index: dict[str, QListWidgetItem] = {}
@@ -8180,8 +8181,8 @@ class MainWindow(QMainWindow):
         self.lyrics_view.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         if hasattr(self, "now_lyrics_heading"):
             self.now_lyrics_heading.show()
-            self.now_current_lyric.show()
-            self.now_next_lyric.show()
+            for label in getattr(self, "now_lyric_context_labels", ()):
+                label.show()
 
     def format_last_played_text(self, timestamp: int) -> str:
         timestamp = int(timestamp or 0)
@@ -8508,13 +8509,26 @@ class MainWindow(QMainWindow):
         self.full_lyrics_view = LyricsView()
         self.full_lyrics_view.set_placeholder(
             "还没有正在播放的歌词",
-            "双击一首歌播放，然后点击左侧“歌词”查看大歌词页面",
+            "双击一首歌播放，然后通过底部更多菜单打开歌词页",
         )
 
         layout.addLayout(header_layout)
         layout.addWidget(self.full_lyrics_view, 1)
 
         return panel
+
+    def ensure_full_lyrics_page(self) -> QFrame | None:
+        page = getattr(self, "full_lyrics_page", None)
+        if page is not None:
+            return page
+        stack = getattr(self, "content_stack", None)
+        if stack is None:
+            return None
+        page = self._create_full_lyrics_page()
+        self.full_lyrics_page = page
+        stack.addWidget(page)
+        self.sync_full_lyrics_from_current()
+        return page
 
     def show_library_container(self, preserve_scroll: bool = False) -> None:
         if hasattr(self, "content_stack"):
@@ -8576,13 +8590,9 @@ class MainWindow(QMainWindow):
 
     def set_sidebar_active(self, active_key: str) -> None:
         nav_buttons = {
-            "playlists": getattr(self, "playlist_nav_button", None),
-            "lyrics": getattr(self, "lyrics_nav_button", None),
             "pending": getattr(self, "pending_nav_button", None),
             "search": getattr(self, "search_nav_button", None),
             "custom_sources": getattr(self, "custom_sources_nav_button", None),
-            "artists": getattr(self, "artists_nav_button", None),
-            "albums": getattr(self, "albums_nav_button", None),
             "settings": getattr(self, "settings_nav_button", None),
         }
 
@@ -8727,8 +8737,9 @@ class MainWindow(QMainWindow):
 
     def show_full_lyrics_page(self) -> None:
         self.set_sidebar_active("lyrics")
-        if hasattr(self, "content_stack"):
-            self.content_stack.setCurrentIndex(1)
+        page = self.ensure_full_lyrics_page()
+        if page is not None:
+            self.content_stack.setCurrentWidget(page)
 
         self.set_right_panel_mode("info")
         self.refresh_full_lyrics_page()
@@ -9723,52 +9734,21 @@ class MainWindow(QMainWindow):
         self.sidebar_navigation_hint = navigation_hint
 
         self.library_nav_button = NavButton(
-            "全部歌曲", active=True, navigation_id="library_all"
+            "本地歌曲", active=True, navigation_id="library_all"
         )
         self.library_nav_button.clicked.connect(
             lambda checked=False: self.show_library_category("all")
         )
-        self.recent_nav_button = NavButton("最近播放", navigation_id="recent")
-        self.recent_nav_button.clicked.connect(
-            lambda checked=False: self.show_library_category("recent_played")
-        )
-        self.frequent_nav_button = NavButton("常听", navigation_id="frequent")
-        self.frequent_nav_button.clicked.connect(
-            lambda checked=False: self.show_library_category("frequent")
-        )
         self.liked_playlist_button = NavButton("我喜欢", navigation_id="liked")
         self.liked_playlist_button.clicked.connect(self.show_liked_playlist_page)
-        self.recent_added_nav_button = NavButton(
-            "最近添加", navigation_id="recent_added"
-        )
-        self.recent_added_nav_button.clicked.connect(
-            lambda checked=False: self.show_library_category("recent_added")
-        )
-        self.artists_nav_button = NavButton("歌手", navigation_id="artists")
-        self.artists_nav_button.clicked.connect(
-            lambda checked=False: self.show_sidebar_library_mode("artists")
-        )
-        self.albums_nav_button = NavButton("专辑", navigation_id="albums")
-        self.albums_nav_button.clicked.connect(
-            lambda checked=False: self.show_sidebar_library_mode("albums")
-        )
         self.view_buttons.update(
             {
                 "all": self.library_nav_button,
-                "recent_played": self.recent_nav_button,
-                "frequent": self.frequent_nav_button,
                 "liked": self.liked_playlist_button,
-                "recent_added": self.recent_added_nav_button,
             }
         )
         self.search_nav_button = NavButton("搜索", navigation_id="online_search")
         self.search_nav_button.clicked.connect(self.show_search_page)
-
-        self.playlist_nav_button = NavButton("播放列表", navigation_id="playlists")
-        self.playlist_nav_button.clicked.connect(self.show_play_queue)
-
-        self.lyrics_nav_button = NavButton("歌词", navigation_id="lyrics")
-        self.lyrics_nav_button.clicked.connect(self.show_full_lyrics_page)
 
         self.pending_nav_button = NavButton("待导入", navigation_id="pending_imports")
         self.pending_nav_button.clicked.connect(self.show_pending_imports_page)
@@ -9787,14 +9767,7 @@ class MainWindow(QMainWindow):
         self.sidebar_navigation_buttons = {
             "library_all": self.library_nav_button,
             "liked": self.liked_playlist_button,
-            "recent": self.recent_nav_button,
-            "frequent": self.frequent_nav_button,
-            "recent_added": self.recent_added_nav_button,
-            "artists": self.artists_nav_button,
-            "albums": self.albums_nav_button,
-            "playlists": self.playlist_nav_button,
             "online_search": self.search_nav_button,
-            "lyrics": self.lyrics_nav_button,
             "pending_imports": self.pending_nav_button,
             "custom_sources": self.custom_sources_nav_button,
         }
@@ -10062,9 +10035,11 @@ class MainWindow(QMainWindow):
         action_row = QHBoxLayout()
         action_row.setContentsMargins(0, 0, 0, 0)
         action_row.setSpacing(UI_SPACING["xs"])
-        self.now_like_btn = QPushButton("♡ 收藏")
+        self.now_like_btn = QPushButton("")
         self.now_like_btn.setObjectName("nowLikeButton")
         self.now_like_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.now_like_btn.setFixedSize(36, 34)
+        self.now_like_btn.setAccessibleName("收藏当前歌曲")
         self.now_like_btn.setEnabled(False)
         self.now_like_btn.clicked.connect(self.toggle_like_current_song)
         self.now_more_btn = QPushButton("⋯")
@@ -10091,18 +10066,47 @@ class MainWindow(QMainWindow):
         lyrics_divider.setFrameShape(QFrame.Shape.HLine)
         self.now_lyrics_heading = QLabel("歌词")
         self.now_lyrics_heading.setObjectName("nowLyricsHeading")
-        self.now_current_lyric = QLabel("这里会显示当前歌词")
+
+        self.now_previous_lyric_2 = ElidedLabel("")
+        self.now_previous_lyric_2.setObjectName("nowContextLyric")
+        self.now_previous_lyric_2.setProperty("distance", 2)
+        self.now_previous_lyric = ElidedLabel("")
+        self.now_previous_lyric.setObjectName("nowContextLyric")
+        self.now_previous_lyric.setProperty("distance", 1)
+        self.now_current_lyric = ElidedLabel("这里会显示当前歌词")
         self.now_current_lyric.setObjectName("nowCurrentLyric")
-        self.now_current_lyric.setWordWrap(True)
         self.now_current_lyric.setAlignment(
             Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
         )
-        self.now_next_lyric = QLabel("播放一首歌后即可查看")
+        self.now_next_lyric = ElidedLabel("播放一首歌后即可查看")
         self.now_next_lyric.setObjectName("nowNextLyric")
-        self.now_next_lyric.setWordWrap(True)
+        self.now_next_lyric.setProperty("distance", 1)
         self.now_next_lyric.setAlignment(
             Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
         )
+        self.now_next_lyric_2 = ElidedLabel("")
+        self.now_next_lyric_2.setObjectName("nowContextLyric")
+        self.now_next_lyric_2.setProperty("distance", 2)
+        self.now_lyric_context_labels = (
+            self.now_previous_lyric_2,
+            self.now_previous_lyric,
+            self.now_current_lyric,
+            self.now_next_lyric,
+            self.now_next_lyric_2,
+        )
+        for lyric_label in self.now_lyric_context_labels:
+            lyric_label.setMinimumWidth(0)
+            lyric_label.setMinimumHeight(21)
+            lyric_label.setAlignment(
+                Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
+            )
+        self.now_lyrics_context_box = QFrame()
+        self.now_lyrics_context_box.setObjectName("nowLyricsContextBox")
+        lyrics_context_layout = QVBoxLayout(self.now_lyrics_context_box)
+        lyrics_context_layout.setContentsMargins(0, 0, 0, 0)
+        lyrics_context_layout.setSpacing(UI_SPACING["xxs"])
+        for lyric_label in self.now_lyric_context_labels:
+            lyrics_context_layout.addWidget(lyric_label)
 
         self.lyrics_view = LyricsView()
         # Keep the established view alive for lyric parsing/state compatibility;
@@ -10170,8 +10174,7 @@ class MainWindow(QMainWindow):
         layout.addLayout(action_row)
         layout.addWidget(lyrics_divider)
         layout.addWidget(self.now_lyrics_heading)
-        layout.addWidget(self.now_current_lyric)
-        layout.addWidget(self.now_next_lyric)
+        layout.addWidget(self.now_lyrics_context_box)
         layout.addStretch(1)
         layout.addWidget(self.lyrics_view)
         layout.addWidget(self.side_info_panel)
@@ -10244,15 +10247,11 @@ class MainWindow(QMainWindow):
             alignment=Qt.AlignmentFlag.AlignLeft,
         )
 
-        self.like_btn = QPushButton("♡ 收藏")
+        self.like_btn = QPushButton("")
         self.like_btn.setObjectName("likeButton")
         self.like_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.like_btn.setMinimumWidth(72)
-        self.like_btn.setMaximumWidth(96)
-        self.like_btn.setSizePolicy(
-            QSizePolicy.Policy.Preferred,
-            QSizePolicy.Policy.Preferred,
-        )
+        self.like_btn.setFixedSize(34, 34)
+        self.like_btn.setAccessibleName("收藏当前歌曲")
         self.like_btn.clicked.connect(self.toggle_like_current_song)
 
         left_layout.addWidget(self.bottom_cover_label)
@@ -10350,8 +10349,8 @@ class MainWindow(QMainWindow):
 
         right_box = QFrame()
         right_box.setObjectName("playerRight")
-        right_box.setMinimumWidth(190)
-        right_box.setMaximumWidth(320)
+        right_box.setMinimumWidth(72)
+        right_box.setMaximumWidth(220)
         right_box.setSizePolicy(
             QSizePolicy.Policy.Preferred,
             QSizePolicy.Policy.Expanding,
@@ -10362,46 +10361,33 @@ class MainWindow(QMainWindow):
         right_layout.setContentsMargins(0, 0, 0, 0)
         right_layout.setSpacing(9)
 
-        self.player_queue_button = QPushButton("队列")
-        self.player_queue_button.setObjectName("controlButton")
-        self.player_queue_button.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.player_queue_button.setMinimumWidth(54)
-        self.player_queue_button.setMaximumWidth(70)
-        self.player_queue_button.setToolTip("打开播放队列")
-        self.player_queue_button.clicked.connect(self.show_play_queue)
-
-        self.floating_lyrics_button = QPushButton("桌面歌词")
-        self.floating_lyrics_button.setObjectName("floatingLyricsToggleButton")
-        self.floating_lyrics_button.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.floating_lyrics_button.setMinimumHeight(34)
-        self.floating_lyrics_button.setMinimumWidth(80)
-        self.floating_lyrics_button.setMaximumWidth(96)
-        self.floating_lyrics_button.clicked.connect(self.toggle_floating_lyrics)
-
         self.player_more_button = QPushButton("⋯")
         self.player_more_button.setObjectName("controlButton")
         self.player_more_button.setCursor(Qt.CursorShape.PointingHandCursor)
         self.player_more_button.setFixedSize(36, 34)
         self.player_more_button.setToolTip("更多播放操作")
         player_more_menu = QMenu(self.player_more_button)
-        current_info_action = player_more_menu.addAction("查看当前歌曲信息")
-        current_info_action.triggered.connect(
-            lambda checked=False: self.show_current_playing_info()
+        lyrics_page_action = player_more_menu.addAction("打开歌词页")
+        lyrics_page_action.triggered.connect(
+            lambda checked=False: self.show_full_lyrics_page()
         )
-        floating_action = player_more_menu.addAction("打开或关闭桌面歌词")
-        floating_action.triggered.connect(
+        self.floating_lyrics_action = player_more_menu.addAction("打开桌面歌词")
+        self.floating_lyrics_action.setCheckable(True)
+        self.floating_lyrics_action.triggered.connect(
             lambda checked=False: self.toggle_floating_lyrics()
         )
+        self.player_like_action = player_more_menu.addAction("添加到我喜欢")
+        self.player_like_action.setEnabled(False)
+        self.player_like_action.triggered.connect(
+            lambda checked=False: self.toggle_like_current_song()
+        )
         self.player_more_button.setMenu(player_more_menu)
-        self.player_more_button.hide()
 
         top_row = QHBoxLayout()
         top_row.setContentsMargins(0, 0, 0, 0)
         top_row.setSpacing(8)
-        top_row.addWidget(self.player_queue_button)
-        top_row.addWidget(self.floating_lyrics_button)
-        top_row.addWidget(self.player_more_button)
         top_row.addStretch()
+        top_row.addWidget(self.player_more_button)
 
         volume_row = QHBoxLayout()
         volume_row.setContentsMargins(0, 0, 0, 0)
@@ -11323,7 +11309,7 @@ class MainWindow(QMainWindow):
             for data in visible_song_data
         ]
         view_titles = {
-            "all": "全部歌曲",
+            "all": "本地歌曲",
             "liked": "我喜欢",
             "recent_played": "最近播放",
             "frequent": "常听歌曲",
@@ -11345,9 +11331,7 @@ class MainWindow(QMainWindow):
         if hasattr(self, "library_page"):
             self.library_page.scroll_current_view_to_top()
         if getattr(self, "current_library_view", "all") == "all":
-            self.set_sidebar_active(
-                mode if mode in {"artists", "albums"} else "library"
-            )
+            self.set_sidebar_active("library")
         if mode == getattr(self, "initial_library_content_view", "tracks"):
             return
         self.initial_library_content_view = mode
@@ -13061,160 +13045,17 @@ class MainWindow(QMainWindow):
         dialog.exec()
 
     def install_floating_lyrics_button(self) -> None:
-        if not hasattr(self, "floating_lyrics_button"):
-            self.floating_lyrics_button = QPushButton("桌面歌词")
-            self.floating_lyrics_button.setObjectName("floatingLyricsToggleButton")
-            self.floating_lyrics_button.setCursor(Qt.CursorShape.PointingHandCursor)
-            self.floating_lyrics_button.setMinimumHeight(34)
-            self.floating_lyrics_button.setMinimumWidth(80)
-            self.floating_lyrics_button.setMaximumWidth(96)
-            self.floating_lyrics_button.clicked.connect(self.toggle_floating_lyrics)
-
-        self.update_floating_lyrics_button_state()
-        return
-
-        existing_button = getattr(self, "floating_lyrics_button", None)
-
-        if existing_button is None:
-            self.floating_lyrics_button = QPushButton("桌面歌词")
-            self.floating_lyrics_button.setObjectName("floatingLyricsToggleButton")
-            self.floating_lyrics_button.setCursor(Qt.CursorShape.PointingHandCursor)
-            self.floating_lyrics_button.setMinimumHeight(34)
-            self.floating_lyrics_button.setMinimumWidth(80)
-            self.floating_lyrics_button.setMaximumWidth(96)
-            self.floating_lyrics_button.clicked.connect(self.toggle_floating_lyrics)
-        else:
-            old_parent = existing_button.parentWidget()
-
-            if old_parent is not None:
-                old_layout = old_parent.layout()
-
-                if old_layout is not None:
-                    old_layout.removeWidget(existing_button)
-
-                existing_button.setParent(None)
-
-        button = self.floating_lyrics_button
-
-        def layout_contains_widget(layout, target_widget) -> bool:
-            if layout is None or target_widget is None:
-                return False
-
-            for index in range(layout.count()):
-                item = layout.itemAt(index)
-
-                if item is None:
-                    continue
-
-                widget = item.widget()
-
-                if widget is target_widget:
-                    return True
-
-                child_layout = item.layout()
-
-                if child_layout is not None and layout_contains_widget(child_layout, target_widget):
-                    return True
-
-            return False
-
-        def direct_widget_index(layout, target_widget) -> int:
-            if layout is None or target_widget is None:
-                return -1
-
-            for index in range(layout.count()):
-                item = layout.itemAt(index)
-
-                if item is not None and item.widget() is target_widget:
-                    return index
-
-            return -1
-
-        def find_button_by_text(text_candidates):
-            for candidate_button in self.findChildren(QPushButton):
-                text = candidate_button.text().strip()
-
-                for candidate in text_candidates:
-                    if candidate in text:
-                        return candidate_button
-
-            return None
-
-        play_mode_button = getattr(self, "play_mode_button", None)
-
-        if play_mode_button is None:
-            play_mode_button = find_button_by_text(["顺序播放", "列表循环", "单曲循环", "随机播放"])
-
-        like_button = getattr(self, "like_button", None)
-
-        if like_button is None:
-            like_button = find_button_by_text(["收藏", "已收藏"])
-
-        target_layout = None
-        anchor_widget = None
-
-        for anchor in (play_mode_button, like_button):
-            widget = anchor
-
-            while widget is not None:
-                parent = widget.parentWidget()
-
-                if parent is None:
-                    break
-
-                layout = parent.layout()
-
-                if layout is not None and layout_contains_widget(layout, anchor):
-                    layout_name = layout.__class__.__name__.lower()
-
-                    if "box" in layout_name and "vbox" not in layout_name:
-                        target_layout = layout
-                        anchor_widget = anchor
-                        break
-
-                    if target_layout is None:
-                        target_layout = layout
-                        anchor_widget = anchor
-
-                widget = parent
-
-            if target_layout is not None and "vbox" not in target_layout.__class__.__name__.lower():
-                break
-
-        if target_layout is None:
-            print("没有找到适合放桌面歌词按钮的底部横向布局，仍可用 Ctrl+Shift+D 打开。")
-            return
-
-        insert_index = direct_widget_index(target_layout, anchor_widget)
-
-        if insert_index >= 0 and hasattr(target_layout, "insertWidget"):
-            target_layout.insertWidget(insert_index + 1, button)
-        else:
-            target_layout.addWidget(button)
-
         self.update_floating_lyrics_button_state()
 
     def update_floating_lyrics_button_state(self) -> None:
-        button = getattr(self, "floating_lyrics_button", None)
-
-        if button is None:
+        action = getattr(self, "floating_lyrics_action", None)
+        if action is None:
             return
 
         window = getattr(self, "floating_lyrics_window", None)
         is_active = window is not None and window.isVisible()
-
-        if is_active:
-            button.setText("桌面歌词开")
-            button.setStyleSheet(
-                "QPushButton#floatingLyricsToggleButton { background: #3b82f6; color: #ffffff; border: none; border-radius: 12px; padding: 8px 12px; font-size: 13px; font-weight: 700; }"
-                "QPushButton#floatingLyricsToggleButton:hover { background: #5594ff; }"
-            )
-        else:
-            button.setText("桌面歌词")
-            button.setStyleSheet(
-                "QPushButton#floatingLyricsToggleButton { background: rgba(255,255,255,0.075); color: #dfe4ee; border: none; border-radius: 12px; padding: 8px 12px; font-size: 13px; }"
-                "QPushButton#floatingLyricsToggleButton:hover { background: rgba(255,255,255,0.13); color: #ffffff; }"
-            )
+        action.setChecked(is_active)
+        action.setText("关闭桌面歌词" if is_active else "打开桌面歌词")
 
     def install_floating_lyrics_feature(self) -> None:
         if not hasattr(self, "floating_lyrics_window"):
@@ -14727,15 +14568,20 @@ class MainWindow(QMainWindow):
             button = getattr(self, button_name, None)
             if button is None:
                 continue
-            button.setText("♥ 已收藏" if liked else "♡ 收藏")
+            button.setText("")
             button.setIcon(create_favorite_icon(liked))
             button.setIconSize(QSize(18, 18))
             button.setToolTip("从我喜欢移除" if liked else "添加到我喜欢")
+            button.setAccessibleName("从我喜欢移除" if liked else "添加到我喜欢")
             button.setProperty("liked", bool(liked))
             button.setEnabled(bool(enabled))
             button.style().unpolish(button)
             button.style().polish(button)
             button.update()
+        menu_action = getattr(self, "player_like_action", None)
+        if menu_action is not None:
+            menu_action.setText("从我喜欢移除" if liked else "添加到我喜欢")
+            menu_action.setEnabled(bool(enabled))
 
     def toggle_like_current_song(self) -> None:
         current = getattr(self, "current_media_item", None)
@@ -18067,7 +17913,7 @@ class MainWindow(QMainWindow):
         menu.addSeparator()
 
         select_menu = menu.addMenu("选择")
-        select_visible_action = select_menu.addAction("选择当前列表全部歌曲")
+        select_visible_action = select_menu.addAction("选择当前列表所有歌曲")
         select_visible_action.triggered.connect(self.select_all_visible_songs)
 
         clear_selection_action = select_menu.addAction("取消选择")
@@ -18469,8 +18315,18 @@ class MainWindow(QMainWindow):
         }}
 
         QLabel#nowNextLyric {{
-            color: {t["text_muted"]};
+            color: {t["text_secondary"]};
             font-size: 13px;
+        }}
+
+        QLabel#nowContextLyric[distance="1"] {{
+            color: {t["text_secondary"]};
+            font-size: 13px;
+        }}
+
+        QLabel#nowContextLyric[distance="2"] {{
+            color: {t["text_muted"]};
+            font-size: 12px;
         }}
 
         QPushButton#nowPlayingActionButton {{
@@ -18600,17 +18456,35 @@ class MainWindow(QMainWindow):
             font-weight: 700;
         }}
 
+        QPushButton#likeButton {{
+            background: transparent;
+            color: {t["text_secondary"]};
+            border: 1px solid transparent;
+            border-radius: {UI_RADII["control"]}px;
+            padding: 0;
+        }}
+
+        QPushButton#likeButton:hover {{
+            background: {t["hover"]};
+            color: {t["text"]};
+        }}
+
         QPushButton#likeButton[liked="true"] {{
-            background: {t["favorite_soft"]};
+            background: transparent;
             color: {t["favorite"]};
-            border-color: rgba(225, 91, 100, 0.38);
-            font-weight: 700;
+            border-color: transparent;
         }}
 
         QPushButton#likeButton[liked="true"]:hover {{
-            background: rgba(225, 91, 100, 0.24);
-            color: #ffffff;
-            border-color: {t["favorite"]};
+            background: {t["favorite_soft"]};
+            color: {t["favorite"]};
+            border-color: transparent;
+        }}
+
+        QPushButton#likeButton:disabled {{
+            background: transparent;
+            color: {t["text_disabled"]};
+            border-color: transparent;
         }}
 
         QPushButton#controlButton[modeActive="true"] {{

@@ -700,7 +700,9 @@ def test_main_window_online_entry() -> None:
             window.current_media_item = MediaItem.from_online(remote_track)
             window.current_track_kind = "online"
             window.update_like_button()
-            assert window.like_btn.text() == "♥ 已收藏"
+            assert window.like_btn.text() == ""
+            assert window.like_btn.toolTip() == "从我喜欢移除"
+            assert not window.like_btn.icon().isNull()
             window.toggle_like_current_song()
             assert stable_id not in window.get_playlist_remote_ids("liked")
             window.toggle_like_current_song()

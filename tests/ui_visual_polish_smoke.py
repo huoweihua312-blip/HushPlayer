@@ -82,7 +82,6 @@ def run_test(app: QApplication) -> None:
             window.library_page,
             window.search_page,
             window.play_queue_page,
-            window.full_lyrics_page,
             window.pending_imports_page,
             window.custom_source_manager_page,
         }
@@ -91,7 +90,14 @@ def run_test(app: QApplication) -> None:
             for index in range(window.content_stack.count())
         }
         assert expected_pages.issubset(stack_pages)
-        assert len(window.sidebar_navigation.navigation_buttons) == 12
+        assert not hasattr(window, "full_lyrics_page")
+        window.show_full_lyrics_page()
+        app.processEvents()
+        assert window.full_lyrics_page in {
+            window.content_stack.widget(index)
+            for index in range(window.content_stack.count())
+        }
+        assert len(window.sidebar_navigation.navigation_buttons) == 5
         assert set(window.sidebar_navigation.navigation_buttons) == set(
             window.sidebar_navigation.ordered_ids()
         )
@@ -167,7 +173,10 @@ def run_test(app: QApplication) -> None:
             for row in range(window.song_list.count())
         ]
 
-        page_instances = list(stack_pages)
+        page_instances = [
+            window.content_stack.widget(index)
+            for index in range(window.content_stack.count())
+        ]
         window.search_nav_button.click()
         window.library_nav_button.click()
         app.processEvents()

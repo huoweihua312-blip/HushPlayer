@@ -283,8 +283,19 @@ def run_feature_test(app: QApplication) -> None:
     assert merge_sidebar_navigation_order([]) == default_order
     assert merge_sidebar_navigation_order(["unknown", "liked", "liked", "lyrics"]) == [
         "liked",
-        "lyrics",
-        *[item_id for item_id in default_order if item_id not in {"liked", "lyrics"}],
+        *[item_id for item_id in default_order if item_id != "liked"],
+    ]
+    assert merge_sidebar_navigation_order(
+        ["albums", "all_songs", "search", "pending_import", "all_songs"]
+    ) == [
+        "library_all",
+        "online_search",
+        "pending_imports",
+        *[
+            item_id
+            for item_id in default_order
+            if item_id not in {"library_all", "online_search", "pending_imports"}
+        ],
     ]
     assert window.sidebar_navigation.ordered_ids() == default_order
     assert window.settings_nav_button not in window.sidebar_navigation.navigation_buttons.values()
@@ -318,11 +329,10 @@ def run_feature_test(app: QApplication) -> None:
     window.search_nav_button.click()
     app.processEvents()
     assert window.content_stack.currentWidget() is window.search_page
-    window.artists_nav_button.click()
+    window.library_nav_button.click()
     app.processEvents()
     assert window.content_stack.currentWidget() is window.library_page
-    assert window.library_page.current_mode == "artists"
-    assert window.artists_nav_button.property("active") is True
+    assert window.library_nav_button.property("active") is True
 
     window.close()
     window.deleteLater()
@@ -361,11 +371,10 @@ def run_feature_test(app: QApplication) -> None:
     try:
         assert compatible.sidebar_navigation.ordered_ids() == [
             "liked",
-            "lyrics",
             *[
                 item_id
                 for item_id in default_order
-                if item_id not in {"liked", "lyrics"}
+                if item_id != "liked"
             ],
         ]
     finally:

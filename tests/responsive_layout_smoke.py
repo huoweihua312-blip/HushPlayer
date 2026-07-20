@@ -78,7 +78,8 @@ def main() -> int:
                 assert window.library_page.random_button.isHidden()
                 assert window.library_page.folder_button.isHidden()
                 assert not window.player_more_button.isHidden()
-                assert window.floating_lyrics_button.isHidden()
+                assert window.like_btn.isHidden()
+                assert not hasattr(window, "floating_lyrics_button")
             elif expected_mode == "compact":
                 assert not window.now_playing_panel.isHidden()
                 assert 220 <= window.now_playing_panel.width() <= 270
@@ -86,13 +87,15 @@ def main() -> int:
                 assert window.library_page.random_button.isHidden()
                 assert window.library_page.folder_button.isHidden()
                 assert not window.player_more_button.isHidden()
+                assert not window.like_btn.isHidden()
             else:
                 assert not window.now_playing_panel.isHidden()
                 assert 280 <= window.now_playing_panel.width() <= 340
                 assert window.content_stack.width() >= 700
                 assert not window.library_page.random_button.isHidden()
                 assert not window.library_page.folder_button.isHidden()
-                assert window.player_more_button.isHidden()
+                assert not window.player_more_button.isHidden()
+                assert not window.like_btn.isHidden()
         scale = os.environ.get("QT_SCALE_FACTOR", "1")
         print(
             "responsive layout smoke: OK",
