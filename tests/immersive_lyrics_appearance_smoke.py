@@ -12,7 +12,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PySide6.QtCore import QCoreApplication, QEvent, Qt
 from PySide6.QtGui import QColor, QGuiApplication, QImage, QImageReader, QPixmap
-from PySide6.QtWidgets import QApplication
+from PySide6.QtWidgets import QApplication, QCheckBox, QFrame
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -74,6 +74,7 @@ def config_checks() -> None:
     assert defaults == ImmersiveAppearanceConfig.defaults()
     assert defaults.background_mode == "cover"
     assert defaults.lyrics_font_scale == 100
+    assert defaults.background_transparency == 38
 
     legacy_default = ImmersiveAppearanceConfig.from_settings(
         {
@@ -105,6 +106,7 @@ def config_checks() -> None:
             "immersive_background_darkness": 500,
             "immersive_background_image_opacity": 0,
             "immersive_background_fill_mode": "stretch",
+            "immersive_background_transparency": 500,
             "immersive_lyrics_font_scale": 999,
         }
     )
@@ -113,6 +115,7 @@ def config_checks() -> None:
     assert invalid.darkness == 90
     assert invalid.image_opacity == 20
     assert invalid.fill_mode == "cover"
+    assert invalid.background_transparency == 85
     assert invalid.lyrics_font_scale == 160
 
     invalid_type = ImmersiveAppearanceConfig.from_settings(
@@ -128,14 +131,44 @@ def background_checks(app: QApplication, root: Path) -> tuple[dict, int]:
     window.resize(1100, 720)
     window.show()
     assert wait_until(app, lambda: window.isVisible())
+    window.set_controls_always_visible(True)
+    assert not window.auto_hide_enabled
+    assert main.settings["immersive_auto_hide_ui"] is False
+    window.set_controls_always_visible(False)
+    assert window.auto_hide_enabled
+    assert main.settings["immersive_auto_hide_ui"] is True
 
     pure_default = replace(
         ImmersiveAppearanceConfig.defaults(),
         background_mode="default",
     )
     window.apply_appearance_config(pure_default, persist=True)
-    assert wait_until(app, lambda: window.background_view.fallback_active)
-    assert "默认" in window.background_view.status_text
+    assert wait_until(
+        app,
+        lambda: not window.background_view.fallback_active
+        and "纯色" in window.background_view.status_text,
+    )
+
+    translucent = replace(
+        pure_default,
+        background_mode="translucent",
+        background_transparency=62,
+    )
+    translucent_tasks = window.background_view.task_start_count
+    window.apply_appearance_config(translucent, persist=True)
+    assert wait_until(
+        app,
+        lambda: not window.background_view.fallback_active
+        and "半透明" in window.background_view.status_text,
+    )
+    background_color = (
+        window.background_view.grab().toImage().pixelColor(10, 10)
+    )
+    assert 90 <= background_color.alpha() <= 105
+    assert window.windowOpacity() == 1.0
+    assert window.header_opacity_effect.opacity() == 1.0
+    assert window.background_view.task_start_count == translucent_tasks
+    assert main.settings["immersive_background_transparency"] == 62
 
     custom_path = root / "custom-background.png"
     create_image(custom_path, "#315c9b", (1600, 1000))
@@ -153,6 +186,7 @@ def background_checks(app: QApplication, root: Path) -> tuple[dict, int]:
     assert wait_until(
         app,
         lambda: not window.background_view.fallback_active
+        and window.background_view.rendered_source_key.startswith("custom:")
         and not window.background_view.task_running,
     )
     assert window.background_view.rendered_source_key.startswith("custom:")
@@ -352,8 +386,32 @@ def font_checks(app: QApplication, persisted: dict) -> None:
     assert window.appearance_config.lyrics_font_scale == scale_before_mode_change
 
     emitted: list[ImmersiveAppearanceConfig] = []
-    dialog = ImmersiveAppearanceDialog(window.appearance_config, window)
+    dialog = ImmersiveAppearanceDialog(
+        window.appearance_config,
+        window,
+        controls_always_visible=True,
+    )
+    assert dialog.windowTitle() == "沉浸歌词显示设置"
+    assert dialog.findChild(QFrame, "appearanceBackgroundSection") is not None
+    assert dialog.findChild(QFrame, "appearanceLyricsSection") is not None
+    assert dialog.findChild(QFrame, "appearanceSyncSection") is not None
+    assert dialog.findChild(QCheckBox).text() == "控制栏始终显示"
+    assert [dialog.mode_combo.itemText(index) for index in range(dialog.mode_combo.count())] == [
+        "封面模糊",
+        "纯色背景",
+        "半透明背景",
+        "自定义图片",
+    ]
     dialog.configChanged.connect(emitted.append)
+    translucent_index = dialog.mode_combo.findData("translucent")
+    dialog.mode_combo.setCurrentIndex(translucent_index)
+    assert emitted and emitted[-1].background_mode == "translucent"
+    assert dialog.background_transparency_slider.isEnabled()
+    assert not dialog.opacity_slider.isEnabled()
+    always_visible: list[bool] = []
+    dialog.controlsAlwaysVisibleChanged.connect(always_visible.append)
+    dialog.controls_always_visible.setChecked(False)
+    assert always_visible == [False]
     dialog.reset_defaults()
     assert emitted and emitted[-1].lyrics_font_scale == 100
     assert emitted[-1].background_mode == "cover"

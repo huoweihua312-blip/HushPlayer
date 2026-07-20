@@ -12,11 +12,11 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from PySide6.QtCore import QAbstractAnimation, QEvent, QObject, QPoint, QPointF, Qt, Signal
+from PySide6.QtCore import QAbstractAnimation, QEvent, QObject, QPoint, QPointF, QSize, Qt, Signal
 from PySide6.QtGui import QColor, QImage, QMouseEvent, QPixmap, QWheelEvent
 from PySide6.QtMultimedia import QMediaPlayer
 from PySide6.QtTest import QTest
-from PySide6.QtWidgets import QApplication, QBoxLayout, QLabel
+from PySide6.QtWidgets import QApplication, QBoxLayout, QLabel, QPushButton
 
 from app.models.media_item import MediaItem
 from app.ui.main_window import ImmersiveLyricsWindow, LyricsView
@@ -207,6 +207,38 @@ def run_test(app: QApplication, root: Path) -> dict[str, float]:
     assert window._responsive_mode == "wide"
     assert window.body_layout.direction() == QBoxLayout.Direction.LeftToRight
     assert window.cover_label.isVisible()
+    header_buttons = window.control_header.findChildren(QPushButton)
+    header_texts = [button.text() for button in header_buttons]
+    assert header_texts == ["进入全屏", "显示设置", "退出沉浸"]
+    assert "窗口模式" not in header_texts
+    assert "退出全屏" not in header_texts
+    assert sum(
+        button.text() == "退出沉浸"
+        for button in window.findChildren(QPushButton)
+    ) == 1
+    assert not any(
+        button.text() == "退出沉浸"
+        for button in window.footer.findChildren(QPushButton)
+    )
+    assert window.cover_label.parentWidget() is window.artwork_content
+    assert window.track_info.parentWidget() is window.artwork_content
+    assert window.artwork_layout.itemAt(0).spacerItem() is not None
+    assert (
+        window.artwork_layout.itemAt(window.artwork_layout.count() - 1).spacerItem()
+        is not None
+    )
+    assert window.artwork_content.y() > 0
+    assert (
+        window.artwork_panel.height()
+        - window.artwork_content.geometry().bottom()
+        > window.artwork_content.y()
+    )
+    assert window._resize_edges_at(window.mapToGlobal(QPoint(1, 1))) == (
+        Qt.Edge.LeftEdge | Qt.Edge.TopEdge
+    )
+    assert not window._resize_edges_at(
+        window.mapToGlobal(QPoint(window.width() // 2, window.height() // 2))
+    )
     assert window.lyrics_view.target_position_ratio == 0.46
     assert window.lyrics_view.scroll_animation.duration() == 240
     assert window.lyrics_view.auto_resume_timer.interval() == 6000
@@ -438,6 +470,7 @@ def run_test(app: QApplication, root: Path) -> dict[str, float]:
     assert [id(label) for label in window.lyrics_view.labels] == stable_ids
 
     for width, height, expected_mode in (
+        (900, 720, "compact"),
         (1100, 720, "compact"),
         (1450, 850, "wide"),
         (1600, 900, "wide"),
@@ -452,17 +485,52 @@ def run_test(app: QApplication, root: Path) -> dict[str, float]:
         assert window._responsive_mode == expected_mode
         assert [id(label) for label in window.lyrics_view.labels] == stable_ids
         assert window.footer.geometry().right() <= window.background_panel.rect().right()
+        assert window.lyrics_panel.geometry().bottom() <= window.footer.geometry().top()
+        if expected_mode != "wide":
+            assert (
+                window.lyrics_view.reserved_bottom_space
+                >= window.footer.sizeHint().height() + 12
+            )
+
+    window.resize(720, 900)
+    app.processEvents()
+    window.lyrics_view.scroll_to_index(len(window.lyrics_view.labels) - 1, animate=False)
+    app.processEvents()
+    last_label = window.lyrics_view.labels[-1]
+    last_label_bottom = (
+        last_label.y()
+        + last_label.height()
+        - window.lyrics_view.verticalScrollBar().value()
+    )
+    assert last_label_bottom < window.lyrics_view.viewport().height()
+    body_geometry = window.body.geometry()
+    lyrics_geometry = window.lyrics_panel.geometry()
+    window.set_controls_visible(False, animate=False)
+    app.processEvents()
+    assert window.body.geometry() == body_geometry
+    assert window.lyrics_panel.geometry() == lyrics_geometry
+    window.set_controls_visible(True, animate=False)
 
     window.resize(1100, 720)
     app.processEvents()
+    window.setGeometry(34, 46, 1030, 680)
+    app.processEvents()
     original_geometry = window.geometry()
+    assert original_geometry.size() == QSize(1030, 680)
+    assert window.maximumWidth() > original_geometry.width()
+    assert window.maximumHeight() > original_geometry.height()
     window.show_on_best_screen()
     app.processEvents()
     assert window.isFullScreen()
+    assert window.fullscreen_btn.text() == "退出全屏"
+    assert "进入全屏" not in [
+        button.text() for button in window.control_header.findChildren(QPushButton)
+    ]
     window.show_windowed()
     app.processEvents()
     assert not window.isFullScreen()
-    assert window.geometry().size() == original_geometry.size()
+    assert window.geometry() == original_geometry
+    assert window.fullscreen_btn.text() == "进入全屏"
 
     mini_view = LyricsView()
     mini_view.set_lyrics(lyrics[:4])
@@ -503,6 +571,8 @@ def run_test(app: QApplication, root: Path) -> dict[str, float]:
         target = Path(screenshot_path)
         target.parent.mkdir(parents=True, exist_ok=True)
         assert window.grab().save(str(target))
+        window.setGeometry(original_geometry)
+        app.processEvents()
 
     window.close()
     assert wait_until(app, lambda: not window.isVisible())
@@ -517,6 +587,57 @@ def run_test(app: QApplication, root: Path) -> dict[str, float]:
     assert window.background_view._closed
     assert not window.background_view.task_running
     assert main.closed_count == 1
+    saved_geometry = main.settings.get("immersive_window_geometry")
+    assert saved_geometry == {
+        "x": original_geometry.x(),
+        "y": original_geometry.y(),
+        "width": original_geometry.width(),
+        "height": original_geometry.height(),
+    }
+
+    restored_main = StubMainWindow(root)
+    restored_main.settings.update(main.settings)
+    restored = ImmersiveLyricsWindow(restored_main)
+    restored_main.immersive_lyrics_window = restored
+    restored.show_windowed()
+    app.processEvents()
+    assert restored.geometry() == original_geometry
+    QTest.keyClick(restored, Qt.Key.Key_F11)
+    app.processEvents()
+    assert restored.isFullScreen()
+    QTest.keyClick(restored, Qt.Key.Key_Escape)
+    app.processEvents()
+    assert restored.isVisible()
+    assert not restored.isFullScreen()
+    QTest.keyClick(restored, Qt.Key.Key_Escape)
+    assert wait_until(app, lambda: not restored.isVisible())
+
+    invalid_main = StubMainWindow(root)
+    invalid_main.settings["immersive_window_geometry"] = {
+        "x": "bad",
+        "y": 0,
+        "width": 100,
+        "height": 100,
+    }
+    invalid_window = ImmersiveLyricsWindow(invalid_main)
+    assert invalid_window._windowed_geometry is None
+    invalid_window.close()
+
+    disconnected_main = StubMainWindow(root)
+    disconnected_main.settings["immersive_window_geometry"] = {
+        "x": 500_000,
+        "y": 500_000,
+        "width": 960,
+        "height": 640,
+    }
+    disconnected_window = ImmersiveLyricsWindow(disconnected_main)
+    restored_rect = disconnected_window._windowed_geometry
+    assert restored_rect is not None
+    assert any(
+        screen.availableGeometry().contains(restored_rect.center())
+        for screen in QApplication.screens()
+    )
+    disconnected_window.close()
     return metrics
 
 

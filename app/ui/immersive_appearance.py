@@ -7,6 +7,7 @@ from pathlib import Path
 from PySide6.QtCore import QObject, QRunnable, QSize, Qt, QThreadPool, QTimer, Signal
 from PySide6.QtGui import QColor, QImage, QImageReader, QLinearGradient, QPainter, QPixmap
 from PySide6.QtWidgets import (
+    QCheckBox,
     QComboBox,
     QDialog,
     QFileDialog,
@@ -22,7 +23,7 @@ from PySide6.QtWidgets import (
 from app.services.lyrics_timing import normalize_lyrics_offset_ms
 
 
-BACKGROUND_MODES = {"default", "cover", "custom"}
+BACKGROUND_MODES = {"default", "cover", "translucent", "custom"}
 BACKGROUND_FILL_MODES = {"cover", "contain"}
 APPEARANCE_SETTING_KEYS = {
     "immersive_background_mode",
@@ -30,6 +31,7 @@ APPEARANCE_SETTING_KEYS = {
     "immersive_background_blur",
     "immersive_background_darkness",
     "immersive_background_image_opacity",
+    "immersive_background_transparency",
     "immersive_background_fill_mode",
     "immersive_lyrics_font_scale",
     "immersive_cover_background_enabled",
@@ -54,6 +56,7 @@ class ImmersiveAppearanceConfig:
     blur_radius: int = 40
     darkness: int = 68
     image_opacity: int = 100
+    background_transparency: int = 38
     fill_mode: str = "cover"
     lyrics_font_scale: int = 100
 
@@ -115,6 +118,15 @@ class ImmersiveAppearanceConfig:
                 20,
                 100,
             ),
+            background_transparency=_bounded_int(
+                document.get(
+                    "immersive_background_transparency",
+                    defaults.background_transparency,
+                ),
+                defaults.background_transparency,
+                0,
+                85,
+            ),
             fill_mode=fill_mode,
             lyrics_font_scale=font_scale,
         )
@@ -126,6 +138,9 @@ class ImmersiveAppearanceConfig:
             "immersive_background_blur": int(self.blur_radius),
             "immersive_background_darkness": int(self.darkness),
             "immersive_background_image_opacity": int(self.image_opacity),
+            "immersive_background_transparency": int(
+                self.background_transparency
+            ),
             "immersive_background_fill_mode": self.fill_mode,
             "immersive_lyrics_font_scale": int(self.lyrics_font_scale),
             # 兼容旧版本：新字段优先，旧字段仅作为降级读取入口。
@@ -308,7 +323,6 @@ class ImmersiveBackgroundView(QWidget):
         self.setAutoFillBackground(False)
 
         self.config = ImmersiveAppearanceConfig.defaults()
-        self.transparent_mode = True
         self._closed = False
         self._generation = 0
         self._task_running = False
@@ -367,13 +381,6 @@ class ImmersiveBackgroundView(QWidget):
     @property
     def status_text(self) -> str:
         return self._status_text
-
-    def set_transparent_mode(self, enabled: bool) -> None:
-        enabled = bool(enabled)
-        if self.transparent_mode == enabled:
-            return
-        self.transparent_mode = enabled
-        self.update()
 
     def set_config(self, config: ImmersiveAppearanceConfig) -> None:
         if not isinstance(config, ImmersiveAppearanceConfig):
@@ -476,7 +483,9 @@ class ImmersiveBackgroundView(QWidget):
 
     def _resolve_source(self) -> tuple[str, QImage, str, str]:
         if self.config.background_mode == "default":
-            return "", QImage(), "", "默认 / 纯色背景"
+            return "", QImage(), "", "纯色背景"
+        if self.config.background_mode == "translucent":
+            return "", QImage(), "", "半透明背景"
         if self.config.background_mode == "cover":
             if self._cover_source_image.isNull() or not self._cover_source_key:
                 return "", QImage(), "", "当前歌曲没有可用封面，已回退默认背景"
@@ -549,7 +558,8 @@ class ImmersiveBackgroundView(QWidget):
         if not source_key:
             self._rendered_pixmap = QPixmap()
             self._rendered_source_key = ""
-            self._set_fallback(True, error or "默认背景")
+            static_mode = self.config.background_mode in {"default", "translucent"}
+            self._set_fallback(not static_mode, error or "默认背景")
             self.update()
             return
 
@@ -628,8 +638,22 @@ class ImmersiveBackgroundView(QWidget):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform, True)
         rect = self.rect()
-        if not self.transparent_mode:
-            painter.fillRect(rect, QColor("#050609"))
+        if self.config.background_mode == "translucent":
+            opacity = 100 - max(
+                0,
+                min(85, int(self.config.background_transparency)),
+            )
+            painter.fillRect(
+                rect,
+                QColor(8, 11, 17, int(round(255 * opacity / 100.0))),
+            )
+            return
+        if self.config.background_mode == "default":
+            gradient = QLinearGradient(rect.topLeft(), rect.bottomRight())
+            gradient.setColorAt(0.0, QColor("#0b0e14"))
+            gradient.setColorAt(0.55, QColor("#111722"))
+            gradient.setColorAt(1.0, QColor("#171b26"))
+            painter.fillRect(rect, gradient)
             return
 
         has_image = not self._rendered_pixmap.isNull() and not self._fallback_active
@@ -681,6 +705,7 @@ class ImmersiveBackgroundView(QWidget):
 class ImmersiveAppearanceDialog(QDialog):
     configChanged = Signal(object)
     lyricsOffsetChanged = Signal(str, int)
+    controlsAlwaysVisibleChanged = Signal(bool)
 
     def __init__(
         self,
@@ -689,9 +714,10 @@ class ImmersiveAppearanceDialog(QDialog):
         *,
         track_identity: str = "",
         lyrics_offset_ms: int = 0,
+        controls_always_visible: bool = False,
     ) -> None:
         super().__init__(parent)
-        self.setWindowTitle("沉浸歌词外观")
+        self.setWindowTitle("沉浸歌词显示设置")
         self.setObjectName("immersiveAppearanceDialog")
         self.setMinimumWidth(520)
         self.config = config
@@ -703,27 +729,31 @@ class ImmersiveAppearanceDialog(QDialog):
         layout.setContentsMargins(22, 20, 22, 20)
         layout.setSpacing(16)
 
-        title = QLabel("沉浸歌词外观")
+        title = QLabel("显示设置")
         title.setObjectName("appearanceTitle")
         subtitle = QLabel(
-            "背景处理会在停止操作约 150ms 后更新；歌词字号和当前歌曲时间偏移即时预览。"
+            "调整沉浸歌词的背景、歌词显示与当前歌曲同步。"
         )
         subtitle.setObjectName("appearanceSubtitle")
         subtitle.setWordWrap(True)
         layout.addWidget(title)
         layout.addWidget(subtitle)
 
-        card = QFrame()
-        card.setObjectName("appearanceCard")
-        form = QVBoxLayout(card)
-        form.setContentsMargins(16, 16, 16, 16)
-        form.setSpacing(13)
+        background_card = QFrame()
+        background_card.setObjectName("appearanceBackgroundSection")
+        background_form = QVBoxLayout(background_card)
+        background_form.setContentsMargins(16, 14, 16, 16)
+        background_form.setSpacing(12)
+        background_title = QLabel("背景")
+        background_title.setObjectName("appearanceSectionTitle")
+        background_form.addWidget(background_title)
 
         self.mode_combo = QComboBox()
-        self.mode_combo.addItem("默认 / 纯色背景", "default")
-        self.mode_combo.addItem("当前歌曲封面", "cover")
-        self.mode_combo.addItem("自定义本地图片", "custom")
-        form.addLayout(self._combo_row("背景模式", self.mode_combo))
+        self.mode_combo.addItem("封面模糊", "cover")
+        self.mode_combo.addItem("纯色背景", "default")
+        self.mode_combo.addItem("半透明背景", "translucent")
+        self.mode_combo.addItem("自定义图片", "custom")
+        background_form.addLayout(self._combo_row("背景模式", self.mode_combo))
 
         image_row = QHBoxLayout()
         image_row.setSpacing(10)
@@ -735,25 +765,72 @@ class ImmersiveAppearanceDialog(QDialog):
         self.choose_button = QPushButton("选择图片")
         self.choose_button.clicked.connect(self.choose_custom_image)
         image_row.addWidget(self.choose_button)
-        form.addLayout(image_row)
+        background_form.addLayout(image_row)
 
-        self.blur_slider, self.blur_value = self._slider_row(form, "模糊程度", 0, 40, 1)
-        self.darkness_slider, self.darkness_value = self._slider_row(form, "背景暗度", 0, 90, 1, "%")
-        self.opacity_slider, self.opacity_value = self._slider_row(form, "图片透明度", 20, 100, 1, "%")
+        self.blur_slider, self.blur_value = self._slider_row(
+            background_form, "模糊程度", 0, 40, 1
+        )
+        self.brightness_slider, self.brightness_value = self._slider_row(
+            background_form, "背景亮度", 10, 100, 1, "%"
+        )
+        self.background_transparency_slider, self.background_transparency_value = (
+            self._slider_row(
+                background_form,
+                "背景透明度",
+                0,
+                85,
+                1,
+                "%",
+            )
+        )
+        self.opacity_slider, self.opacity_value = self._slider_row(
+            background_form, "背景图片不透明度", 20, 100, 1, "%"
+        )
 
         self.fill_combo = QComboBox()
         self.fill_combo.addItem("裁剪填满", "cover")
         self.fill_combo.addItem("完整显示", "contain")
-        form.addLayout(self._combo_row("图片填充", self.fill_combo))
+        background_form.addLayout(self._combo_row("图片填充方式", self.fill_combo))
+
+        self.status_label = QLabel("等待预览")
+        self.status_label.setObjectName("appearanceStatus")
+        self.status_label.setWordWrap(True)
+        background_form.addWidget(self.status_label)
+        layout.addWidget(background_card)
+
+        lyrics_card = QFrame()
+        lyrics_card.setObjectName("appearanceLyricsSection")
+        lyrics_form = QVBoxLayout(lyrics_card)
+        lyrics_form.setContentsMargins(16, 14, 16, 16)
+        lyrics_form.setSpacing(12)
+        lyrics_title = QLabel("歌词")
+        lyrics_title.setObjectName("appearanceSectionTitle")
+        lyrics_form.addWidget(lyrics_title)
 
         self.font_slider, self.font_value = self._slider_row(
-            form,
-            "歌词字体大小",
+            lyrics_form,
+            "歌词字号",
             70,
             160,
             5,
             "%",
         )
+        self.controls_always_visible = QCheckBox("控制栏始终显示")
+        self.controls_always_visible.setChecked(bool(controls_always_visible))
+        self.controls_always_visible.toggled.connect(
+            self.controlsAlwaysVisibleChanged
+        )
+        lyrics_form.addWidget(self.controls_always_visible)
+        layout.addWidget(lyrics_card)
+
+        sync_card = QFrame()
+        sync_card.setObjectName("appearanceSyncSection")
+        sync_form = QVBoxLayout(sync_card)
+        sync_form.setContentsMargins(16, 14, 16, 16)
+        sync_form.setSpacing(12)
+        sync_title = QLabel("同步")
+        sync_title.setObjectName("appearanceSectionTitle")
+        sync_form.addWidget(sync_title)
 
         offset_row = QHBoxLayout()
         offset_row.setSpacing(8)
@@ -779,13 +856,8 @@ class ImmersiveAppearanceDialog(QDialog):
             Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
         )
         offset_row.addWidget(self.offset_value)
-        form.addLayout(offset_row)
-
-        self.status_label = QLabel("等待预览")
-        self.status_label.setObjectName("appearanceStatus")
-        self.status_label.setWordWrap(True)
-        form.addWidget(self.status_label)
-        layout.addWidget(card)
+        sync_form.addLayout(offset_row)
+        layout.addWidget(sync_card)
 
         buttons = QHBoxLayout()
         buttons.addStretch()
@@ -802,7 +874,8 @@ class ImmersiveAppearanceDialog(QDialog):
         self.fill_combo.currentIndexChanged.connect(self._controls_changed)
         for slider in (
             self.blur_slider,
-            self.darkness_slider,
+            self.brightness_slider,
+            self.background_transparency_slider,
             self.opacity_slider,
             self.font_slider,
         ):
@@ -815,7 +888,8 @@ class ImmersiveAppearanceDialog(QDialog):
             "QLabel { color: #d7dce6; }"
             "QLabel#appearanceTitle { color: #ffffff; font-size: 20px; font-weight: 800; }"
             "QLabel#appearanceSubtitle, QLabel#appearancePath, QLabel#appearanceStatus { color: #9da6b5; }"
-            "QFrame#appearanceCard { background: #171b24; border: 1px solid #2a303b; border-radius: 14px; }"
+            "QFrame#appearanceBackgroundSection, QFrame#appearanceLyricsSection, QFrame#appearanceSyncSection { background: #171b24; border: 1px solid #2a303b; border-radius: 14px; }"
+            "QLabel#appearanceSectionTitle { color: #ffffff; font-size: 14px; font-weight: 750; }"
             "QComboBox, QPushButton { background: #222834; color: #eef1f6; border: 1px solid #343c49; border-radius: 9px; padding: 7px 10px; }"
             "QPushButton:hover { background: #2c3442; }"
             "QPushButton#appearancePrimaryButton { background: #3f7ee8; border-color: #3f7ee8; }"
@@ -867,12 +941,24 @@ class ImmersiveAppearanceDialog(QDialog):
         self._set_combo_value(self.mode_combo, config.background_mode)
         self._set_combo_value(self.fill_combo, config.fill_mode)
         self.blur_slider.setValue(config.blur_radius)
-        self.darkness_slider.setValue(config.darkness)
+        self.brightness_slider.setValue(100 - config.darkness)
+        self.background_transparency_slider.setValue(
+            config.background_transparency
+        )
         self.opacity_slider.setValue(config.image_opacity)
         self.font_slider.setValue(config.lyrics_font_scale)
         self.path_label.setText(config.custom_image_path or "尚未选择")
-        self.choose_button.setEnabled(config.background_mode == "custom")
+        self._update_mode_controls(config.background_mode)
         self._updating = False
+
+    def _update_mode_controls(self, mode: str) -> None:
+        image_mode = mode in {"cover", "custom"}
+        self.choose_button.setEnabled(mode == "custom")
+        self.blur_slider.setEnabled(image_mode)
+        self.brightness_slider.setEnabled(image_mode)
+        self.opacity_slider.setEnabled(image_mode)
+        self.fill_combo.setEnabled(image_mode)
+        self.background_transparency_slider.setEnabled(mode == "translucent")
 
     def _controls_changed(self, _value=0) -> None:
         if self._updating:
@@ -882,12 +968,15 @@ class ImmersiveAppearanceDialog(QDialog):
             self.config,
             background_mode=mode,
             blur_radius=int(self.blur_slider.value()),
-            darkness=int(self.darkness_slider.value()),
+            darkness=100 - int(self.brightness_slider.value()),
             image_opacity=int(self.opacity_slider.value()),
+            background_transparency=int(
+                self.background_transparency_slider.value()
+            ),
             fill_mode=str(self.fill_combo.currentData() or "cover"),
             lyrics_font_scale=int(self.font_slider.value()),
         )
-        self.choose_button.setEnabled(mode == "custom")
+        self._update_mode_controls(mode)
         self.configChanged.emit(self.config)
 
     @staticmethod

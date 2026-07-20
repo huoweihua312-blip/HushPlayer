@@ -61,7 +61,7 @@ from app.ui.track_list_view import (
     draw_track_like_icon,
 )
 from app.ui.update_dialog import UpdateDialog
-from PySide6.QtCore import QEasingCurve, QEvent, QItemSelectionModel, QObject, QPointF, QPropertyAnimation, QRectF, QRunnable, QSize, Qt, QThread, QThreadPool, QTimer, QUrl, Signal, Slot
+from PySide6.QtCore import QEasingCurve, QEvent, QItemSelectionModel, QObject, QPoint, QPointF, QPropertyAnimation, QRect, QRectF, QRunnable, QSize, Qt, QThread, QThreadPool, QTimer, QUrl, Signal, Slot
 from PySide6.QtGui import QColor, QDesktopServices, QFont, QFontMetrics, QIcon, QKeySequence, QPainter, QPainterPath, QPalette, QPen, QPixmap, QShortcut
 from PySide6.QtMultimedia import QAudioOutput, QMediaDevices, QMediaPlayer
 from PySide6.QtWidgets import (
@@ -1226,7 +1226,9 @@ class LyricsView(QScrollArea):
         self.content.setObjectName("lyricsContent")
 
         self.lyrics_layout = QVBoxLayout(self.content)
-        self.lyrics_layout.setContentsMargins(0, 120, 0, 120)
+        self._base_content_margins = (0, 120, 0, 120)
+        self.reserved_bottom_space = 0
+        self._apply_content_margins()
         self.lyrics_layout.setSpacing(14)
 
         self.setWidget(self.content)
@@ -1270,6 +1272,37 @@ class LyricsView(QScrollArea):
             self._install_browse_filter(self.content)
 
         self.set_placeholder("这里会显示歌词", "支持本地 .lrc 歌词滚动")
+
+    def _apply_content_margins(self) -> None:
+        left, top, right, bottom = self._base_content_margins
+        self.lyrics_layout.setContentsMargins(
+            left,
+            top,
+            right,
+            bottom + self.reserved_bottom_space,
+        )
+
+    def _set_content_margins(
+        self,
+        left: int,
+        top: int,
+        right: int,
+        bottom: int,
+    ) -> None:
+        self._base_content_margins = (
+            int(left),
+            int(top),
+            int(right),
+            int(bottom),
+        )
+        self._apply_content_margins()
+
+    def set_reserved_bottom_space(self, pixels: int) -> None:
+        reserved = max(0, int(pixels))
+        if reserved == self.reserved_bottom_space:
+            return
+        self.reserved_bottom_space = reserved
+        self._apply_content_margins()
 
     def _install_browse_filter(self, widget: QWidget | None) -> None:
         if widget is None:
@@ -1378,7 +1411,7 @@ class LyricsView(QScrollArea):
     def set_placeholder(self, title: str, subtitle: str = "") -> None:
         self.clear_content()
 
-        self.lyrics_layout.setContentsMargins(0, 80, 0, 80)
+        self._set_content_margins(0, 80, 0, 80)
         self.lyrics_layout.addStretch()
 
         title_label = QLabel(title)
@@ -1416,7 +1449,7 @@ class LyricsView(QScrollArea):
         self._lyric_timestamps = [timestamp for timestamp, _text in signature]
         self.content_rebuild_count += 1
 
-        self.lyrics_layout.setContentsMargins(0, 135, 0, 135)
+        self._set_content_margins(0, 135, 0, 135)
         self.lyrics_layout.setSpacing(12)
 
         for _, text in signature:
@@ -1447,7 +1480,7 @@ class LyricsView(QScrollArea):
             self.set_placeholder("暂无歌词", "歌曲来源没有提供可显示的歌词")
             return
         self.plain_text_mode = True
-        self.lyrics_layout.setContentsMargins(18, 60, 18, 80)
+        self._set_content_margins(18, 60, 18, 80)
         self.lyrics_layout.setSpacing(16)
         for line in lines:
             label = QLabel(line)
@@ -3023,9 +3056,10 @@ class SettingsDialog(QDialog):
         immersive_title.setObjectName("settingsCardTitle")
 
         self.immersive_background_mode_combo = QComboBox()
-        self.immersive_background_mode_combo.addItem("默认 / 纯色背景", "default")
-        self.immersive_background_mode_combo.addItem("当前歌曲封面", "cover")
-        self.immersive_background_mode_combo.addItem("自定义本地图片", "custom")
+        self.immersive_background_mode_combo.addItem("封面模糊", "cover")
+        self.immersive_background_mode_combo.addItem("纯色背景", "default")
+        self.immersive_background_mode_combo.addItem("半透明背景", "translucent")
+        self.immersive_background_mode_combo.addItem("自定义图片", "custom")
         immersive_mode_index = self.immersive_background_mode_combo.findData(
             self.immersive_appearance_config.background_mode
         )
@@ -3059,7 +3093,7 @@ class SettingsDialog(QDialog):
         immersive_layout.addWidget(self.immersive_background_mode_combo)
         immersive_layout.addWidget(self.auto_hide_checkbox)
         immersive_layout.addLayout(alpha_row)
-        immersive_hint = QLabel("自定义图片、模糊、透明度、填充方式和歌词字号可在沉浸歌词右上角“背景设置”中调整。")
+        immersive_hint = QLabel("自定义图片、模糊、透明度、填充方式和歌词字号可在沉浸歌词右上角“显示设置”中调整。")
         immersive_hint.setWordWrap(True)
         immersive_hint.setObjectName("settingsHint")
         immersive_layout.addWidget(immersive_hint)
@@ -3751,99 +3785,24 @@ class MetadataMatchDialog(QDialog):
         self.accept()
 
 
-class TransparentOpacitySlider(QSlider):
-    def __init__(self, parent=None) -> None:
-        super().__init__(Qt.Orientation.Horizontal, parent)
-        self.setObjectName("immersiveOpacitySlider")
-        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
-        self.setAutoFillBackground(False)
-        self.setMinimumHeight(28)
-        self.setFixedHeight(28)
-        self.setMouseTracking(True)
-
-    def paintEvent(self, event) -> None:
-        painter = QPainter(self)
-        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
-
-        left = 9
-        right = self.width() - 9
-        width = max(1, right - left)
-        center_y = self.height() / 2
-        track_rect = QRectF(left, center_y - 2, width, 4)
-
-        if self.isEnabled():
-            base_color = QColor(255, 255, 255, 22)
-            active_color = QColor(255, 255, 255, 95)
-            handle_color = QColor(255, 255, 255, 230)
-            border_color = QColor(255, 255, 255, 55)
-        else:
-            base_color = QColor(255, 255, 255, 12)
-            active_color = QColor(255, 255, 255, 28)
-            handle_color = QColor(255, 255, 255, 70)
-            border_color = QColor(255, 255, 255, 24)
-
-        base_path = QPainterPath()
-        base_path.addRoundedRect(track_rect, 2, 2)
-        painter.fillPath(base_path, base_color)
-
-        value_range = max(1, self.maximum() - self.minimum())
-        ratio = (self.value() - self.minimum()) / value_range
-        ratio = max(0.0, min(1.0, ratio))
-
-        active_rect = QRectF(left, center_y - 2, width * ratio, 4)
-        active_path = QPainterPath()
-        active_path.addRoundedRect(active_rect, 2, 2)
-        painter.fillPath(active_path, active_color)
-
-        handle_x = left + width * ratio
-        handle_rect = QRectF(handle_x - 8, center_y - 8, 16, 16)
-
-        painter.setPen(QPen(border_color, 1))
-        painter.setBrush(handle_color)
-        painter.drawEllipse(handle_rect)
-
-    def mousePressEvent(self, event) -> None:
-        if event.button() == Qt.MouseButton.LeftButton:
-            self.set_value_from_position(event.position().x())
-            event.accept()
-            return
-
-        super().mousePressEvent(event)
-
-    def mouseMoveEvent(self, event) -> None:
-        if event.buttons() & Qt.MouseButton.LeftButton:
-            self.set_value_from_position(event.position().x())
-            event.accept()
-            return
-
-        super().mouseMoveEvent(event)
-
-    def set_value_from_position(self, x_position: float) -> None:
-        left = 9
-        right = max(left + 1, self.width() - 9)
-        ratio = (float(x_position) - left) / max(1, right - left)
-        ratio = max(0.0, min(1.0, ratio))
-        value = self.minimum() + round(ratio * (self.maximum() - self.minimum()))
-        self.setValue(int(value))
-
-
 class ImmersiveLyricsWindow(QWidget):
+    WINDOW_GEOMETRY_SETTING = "immersive_window_geometry"
+    WINDOW_RESIZE_MARGIN = 8
+    DEFAULT_WINDOW_SIZE = QSize(1100, 720)
+
     def __init__(self, main_window) -> None:
         super().__init__()
 
         self.main_window = main_window
-        self.transparent_mode = True
         self.appearance_config = ImmersiveAppearanceConfig.from_settings(
             main_window.get_hush_settings()
         )
-        self.cover_background_enabled = self.appearance_config.background_mode == "cover"
-        self.background_alpha = self.appearance_config.darkness
         self.ui_visible = True
         self.appearance_dialog: ImmersiveAppearanceDialog | None = None
         self.track_identity = ""
         self.lyrics_offset_ms = 0
         self._external_connections: list[tuple[object, object]] = []
-        self._windowed_geometry = None
+        self._windowed_geometry: QRect | None = None
         self._playback_seeking = False
         self._responsive_mode = ""
         self.auto_hide_enabled = bool(
@@ -3859,6 +3818,7 @@ class ImmersiveLyricsWindow(QWidget):
         self.setWindowFlag(Qt.WindowType.FramelessWindowHint, True)
         self.setWindowFlag(Qt.WindowType.WindowStaysOnTopHint, True)
         self.setWindowOpacity(1.0)
+        self._windowed_geometry = self._read_windowed_geometry_setting()
 
         self.hide_ui_timer = QTimer(self)
         self.hide_ui_timer.setSingleShot(True)
@@ -3904,33 +3864,20 @@ class ImmersiveLyricsWindow(QWidget):
 
         self.immersive_title = QLabel("沉浸歌词")
         self.immersive_title.setObjectName("immersivePageTitle")
+        self.immersive_title.installEventFilter(self)
         header.addWidget(self.immersive_title)
         header.addStretch(1)
 
-        self.fullscreen_btn = QPushButton("副屏全屏")
+        self.fullscreen_btn = QPushButton("进入全屏")
         self.fullscreen_btn.setObjectName("immersiveButton")
         self.fullscreen_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.fullscreen_btn.setToolTip("进入全屏（F11）")
         self.fullscreen_btn.clicked.connect(self.toggle_fullscreen)
 
-        self.window_btn = QPushButton("窗口模式")
-        self.window_btn.setObjectName("immersiveButton")
-        self.window_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.window_btn.clicked.connect(self.show_windowed)
-
-        self.transparent_btn = QPushButton("切换纯黑")
-        self.transparent_btn.setObjectName("immersiveButton")
-        self.transparent_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.transparent_btn.clicked.connect(self.toggle_transparent_mode)
-
-        self.cover_bg_btn = QPushButton("背景设置")
-        self.cover_bg_btn.setObjectName("immersiveButton")
-        self.cover_bg_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.cover_bg_btn.clicked.connect(self.open_appearance_settings)
-
-        self.auto_hide_btn = QPushButton("常显 UI")
-        self.auto_hide_btn.setObjectName("immersiveButton")
-        self.auto_hide_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.auto_hide_btn.clicked.connect(self.toggle_auto_hide)
+        self.display_settings_btn = QPushButton("显示设置")
+        self.display_settings_btn.setObjectName("immersiveButton")
+        self.display_settings_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.display_settings_btn.clicked.connect(self.open_appearance_settings)
 
         self.close_btn = QPushButton("退出沉浸")
         self.close_btn.setObjectName("immersiveButton")
@@ -3939,38 +3886,10 @@ class ImmersiveLyricsWindow(QWidget):
 
         for button in (
             self.fullscreen_btn,
-            self.window_btn,
-            self.transparent_btn,
-            self.cover_bg_btn,
-            self.auto_hide_btn,
+            self.display_settings_btn,
             self.close_btn,
         ):
             header.addWidget(button)
-
-        self.opacity_panel = QFrame()
-        self.opacity_panel.setObjectName("immersiveOpacityPanel")
-        self.opacity_panel.setMouseTracking(True)
-        self.opacity_panel.installEventFilter(self)
-
-        alpha_box = QHBoxLayout(self.opacity_panel)
-        alpha_box.setContentsMargins(0, 0, 0, 0)
-        alpha_box.setSpacing(10)
-
-        self.alpha_label = QLabel("背景暗度 68%")
-        self.alpha_label.setObjectName("immersiveOpacityLabel")
-
-        self.alpha_slider = TransparentOpacitySlider()
-        self.alpha_slider.setRange(0, 90)
-        self.alpha_slider.setValue(self.background_alpha)
-        self.alpha_slider.setFixedWidth(240)
-        self.alpha_slider.setAutoFillBackground(False)
-        self.alpha_slider.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
-        self.alpha_slider.valueChanged.connect(self.change_background_alpha)
-
-        alpha_box.addWidget(self.alpha_label)
-        alpha_box.addWidget(self.alpha_slider)
-
-        header.addWidget(self.opacity_panel)
 
         self.body = QFrame()
         self.body.setObjectName("immersiveBody")
@@ -3989,6 +3908,16 @@ class ImmersiveLyricsWindow(QWidget):
         )
         self.artwork_layout.setContentsMargins(0, 0, 0, 0)
         self.artwork_layout.setSpacing(UI_SPACING["md"])
+
+        self.artwork_layout.addStretch(2)
+        self.artwork_content = QFrame()
+        self.artwork_content.setObjectName("immersiveArtworkContent")
+        self.artwork_content_layout = QBoxLayout(
+            QBoxLayout.Direction.TopToBottom,
+            self.artwork_content,
+        )
+        self.artwork_content_layout.setContentsMargins(0, 0, 0, 0)
+        self.artwork_content_layout.setSpacing(UI_SPACING["md"])
 
         self.cover_label = RoundedCoverLabel("无封面")
         self.cover_label.setObjectName("immersiveCover")
@@ -4032,12 +3961,13 @@ class ImmersiveLyricsWindow(QWidget):
         track_info_layout.addWidget(self.status_label)
         track_info_layout.addLayout(track_action_row)
 
-        self.artwork_layout.addWidget(
+        self.artwork_content_layout.addWidget(
             self.cover_label,
             alignment=Qt.AlignmentFlag.AlignHCenter,
         )
-        self.artwork_layout.addWidget(self.track_info)
-        self.artwork_layout.addStretch(1)
+        self.artwork_content_layout.addWidget(self.track_info)
+        self.artwork_layout.addWidget(self.artwork_content)
+        self.artwork_layout.addStretch(3)
 
         self.lyrics_panel = QFrame()
         self.lyrics_panel.setObjectName("immersiveLyricsPanel")
@@ -4166,11 +4096,6 @@ class ImmersiveLyricsWindow(QWidget):
         self.immersive_mode_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.immersive_mode_btn.clicked.connect(self.request_toggle_play_mode)
 
-        self.footer_exit_btn = QPushButton("退出沉浸")
-        self.footer_exit_btn.setObjectName("immersiveButton")
-        self.footer_exit_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.footer_exit_btn.clicked.connect(self.close)
-
         controls_row = QHBoxLayout()
         controls_row.setContentsMargins(0, 0, 0, 0)
         controls_row.setSpacing(UI_SPACING["sm"])
@@ -4182,33 +4107,20 @@ class ImmersiveLyricsWindow(QWidget):
         controls_row.addWidget(self.immersive_next_btn)
         controls_row.addStretch(1)
         controls_row.addWidget(self.immersive_mode_btn)
-        controls_row.addWidget(self.footer_exit_btn)
-
-        self.footer_hint = QLabel(
-            "移动鼠标显示控制栏 · Esc 退出沉浸 · 当前：封面模糊背景"
-        )
-        self.footer_hint.setObjectName("immersiveFooter")
-        self.footer_hint.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
         footer_layout.addLayout(progress_row)
         footer_layout.addLayout(controls_row)
-        footer_layout.addWidget(self.footer_hint)
 
         for control in (
             self.fullscreen_btn,
-            self.window_btn,
-            self.transparent_btn,
-            self.cover_bg_btn,
-            self.auto_hide_btn,
+            self.display_settings_btn,
             self.close_btn,
-            self.alpha_slider,
             self.immersive_progress_slider,
             self.immersive_volume_slider,
             self.immersive_prev_btn,
             self.immersive_play_btn,
             self.immersive_next_btn,
             self.immersive_mode_btn,
-            self.footer_exit_btn,
         ):
             control.installEventFilter(self)
 
@@ -4246,15 +4158,99 @@ class ImmersiveLyricsWindow(QWidget):
         self.show_controls_temporarily()
 
     def eventFilter(self, watched, event) -> bool:
-        if event.type() in (
+        event_type = event.type()
+        if not self.isFullScreen() and not self.isMaximized():
+            if watched is self.background_panel:
+                if (
+                    event_type == QEvent.Type.MouseButtonPress
+                    and event.button() == Qt.MouseButton.LeftButton
+                ):
+                    edges = self._resize_edges_at(event.globalPosition().toPoint())
+                    handle = self.windowHandle()
+                    if edges and handle is not None and handle.startSystemResize(edges):
+                        event.accept()
+                        return True
+                    header_widget = getattr(self, "control_header", None)
+                    header_bottom = (
+                        header_widget.geometry().bottom()
+                        if header_widget is not None
+                        else 0
+                    )
+                    if (
+                        not edges
+                        and event.position().y() <= header_bottom
+                        and handle is not None
+                        and handle.startSystemMove()
+                    ):
+                        event.accept()
+                        return True
+            if (
+                watched
+                in {
+                    getattr(self, "control_header", None),
+                    getattr(self, "immersive_title", None),
+                }
+                and event_type == QEvent.Type.MouseButtonPress
+                and event.button() == Qt.MouseButton.LeftButton
+            ):
+                handle = self.windowHandle()
+                if handle is not None and handle.startSystemMove():
+                    event.accept()
+                    return True
+
+        if event_type in (
             QEvent.Type.MouseMove,
             QEvent.Type.Enter,
             QEvent.Type.MouseButtonPress,
             QEvent.Type.FocusIn,
         ):
             self.show_controls_temporarily()
+        if (
+            watched is self.background_panel
+            and event_type == QEvent.Type.MouseMove
+            and not event.buttons()
+            and not self.isFullScreen()
+            and not self.isMaximized()
+        ):
+            self._update_resize_cursor(event.globalPosition().toPoint())
 
         return super().eventFilter(watched, event)
+
+    def _resize_edges_at(self, global_position: QPoint):
+        position = self.mapFromGlobal(global_position)
+        margin = self.WINDOW_RESIZE_MARGIN
+        edges = Qt.Edge(0)
+        if position.x() <= margin:
+            edges |= Qt.Edge.LeftEdge
+        elif position.x() >= self.width() - margin:
+            edges |= Qt.Edge.RightEdge
+        if position.y() <= margin:
+            edges |= Qt.Edge.TopEdge
+        elif position.y() >= self.height() - margin:
+            edges |= Qt.Edge.BottomEdge
+        return edges
+
+    def _update_resize_cursor(self, global_position: QPoint) -> None:
+        edges = self._resize_edges_at(global_position)
+        horizontal = bool(edges & (Qt.Edge.LeftEdge | Qt.Edge.RightEdge))
+        vertical = bool(edges & (Qt.Edge.TopEdge | Qt.Edge.BottomEdge))
+        if horizontal and vertical:
+            top_left_or_bottom_right = edges in (
+                Qt.Edge.LeftEdge | Qt.Edge.TopEdge,
+                Qt.Edge.RightEdge | Qt.Edge.BottomEdge,
+            )
+            cursor = (
+                Qt.CursorShape.SizeFDiagCursor
+                if top_left_or_bottom_right
+                else Qt.CursorShape.SizeBDiagCursor
+            )
+        elif horizontal:
+            cursor = Qt.CursorShape.SizeHorCursor
+        elif vertical:
+            cursor = Qt.CursorShape.SizeVerCursor
+        else:
+            cursor = Qt.CursorShape.ArrowCursor
+        self.setCursor(cursor)
 
     def mouseMoveEvent(self, event) -> None:
         self.show_controls_temporarily()
@@ -4360,24 +4356,20 @@ class ImmersiveLyricsWindow(QWidget):
 
         self.set_controls_visible(False, animate=True)
 
-    def toggle_auto_hide(self) -> None:
-        self.auto_hide_enabled = not self.auto_hide_enabled
-
+    def set_controls_always_visible(self, always_visible: bool) -> None:
+        self.auto_hide_enabled = not bool(always_visible)
         if self.auto_hide_enabled:
-            self.auto_hide_btn.setText("常显 UI")
             self.show_controls_temporarily()
         else:
             self.hide_ui_timer.stop()
             self.set_controls_visible(True, animate=True)
-            self.auto_hide_btn.setText("隐藏 UI")
-
-        self.apply_immersive_style()
+        self.main_window.save_hush_settings(
+            {"immersive_auto_hide_ui": self.auto_hide_enabled}
+        )
 
     def apply_immersive_style(self) -> None:
         self.setWindowOpacity(1.0)
         config = self.appearance_config
-        self.background_alpha = config.darkness
-        self.cover_background_enabled = config.background_mode == "cover"
         font_ratio = config.lyrics_font_scale / 100.0
         mode = self.responsive_mode_for_size(self.width())
         base_fonts = {
@@ -4396,55 +4388,19 @@ class ImmersiveLyricsWindow(QWidget):
         current_padding = max(13, round(18 * font_ratio))
         t = DARK_THEME_TOKENS
 
-        if self.transparent_mode:
-            button_background = "rgba(31, 35, 44, 190)"
-            mode_name = {
-                "default": "默认 / 纯色背景",
-                "cover": "当前歌曲封面",
-                "custom": "自定义图片",
-            }.get(config.background_mode, "默认 / 纯色背景")
-            footer_text = (
-                f"移动鼠标显示控制栏 · Esc 退出沉浸 · 当前：{mode_name}"
-                f" · 背景暗度 {config.darkness}% · 歌词字号 {config.lyrics_font_scale}%"
-            )
-            button_text = "切换纯黑"
-            slider_enabled = True
-        else:
-            button_background = "#1f232c"
-            footer_text = (
-                "移动鼠标显示控制栏 · Esc 退出沉浸 · 当前：纯黑背景"
-                f" · 歌词字号 {config.lyrics_font_scale}%"
-            )
-            button_text = "切换半透明"
-            slider_enabled = False
-
-        if self.auto_hide_enabled:
-            auto_hide_text = "常显 UI"
-        else:
-            auto_hide_text = "隐藏 UI"
-
-        self.footer_hint.setText(footer_text)
-        self.transparent_btn.setText(button_text)
-        self.cover_bg_btn.setText("背景设置")
-        self.auto_hide_btn.setText(auto_hide_text)
-        self.alpha_label.setText(f"背景暗度 {config.darkness}%")
-        self.alpha_slider.setEnabled(slider_enabled)
-        self.background_view.set_transparent_mode(self.transparent_mode)
+        button_background = "rgba(31, 35, 44, 190)"
         self.background_view.set_config(config)
 
         self.setStyleSheet(
             f"QWidget#immersiveLyricsWindow {{ background: transparent; color: {t['text']}; font-family: 'Segoe UI Variable Text', 'Segoe UI', 'Microsoft YaHei UI'; }}"
             "QFrame#immersiveBackgroundPanel { background: transparent; }"
-            "QFrame#immersiveBody, QFrame#immersiveArtworkPanel, QFrame#immersiveTrackInfo, QFrame#immersiveLyricsPanel { background: transparent; border: none; }"
+            "QFrame#immersiveBody, QFrame#immersiveArtworkPanel, QFrame#immersiveArtworkContent, QFrame#immersiveTrackInfo, QFrame#immersiveLyricsPanel { background: transparent; border: none; }"
             f"QFrame#immersiveControlHeader {{ background: rgba(8, 10, 15, 92); border: 1px solid {t['border']}; border-radius: {UI_RADII['card']}px; padding: 8px 10px; }}"
             f"QFrame#immersivePlaybackFooter {{ background: rgba(8, 10, 15, 150); border: 1px solid {t['border']}; border-radius: {UI_RADII['panel']}px; }}"
             f"QLabel#immersivePageTitle {{ color: {t['text_secondary']}; font-size: 14px; font-weight: 700; }}"
             f"QLabel#immersiveSongTitle {{ color: {t['text']}; font-size: 28px; font-weight: 900; }}"
             f"QLabel#immersiveSongArtist {{ color: {t['text_secondary']}; font-size: 15px; }}"
             f"QLabel#immersiveStatus {{ color: {t['text_muted']}; font-size: 12px; }}"
-            f"QLabel#immersiveFooter {{ color: {t['text_muted']}; font-size: 11px; }}"
-            "QFrame#immersiveOpacityPanel { background: transparent; border: none; }"
-            f"QLabel#immersiveOpacityLabel {{ background: transparent; color: {t['text_secondary']}; font-size: 12px; }}"
             f"QPushButton#immersiveButton, QPushButton#immersiveModeButton {{ background: {button_background}; color: {t['text_secondary']}; border: 1px solid {t['border']}; border-radius: {UI_RADII['button']}px; padding: 8px 12px; font-size: 12px; }}"
             f"QPushButton#immersiveButton:hover, QPushButton#immersiveModeButton:hover {{ background: {t['hover']}; color: {t['text']}; border-color: {t['border_strong']}; }}"
             f"QPushButton#immersiveModeButton[modeActive='true'] {{ background: {t['accent_soft']}; color: {t['accent_hover']}; border-color: {t['selected_border']}; }}"
@@ -4457,7 +4413,6 @@ class ImmersiveLyricsWindow(QWidget):
             f"QPushButton#immersiveTransportButton:hover {{ background: {t['hover']}; border-color: {t['border']}; }}"
             f"QPushButton#immersiveTransportPlayButton {{ background: {t['accent']}; border: 1px solid rgba(255,255,255,0.16); border-radius: 24px; }}"
             f"QPushButton#immersiveTransportPlayButton:hover {{ background: {t['accent_hover']}; }}"
-            "QSlider#immersiveOpacitySlider { background: transparent; border: none; }"
             f"QSlider#immersiveProgressSlider::groove:horizontal, QSlider#immersiveVolumeSlider::groove:horizontal {{ height: 4px; background: rgba(255,255,255,0.14); border-radius: 2px; }}"
             f"QSlider#immersiveProgressSlider::sub-page:horizontal, QSlider#immersiveVolumeSlider::sub-page:horizontal {{ background: {t['accent']}; border-radius: 2px; }}"
             f"QSlider#immersiveProgressSlider::handle:horizontal, QSlider#immersiveVolumeSlider::handle:horizontal {{ width: 14px; height: 14px; margin: -5px 0; background: {t['text']}; border: 1px solid rgba(15,17,23,0.42); border-radius: 7px; }}"
@@ -4471,36 +4426,6 @@ class ImmersiveLyricsWindow(QWidget):
             f"QLabel#lyricLine[lyricState='near'] {{ color: rgba(236,240,248,170); font-size: {near_font:.2f}pt; font-weight: 700; padding: {near_padding}px 12px; }}"
             f"QLabel#lyricLine[lyricState='current'] {{ color: {t['text']}; font-size: {current_font:.2f}pt; font-weight: 850; padding: {current_padding}px 12px; }}"
         )
-
-    def change_background_alpha(self, value: int) -> None:
-        config = replace(self.appearance_config, darkness=int(value))
-        self.apply_appearance_config(config, persist=True)
-
-    def refresh_appearance_control_text(self) -> None:
-        config = self.appearance_config
-        if self.transparent_mode:
-            mode_name = {
-                "default": "默认 / 纯色背景",
-                "cover": "当前歌曲封面",
-                "custom": "自定义图片",
-            }.get(config.background_mode, "默认 / 纯色背景")
-            footer_text = (
-                f"移动鼠标显示控制栏 · Esc 退出沉浸 · 当前：{mode_name}"
-                f" · 背景暗度 {config.darkness}% · 歌词字号 {config.lyrics_font_scale}%"
-            )
-            self.transparent_btn.setText("切换纯黑")
-            self.alpha_slider.setEnabled(True)
-        else:
-            footer_text = (
-                "移动鼠标显示控制栏 · Esc 退出沉浸 · 当前：纯黑背景"
-                f" · 歌词字号 {config.lyrics_font_scale}%"
-            )
-            self.transparent_btn.setText("切换半透明")
-            self.alpha_slider.setEnabled(False)
-        self.footer_hint.setText(footer_text)
-        self.cover_bg_btn.setText("背景设置")
-        self.auto_hide_btn.setText("常显 UI" if self.auto_hide_enabled else "隐藏 UI")
-        self.alpha_label.setText(f"背景暗度 {config.darkness}%")
 
     @staticmethod
     def responsive_mode_for_size(width: int) -> str:
@@ -4517,6 +4442,10 @@ class ImmersiveLyricsWindow(QWidget):
         if not force and not mode_changed:
             if mode == "wide":
                 self.update_responsive_cover_size()
+            else:
+                self.lyrics_view.set_reserved_bottom_space(
+                    max(96, self.footer.sizeHint().height() + 12)
+                )
             return
         self._responsive_mode = mode
 
@@ -4527,19 +4456,18 @@ class ImmersiveLyricsWindow(QWidget):
             self.body_layout.setSpacing(40)
             self.body_layout.setStretch(0, 2)
             self.body_layout.setStretch(1, 3)
-            self.artwork_layout.setDirection(QBoxLayout.Direction.TopToBottom)
+            self.artwork_content_layout.setDirection(
+                QBoxLayout.Direction.TopToBottom
+            )
             self.artwork_panel.setMinimumWidth(280)
             self.artwork_panel.setMaximumWidth(480)
             self.artwork_panel.setMaximumHeight(16777215)
+            self.artwork_content.setMaximumWidth(480)
             self.cover_label.show()
             self.song_artist.show()
             self.status_label.show()
-            self.window_btn.show()
-            self.transparent_btn.show()
-            self.auto_hide_btn.show()
-            self.opacity_panel.show()
-            self.footer_hint.show()
             self.immersive_volume_slider.setMaximumWidth(150)
+            self.lyrics_view.set_reserved_bottom_space(24)
         elif mode == "compact":
             self.page_layout.setContentsMargins(24, 18, 24, 18)
             self.page_layout.setSpacing(UI_SPACING["sm"])
@@ -4547,19 +4475,20 @@ class ImmersiveLyricsWindow(QWidget):
             self.body_layout.setSpacing(UI_SPACING["sm"])
             self.body_layout.setStretch(0, 0)
             self.body_layout.setStretch(1, 1)
-            self.artwork_layout.setDirection(QBoxLayout.Direction.LeftToRight)
+            self.artwork_content_layout.setDirection(
+                QBoxLayout.Direction.LeftToRight
+            )
             self.artwork_panel.setMinimumWidth(0)
             self.artwork_panel.setMaximumWidth(16777215)
             self.artwork_panel.setMaximumHeight(210)
+            self.artwork_content.setMaximumWidth(16777215)
             self.cover_label.show()
             self.song_artist.show()
             self.status_label.show()
-            self.window_btn.hide()
-            self.transparent_btn.hide()
-            self.auto_hide_btn.show()
-            self.opacity_panel.hide()
-            self.footer_hint.hide()
             self.immersive_volume_slider.setMaximumWidth(120)
+            self.lyrics_view.set_reserved_bottom_space(
+                max(96, self.footer.sizeHint().height() + 12)
+            )
         else:
             self.page_layout.setContentsMargins(16, 12, 16, 12)
             self.page_layout.setSpacing(UI_SPACING["xs"])
@@ -4567,19 +4496,20 @@ class ImmersiveLyricsWindow(QWidget):
             self.body_layout.setSpacing(UI_SPACING["xs"])
             self.body_layout.setStretch(0, 0)
             self.body_layout.setStretch(1, 1)
-            self.artwork_layout.setDirection(QBoxLayout.Direction.TopToBottom)
+            self.artwork_content_layout.setDirection(
+                QBoxLayout.Direction.TopToBottom
+            )
             self.artwork_panel.setMinimumWidth(0)
             self.artwork_panel.setMaximumWidth(16777215)
             self.artwork_panel.setMaximumHeight(96)
+            self.artwork_content.setMaximumWidth(16777215)
             self.cover_label.hide()
             self.song_artist.show()
             self.status_label.hide()
-            self.window_btn.hide()
-            self.transparent_btn.hide()
-            self.auto_hide_btn.hide()
-            self.opacity_panel.hide()
-            self.footer_hint.hide()
             self.immersive_volume_slider.setMaximumWidth(96)
+            self.lyrics_view.set_reserved_bottom_space(
+                max(96, self.footer.sizeHint().height() + 12)
+            )
 
         self.update_responsive_cover_size()
         if mode_changed:
@@ -4599,6 +4529,11 @@ class ImmersiveLyricsWindow(QWidget):
             side = 0
         if side > 0 and self.cover_label.size() != QSize(side, side):
             self.cover_label.setFixedSize(side, side)
+        if mode == "wide" and side > 0:
+            self.artwork_content.setFixedWidth(side)
+        elif self.artwork_content.minimumWidth() == self.artwork_content.maximumWidth():
+            self.artwork_content.setMinimumWidth(0)
+            self.artwork_content.setMaximumWidth(16777215)
 
     @staticmethod
     def format_time(milliseconds: int) -> str:
@@ -4747,14 +4682,6 @@ class ImmersiveLyricsWindow(QWidget):
         else:
             self.show_on_best_screen()
 
-    def toggle_transparent_mode(self) -> None:
-        self.transparent_mode = not self.transparent_mode
-        self.apply_immersive_style()
-        self.show_controls_temporarily()
-
-    def toggle_cover_background(self) -> None:
-        self.open_appearance_settings()
-
     def open_appearance_settings(self) -> None:
         dialog = self.appearance_dialog
         if dialog is not None and dialog.isVisible():
@@ -4768,11 +4695,15 @@ class ImmersiveLyricsWindow(QWidget):
             self,
             track_identity=self.track_identity,
             lyrics_offset_ms=self.lyrics_offset_ms,
+            controls_always_visible=not self.auto_hide_enabled,
         )
         dialog.configChanged.connect(
             lambda config: self.apply_appearance_config(config, persist=True)
         )
         dialog.lyricsOffsetChanged.connect(self.request_lyrics_offset_change)
+        dialog.controlsAlwaysVisibleChanged.connect(
+            self.set_controls_always_visible
+        )
         dialog.finished.connect(lambda _result: self._clear_appearance_dialog(dialog))
         dialog.set_availability(
             not self.background_view.fallback_active,
@@ -4834,16 +4765,9 @@ class ImmersiveLyricsWindow(QWidget):
         font_changed = previous.lyrics_font_scale != config.lyrics_font_scale
         mode_changed = previous.background_mode != config.background_mode
         self.appearance_config = config
-        self.background_alpha = config.darkness
-        self.cover_background_enabled = config.background_mode == "cover"
-        self.alpha_slider.blockSignals(True)
-        self.alpha_slider.setValue(config.darkness)
-        self.alpha_slider.blockSignals(False)
         self.background_view.set_config(config)
         if mode_changed:
             self.apply_immersive_style()
-        elif not font_changed:
-            self.refresh_appearance_control_text()
         if font_changed:
             self.font_scale_timer.start()
         if persist:
@@ -4897,33 +4821,122 @@ class ImmersiveLyricsWindow(QWidget):
         if hasattr(self, "responsive_layout_timer"):
             self.responsive_layout_timer.start()
 
+    @staticmethod
+    def _geometry_document(rect: QRect) -> dict[str, int]:
+        return {
+            "x": int(rect.x()),
+            "y": int(rect.y()),
+            "width": int(rect.width()),
+            "height": int(rect.height()),
+        }
+
+    def _read_windowed_geometry_setting(self) -> QRect | None:
+        raw = self.main_window.get_user_setting(
+            self.WINDOW_GEOMETRY_SETTING,
+            None,
+        )
+        if not isinstance(raw, dict):
+            return None
+        values: list[int] = []
+        for key in ("x", "y", "width", "height"):
+            value = raw.get(key)
+            if isinstance(value, bool):
+                return None
+            try:
+                values.append(int(value))
+            except (TypeError, ValueError):
+                return None
+        rect = QRect(*values)
+        if (
+            not rect.isValid()
+            or rect.width() < self.minimumWidth()
+            or rect.height() < self.minimumHeight()
+        ):
+            return None
+        return self._safe_windowed_geometry(rect)
+
+    def _safe_windowed_geometry(self, requested: QRect | None) -> QRect:
+        screens = QApplication.screens()
+        available_rects = [screen.availableGeometry() for screen in screens]
+        target = None
+        if requested is not None and requested.isValid():
+            ranked = sorted(
+                available_rects,
+                key=lambda available: (
+                    available.intersected(requested).width()
+                    * available.intersected(requested).height()
+                ),
+                reverse=True,
+            )
+            if ranked and ranked[0].intersects(requested):
+                target = ranked[0]
+        if target is None:
+            requested = None
+            main_handle = getattr(self.main_window, "windowHandle", lambda: None)()
+            main_screen = main_handle.screen() if main_handle is not None else None
+            fallback_screen = main_screen or QApplication.primaryScreen()
+            if fallback_screen is not None:
+                target = fallback_screen.availableGeometry()
+            else:
+                target = QRect(0, 0, 1280, 800)
+
+        if requested is None or not requested.isValid():
+            width = min(self.DEFAULT_WINDOW_SIZE.width(), max(720, target.width() - 80))
+            height = min(self.DEFAULT_WINDOW_SIZE.height(), max(560, target.height() - 80))
+            return QRect(
+                target.x() + (target.width() - width) // 2,
+                target.y() + (target.height() - height) // 2,
+                width,
+                height,
+            )
+
+        width = max(self.minimumWidth(), requested.width())
+        height = max(self.minimumHeight(), requested.height())
+        visible_width = min(160, width)
+        visible_height = min(80, height)
+        x = max(
+            target.left() - width + visible_width,
+            min(requested.x(), target.right() - visible_width + 1),
+        )
+        y = max(
+            target.top(),
+            min(requested.y(), target.bottom() - visible_height + 1),
+        )
+        return QRect(x, y, width, height)
+
+    def _persist_windowed_geometry(self) -> None:
+        rect = self._windowed_geometry
+        if rect is None or not rect.isValid():
+            return
+        self.main_window.save_hush_settings(
+            {self.WINDOW_GEOMETRY_SETTING: self._geometry_document(rect)}
+        )
+
+    def _update_fullscreen_control(self) -> None:
+        fullscreen = self.isFullScreen()
+        self.fullscreen_btn.setText("退出全屏" if fullscreen else "进入全屏")
+        self.fullscreen_btn.setToolTip(
+            "退出全屏（F11）" if fullscreen else "进入全屏（F11）"
+        )
+
     def show_on_best_screen(self) -> None:
         if not self.isFullScreen():
-            self._windowed_geometry = self.geometry()
-        screens = QApplication.screens()
-        target_screen = None
-
-        if len(screens) >= 2:
-            target_screen = screens[1]
-        elif screens:
-            target_screen = screens[0]
-
-        if target_screen:
-            self.setGeometry(target_screen.availableGeometry())
+            self._windowed_geometry = self._safe_windowed_geometry(self.geometry())
+            self._persist_windowed_geometry()
 
         self.showFullScreen()
-        self.fullscreen_btn.setText("退出全屏")
+        self._update_fullscreen_control()
         self.raise_()
         self.activateWindow()
         self.show_controls_temporarily()
 
     def show_windowed(self) -> None:
         self.showNormal()
-        if self._windowed_geometry is not None and self._windowed_geometry.isValid():
-            self.setGeometry(self._windowed_geometry)
-        else:
-            self.resize(1100, 720)
-        self.fullscreen_btn.setText("副屏全屏")
+        self._windowed_geometry = self._safe_windowed_geometry(
+            self._windowed_geometry
+        )
+        self.setGeometry(self._windowed_geometry)
+        self._update_fullscreen_control()
         self.raise_()
         self.activateWindow()
         self.show_controls_temporarily()
@@ -4995,12 +5008,17 @@ class ImmersiveLyricsWindow(QWidget):
         self.lyrics_view.update_by_position(position, lyrics)
 
     def keyPressEvent(self, event) -> None:
-        if event.key() == Qt.Key.Key_Escape:
-            self.close()
+        if event.key() == Qt.Key.Key_F11:
+            self.toggle_fullscreen()
+            event.accept()
             return
 
-        if event.key() == Qt.Key.Key_Space:
-            self.toggle_auto_hide()
+        if event.key() == Qt.Key.Key_Escape:
+            if self.isFullScreen():
+                self.show_windowed()
+            else:
+                self.close()
+            event.accept()
             return
 
         super().keyPressEvent(event)
@@ -5011,9 +5029,13 @@ class ImmersiveLyricsWindow(QWidget):
         self.apply_responsive_layout(force=True)
         self.refresh_playback_snapshot()
         self.refresh_favorite_state()
+        self._update_fullscreen_control()
         self.show_controls_temporarily()
 
     def closeEvent(self, event) -> None:
+        if not self.isFullScreen() and not self.isMaximized():
+            self._windowed_geometry = self._safe_windowed_geometry(self.geometry())
+        self._persist_windowed_geometry()
         self.setWindowOpacity(1.0)
         self.setCursor(Qt.CursorShape.ArrowCursor)
         self.hide_ui_timer.stop()
@@ -8205,10 +8227,13 @@ class MainWindow(QMainWindow):
             self.immersive_lyrics_window = ImmersiveLyricsWindow(self)
 
         self.sync_immersive_lyrics()
-        self.immersive_lyrics_window.show_on_best_screen()
 
         if not was_already_visible:
+            self.immersive_lyrics_window.show_windowed()
             self.minimize_main_for_immersive()
+        else:
+            self.immersive_lyrics_window.raise_()
+            self.immersive_lyrics_window.activateWindow()
 
     def minimize_main_for_immersive(self) -> None:
         self.main_was_minimized_before_immersive = self.isMinimized()
