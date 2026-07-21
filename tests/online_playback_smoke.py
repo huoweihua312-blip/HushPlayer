@@ -3,7 +3,6 @@ from __future__ import annotations
 import hashlib
 import json
 import os
-import shutil
 import sys
 import tempfile
 import threading
@@ -17,18 +16,25 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-
-def _default_real_play_queue_path() -> Path | None:
-    if os.name != "nt":
-        return None
-    app_data = str(os.environ.get("APPDATA") or "").strip()
-    if not app_data:
-        return None
-    return Path(app_data) / "HushPlayer" / "HushPlayer" / "data" / "play_queue.json"
+from _smoke_storage import activate_isolated_app_storage
 
 
-def _file_fingerprint(path: Path | None) -> dict[str, object]:
-    if path is None or not path.is_file():
+ISOLATED_STORAGE = activate_isolated_app_storage("hushplayer-online-playback-")
+os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+
+
+def _protected_play_queue_fixture_path() -> Path:
+    return (
+        Path(os.environ["APPDATA"])
+        / "HushPlayer"
+        / "HushPlayer"
+        / "data"
+        / "play_queue.json"
+    )
+
+
+def _file_fingerprint(path: Path) -> dict[str, object]:
+    if not path.is_file():
         return {"exists": False}
     digest = hashlib.sha256()
     with path.open("rb") as file:
@@ -43,14 +49,17 @@ def _file_fingerprint(path: Path | None) -> dict[str, object]:
     }
 
 
-REAL_PLAY_QUEUE_PATH = _default_real_play_queue_path()
-REAL_PLAY_QUEUE_BEFORE = _file_fingerprint(REAL_PLAY_QUEUE_PATH)
-
-from _smoke_storage import activate_isolated_app_storage
-
-
-ISOLATED_STORAGE = activate_isolated_app_storage("hushplayer-online-playback-")
-os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+PROTECTED_PLAY_QUEUE_PATH = _protected_play_queue_fixture_path()
+PROTECTED_PLAY_QUEUE_PATH.parent.mkdir(parents=True, exist_ok=True)
+PROTECTED_PLAY_QUEUE_PATH.write_text(
+    '[{"fixture": "must remain unchanged"}]\n',
+    encoding="utf-8",
+)
+PROTECTED_PLAY_QUEUE_BEFORE = _file_fingerprint(PROTECTED_PLAY_QUEUE_PATH)
+assert PROTECTED_PLAY_QUEUE_PATH.resolve().is_relative_to(ISOLATED_STORAGE.root)
+assert not PROTECTED_PLAY_QUEUE_PATH.resolve().is_relative_to(
+    ISOLATED_STORAGE.app_data_dir
+)
 
 from PySide6.QtCore import QUrl, Qt
 from PySide6.QtWidgets import QApplication, QListWidgetItem
@@ -64,8 +73,17 @@ from app.services.unified_search_service import UnifiedSearchService
 from app.ui.online_source_pages import OnlineSearchPage
 
 
-STAGING_ROOT = PROJECT_ROOT / "source_runtime" / "sources" / "staging"
-TEST_ROOT = STAGING_ROOT / f"hushplayer_qprocess_{os.getpid()}"
+TEST_SOURCE_HOME = ISOLATED_STORAGE.root / "online_source_fixture"
+TEST_ROOT = TEST_SOURCE_HOME / "sources" / "active"
+
+
+def fixture_client(registry_path: Path) -> OnlineSourceClient:
+    return OnlineSourceClient(
+        PROJECT_ROOT,
+        runtime_dir=PROJECT_ROOT / "source_runtime",
+        registry_path=registry_path,
+        user_sources_dir=ISOLATED_STORAGE.user_sources_dir,
+    )
 
 
 def wait_until(predicate, timeout_ms: int = 5000) -> bool:
@@ -101,7 +119,7 @@ def prepare_fixture() -> Path:
         };\n""",
         encoding="utf-8",
     )
-    registry_path = TEST_ROOT / "registry.json"
+    registry_path = TEST_SOURCE_HOME / "source_registry.json"
     registry_path.write_text(
         json.dumps(
             {
@@ -110,7 +128,7 @@ def prepare_fixture() -> Path:
                     {
                         "id": "open_fixture",
                         "name": "Open fixture",
-                        "filename": plugin_path.relative_to(PROJECT_ROOT / "source_runtime").as_posix(),
+                        "filename": plugin_path.relative_to(TEST_SOURCE_HOME).as_posix(),
                         "enabled": True,
                         "userInstalled": True,
                         "sourceUrl": "https://example.invalid/open_fixture.js",
@@ -125,7 +143,7 @@ def prepare_fixture() -> Path:
                     {
                         "id": "independent_fixture",
                         "name": "Independent fixture",
-                        "filename": independent_path.relative_to(PROJECT_ROOT / "source_runtime").as_posix(),
+                        "filename": independent_path.relative_to(TEST_SOURCE_HOME).as_posix(),
                         "enabled": True,
                         "userInstalled": True,
                         "sourceUrl": "https://example.invalid/independent_fixture.js",
@@ -146,8 +164,7 @@ def prepare_fixture() -> Path:
 
 
 def test_qprocess_client(app: QApplication, registry_path: Path) -> None:
-    os.environ["HUSHPLAYER_SOURCE_REGISTRY"] = str(registry_path)
-    client = OnlineSourceClient(PROJECT_ROOT)
+    client = fixture_client(registry_path)
     resolved: list[tuple[int, dict]] = []
     failures: list[tuple[int, str, str]] = []
     stopped: list[bool] = []
@@ -196,8 +213,7 @@ def test_qprocess_client(app: QApplication, registry_path: Path) -> None:
 
 
 def test_unified_qprocess_search(app: QApplication, registry_path: Path) -> None:
-    os.environ["HUSHPLAYER_SOURCE_REGISTRY"] = str(registry_path)
-    client = OnlineSourceClient(PROJECT_ROOT)
+    client = fixture_client(registry_path)
     service = UnifiedSearchService(client, debounce_ms=500)
     emissions: list[tuple[list, dict]] = []
     service.resultsChanged.connect(
@@ -217,8 +233,8 @@ def test_unified_qprocess_search(app: QApplication, registry_path: Path) -> None
     app.processEvents()
 
 
-def test_search_page_signals() -> None:
-    client = OnlineSourceClient(PROJECT_ROOT)
+def test_search_page_signals(registry_path: Path) -> None:
+    client = fixture_client(registry_path)
     page = OnlineSearchPage(client)
     emitted: list[dict] = []
     page.play_requested.connect(emitted.append)
@@ -470,7 +486,7 @@ def test_main_window_online_entry() -> None:
     try:
         window = MainWindow()
         assert window.play_queue_file.resolve().is_relative_to(
-            ISOLATED_STORAGE.root
+            ISOLATED_STORAGE.app_data_dir
         )
         window.show_pending_playback_restore(
             {
@@ -742,26 +758,23 @@ def main() -> int:
     try:
         test_qprocess_client(app, registry_path)
         test_unified_qprocess_search(app, registry_path)
-        test_search_page_signals()
+        test_search_page_signals(registry_path)
         test_download_manager()
         test_js_and_json_import_capabilities()
         test_main_window_online_entry()
         print("online playback QProcess/UI smoke: OK")
         return 0
     finally:
-        resolved_root = TEST_ROOT.resolve()
-        resolved_staging = STAGING_ROOT.resolve()
-        if resolved_root.parent == resolved_staging and resolved_root.name.startswith("hushplayer_qprocess_"):
-            shutil.rmtree(resolved_root, ignore_errors=True)
-        real_play_queue_after = _file_fingerprint(REAL_PLAY_QUEUE_PATH)
-        assert real_play_queue_after == REAL_PLAY_QUEUE_BEFORE, (
-            "online playback smoke modified the real user play queue: "
-            f"before={REAL_PLAY_QUEUE_BEFORE}, after={real_play_queue_after}"
+        protected_play_queue_after = _file_fingerprint(PROTECTED_PLAY_QUEUE_PATH)
+        assert protected_play_queue_after == PROTECTED_PLAY_QUEUE_BEFORE, (
+            "online playback smoke modified the protected queue fixture: "
+            f"before={PROTECTED_PLAY_QUEUE_BEFORE}, "
+            f"after={protected_play_queue_after}"
         )
         print(
-            "real play queue unchanged:",
-            REAL_PLAY_QUEUE_PATH,
-            real_play_queue_after,
+            "protected play queue fixture unchanged:",
+            PROTECTED_PLAY_QUEUE_PATH,
+            protected_play_queue_after,
         )
 
 
