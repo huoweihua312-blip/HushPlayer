@@ -526,56 +526,58 @@ def run_test(app: QApplication) -> None:
     MainWindow.auto_scan_music_folders_on_startup = lambda self: None
     window = None
     metrics = None
+    temporary_directory = tempfile.TemporaryDirectory(
+        prefix="hushplayer_online_incremental_"
+    )
     try:
-        with tempfile.TemporaryDirectory(prefix="hushplayer_online_incremental_") as temp_dir:
-            root = Path(temp_dir)
-            prepare_isolated_storage(root)
-            os.environ["HUSHPLAYER_APP_DATA_DIR"] = str(root / "appdata")
-            os.environ["HUSHPLAYER_CACHE_DIR"] = str(root / "cache")
-            os.environ["HUSHPLAYER_LOG_DIR"] = str(root / "logs")
-            window = MainWindow()
-            window.resize(1100, 720)
-            window.show()
-            process_events(app)
-            install_local_library(window, 1000)
-            client, service = attach_service(window)
-            metrics = Metrics(window)
-            run_order_benchmark(
-                window,
-                client,
-                service,
-                metrics,
-                app,
-                "normal",
-                list(SOURCE_IDS),
-            )
-            run_order_benchmark(
-                window,
-                client,
-                service,
-                metrics,
-                app,
-                "reverse",
-                list(reversed(SOURCE_IDS)),
-            )
-            random_order = list(SOURCE_IDS)
-            random.Random(20260715).shuffle(random_order)
-            run_order_benchmark(
-                window,
-                client,
-                service,
-                metrics,
-                app,
-                "random",
-                random_order,
-            )
-            test_failures_duplicates_and_stale_results(window, client, service, app)
-            test_cache_invalidation_and_actions(window, metrics)
-            assert not [
-                thread for thread in window.findChildren(QThread) if thread.isRunning()
-            ]
-            assert window.online_source_client.process.state() == QProcess.ProcessState.NotRunning
-            print("online search incremental smoke: OK")
+        root = Path(temporary_directory.name)
+        prepare_isolated_storage(root)
+        os.environ["HUSHPLAYER_APP_DATA_DIR"] = str(root / "appdata")
+        os.environ["HUSHPLAYER_CACHE_DIR"] = str(root / "cache")
+        os.environ["HUSHPLAYER_LOG_DIR"] = str(root / "logs")
+        window = MainWindow()
+        window.resize(1100, 720)
+        window.show()
+        process_events(app)
+        install_local_library(window, 1000)
+        client, service = attach_service(window)
+        metrics = Metrics(window)
+        run_order_benchmark(
+            window,
+            client,
+            service,
+            metrics,
+            app,
+            "normal",
+            list(SOURCE_IDS),
+        )
+        run_order_benchmark(
+            window,
+            client,
+            service,
+            metrics,
+            app,
+            "reverse",
+            list(reversed(SOURCE_IDS)),
+        )
+        random_order = list(SOURCE_IDS)
+        random.Random(20260715).shuffle(random_order)
+        run_order_benchmark(
+            window,
+            client,
+            service,
+            metrics,
+            app,
+            "random",
+            random_order,
+        )
+        test_failures_duplicates_and_stale_results(window, client, service, app)
+        test_cache_invalidation_and_actions(window, metrics)
+        assert not [
+            thread for thread in window.findChildren(QThread) if thread.isRunning()
+        ]
+        assert window.online_source_client.process.state() == QProcess.ProcessState.NotRunning
+        print("online search incremental smoke: OK")
     finally:
         if metrics is not None:
             metrics.restore()
@@ -592,6 +594,7 @@ def run_test(app: QApplication) -> None:
                 os.environ.pop(name, None)
             else:
                 os.environ[name] = value
+        temporary_directory.cleanup()
 
 
 def main() -> int:

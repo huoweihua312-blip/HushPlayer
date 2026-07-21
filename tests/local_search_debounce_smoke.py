@@ -362,44 +362,46 @@ def run_test(app: QApplication) -> None:
     )
     window = None
     metrics = None
+    temporary_directory = tempfile.TemporaryDirectory(
+        prefix="hushplayer_local_search_"
+    )
     try:
-        with tempfile.TemporaryDirectory(prefix="hushplayer_local_search_") as temp_dir:
-            root = Path(temp_dir)
-            prepare_isolated_storage(root)
-            os.environ["HUSHPLAYER_APP_DATA_DIR"] = str(root / "appdata")
-            os.environ["HUSHPLAYER_CACHE_DIR"] = str(root / "cache")
-            os.environ["HUSHPLAYER_LOG_DIR"] = str(root / "logs")
-            window = MainWindow()
-            window._test_online_schedule_calls = []
-            window.unified_search_service.schedule_search = (
-                lambda keyword, local_only=False: window._test_online_schedule_calls.append(
-                    (str(keyword), bool(local_only))
-                )
+        root = Path(temporary_directory.name)
+        prepare_isolated_storage(root)
+        os.environ["HUSHPLAYER_APP_DATA_DIR"] = str(root / "appdata")
+        os.environ["HUSHPLAYER_CACHE_DIR"] = str(root / "cache")
+        os.environ["HUSHPLAYER_LOG_DIR"] = str(root / "logs")
+        window = MainWindow()
+        window._test_online_schedule_calls = []
+        window.unified_search_service.schedule_search = (
+            lambda keyword, local_only=False: window._test_online_schedule_calls.append(
+                (str(keyword), bool(local_only))
             )
-            window.resize(1100, 720)
-            window.show()
-            process_events(app)
-            metrics = SearchMetrics(window)
+        )
+        window.resize(1100, 720)
+        window.show()
+        process_events(app)
+        metrics = SearchMetrics(window)
 
-            install_tracks(window, app, local_tracks(root, 100, chinese_artists=12))
-            test_input_timing_and_normalization(window, app, metrics)
-            test_clear_and_stale_page_request(window, app, metrics)
-            test_result_reuse_state_and_signals(
-                window,
-                app,
-                metrics,
-                context_calls,
-            )
-            run_benchmark(window, app, metrics, root, 300)
-            run_benchmark(window, app, metrics, root, 1000)
+        install_tracks(window, app, local_tracks(root, 100, chinese_artists=12))
+        test_input_timing_and_normalization(window, app, metrics)
+        test_clear_and_stale_page_request(window, app, metrics)
+        test_result_reuse_state_and_signals(
+            window,
+            app,
+            metrics,
+            context_calls,
+        )
+        run_benchmark(window, app, metrics, root, 300)
+        run_benchmark(window, app, metrics, root, 1000)
 
-            assert not [
-                thread
-                for thread in window.findChildren(QThread)
-                if thread.isRunning()
-            ]
-            assert window.online_source_client.process.state() == QProcess.ProcessState.NotRunning
-            print("local search debounce smoke: OK")
+        assert not [
+            thread
+            for thread in window.findChildren(QThread)
+            if thread.isRunning()
+        ]
+        assert window.online_source_client.process.state() == QProcess.ProcessState.NotRunning
+        print("local search debounce smoke: OK")
     finally:
         if metrics is not None:
             metrics.restore()
@@ -420,6 +422,7 @@ def run_test(app: QApplication) -> None:
                 os.environ.pop(name, None)
             else:
                 os.environ[name] = value
+        temporary_directory.cleanup()
 
 
 def main() -> int:
