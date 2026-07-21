@@ -1,19 +1,18 @@
 {
     "schema_version": 1,
     "channel": "beta",
-    "version": "0.5.0-beta.4",
-    "numeric_version": "0.5.0.4",
+    "version": "0.5.0-beta.5",
+    "numeric_version": "0.5.0.5",
     "architecture": "win-x64",
     "mandatory": false,
-    "setup_url": "https://huoweihua312-blip.github.io/HushPlayer-downloads/releases/v0.5.0-beta.4/HushPlayer-0.5.0-beta.4-win-x64-setup.exe",
-    "setup_size": 67639948,
-    "sha256": "ad7aafebc096ed905646fda1fd0c5c23cff93c8a7f6dd3e6b57d07a8d249de8e",
+    "setup_url": "https://huoweihua312-blip.github.io/HushPlayer-downloads/HushPlayer-0.5.0-beta.5-win-x64-setup.exe",
+    "setup_size": 67697663,
+    "sha256": "4d2c348fcce16890616b2cc237b33ab79b0ecaaaa7e26d0b2fc16c194f561b88",
     "release_notes": [
-        "沉浸式歌词支持自定义图片背景、模糊、暗度、透明度和填充方式调节",
-        "新增沉浸式歌词字体大小调节",
-        "新增按歌曲保存的歌词时间偏移，支持本地与在线歌曲",
-        "改进沉浸歌词背景渲染、切歌竞态保护和相关稳定性",
-        "修复安装包下载遇到 HTTP 重定向时误判 Content-Length 的问题",
-        "提高 GitHub 等重定向下载地址的在线更新稳定性"
+        "统一主界面视觉风格和控件层级，提升整体布局一致性",
+        "重新设计沉浸式歌词界面，并优化窗口打开、关闭和切换行为",
+        "精简侧栏导航和底部播放控制，突出常用功能入口",
+        "优化右侧歌词区域的自适应多行显示和当前歌词定位",
+        "改进不同窗口尺寸下的界面布局和歌词显示效果"
     ]
 }
