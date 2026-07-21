@@ -22,8 +22,10 @@ if (-not (Test-Path -LiteralPath $Python -PathType Leaf)) {
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
 $VersionMetadataHelper = Join-Path $ProjectRoot "packaging\prepare_version_metadata.py"
+$UpdateManifestHelper = Join-Path $ProjectRoot "packaging\prepare_update_manifest.py"
+$UpdateManifest = Join-Path $ProjectRoot "updates\beta\win-x64.json"
 $InstallerScript = Join-Path $ProjectRoot "packaging\installer\HushPlayer.iss"
-foreach ($RequiredFile in @($VersionMetadataHelper, $InstallerScript)) {
+foreach ($RequiredFile in @($VersionMetadataHelper, $UpdateManifestHelper, $UpdateManifest, $InstallerScript)) {
     if (-not (Test-Path -LiteralPath $RequiredFile -PathType Leaf)) {
         throw "Required installer build input is missing: $RequiredFile"
     }
@@ -46,11 +48,16 @@ if ($DiagnosticOnly) {
     Write-Host "ProjectRoot=$ProjectRoot"
     Write-Host "Python=$Python"
     Write-Host "VersionMetadataHelper=$VersionMetadataHelper"
+    Write-Host "UpdateManifestHelper=$UpdateManifestHelper"
+    Write-Host "UpdateManifest=$UpdateManifest"
     Write-Host "InstallerScript=$InstallerScript"
     Write-Host "Iscc=$Iscc"
     Write-Host "DiagnosticOnly=OK"
     return
 }
+
+& $Python $UpdateManifestHelper --manifest $UpdateManifest
+if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
 $ReleaseExe = Join-Path $ProjectRoot "dist\HushPlayer\HushPlayer.exe"
 if (-not (Test-Path -LiteralPath $ReleaseExe -PathType Leaf)) {

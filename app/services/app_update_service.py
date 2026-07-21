@@ -2,9 +2,12 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import re
 import time
+from collections.abc import Sequence
 from dataclasses import dataclass
+from datetime import date
 from pathlib import Path
 from typing import Callable
 from urllib.parse import urlparse
@@ -24,6 +27,7 @@ from PySide6.QtCore import (
 from PySide6.QtNetwork import QNetworkAccessManager, QNetworkReply, QNetworkRequest
 
 from app.core.version import (
+    APP_NUMERIC_VERSION,
     APP_USER_AGENT,
     UPDATE_ARCHITECTURE,
     UPDATE_CHANNEL,
@@ -37,8 +41,11 @@ SUPPORTED_MANIFEST_SCHEMA = 1
 MAX_MANIFEST_BYTES = 128 * 1024
 MIN_SETUP_BYTES = 1024
 MAX_SETUP_BYTES = 512 * 1024 * 1024
+MAX_RELEASE_HISTORY_ENTRIES = 50
+MAX_RELEASE_NOTES = 50
 
 _SHA256_PATTERN = re.compile(r"^[0-9a-fA-F]{64}$")
+_RELEASE_DATE_PATTERN = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 _VERSION_PATTERN = re.compile(
     r"^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)-"
     r"([a-z][a-z0-9-]*)\.(0|[1-9]\d*)$"
@@ -46,10 +53,22 @@ _VERSION_PATTERN = re.compile(
 _UPDATE_FILENAME_PATTERN = re.compile(
     r"^HushPlayer-[0-9A-Za-z.-]+-win-x64-setup\.exe(?:\..+)?$"
 )
+_LOGGER = logging.getLogger(__name__)
 
 
 class UpdateValidationError(ValueError):
     pass
+
+
+@dataclass(frozen=True, slots=True)
+class UpdateReleaseNotesSection:
+    """One version's plain-text release notes for the update prompt."""
+
+    version: str
+    numeric_version: tuple[int, int, int, int]
+    numeric_version_text: str
+    release_date: str | None
+    notes: tuple[str, ...]
 
 
 @dataclass(frozen=True, slots=True)
@@ -65,6 +84,7 @@ class UpdateManifest:
     setup_size: int
     sha256: str
     release_notes: tuple[str, ...]
+    release_history: tuple[UpdateReleaseNotesSection, ...]
 
     @property
     def is_newer(self) -> bool:
@@ -98,6 +118,123 @@ def validate_update_url(
     if parsed.fragment:
         raise UpdateValidationError("更新地址不允许包含片段标识。")
     return text
+
+
+def _parse_release_notes(
+    raw_release_notes: object,
+    *,
+    label: str = "更新说明",
+) -> tuple[str, ...]:
+    if not isinstance(raw_release_notes, list) or len(raw_release_notes) > MAX_RELEASE_NOTES:
+        raise UpdateValidationError(f"{label}必须是最多 50 项的字符串数组。")
+    release_notes: list[str] = []
+    for note in raw_release_notes:
+        if not isinstance(note, str):
+            raise UpdateValidationError(f"{label}中的每一项都必须是字符串。")
+        normalized = note.strip()
+        if not normalized or len(normalized) > 1000:
+            raise UpdateValidationError(f"{label}包含空白或过长内容。")
+        release_notes.append(normalized)
+    return tuple(release_notes)
+
+
+def _parse_release_history_entry(
+    raw_entry: object,
+    *,
+    channel: str,
+) -> UpdateReleaseNotesSection:
+    if not isinstance(raw_entry, dict):
+        raise UpdateValidationError("历史版本条目必须是 JSON 对象。")
+
+    version = str(raw_entry.get("version") or "").strip()
+    version_match = _VERSION_PATTERN.fullmatch(version)
+    if version_match is None or len(version) > 64:
+        raise UpdateValidationError("历史版本条目的 version 格式无效。")
+    version_major, version_minor, version_patch, version_channel, version_sequence = (
+        version_match.groups()
+    )
+    if version_channel != channel:
+        raise UpdateValidationError("历史版本条目的 channel 与更新清单不一致。")
+
+    try:
+        numeric_version = parse_numeric_version(
+            str(raw_entry.get("numeric_version") or "")
+        )
+    except ValueError as error:
+        raise UpdateValidationError("历史版本条目的 numeric_version 无效。") from error
+    label_numeric = (
+        int(version_major),
+        int(version_minor),
+        int(version_patch),
+        int(version_sequence),
+    )
+    if numeric_version != label_numeric:
+        raise UpdateValidationError(
+            "历史版本条目的 version 与 numeric_version 不一致。"
+        )
+
+    release_date = str(raw_entry.get("release_date") or "").strip()
+    if _RELEASE_DATE_PATTERN.fullmatch(release_date) is None:
+        raise UpdateValidationError("历史版本条目的 release_date 格式无效。")
+    try:
+        if date.fromisoformat(release_date).isoformat() != release_date:
+            raise ValueError(release_date)
+    except ValueError as error:
+        raise UpdateValidationError("历史版本条目的 release_date 无效。") from error
+
+    return UpdateReleaseNotesSection(
+        version=version,
+        numeric_version=numeric_version,
+        numeric_version_text=".".join(str(part) for part in numeric_version),
+        release_date=release_date,
+        notes=_parse_release_notes(
+            raw_entry.get("notes"),
+            label="历史版本更新说明",
+        ),
+    )
+
+
+def _parse_release_history(
+    raw_release_history: object,
+    *,
+    channel: str,
+) -> tuple[UpdateReleaseNotesSection, ...]:
+    """Best-effort optional history parsing; invalid entries never block updates."""
+
+    if raw_release_history is None:
+        return ()
+    if not isinstance(raw_release_history, list):
+        _LOGGER.warning("Ignoring invalid release_history: it must be a JSON array.")
+        return ()
+    if len(raw_release_history) > MAX_RELEASE_HISTORY_ENTRIES:
+        _LOGGER.warning(
+            "release_history has %s entries; only the first %s are considered.",
+            len(raw_release_history),
+            MAX_RELEASE_HISTORY_ENTRIES,
+        )
+
+    history: list[UpdateReleaseNotesSection] = []
+    seen_versions: set[tuple[int, int, int, int]] = set()
+    for index, raw_entry in enumerate(raw_release_history[:MAX_RELEASE_HISTORY_ENTRIES]):
+        try:
+            entry = _parse_release_history_entry(raw_entry, channel=channel)
+        except UpdateValidationError as error:
+            _LOGGER.warning(
+                "Ignoring invalid release_history entry %s: %s",
+                index,
+                error,
+            )
+            continue
+        if entry.numeric_version in seen_versions:
+            _LOGGER.warning(
+                "Ignoring duplicate release_history entry %s for %s.",
+                index,
+                entry.numeric_version_text,
+            )
+            continue
+        seen_versions.add(entry.numeric_version)
+        history.append(entry)
+    return tuple(sorted(history, key=lambda item: item.numeric_version))
 
 
 def parse_update_manifest(
@@ -183,17 +320,11 @@ def parse_update_manifest(
     if not isinstance(mandatory, bool):
         raise UpdateValidationError("更新清单 mandatory 必须是布尔值。")
 
-    raw_release_notes = document.get("release_notes", [])
-    if not isinstance(raw_release_notes, list) or len(raw_release_notes) > 50:
-        raise UpdateValidationError("更新说明必须是最多 50 项的字符串数组。")
-    release_notes: list[str] = []
-    for note in raw_release_notes:
-        if not isinstance(note, str):
-            raise UpdateValidationError("更新说明中的每一项都必须是字符串。")
-        normalized = note.strip()
-        if not normalized or len(normalized) > 1000:
-            raise UpdateValidationError("更新说明包含空白或过长内容。")
-        release_notes.append(normalized)
+    release_notes = _parse_release_notes(document.get("release_notes", []))
+    release_history = _parse_release_history(
+        document.get("release_history"),
+        channel=channel,
+    )
 
     return UpdateManifest(
         schema_version=SUPPORTED_MANIFEST_SCHEMA,
@@ -206,8 +337,39 @@ def parse_update_manifest(
         setup_url=setup_url,
         setup_size=setup_size,
         sha256=sha256,
-        release_notes=tuple(release_notes),
+        release_notes=release_notes,
+        release_history=release_history,
     )
+
+
+def select_update_release_notes(
+    manifest: UpdateManifest,
+    *,
+    current_numeric_version: str | Sequence[int] = APP_NUMERIC_VERSION,
+) -> tuple[UpdateReleaseNotesSection, ...]:
+    """Select ordered history, adding legacy target notes when history is incomplete."""
+
+    current = parse_numeric_version(current_numeric_version)
+    if not is_newer_numeric_version(manifest.numeric_version, current):
+        return ()
+
+    fallback = UpdateReleaseNotesSection(
+        version=manifest.version,
+        numeric_version=manifest.numeric_version,
+        numeric_version_text=manifest.numeric_version_text,
+        release_date=None,
+        notes=manifest.release_notes,
+    )
+    matching_history = tuple(
+        entry
+        for entry in manifest.release_history
+        if current < entry.numeric_version <= manifest.numeric_version
+    )
+    if matching_history:
+        if matching_history[-1].numeric_version == manifest.numeric_version:
+            return matching_history
+        return matching_history + (fallback,)
+    return (fallback,)
 
 
 def verify_installer_file(path: str | Path, manifest: UpdateManifest) -> None:

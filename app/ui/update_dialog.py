@@ -14,7 +14,13 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from app.services.app_update_service import AppUpdateService, UpdateManifest
+from app.core.version import APP_VERSION
+from app.services.app_update_service import (
+    AppUpdateService,
+    UpdateManifest,
+    UpdateReleaseNotesSection,
+    select_update_release_notes,
+)
 from app.ui.design_system import UI_SPACING
 
 
@@ -39,12 +45,14 @@ class UpdateDialog(QDialog):
 
         title = QLabel(f"发现新版本 {manifest.version}")
         title.setObjectName("settingsDialogTitle")
-        subtitle = QLabel(
+        self.subtitle = QLabel(
+            f"将从 {APP_VERSION} 更新到 {manifest.version}\n"
             f"Windows 版本 {manifest.numeric_version_text} · {manifest.architecture}"
         )
-        subtitle.setObjectName("settingsDialogSubtitle")
+        self.subtitle.setObjectName("settingsDialogSubtitle")
+        self.subtitle.setWordWrap(True)
         layout.addWidget(title)
-        layout.addWidget(subtitle)
+        layout.addWidget(self.subtitle)
 
         notice = QFrame()
         notice.setObjectName("settingsCard")
@@ -62,14 +70,18 @@ class UpdateDialog(QDialog):
         notice_layout.addWidget(mandatory_label)
         layout.addWidget(notice)
 
-        notes_title = QLabel("更新说明")
+        notes_title = QLabel("更新日志")
         notes_title.setObjectName("settingsCardTitle")
         self.notes = QPlainTextEdit()
         self.notes.setReadOnly(True)
-        self.notes.setMinimumHeight(130)
+        self.notes.setMinimumHeight(150)
+        self.notes.setMaximumHeight(320)
+        self.notes.setVerticalScrollBarPolicy(
+            Qt.ScrollBarPolicy.ScrollBarAsNeeded
+        )
+        self.release_note_sections = select_update_release_notes(manifest)
         self.notes.setPlainText(
-            "\n".join(f"• {note}" for note in manifest.release_notes)
-            or "本次更新没有附加说明。"
+            self.format_release_notes(self.release_note_sections)
         )
         layout.addWidget(notes_title)
         layout.addWidget(self.notes, 1)
@@ -128,6 +140,21 @@ class UpdateDialog(QDialog):
             and service.verified_path.is_file()
         ):
             self.on_download_verified(manifest, str(service.verified_path))
+
+    @staticmethod
+    def format_release_notes(
+        sections: tuple[UpdateReleaseNotesSection, ...],
+    ) -> str:
+        if not sections:
+            return "本次更新没有附加说明。"
+        blocks: list[str] = []
+        for section in sections:
+            heading = section.version
+            if section.release_date:
+                heading = f"{heading} · {section.release_date}"
+            notes = "\n".join(f"• {note}" for note in section.notes)
+            blocks.append(f"{heading}\n{notes}" if notes else heading)
+        return "\n\n".join(blocks)
 
     @staticmethod
     def format_bytes(value: int) -> str:

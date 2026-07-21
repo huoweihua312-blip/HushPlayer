@@ -44,15 +44,26 @@ $VersionMetadataHelper = Join-Path $ProjectRoot "packaging\prepare_version_metad
 if (-not (Test-Path -LiteralPath $VersionMetadataHelper -PathType Leaf)) {
     throw "The version metadata helper is missing: $VersionMetadataHelper"
 }
+$UpdateManifestHelper = Join-Path $ProjectRoot "packaging\prepare_update_manifest.py"
+$UpdateManifest = Join-Path $ProjectRoot "updates\beta\win-x64.json"
+foreach ($RequiredReleaseFile in @($UpdateManifestHelper, $UpdateManifest)) {
+    if (-not (Test-Path -LiteralPath $RequiredReleaseFile -PathType Leaf)) {
+        throw "Required release changelog input is missing: $RequiredReleaseFile"
+    }
+}
 if ($DiagnosticOnly) {
     Write-Host "ProjectRoot=$ProjectRoot"
     Write-Host "RequirementsLock=$RequirementsLock"
     Write-Host "NodeRuntimeHelper=$NodeRuntimeHelper"
     Write-Host "Spec=$Spec"
     Write-Host "VersionMetadataHelper=$VersionMetadataHelper"
+    Write-Host "UpdateManifestHelper=$UpdateManifestHelper"
+    Write-Host "UpdateManifest=$UpdateManifest"
     Write-Host "DiagnosticOnly=OK"
     return
 }
+& $Python $UpdateManifestHelper --manifest $UpdateManifest
+if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 . $NodeRuntimeHelper
 $NodeRuntime = Prepare-HushPlayerNodeRuntime -ProjectRoot $ProjectRoot
 $NodeExe = $NodeRuntime.NodeExe
