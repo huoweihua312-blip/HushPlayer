@@ -32,6 +32,7 @@ from app.core.version import (
     UPDATE_ARCHITECTURE,
     UPDATE_CHANNEL,
     UPDATE_MANIFEST_URL,
+    UPDATE_MANIFEST_SOURCES,
     is_newer_numeric_version,
     parse_numeric_version,
 )
@@ -422,8 +423,10 @@ class AppUpdateService(QObject):
     installerLaunchFailed = Signal(str)
     installerLaunched = Signal(str)
 
-    CHECK_TRANSFER_TIMEOUT_MS = 15_000
-    CHECK_TOTAL_TIMEOUT_MS = 30_000
+    CHECK_TRANSFER_TIMEOUT_MS = 8_000
+    # Leave a small guard interval after Qt's transfer timeout so the two
+    # independent abort paths cannot race for the same reply.
+    CHECK_TOTAL_TIMEOUT_MS = 9_000
     DOWNLOAD_TRANSFER_TIMEOUT_MS = 30_000
     DOWNLOAD_TOTAL_TIMEOUT_MS = 30 * 60 * 1000
     INSTALLER_ARGUMENTS = (
@@ -437,13 +440,26 @@ class AppUpdateService(QObject):
         self,
         parent: QObject | None = None,
         *,
-        manifest_url: str = UPDATE_MANIFEST_URL,
+        manifest_url: str | None = None,
+        manifest_sources: Sequence[tuple[str, str]] | None = None,
         updates_dir: str | Path | None = None,
         allow_insecure_localhost: bool = False,
         installer_launcher: Callable[[str, list[str]], object] | None = None,
     ) -> None:
         super().__init__(parent)
-        self.manifest_url = str(manifest_url)
+        configured_sources: Sequence[object]
+        if manifest_url is not None:
+            configured_sources = (("自定义更新源", str(manifest_url)),)
+        elif manifest_sources is not None:
+            configured_sources = manifest_sources
+        else:
+            configured_sources = UPDATE_MANIFEST_SOURCES
+        self.manifest_sources = self._normalize_manifest_sources(configured_sources)
+        self.manifest_url = (
+            self.manifest_sources[0][1]
+            if self.manifest_sources
+            else UPDATE_MANIFEST_URL
+        )
         self.allow_insecure_localhost = bool(allow_insecure_localhost)
         self.network = QNetworkAccessManager(self)
         self.updates_dir = (
@@ -461,12 +477,19 @@ class AppUpdateService(QObject):
         self._check_timer = QTimer(self)
         self._check_timer.setSingleShot(True)
         self._check_timer.timeout.connect(self._on_check_timeout)
+        self._check_retry_timer = QTimer(self)
+        self._check_retry_timer.setSingleShot(True)
+        self._check_retry_timer.timeout.connect(self._start_next_manifest_source)
         self._download_timer = QTimer(self)
         self._download_timer.setSingleShot(True)
         self._download_timer.timeout.connect(self._on_download_timeout)
 
         self._check_reply: QNetworkReply | None = None
+        self._check_active = False
         self._check_manual = False
+        self._check_source_index = -1
+        self._check_source_name = ""
+        self._last_successful_manifest_source: str | None = None
         self._manifest_buffer = bytearray()
         self._check_failure = ""
         self._download_reply: QNetworkReply | None = None
@@ -484,7 +507,7 @@ class AppUpdateService(QObject):
 
     @property
     def is_checking(self) -> bool:
-        return self._check_reply is not None
+        return self._check_active
 
     @property
     def is_downloading(self) -> bool:
@@ -498,43 +521,126 @@ class AppUpdateService(QObject):
     def verified_path(self) -> Path | None:
         return self._verified_path
 
-    def check_for_updates(self, *, manual: bool) -> bool:
-        if self._shutting_down or self.is_checking or self.is_downloading:
-            return False
-        try:
-            url = validate_update_url(
-                self.manifest_url,
-                allow_insecure_localhost=self.allow_insecure_localhost,
-            )
-        except UpdateValidationError as error:
-            self.checkFailed.emit(str(error), bool(manual))
-            return False
+    @staticmethod
+    def _normalize_manifest_sources(
+        sources: Sequence[object],
+    ) -> tuple[tuple[str, str], ...]:
+        normalized: list[tuple[str, str]] = []
+        for index, source in enumerate(sources):
+            if isinstance(source, (tuple, list)) and len(source) == 2:
+                name = str(source[0] or "").strip() or f"更新源 {index + 1}"
+                url = str(source[1] or "").strip()
+            else:
+                name = f"更新源 {index + 1}"
+                url = ""
+            normalized.append((name, url))
+        return tuple(normalized)
 
+    def _build_manifest_request(self, url: str) -> QNetworkRequest:
         request = QNetworkRequest(QUrl(url))
         request.setAttribute(
             QNetworkRequest.Attribute.RedirectPolicyAttribute,
             QNetworkRequest.RedirectPolicy.NoLessSafeRedirectPolicy,
         )
+        request.setAttribute(
+            QNetworkRequest.Attribute.Http2AllowedAttribute,
+            False,
+        )
         request.setTransferTimeout(self.CHECK_TRANSFER_TIMEOUT_MS)
         request.setRawHeader(b"User-Agent", f"{APP_USER_AGENT} updater".encode("ascii"))
         request.setRawHeader(b"Accept", b"application/json")
-        reply = self.network.get(request)
-        self._check_reply = reply
+        return request
+
+    def check_for_updates(self, *, manual: bool) -> bool:
+        if self._shutting_down or self.is_checking or self.is_downloading:
+            return False
+        self._check_active = True
         self._check_manual = bool(manual)
+        self._check_source_index = -1
+        self._check_source_name = ""
+        self._last_successful_manifest_source = None
         self._manifest_buffer.clear()
         self._check_failure = ""
-        reply.readyRead.connect(lambda current=reply: self._read_manifest_data(current))
-        reply.downloadProgress.connect(
-            lambda received, total, current=reply: self._guard_manifest_size(
-                current,
-                received,
-                total,
-            )
-        )
-        reply.finished.connect(lambda current=reply: self._finish_check(current))
-        self._check_timer.start(self.CHECK_TOTAL_TIMEOUT_MS)
         self.checkStarted.emit(bool(manual))
+        self._start_next_manifest_source()
         return True
+
+    def _start_next_manifest_source(self) -> None:
+        if self._shutting_down or not self._check_active:
+            return
+        self._check_retry_timer.stop()
+        while self._check_source_index + 1 < len(self.manifest_sources):
+            self._check_source_index += 1
+            source_name, source_url = self.manifest_sources[self._check_source_index]
+            try:
+                url = validate_update_url(
+                    source_url,
+                    allow_insecure_localhost=self.allow_insecure_localhost,
+                )
+            except UpdateValidationError as error:
+                self._record_manifest_source_failure(source_name, str(error))
+                continue
+
+            self._check_source_name = source_name
+            if self._check_source_index > 0:
+                print(f"正在尝试备用更新源：{source_name}")
+            self._manifest_buffer.clear()
+            self._check_failure = ""
+            reply = self.network.get(self._build_manifest_request(url))
+            self._check_reply = reply
+            reply.readyRead.connect(
+                lambda current=reply: self._read_manifest_data(current)
+            )
+            reply.downloadProgress.connect(
+                lambda received, total, current=reply: self._guard_manifest_size(
+                    current,
+                    received,
+                    total,
+                )
+            )
+            reply.finished.connect(lambda current=reply: self._finish_check(current))
+            self._check_timer.start(self.CHECK_TOTAL_TIMEOUT_MS)
+            return
+        self._complete_check_failure()
+
+    def _record_manifest_source_failure(self, source_name: str, reason: str) -> None:
+        _LOGGER.warning("%s 更新清单请求失败：%s", source_name, reason)
+
+    def _queue_next_manifest_source(self) -> None:
+        """Yield after a reply finishes before creating the fallback request."""
+
+        if self._shutting_down or not self._check_active:
+            return
+        self._check_retry_timer.start(0)
+
+    def _clear_check_attempt(self) -> bool:
+        if not self._check_active:
+            return False
+        self._check_active = False
+        self._check_timer.stop()
+        self._check_retry_timer.stop()
+        self._check_reply = None
+        self._check_source_name = ""
+        self._manifest_buffer.clear()
+        self._check_failure = ""
+        return True
+
+    def _complete_check_failure(self) -> None:
+        if self._shutting_down or not self._clear_check_attempt():
+            return
+        manual = self._check_manual
+        self.checkCompleted.emit()
+        self.checkFailed.emit("检查更新失败，请检查网络连接后重试。", manual)
+
+    def _complete_check_success(self, manifest: UpdateManifest) -> None:
+        if self._shutting_down or not self._clear_check_attempt():
+            return
+        manual = self._check_manual
+        self.checkCompleted.emit()
+        if manifest.is_newer:
+            self.updateAvailable.emit(manifest, manual)
+        else:
+            self.noUpdate.emit(manual)
 
     def _guard_manifest_size(
         self,
@@ -560,7 +666,7 @@ class AppUpdateService(QObject):
 
     def _on_check_timeout(self) -> None:
         reply = self._check_reply
-        if reply is None:
+        if reply is None or not self._check_active:
             return
         self._check_failure = "检查更新超时，请稍后重试。"
         reply.abort()
@@ -571,7 +677,7 @@ class AppUpdateService(QObject):
             return
         self._read_manifest_data(reply)
         self._check_timer.stop()
-        manual = self._check_manual
+        source_name = self._check_source_name
         failure = self._check_failure
         payload = bytes(self._manifest_buffer)
         self._check_reply = None
@@ -586,9 +692,9 @@ class AppUpdateService(QObject):
 
         if self._shutting_down:
             return
-        self.checkCompleted.emit()
         if failure:
-            self.checkFailed.emit(failure, manual)
+            self._record_manifest_source_failure(source_name, failure)
+            self._queue_next_manifest_source()
             return
         try:
             manifest = parse_update_manifest(
@@ -596,12 +702,12 @@ class AppUpdateService(QObject):
                 allow_insecure_localhost=self.allow_insecure_localhost,
             )
         except UpdateValidationError as error:
-            self.checkFailed.emit(str(error), manual)
+            self._record_manifest_source_failure(source_name, str(error))
+            self._queue_next_manifest_source()
             return
-        if manifest.is_newer:
-            self.updateAvailable.emit(manifest, manual)
-        else:
-            self.noUpdate.emit(manual)
+        self._last_successful_manifest_source = source_name
+        print(f"更新清单获取成功：{source_name}")
+        self._complete_check_success(manifest)
 
     def start_download(self, manifest: UpdateManifest) -> bool:
         if (
@@ -909,10 +1015,15 @@ class AppUpdateService(QObject):
         if self._shutting_down:
             return
         self._shutting_down = True
+        self._check_active = False
         self._check_timer.stop()
+        self._check_retry_timer.stop()
         self._download_timer.stop()
         check_reply = self._check_reply
         self._check_reply = None
+        self._check_source_name = ""
+        self._manifest_buffer.clear()
+        self._check_failure = ""
         if check_reply is not None:
             check_reply.abort()
             check_reply.deleteLater()

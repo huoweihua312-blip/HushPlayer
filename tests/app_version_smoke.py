@@ -14,6 +14,7 @@ from app.core.version import (
     UPDATE_ARCHITECTURE,
     UPDATE_CHANNEL,
     UPDATE_MANIFEST_URL,
+    UPDATE_MANIFEST_SOURCES,
     is_newer_numeric_version,
     parse_numeric_version,
 )
@@ -26,8 +27,20 @@ def main() -> None:
     assert UPDATE_CHANNEL == "beta"
     assert UPDATE_ARCHITECTURE == "win-x64"
     assert UPDATE_MANIFEST_URL == (
-        "https://raw.githubusercontent.com/huoweihua312-blip/"
-        "HushPlayer/main/updates/beta/win-x64.json"
+        "https://api.gitcode.com/api/v5/repos/gcw_iPVB8B5g/"
+        "HushPlayer-updates/raw/updates/beta/win-x64.json?ref=main"
+    )
+    assert UPDATE_MANIFEST_SOURCES == (
+        (
+            "GitCode",
+            "https://api.gitcode.com/api/v5/repos/gcw_iPVB8B5g/"
+            "HushPlayer-updates/raw/updates/beta/win-x64.json?ref=main",
+        ),
+        (
+            "GitHub",
+            "https://raw.githubusercontent.com/huoweihua312-blip/"
+            "HushPlayer/main/updates/beta/win-x64.json",
+        ),
     )
 
     assert is_newer_numeric_version("0.5.0.2", "0.5.0.1")

@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import contextlib
 import hashlib
+import io
 import json
 import logging
 import os
@@ -17,7 +19,8 @@ if str(PROJECT_ROOT) not in sys.path:
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PySide6.QtCore import QCoreApplication, QEvent
+from PySide6.QtCore import QCoreApplication, QEvent, QUrl
+from PySide6.QtNetwork import QNetworkReply, QNetworkRequest
 from PySide6.QtWidgets import QApplication
 
 from app.services.app_update_service import (
@@ -38,10 +41,14 @@ from app.ui.update_dialog import UpdateDialog
 class FixtureServer:
     def __init__(self) -> None:
         self.routes: dict[str, dict] = {}
+        self.request_paths: list[str] = []
+        self._request_lock = threading.Lock()
         fixture = self
 
         class Handler(BaseHTTPRequestHandler):
             def do_GET(self) -> None:
+                with fixture._request_lock:
+                    fixture.request_paths.append(self.path)
                 route = fixture.routes.get(self.path)
                 if route is None:
                     self.send_error(404)
@@ -91,6 +98,10 @@ class FixtureServer:
         self.server.shutdown()
         self.server.server_close()
         self.thread.join(timeout=2)
+
+    def request_count(self, path: str) -> int:
+        with self._request_lock:
+            return self.request_paths.count(path)
 
 
 def wait_until(predicate, timeout: float = 5.0) -> bool:
@@ -401,15 +412,331 @@ def configure_manifest_route(
     server: FixtureServer,
     document: dict,
     *,
+    path: str = "/manifest",
     status: int = 200,
     delay: float = 0,
+    content_type: str = "application/json",
 ) -> None:
-    server.routes["/manifest"] = {
+    server.routes[path] = {
         "status": status,
         "body": encoded_manifest(document),
-        "content_type": "application/json",
+        "content_type": content_type,
         "delay": delay,
     }
+
+
+def manifest_source_fallback_checks(
+    root: Path,
+    server: FixtureServer,
+    setup: bytes,
+) -> None:
+    """Exercise the production-style ordered manifest sources without real network."""
+
+    def dispose_service(service: AppUpdateService) -> None:
+        service.shutdown()
+        service.deleteLater()
+        QCoreApplication.sendPostedEvents(service, QEvent.Type.DeferredDelete)
+
+    def begin_manifest_output_capture():
+        output = io.StringIO()
+        capture = contextlib.redirect_stdout(output)
+        capture.__enter__()
+        return output, capture
+
+    def end_manifest_output_capture(capture) -> None:
+        capture.__exit__(None, None, None)
+
+    def source_paths(case: str) -> tuple[str, str]:
+        return (f"/gitcode-{case}", f"/github-{case}")
+
+    def source_service(case: str) -> AppUpdateService:
+        gitcode_path, github_path = source_paths(case)
+        return AppUpdateService(
+            manifest_sources=(
+                ("GitCode", f"{server.base_url}{gitcode_path}"),
+                ("GitHub", f"{server.base_url}{github_path}"),
+            ),
+            updates_dir=root / f"source-{case}",
+            allow_insecure_localhost=True,
+        )
+
+    def valid_document(case: str) -> dict:
+        return manifest_document(f"{server.base_url}/setup-{case}.exe", setup)
+
+    def expect_fallback(case: str, gitcode_route: dict) -> None:
+        gitcode_path, github_path = source_paths(case)
+        server.routes[gitcode_path] = gitcode_route
+        configure_manifest_route(
+            server,
+            valid_document(case),
+            path=github_path,
+        )
+        service = source_service(case)
+        available: list[tuple[UpdateManifest, bool]] = []
+        failures: list[tuple[str, bool]] = []
+        service.updateAvailable.connect(
+            lambda manifest, manual: available.append((manifest, manual))
+        )
+        service.checkFailed.connect(
+            lambda message, manual: failures.append((message, manual))
+        )
+        output, capture = begin_manifest_output_capture()
+        try:
+            assert service.check_for_updates(manual=True)
+            assert wait_until(lambda: bool(available))
+            assert len(available) == 1
+            assert not failures
+            assert service._last_successful_manifest_source == "GitHub"
+            assert "正在尝试备用更新源：GitHub" in output.getvalue()
+            assert "更新清单获取成功：GitHub" in output.getvalue()
+            assert server.request_count(gitcode_path) == 1
+            assert server.request_count(github_path) == 1
+        finally:
+            dispose_service(service)
+            end_manifest_output_capture(capture)
+
+    primary_case = "primary-success"
+    gitcode_path, github_path = source_paths(primary_case)
+    configure_manifest_route(
+        server,
+        valid_document(primary_case),
+        path=gitcode_path,
+        content_type="application/octet-stream;charset=UTF-8",
+    )
+    service = source_service(primary_case)
+    available: list[tuple[UpdateManifest, bool]] = []
+    service.updateAvailable.connect(
+        lambda manifest, manual: available.append((manifest, manual))
+    )
+    output, capture = begin_manifest_output_capture()
+    try:
+        assert service.check_for_updates(manual=False)
+        assert wait_until(lambda: bool(available))
+        assert len(available) == 1
+        assert service._last_successful_manifest_source == "GitCode"
+        assert "更新清单获取成功：GitCode" in output.getvalue()
+        assert server.request_count(gitcode_path) == 1
+        assert server.request_count(github_path) == 0
+        request = service._build_manifest_request(f"{server.base_url}{gitcode_path}")
+        assert request.attribute(QNetworkRequest.Attribute.Http2AllowedAttribute) is False
+    finally:
+        dispose_service(service)
+        end_manifest_output_capture(capture)
+
+    expect_fallback(
+        "http-error",
+        {
+            "status": 500,
+            "body": b"server error",
+            "content_type": "text/plain",
+        },
+    )
+
+    timeout_case = "timeout"
+    service = source_service(timeout_case)
+
+    class ReplySignal:
+        def __init__(self) -> None:
+            self._callbacks: list = []
+
+        def connect(self, callback) -> None:
+            self._callbacks.append(callback)
+
+        def emit(self, *args) -> None:
+            for callback in tuple(self._callbacks):
+                callback(*args)
+
+    class TimeoutReply:
+        def __init__(self, payload: bytes = b"", *, status: int = 200) -> None:
+            self.readyRead = ReplySignal()
+            self.downloadProgress = ReplySignal()
+            self.finished = ReplySignal()
+            self.aborted = False
+            self.deleted = False
+            self._payload = payload
+            self._status = status
+
+        def abort(self) -> None:
+            self.aborted = True
+
+        def readAll(self) -> bytes:
+            payload, self._payload = self._payload, b""
+            return payload
+
+        def attribute(self, attribute):
+            if attribute == QNetworkRequest.Attribute.HttpStatusCodeAttribute:
+                return self._status
+            return None
+
+        @staticmethod
+        def url() -> QUrl:
+            return QUrl("http://127.0.0.1/controlled-manifest")
+
+        @staticmethod
+        def error():
+            return QNetworkReply.NetworkError.NoError
+
+        @staticmethod
+        def errorString() -> str:
+            return ""
+
+        def deleteLater(self) -> None:
+            self.deleted = True
+
+    class TimeoutNetwork:
+        def __init__(self, replies: list[TimeoutReply]) -> None:
+            self.replies = list(replies)
+            self.requests: list[QNetworkRequest] = []
+
+        def get(self, request: QNetworkRequest) -> TimeoutReply:
+            self.requests.append(request)
+            return self.replies.pop(0)
+
+    timeout_reply = TimeoutReply()
+    timeout_network = TimeoutNetwork([timeout_reply])
+    service.network = timeout_network  # type: ignore[assignment]
+    fallback_sources: list[str] = []
+
+    def record_timeout_fallback() -> None:
+        next_index = service._check_source_index + 1
+        fallback_sources.append(service.manifest_sources[next_index][0])
+
+    service._queue_next_manifest_source = record_timeout_fallback  # type: ignore[method-assign]
+    try:
+        # A controlled reply covers the timeout transition without relying on
+        # a real socket timeout in the Python/PySide test runtime.  The same
+        # GitCode → GitHub completion path is exercised with the HTTP fixture.
+        assert service.check_for_updates(manual=False)
+        assert len(timeout_network.requests) == 1
+        service._on_check_timeout()
+        timeout_reply.finished.emit()
+        assert timeout_reply.aborted
+        assert timeout_reply.deleted
+        assert fallback_sources == ["GitHub"]
+        assert timeout_network.requests[0].url().path().endswith("gitcode-timeout")
+    finally:
+        dispose_service(service)
+
+    def expect_controlled_parse_fallback(case: str, payload: bytes) -> None:
+        service = source_service(case)
+        reply = TimeoutReply(payload)
+        service.network = TimeoutNetwork([reply])  # type: ignore[assignment]
+        fallback_sources: list[str] = []
+
+        def record_parse_fallback() -> None:
+            next_index = service._check_source_index + 1
+            fallback_sources.append(service.manifest_sources[next_index][0])
+
+        service._queue_next_manifest_source = record_parse_fallback  # type: ignore[method-assign]
+        output, capture = begin_manifest_output_capture()
+        try:
+            assert service.check_for_updates(manual=False)
+            reply.finished.emit()
+            assert reply.deleted
+            assert service._last_successful_manifest_source is None
+            assert "更新清单获取成功：" not in output.getvalue()
+            assert fallback_sources == ["GitHub"]
+        finally:
+            dispose_service(service)
+            end_manifest_output_capture(capture)
+
+    expect_controlled_parse_fallback("invalid-json", b"not-json")
+
+    invalid_case = "invalid-schema"
+    invalid_document = valid_document(invalid_case)
+    invalid_document["channel"] = "stable"
+    expect_controlled_parse_fallback(
+        invalid_case,
+        encoded_manifest(invalid_document),
+    )
+
+    expect_controlled_parse_fallback(
+        "oversized",
+        b"x" * (MAX_MANIFEST_BYTES + 1),
+    )
+
+    failure_case = "all-failed"
+    service = source_service(failure_case)
+    first_failure = TimeoutReply(status=500)
+    second_failure = TimeoutReply(status=500)
+    failure_network = TimeoutNetwork([first_failure, second_failure])
+    service.network = failure_network  # type: ignore[assignment]
+    service._queue_next_manifest_source = service._start_next_manifest_source  # type: ignore[method-assign]
+    started: list[bool] = []
+    completed: list[bool] = []
+    failures: list[tuple[str, bool]] = []
+    service.checkStarted.connect(started.append)
+    service.checkCompleted.connect(lambda: completed.append(True))
+    service.checkFailed.connect(
+        lambda message, manual: failures.append((message, manual))
+    )
+    output, capture = begin_manifest_output_capture()
+    try:
+        assert service.check_for_updates(manual=True)
+        first_failure.finished.emit()
+        assert len(failure_network.requests) == 2
+        second_failure.finished.emit()
+        assert started == [True]
+        assert completed == [True]
+        assert failures == [("检查更新失败，请检查网络连接后重试。", True)]
+        assert service._last_successful_manifest_source is None
+        assert "更新清单获取成功：" not in output.getvalue()
+        assert first_failure.deleted
+        assert second_failure.deleted
+    finally:
+        dispose_service(service)
+        end_manifest_output_capture(capture)
+
+    single_path = "/single-manifest-url"
+    configure_manifest_route(
+        server,
+        valid_document("single-manifest-url"),
+        path=single_path,
+    )
+    service = AppUpdateService(
+        manifest_url=f"{server.base_url}{single_path}",
+        updates_dir=root / "single-manifest-url",
+        allow_insecure_localhost=True,
+    )
+    available = []
+    service.updateAvailable.connect(
+        lambda manifest, manual: available.append((manifest, manual))
+    )
+    output, capture = begin_manifest_output_capture()
+    try:
+        assert service.manifest_sources == (("自定义更新源", f"{server.base_url}{single_path}"),)
+        assert service.check_for_updates(manual=True)
+        assert wait_until(lambda: bool(available))
+        assert service._last_successful_manifest_source == "自定义更新源"
+        assert "更新清单获取成功：自定义更新源" in output.getvalue()
+        assert server.request_count(single_path) == 1
+    finally:
+        dispose_service(service)
+        end_manifest_output_capture(capture)
+
+    shutdown_case = "shutdown"
+    shutdown_gitcode_path, shutdown_github_path = source_paths(shutdown_case)
+    configure_manifest_route(
+        server,
+        valid_document(shutdown_case),
+        path=shutdown_gitcode_path,
+        delay=0.35,
+    )
+    configure_manifest_route(
+        server,
+        valid_document(shutdown_case),
+        path=shutdown_github_path,
+    )
+    service = source_service(shutdown_case)
+    callbacks: list[str] = []
+    service.updateAvailable.connect(lambda *_args: callbacks.append("available"))
+    service.noUpdate.connect(lambda *_args: callbacks.append("no-update"))
+    service.checkFailed.connect(lambda *_args: callbacks.append("failed"))
+    assert service.check_for_updates(manual=False)
+    dispose_service(service)
+    assert wait_until(lambda: False, timeout=0.7) is False
+    assert callbacks == []
+    assert server.request_count(shutdown_github_path) == 0
 
 
 def service_checks(root: Path, server: FixtureServer, setup: bytes) -> None:
@@ -737,6 +1064,7 @@ def main() -> None:
         with tempfile.TemporaryDirectory(prefix="hushplayer_app_update_") as temp_dir:
             root = Path(temp_dir)
             service_checks(root, server, setup)
+            manifest_source_fallback_checks(root, server, setup)
             shutdown_callback_check(root, server, setup)
     finally:
         server.close()

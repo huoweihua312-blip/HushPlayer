@@ -9,10 +9,20 @@ APP_VERSION = "0.5.0-beta.5"
 APP_NUMERIC_VERSION = (0, 5, 0, 5)
 UPDATE_CHANNEL = "beta"
 UPDATE_ARCHITECTURE = "win-x64"
-UPDATE_MANIFEST_URL = (
-    "https://raw.githubusercontent.com/huoweihua312-blip/"
-    "HushPlayer/main/updates/beta/win-x64.json"
+UPDATE_MANIFEST_SOURCES = (
+    (
+        "GitCode",
+        "https://api.gitcode.com/api/v5/repos/gcw_iPVB8B5g/"
+        "HushPlayer-updates/raw/updates/beta/win-x64.json?ref=main",
+    ),
+    (
+        "GitHub",
+        "https://raw.githubusercontent.com/huoweihua312-blip/"
+        "HushPlayer/main/updates/beta/win-x64.json",
+    ),
 )
+# Keep the legacy single-source import available for injected callers.
+UPDATE_MANIFEST_URL = UPDATE_MANIFEST_SOURCES[0][1]
 APP_USER_AGENT = f"{APP_NAME}/{APP_VERSION}"
 
 
