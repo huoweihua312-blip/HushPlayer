@@ -1,19 +1,17 @@
 {
     "schema_version": 1,
     "channel": "beta",
-    "version": "0.5.0-beta.5",
-    "numeric_version": "0.5.0.5",
+    "version": "0.5.0-beta.6",
+    "numeric_version": "0.5.0.6",
     "architecture": "win-x64",
     "mandatory": false,
-    "setup_url": "https://gitcode.com/gcw_iPVB8B5g/HushPlayer-updates/releases/download/v0.5.0-beta.5/HushPlayer-0.5.0-beta.5-win-x64-setup.exe",
-    "setup_size": 67697663,
-    "sha256": "4d2c348fcce16890616b2cc237b33ab79b0ecaaaa7e26d0b2fc16c194f561b88",
+    "setup_url": "https://gitcode.com/gcw_iPVB8B5g/HushPlayer-updates/releases/download/v0.5.0-beta.6/HushPlayer-0.5.0-beta.6-win-x64-setup.exe",
+    "setup_size": 67693471,
+    "sha256": "f8681387116977abaa644e8dd61e32ca15c69bccbefd1eff6ed01c5de529795c",
     "release_notes": [
-        "统一主界面视觉风格和控件层级，提升整体布局一致性",
-        "重新设计沉浸式歌词界面，并优化窗口打开、关闭和切换行为",
-        "精简侧栏导航和底部播放控制，突出常用功能入口",
-        "优化右侧歌词区域的自适应多行显示和当前歌词定位",
-        "改进不同窗口尺寸下的界面布局和歌词显示效果"
+        "在线检查更新优先使用 GitCode，失败时自动回退 GitHub。",
+        "跨多个版本更新时逐版本展示更新日志。",
+        "清单请求失败、超时、解析或校验失败时自动切换备用源，旧格式 `release_notes` 继续兼容。"
     ],
     "release_history": [
         {
@@ -72,6 +70,16 @@
                 "精简侧栏导航和底部播放控制，突出常用功能入口",
                 "优化右侧歌词区域的自适应多行显示和当前歌词定位",
                 "改进不同窗口尺寸下的界面布局和歌词显示效果"
+            ]
+        },
+        {
+            "version": "0.5.0-beta.6",
+            "numeric_version": "0.5.0.6",
+            "release_date": "2026-07-21",
+            "notes": [
+                "在线检查更新优先使用 GitCode，失败时自动回退 GitHub。",
+                "跨多个版本更新时逐版本展示更新日志。",
+                "清单请求失败、超时、解析或校验失败时自动切换备用源，旧格式 `release_notes` 继续兼容。"
             ]
         }
     ]
