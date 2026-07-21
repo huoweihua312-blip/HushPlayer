@@ -21,6 +21,8 @@ from PySide6.QtWidgets import (
 )
 
 from app.services.lyrics_timing import normalize_lyrics_offset_ms
+from app.ui.design_system import ACTIVE_THEME_TOKENS, UI_RADII
+from app.ui.theme_manager import get_application_theme_manager
 
 
 BACKGROUND_MODES = {"default", "cover", "translucent", "custom"}
@@ -638,27 +640,27 @@ class ImmersiveBackgroundView(QWidget):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform, True)
         rect = self.rect()
+        t = ACTIVE_THEME_TOKENS
         if self.config.background_mode == "translucent":
             opacity = 100 - max(
                 0,
                 min(85, int(self.config.background_transparency)),
             )
-            painter.fillRect(
-                rect,
-                QColor(8, 11, 17, int(round(255 * opacity / 100.0))),
-            )
+            color = QColor(t["window_background"])
+            color.setAlpha(int(round(255 * opacity / 100.0)))
+            painter.fillRect(rect, color)
             return
         if self.config.background_mode == "default":
             gradient = QLinearGradient(rect.topLeft(), rect.bottomRight())
-            gradient.setColorAt(0.0, QColor("#0b0e14"))
-            gradient.setColorAt(0.55, QColor("#111722"))
-            gradient.setColorAt(1.0, QColor("#171b26"))
+            gradient.setColorAt(0.0, QColor(t["window_background"]))
+            gradient.setColorAt(0.55, QColor(t["surface_secondary"]))
+            gradient.setColorAt(1.0, QColor(t["surface_tertiary"]))
             painter.fillRect(rect, gradient)
             return
 
         has_image = not self._rendered_pixmap.isNull() and not self._fallback_active
         if has_image:
-            painter.fillRect(rect, QColor("#050609"))
+            painter.fillRect(rect, QColor(t["window_background"]))
             painter.save()
             painter.setOpacity(max(0.2, min(1.0, self.config.image_opacity / 100.0)))
             painter.drawPixmap(rect, self._rendered_pixmap)
@@ -667,9 +669,9 @@ class ImmersiveBackgroundView(QWidget):
             painter.fillRect(rect, QColor(0, 0, 0, overlay_alpha))
         else:
             gradient = QLinearGradient(rect.topLeft(), rect.bottomRight())
-            gradient.setColorAt(0.0, QColor("#0b0e14"))
-            gradient.setColorAt(0.55, QColor("#111722"))
-            gradient.setColorAt(1.0, QColor("#171b26"))
+            gradient.setColorAt(0.0, QColor(t["window_background"]))
+            gradient.setColorAt(0.55, QColor(t["surface_secondary"]))
+            gradient.setColorAt(1.0, QColor(t["surface_tertiary"]))
             painter.fillRect(rect, gradient)
             overlay_alpha = int(
                 round(255 * self.config.darkness / 100.0 * 0.38)
@@ -883,19 +885,24 @@ class ImmersiveAppearanceDialog(QDialog):
 
         self._load_config(config)
         self.set_track_timing(track_identity, lyrics_offset_ms)
+        get_application_theme_manager().themeChanged.connect(self.apply_theme)
+        self.apply_theme()
+
+    def apply_theme(self, *_args) -> None:
+        t = ACTIVE_THEME_TOKENS
         self.setStyleSheet(
-            "QDialog#immersiveAppearanceDialog { background: #10131a; color: #f3f4f6; }"
-            "QLabel { color: #d7dce6; }"
-            "QLabel#appearanceTitle { color: #ffffff; font-size: 20px; font-weight: 800; }"
-            "QLabel#appearanceSubtitle, QLabel#appearancePath, QLabel#appearanceStatus { color: #9da6b5; }"
-            "QFrame#appearanceBackgroundSection, QFrame#appearanceLyricsSection, QFrame#appearanceSyncSection { background: #171b24; border: 1px solid #2a303b; border-radius: 14px; }"
-            "QLabel#appearanceSectionTitle { color: #ffffff; font-size: 14px; font-weight: 750; }"
-            "QComboBox, QPushButton { background: #222834; color: #eef1f6; border: 1px solid #343c49; border-radius: 9px; padding: 7px 10px; }"
-            "QPushButton:hover { background: #2c3442; }"
-            "QPushButton#appearancePrimaryButton { background: #3f7ee8; border-color: #3f7ee8; }"
-            "QSlider::groove:horizontal { height: 4px; background: #343b48; border-radius: 2px; }"
-            "QSlider::sub-page:horizontal { background: #6d9ff8; border-radius: 2px; }"
-            "QSlider::handle:horizontal { width: 16px; margin: -6px 0; background: #ffffff; border-radius: 8px; }"
+            f"QDialog#immersiveAppearanceDialog {{ background: {t['window_background']}; color: {t['text_primary']}; }}"
+            f"QLabel {{ color: {t['text_secondary']}; }}"
+            f"QLabel#appearanceTitle {{ color: {t['text_primary']}; font-size: 20px; font-weight: 800; }}"
+            f"QLabel#appearanceSubtitle, QLabel#appearancePath, QLabel#appearanceStatus {{ color: {t['text_muted']}; }}"
+            f"QFrame#appearanceBackgroundSection, QFrame#appearanceLyricsSection, QFrame#appearanceSyncSection {{ background: {t['surface']}; border: 1px solid {t['border']}; border-radius: 14px; }}"
+            f"QLabel#appearanceSectionTitle {{ color: {t['text_primary']}; font-size: 14px; font-weight: 750; }}"
+            f"QComboBox, QPushButton {{ background: {t['surface_tertiary']}; color: {t['text_primary']}; border: 1px solid {t['border_strong']}; border-radius: 9px; padding: 7px 10px; }}"
+            f"QPushButton:hover {{ background: {t['surface_hover']}; }}"
+            f"QPushButton#appearancePrimaryButton {{ background: {t['accent']}; color: {t['on_accent']}; border-color: {t['accent']}; }}"
+            f"QSlider::groove:horizontal {{ height: 4px; background: {t['slider_groove']}; border-radius: 2px; }}"
+            f"QSlider::sub-page:horizontal {{ background: {t['accent']}; border-radius: 2px; }}"
+            f"QSlider::handle:horizontal {{ width: 16px; margin: -6px 0; background: {t['slider_handle']}; border-radius: 8px; }}"
         )
 
     @staticmethod
@@ -1041,5 +1048,7 @@ class ImmersiveAppearanceDialog(QDialog):
     def set_availability(self, available: bool, message: str) -> None:
         self.status_label.setText(str(message))
         self.status_label.setStyleSheet(
-            "color: #8fd5a6;" if available else "color: #e7ad79;"
+            f"color: {ACTIVE_THEME_TOKENS['success']};"
+            if available
+            else f"color: {ACTIVE_THEME_TOKENS['warning']};"
         )

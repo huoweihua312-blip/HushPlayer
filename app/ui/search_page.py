@@ -18,7 +18,7 @@ from PySide6.QtWidgets import (
 )
 
 from app.models.media_item import MediaItem
-from app.ui.design_system import DARK_THEME_TOKENS, UI_RADII, UI_SPACING
+from app.ui.design_system import ACTIVE_THEME_TOKENS, UI_RADII, UI_SPACING
 from app.ui.track_list_view import TrackListView
 from app.ui.unified_search_panel import UnifiedSearchResultsPanel
 
@@ -362,7 +362,11 @@ class SearchPage(QFrame):
         layout.addWidget(self.page_header)
         layout.addLayout(tab_row)
         layout.addWidget(self.results_stack, 1)
-        t = DARK_THEME_TOKENS
+        self.apply_theme()
+        self.show_tab("local")
+
+    def apply_theme(self) -> None:
+        t = ACTIVE_THEME_TOKENS
         self.setStyleSheet(
             f"QPushButton#searchTabButton {{ background: transparent; color: {t['text_muted']}; border: none; border-bottom: 2px solid transparent; border-radius: 0; padding: 8px 14px; font-weight: 700; }}"
             f"QPushButton#searchTabButton:hover {{ background: {t['hover']}; color: {t['text']}; }}"
@@ -372,7 +376,6 @@ class SearchPage(QFrame):
             f"QToolButton#searchSourceSelector:disabled {{ color: {t['text_disabled']}; background: {t['app_bg']}; border-color: {t['border']}; }}"
             f"QFrame#searchSourceMenuPanel {{ background: {t['card_bg_alt']}; border: 1px solid {t['border_strong']}; border-radius: {UI_RADII['button']}px; }}"
         )
-        self.show_tab("local")
 
     def _connect_source_service(self) -> None:
         service = self._source_service

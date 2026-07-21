@@ -15,7 +15,7 @@ from PySide6.QtWidgets import (
 
 from app.models.media_item import MediaItem
 from app.ui.design_system import (
-    DARK_THEME_TOKENS,
+    ACTIVE_THEME_TOKENS,
     UI_CONTROL_SIZES,
     UI_RADII,
     UI_SPACING,
@@ -98,7 +98,11 @@ class UnifiedSearchResultsPanel(QFrame):
         layout.addWidget(self.table_header)
         layout.addWidget(self.result_list)
         layout.addWidget(self.detail_label)
-        t = DARK_THEME_TOKENS
+        self.apply_theme()
+        self.setVisible(self.standalone)
+
+    def apply_theme(self) -> None:
+        t = ACTIVE_THEME_TOKENS
         self.setStyleSheet(
             "QFrame#unifiedSearchPanel { background: transparent; border: none; }"
             f"QListWidget#unifiedSearchResultList {{ background: {t['sidebar_bg']}; color: {t['text']}; border: 1px solid {t['border']}; border-radius: {UI_RADII['card']}px; padding: 6px; outline: none; }}"
@@ -106,7 +110,11 @@ class UnifiedSearchResultsPanel(QFrame):
             f"QListWidget#unifiedSearchResultList::item:hover {{ background: {t['hover']}; }}"
             f"QListWidget#unifiedSearchResultList::item:selected {{ background: {t['selected_bg']}; }}"
         )
-        self.setVisible(self.standalone)
+        for group_item in self._group_headers.values():
+            group_item.setForeground(QColor(t["accent_hover"]))
+            group_item.setBackground(QColor(t["card_bg_alt"]))
+        if hasattr(self, "result_list"):
+            self.result_list.viewport().update()
 
     def set_collection_providers(self, state_provider, playlist_provider) -> None:
         self.collection_state_provider = state_provider or (lambda _track: {})
@@ -356,8 +364,8 @@ class UnifiedSearchResultsPanel(QFrame):
         group_font = group_item.font()
         group_font.setBold(True)
         group_item.setFont(group_font)
-        group_item.setForeground(QColor(DARK_THEME_TOKENS["accent_hover"]))
-        group_item.setBackground(QColor(DARK_THEME_TOKENS["card_bg_alt"]))
+        group_item.setForeground(QColor(ACTIVE_THEME_TOKENS["accent_hover"]))
+        group_item.setBackground(QColor(ACTIVE_THEME_TOKENS["card_bg_alt"]))
         group_item.setSizeHint(QSize(0, 38))
         insert_row = self.result_list.count()
         if source_id in self._source_order:
@@ -505,8 +513,8 @@ class UnifiedSearchResultsPanel(QFrame):
             group_font = group_item.font()
             group_font.setBold(True)
             group_item.setFont(group_font)
-            group_item.setForeground(QColor(DARK_THEME_TOKENS["accent_hover"]))
-            group_item.setBackground(QColor(DARK_THEME_TOKENS["card_bg_alt"]))
+            group_item.setForeground(QColor(ACTIVE_THEME_TOKENS["accent_hover"]))
+            group_item.setBackground(QColor(ACTIVE_THEME_TOKENS["card_bg_alt"]))
             group_item.setSizeHint(QSize(0, 38))
             self.result_list.addItem(group_item)
             if collapsed:

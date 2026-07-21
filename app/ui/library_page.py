@@ -19,7 +19,7 @@ from PySide6.QtWidgets import (
 )
 
 from app.models.media_item import MediaItem
-from app.ui.design_system import DARK_THEME_TOKENS, UI_RADII, UI_SPACING
+from app.ui.design_system import ACTIVE_THEME_TOKENS, UI_RADII, UI_SPACING
 from app.ui.track_list_view import TrackListView
 
 
@@ -129,7 +129,10 @@ class GroupedLibraryView(QFrame):
         self.stack.addWidget(self.grid_page)
         self.stack.addWidget(self.detail_page)
         layout.addWidget(self.stack)
-        t = DARK_THEME_TOKENS
+        self.apply_theme()
+
+    def apply_theme(self) -> None:
+        t = ACTIVE_THEME_TOKENS
         self.setStyleSheet(
             f"QListWidget#libraryGroupList {{ background: transparent; color: {t['text']}; border: none; outline: none; }}"
             f"QListWidget#libraryGroupList::item {{ background: {t['card_bg']}; border: 1px solid {t['border']}; border-radius: {UI_RADII['card']}px; padding: 10px 12px; margin: 2px; }}"
@@ -291,9 +294,9 @@ class GroupedLibraryView(QFrame):
         pixmap = QPixmap(path) if path else QPixmap()
         if pixmap.isNull():
             pixmap = QPixmap(48, 48)
-            pixmap.fill(QColor(DARK_THEME_TOKENS["card_bg_high"]))
+            pixmap.fill(QColor(ACTIVE_THEME_TOKENS["card_bg_high"]))
             painter = QPainter(pixmap)
-            painter.setPen(QColor(DARK_THEME_TOKENS["text_muted"]))
+            painter.setPen(QColor(ACTIVE_THEME_TOKENS["text_muted"]))
             font = painter.font()
             font.setPointSize(20)
             font.setBold(True)
@@ -481,13 +484,18 @@ class LibraryPage(QFrame):
         self.content_stack.addWidget(self.album_view)
         layout.addWidget(self.page_header)
         layout.addWidget(self.content_stack, 1)
-        t = DARK_THEME_TOKENS
+        self.apply_theme()
+
+    def apply_theme(self) -> None:
+        t = ACTIVE_THEME_TOKENS
         self.setStyleSheet(
             "QFrame#libraryViewSwitcher { background: transparent; border: none; }"
             f"QPushButton#libraryViewSwitchButton {{ background: transparent; color: {t['text_muted']}; border: none; border-radius: {UI_RADII['control']}px; padding: 7px 12px; font-weight: 650; }}"
             f"QPushButton#libraryViewSwitchButton:hover {{ background: {t['hover']}; color: {t['text']}; }}"
             f"QPushButton#libraryViewSwitchButton[active='true'] {{ background: {t['accent_soft']}; color: {t['accent_hover']}; }}"
         )
+        for group_view in (self.artist_view, self.album_view):
+            group_view.apply_theme()
 
     def set_responsive_mode(self, mode: str) -> None:
         mode = mode if mode in {"full", "compact", "narrow"} else "full"

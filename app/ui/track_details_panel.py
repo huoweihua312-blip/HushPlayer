@@ -15,7 +15,7 @@ from PySide6.QtWidgets import (
 )
 
 from app.models.media_item import MediaItem
-from app.ui.design_system import DARK_THEME_TOKENS, UI_RADII, UI_SPACING
+from app.ui.design_system import ACTIVE_THEME_TOKENS, UI_RADII, UI_SPACING
 
 
 class TrackDetailsPanel(QFrame):
@@ -71,7 +71,10 @@ class TrackDetailsPanel(QFrame):
         grid.setColumnStretch(1, 1)
         layout.addLayout(grid)
         layout.addStretch()
-        t = DARK_THEME_TOKENS
+        self.apply_theme()
+
+    def apply_theme(self) -> None:
+        t = ACTIVE_THEME_TOKENS
         self.setStyleSheet(
             f"QFrame#trackDetailsPanel {{ background: {t['card_bg']}; border: 1px solid {t['border']}; border-radius: {UI_RADII['panel']}px; }}"
             f"QLabel#trackDetailsTitle {{ color: {t['text']}; font-size: 22px; font-weight: 800; }}"

@@ -1,43 +1,141 @@
-"""Shared visual tokens for HushPlayer's current dark-first UI.
+"""Shared visual tokens for HushPlayer.
 
-Keep this module data-only so lightweight widgets can reuse the same design
-language without importing the main window or creating another theme engine.
+The semantic names in this module are the single colour vocabulary used by
+the UI.  The legacy aliases near the end of each set intentionally remain so
+small, already-stable widgets can migrate without a risky rewrite.
 """
 
 from __future__ import annotations
 
 
-DARK_THEME_TOKENS = {
-    "app_bg": "#0d0f14",
-    "shell_bg": "#141821",
-    "sidebar_bg": "#10131a",
-    "panel_bg": "#151922",
-    "card_bg": "#151922",
-    "card_bg_alt": "#1a1f2b",
-    "card_bg_high": "#202631",
-    "hover": "#202631",
-    "active": "#252c3a",
-    "selected_bg": "rgba(76, 141, 255, 0.18)",
-    "selected_border": "rgba(76, 141, 255, 0.42)",
-    "playing_bg": "rgba(76, 141, 255, 0.11)",
-    "text": "#f3f4f6",
-    "text_secondary": "#b5bbc7",
-    "text_muted": "#8a92a3",
-    "text_weak": "#8a92a3",
-    "text_disabled": "#737d8f",
-    "placeholder": "#7f8898",
-    "border": "#2a303b",
-    "border_strong": "#3a4352",
-    "accent": "#4c8dff",
-    "accent_hover": "#65a0ff",
-    "accent_pressed": "#3978dd",
-    "accent_soft": "rgba(76, 141, 255, 0.18)",
-    "favorite": "#d66f78",
-    "favorite_soft": "rgba(214, 111, 120, 0.15)",
-    "warning": "#e8ad52",
-    "error": "#e15b64",
-    "danger": "#e15b64",
-}
+def _with_legacy_aliases(tokens: dict[str, str]) -> dict[str, str]:
+    """Keep established widgets compatible while they use semantic colours."""
+    aliases = {
+        "app_bg": "window_background",
+        "shell_bg": "surface_secondary",
+        "sidebar_bg": "surface",
+        "panel_bg": "surface",
+        "card_bg": "surface",
+        "card_bg_alt": "surface_secondary",
+        "card_bg_high": "surface_hover",
+        "hover": "surface_hover",
+        "active": "surface_pressed",
+        "selected_bg": "selection_background",
+        "selected_border": "selection_border",
+        "playing_bg": "current_track_background",
+        "text": "text_primary",
+        "text_weak": "text_muted",
+        "text_disabled": "text_disabled",
+        "placeholder": "text_muted",
+        "accent_soft": "selection_background",
+        "favorite": "danger",
+        "favorite_soft": "danger_soft",
+        "error": "danger",
+    }
+    combined = dict(tokens)
+    combined.update({alias: tokens[target] for alias, target in aliases.items()})
+    return combined
+
+
+# These are deliberately designed independently.  The light mode is not an
+# inverted dark palette: it uses cool off-white window surfaces and readable
+# charcoal text, matching Windows 11's calm Fluent hierarchy.
+DARK_THEME_TOKENS = _with_legacy_aliases(
+    {
+        "window_background": "#0d0f14",
+        "surface": "#151922",
+        "surface_secondary": "#10131a",
+        "surface_tertiary": "#1a1f2b",
+        "surface_hover": "#202631",
+        "surface_pressed": "#252c3a",
+        "border": "#2a303b",
+        "border_strong": "#3a4352",
+        "text_primary": "#f3f4f6",
+        "text_secondary": "#b5bbc7",
+        "text_muted": "#8a92a3",
+        "text_disabled": "#737d8f",
+        "accent": "#4c8dff",
+        "accent_hover": "#65a0ff",
+        "accent_pressed": "#3978dd",
+        "on_accent": "#ffffff",
+        "selection_background": "rgba(76, 141, 255, 0.18)",
+        "selection_border": "rgba(76, 141, 255, 0.42)",
+        "selection_text": "#f8fbff",
+        "current_track_background": "rgba(76, 141, 255, 0.11)",
+        "current_track_text": "#8fb8ff",
+        "input_background": "#11131a",
+        "scrollbar_background": "rgba(255, 255, 255, 0.055)",
+        "scrollbar_handle": "rgba(255, 255, 255, 0.22)",
+        "control_overlay": "rgba(255, 255, 255, 0.055)",
+        "control_overlay_hover": "rgba(255, 255, 255, 0.105)",
+        "control_overlay_pressed": "rgba(255, 255, 255, 0.145)",
+        "slider_groove": "rgba(255, 255, 255, 0.14)",
+        "slider_handle": "#f8fbff",
+        "overlay_background": "rgba(8, 10, 15, 150)",
+        "overlay_background_soft": "rgba(8, 10, 15, 92)",
+        "danger": "#e15b64",
+        "danger_soft": "rgba(225, 91, 100, 0.15)",
+        "warning": "#e8ad52",
+        "success": "#8fd5a6",
+    }
+)
+
+LIGHT_THEME_TOKENS = _with_legacy_aliases(
+    {
+        "window_background": "#f3f5f8",
+        "surface": "#fbfcfe",
+        "surface_secondary": "#f6f8fb",
+        "surface_tertiary": "#edf1f6",
+        "surface_hover": "#e6ebf3",
+        "surface_pressed": "#dce4ef",
+        "border": "#d5dce6",
+        "border_strong": "#b7c3d1",
+        "text_primary": "#1c2530",
+        "text_secondary": "#465466",
+        "text_muted": "#68778a",
+        "text_disabled": "#99a5b3",
+        "accent": "#286ed6",
+        "accent_hover": "#1d62c8",
+        "accent_pressed": "#1655ae",
+        "on_accent": "#ffffff",
+        "selection_background": "rgba(40, 110, 214, 0.16)",
+        "selection_border": "rgba(40, 110, 214, 0.46)",
+        "selection_text": "#173b73",
+        "current_track_background": "rgba(40, 110, 214, 0.13)",
+        "current_track_text": "#1d62c8",
+        "input_background": "#ffffff",
+        "scrollbar_background": "rgba(64, 82, 104, 0.08)",
+        "scrollbar_handle": "rgba(64, 82, 104, 0.34)",
+        "control_overlay": "rgba(64, 82, 104, 0.07)",
+        "control_overlay_hover": "rgba(64, 82, 104, 0.13)",
+        "control_overlay_pressed": "rgba(64, 82, 104, 0.19)",
+        "slider_groove": "rgba(64, 82, 104, 0.20)",
+        "slider_handle": "#ffffff",
+        "overlay_background": "rgba(247, 249, 252, 235)",
+        "overlay_background_soft": "rgba(247, 249, 252, 215)",
+        "danger": "#bf3e4c",
+        "danger_soft": "rgba(191, 62, 76, 0.12)",
+        "warning": "#a96300",
+        "success": "#287a4c",
+    }
+)
+
+
+# A stable mutable mapping lets delegate painters use the active palette at
+# paint time without rebuilding any music-list model or playback object.
+ACTIVE_THEME_TOKENS: dict[str, str] = dict(DARK_THEME_TOKENS)
+
+
+def get_theme_tokens(resolved_mode: str = "dark") -> dict[str, str]:
+    """Return a defensive copy of one resolved palette."""
+    return dict(LIGHT_THEME_TOKENS if resolved_mode == "light" else DARK_THEME_TOKENS)
+
+
+def set_active_theme_tokens(resolved_mode: str) -> dict[str, str]:
+    """Update the shared painter palette in place and return it."""
+    ACTIVE_THEME_TOKENS.clear()
+    ACTIVE_THEME_TOKENS.update(get_theme_tokens(resolved_mode))
+    return ACTIVE_THEME_TOKENS
 
 
 UI_RADII = {

@@ -29,7 +29,7 @@ from app.services.source_registry import (
     SourceRegistryError,
     SourceRegistryManager,
 )
-from app.ui.design_system import DARK_THEME_TOKENS, UI_RADII, UI_SPACING
+from app.ui.design_system import ACTIVE_THEME_TOKENS, UI_RADII, UI_SPACING
 
 
 class CustomSourceManagerPage(QFrame):
@@ -166,7 +166,10 @@ class CustomSourceManagerPage(QFrame):
         self.status_label.setWordWrap(True)
         layout.addWidget(self.status_label)
         self._set_detail_enabled(False)
-        t = DARK_THEME_TOKENS
+        self.apply_theme()
+
+    def apply_theme(self) -> None:
+        t = ACTIVE_THEME_TOKENS
         self.setStyleSheet(
             f"QFrame#settingsCard {{ background: {t['card_bg']}; border: 1px solid {t['border']}; border-radius: {UI_RADII['panel']}px; }}"
             f"QLabel#settingsCardTitle {{ color: {t['text']}; font-size: 16px; font-weight: 800; }}"

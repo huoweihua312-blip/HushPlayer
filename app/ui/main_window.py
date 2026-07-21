@@ -38,11 +38,20 @@ from app.services.source_registry import SourceRegistryManager
 from app.services.unified_search_service import UnifiedSearchService
 from app.ui.custom_source_manager_page import CustomSourceManagerPage
 from app.ui.design_system import (
-    DARK_THEME_TOKENS,
+    ACTIVE_THEME_TOKENS,
     UI_CONTROL_SIZES,
     UI_RADII,
     UI_SPACING,
     UI_TYPOGRAPHY,
+)
+from app.ui.theme_manager import (
+    apply_dialog_style,
+    build_application_fallback_qss,
+    build_dialog_qss,
+    create_application_palette,
+    get_application_theme_manager,
+    get_theme_tokens,
+    normalize_appearance_mode,
 )
 from app.ui.immersive_appearance import (
     APPEARANCE_SETTING_KEYS,
@@ -150,192 +159,25 @@ def normalize_update_check_delay_seconds(value) -> int:
 
 
 def create_dark_palette() -> QPalette:
-    t = DARK_THEME_TOKENS
-    palette = QPalette()
-
-    role_colors = {
-        QPalette.ColorRole.Window: t["app_bg"],
-        QPalette.ColorRole.WindowText: t["text"],
-        QPalette.ColorRole.Base: t["panel_bg"],
-        QPalette.ColorRole.AlternateBase: t["card_bg_alt"],
-        QPalette.ColorRole.Text: t["text"],
-        QPalette.ColorRole.Button: t["card_bg_alt"],
-        QPalette.ColorRole.ButtonText: t["text_secondary"],
-        QPalette.ColorRole.Highlight: t["accent"],
-        QPalette.ColorRole.HighlightedText: "#ffffff",
-        QPalette.ColorRole.ToolTipBase: t["card_bg_alt"],
-        QPalette.ColorRole.ToolTipText: t["text"],
-        QPalette.ColorRole.PlaceholderText: t["placeholder"],
-        QPalette.ColorRole.Link: t["accent"],
-    }
-
-    for role, color in role_colors.items():
-        palette.setColor(QPalette.ColorGroup.All, role, QColor(color))
-
-    for role in (
-        QPalette.ColorRole.WindowText,
-        QPalette.ColorRole.Text,
-        QPalette.ColorRole.ButtonText,
-        QPalette.ColorRole.PlaceholderText,
-    ):
-        palette.setColor(QPalette.ColorGroup.Disabled, role, QColor(t["text_disabled"]))
-
-    palette.setColor(QPalette.ColorGroup.Disabled, QPalette.ColorRole.Button, QColor(t["panel_bg"]))
-    palette.setColor(QPalette.ColorGroup.Disabled, QPalette.ColorRole.Base, QColor(t["app_bg"]))
-    return palette
+    return create_application_palette(get_theme_tokens("dark"))
 
 
 def build_dark_dialog_qss() -> str:
-    t = DARK_THEME_TOKENS
-    return f"""
-    QDialog, QMessageBox, QInputDialog {{
-        background: {t['app_bg']};
-        color: {t['text']};
-        font-family: "Segoe UI", "Microsoft YaHei UI", "Microsoft YaHei";
-    }}
-    QDialog QLabel, QMessageBox QLabel, QInputDialog QLabel {{
-        background: transparent;
-        color: {t['text_secondary']};
-    }}
-    QDialog QLabel:disabled, QDialog QCheckBox:disabled,
-    QDialog QRadioButton:disabled {{ color: {t['text_disabled']}; }}
-    QDialog QLineEdit, QDialog QTextEdit, QDialog QPlainTextEdit {{
-        background: {t['panel_bg']};
-        color: {t['text']};
-        border: 1px solid {t['border']};
-        border-radius: 10px;
-        padding: 8px 10px;
-        selection-background-color: {t['accent']};
-        selection-color: {t['text']};
-    }}
-    QDialog QLineEdit:focus, QDialog QTextEdit:focus,
-    QDialog QPlainTextEdit:focus {{
-        border: 1px solid {t['accent']};
-        background: {t['card_bg_alt']};
-    }}
-    QDialog QLineEdit:disabled, QDialog QTextEdit:disabled,
-    QDialog QPlainTextEdit:disabled {{
-        background: {t['app_bg']};
-        color: {t['text_disabled']};
-        border-color: {t['border']};
-    }}
-    QDialog QLineEdit[readOnly="true"], QDialog QTextEdit[readOnly="true"],
-    QDialog QPlainTextEdit[readOnly="true"] {{
-        background: {t['app_bg']};
-        color: {t['text_muted']};
-    }}
-    QDialog QComboBox {{
-        background: {t['panel_bg']};
-        color: {t['text']};
-        border: 1px solid {t['border']};
-        border-radius: 10px;
-        padding: 7px 10px;
-    }}
-    QDialog QComboBox:hover, QDialog QComboBox:focus {{ border-color: {t['border_strong']}; }}
-    QDialog QComboBox:disabled {{
-        background: {t['app_bg']};
-        color: {t['text_disabled']};
-    }}
-    QDialog QComboBox QAbstractItemView {{
-        background: {t['card_bg_alt']};
-        color: {t['text']};
-        border: 1px solid {t['border_strong']};
-        outline: none;
-        selection-background-color: {t['accent_soft']};
-        selection-color: {t['text']};
-    }}
-    QDialog QCheckBox, QDialog QRadioButton {{
-        background: transparent;
-        color: {t['text_secondary']};
-        spacing: 8px;
-    }}
-    QDialog QListWidget, QDialog QTreeWidget, QDialog QTableWidget {{
-        background: {t['panel_bg']};
-        color: {t['text']};
-        alternate-background-color: {t['card_bg_alt']};
-        border: 1px solid {t['border']};
-        outline: none;
-        selection-background-color: {t['accent_soft']};
-        selection-color: {t['text']};
-    }}
-    QDialog QListWidget::item:hover, QDialog QTreeWidget::item:hover,
-    QDialog QTableWidget::item:hover {{ background: {t['hover']}; }}
-    QDialog QPushButton, QMessageBox QPushButton, QInputDialog QPushButton {{
-        background: {t['card_bg_alt']};
-        color: {t['text_secondary']};
-        border: 1px solid {t['border']};
-        border-radius: 10px;
-        padding: 8px 14px;
-        min-width: 72px;
-    }}
-    QDialog QPushButton:hover, QMessageBox QPushButton:hover,
-    QInputDialog QPushButton:hover {{
-        background: {t['hover']};
-        color: {t['text']};
-        border-color: {t['border_strong']};
-    }}
-    QDialog QPushButton:pressed, QMessageBox QPushButton:pressed,
-    QInputDialog QPushButton:pressed {{ background: {t['active']}; }}
-    QDialog QPushButton:disabled, QMessageBox QPushButton:disabled,
-    QInputDialog QPushButton:disabled {{
-        background: {t['panel_bg']};
-        color: {t['text_disabled']};
-        border-color: {t['border']};
-    }}
-    QPushButton#dangerDialogButton {{
-        background: rgba(225, 91, 100, 0.14);
-        color: #f3b7bc;
-        border-color: rgba(225, 91, 100, 0.30);
-    }}
-    QPushButton#dangerDialogButton:hover {{
-        background: rgba(225, 91, 100, 0.24);
-        color: {t['text']};
-        border-color: {t['danger']};
-    }}
-    QDialog QScrollArea, QDialog QScrollArea > QWidget > QWidget {{
-        background: transparent;
-        border: none;
-    }}
-    """
+    return build_dialog_qss(get_theme_tokens("dark"))
 
 
 def build_dark_application_fallback_qss() -> str:
-    t = DARK_THEME_TOKENS
-    return build_dark_dialog_qss() + f"""
-    QMenu {{
-        background: {t['card_bg_alt']};
-        color: {t['text_secondary']};
-        border: 1px solid {t['border_strong']};
-        border-radius: 10px;
-        padding: 6px;
-    }}
-    QMenu::item {{ padding: 8px 24px; border-radius: 7px; }}
-    QMenu::item:selected {{ background: {t['accent_soft']}; color: {t['text']}; }}
-    QMenu::item:disabled {{ background: transparent; color: {t['text_disabled']}; }}
-    QMenu::separator {{ height: 1px; background: {t['border']}; margin: 6px 8px; }}
-    QToolTip {{
-        background: {t['card_bg_alt']};
-        color: {t['text']};
-        border: 1px solid {t['border_strong']};
-        border-radius: 8px;
-        padding: 6px 8px;
-    }}
-    """
+    return build_application_fallback_qss(get_theme_tokens("dark"))
 
 
 def apply_dark_application_theme(app: QApplication) -> None:
-    if app.property("hushDarkThemeApplied"):
-        return
-
-    app.setPalette(create_dark_palette())
-    existing_qss = app.styleSheet()
-    app.setStyleSheet(f"{existing_qss}\n{build_dark_application_fallback_qss()}")
-    app.setProperty("hushDarkThemeApplied", True)
+    """Backward-compatible startup helper for the established dark default."""
+    get_application_theme_manager(app).set_appearance_mode("dark")
 
 
 def apply_dark_dialog_style(dialog: QDialog, extra_qss: str = "") -> None:
-    dialog.setPalette(create_dark_palette())
-    dialog.setStyleSheet(f"{build_dark_dialog_qss()}\n{extra_qss}")
+    """Backward-compatible name for the application-aware dialog style."""
+    apply_dialog_style(dialog, extra_qss)
 
 
 _NAVIGATION_ICON_CACHE: dict[tuple[str, bool], QIcon] = {}
@@ -355,9 +197,9 @@ def create_navigation_icon(navigation_id: str, active: bool = False) -> QIcon:
     painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
     painter.scale(2.0, 2.0)
     color = QColor(
-        DARK_THEME_TOKENS["accent"]
+        ACTIVE_THEME_TOKENS["accent"]
         if active
-        else DARK_THEME_TOKENS["text_muted"]
+        else ACTIVE_THEME_TOKENS["text_muted"]
     )
     pen = QPen(color, 1.45)
     pen.setCapStyle(Qt.PenCapStyle.RoundCap)
@@ -382,7 +224,7 @@ def create_navigation_icon(navigation_id: str, active: bool = False) -> QIcon:
         painter.drawLine(QPointF(9.0, 5.5), QPointF(9.0, 9.0))
         painter.drawLine(QPointF(9.0, 9.0), QPointF(11.7, 10.5))
         if role == "recent_added":
-            painter.setBrush(QColor(DARK_THEME_TOKENS["sidebar_bg"]))
+            painter.setBrush(QColor(ACTIVE_THEME_TOKENS["sidebar_bg"]))
             painter.drawEllipse(QRectF(10.5, 10.5, 6.0, 6.0))
             painter.setBrush(Qt.BrushStyle.NoBrush)
             painter.drawLine(QPointF(13.5, 12.0), QPointF(13.5, 15.0))
@@ -691,7 +533,11 @@ class PlayerIconButton(QPushButton):
 
         painter = QPainter(pixmap)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
-        color = QColor("#ffffff" if role in {"play", "pause"} else "#dfe6f2")
+        color = QColor(
+            ACTIVE_THEME_TOKENS["on_accent"]
+            if role in {"play", "pause"}
+            else ACTIVE_THEME_TOKENS["text_secondary"]
+        )
 
         if role == "play":
             path = QPainterPath()
@@ -759,7 +605,11 @@ class VolumeStatusIcon(QLabel):
 
         painter = QPainter(pixmap)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
-        color = QColor("#ffffff" if self._hovered else "#dfe6f2")
+        color = QColor(
+            ACTIVE_THEME_TOKENS["text_primary"]
+            if self._hovered
+            else ACTIVE_THEME_TOKENS["text_secondary"]
+        )
 
         speaker = QPainterPath()
         speaker.moveTo(4, 10)
@@ -831,7 +681,7 @@ def create_player_action_icon(role: str) -> QIcon:
     pixmap.fill(Qt.GlobalColor.transparent)
     painter = QPainter(pixmap)
     painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
-    color = QColor("#dfe6f2")
+    color = QColor(ACTIVE_THEME_TOKENS["text_secondary"])
     pen = QPen(color, 1.8)
     pen.setCapStyle(Qt.PenCapStyle.RoundCap)
     pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
@@ -1035,7 +885,7 @@ class SongLibraryDelegate(QStyledItemDelegate):
 
         if is_playing:
             accent_rect = QRectF(row_rect.left(), row_rect.top() + 8, 3, row_rect.height() - 16)
-            painter.fillRect(accent_rect, QColor(DARK_THEME_TOKENS["accent"]))
+            painter.fillRect(accent_rect, QColor(ACTIVE_THEME_TOKENS["accent"]))
 
         rects = self.column_rects(option.rect)
 
@@ -1065,22 +915,22 @@ class SongLibraryDelegate(QStyledItemDelegate):
             hovered=like_hovered,
             pressed=like_pressed,
         )
-        self._draw_text(painter, option, rects["marker"], "▶" if is_playing else "", DARK_THEME_TOKENS["accent"], True)
+        self._draw_text(painter, option, rects["marker"], "▶" if is_playing else "", ACTIVE_THEME_TOKENS["accent"], True)
         self._draw_text(
             painter,
             option,
             rects["title"],
             str(song_data.get("title") or "未知歌曲"),
             (
-                DARK_THEME_TOKENS["accent_hover"]
+                ACTIVE_THEME_TOKENS["accent_hover"]
                 if is_playing
-                else DARK_THEME_TOKENS["text"]
+                else ACTIVE_THEME_TOKENS["text"]
             ),
             is_playing,
         )
-        self._draw_text(painter, option, rects["artist"], str(song_data.get("artist") or "未知艺术家"), DARK_THEME_TOKENS["text_secondary"])
-        self._draw_text(painter, option, rects["album"], str(song_data.get("album") or "未知专辑"), DARK_THEME_TOKENS["text_secondary"])
-        self._draw_text(painter, option, rects["duration"], duration_text, DARK_THEME_TOKENS["text_muted"], align_right=True)
+        self._draw_text(painter, option, rects["artist"], str(song_data.get("artist") or "未知艺术家"), ACTIVE_THEME_TOKENS["text_secondary"])
+        self._draw_text(painter, option, rects["album"], str(song_data.get("album") or "未知专辑"), ACTIVE_THEME_TOKENS["text_secondary"])
+        self._draw_text(painter, option, rects["duration"], duration_text, ACTIVE_THEME_TOKENS["text_muted"], align_right=True)
         painter.restore()
 
     def helpEvent(self, event, view, option, index) -> bool:
@@ -1207,7 +1057,7 @@ class RoundedCoverLabel(QLabel):
         path = QPainterPath()
         path.addRoundedRect(rect, self.radius, self.radius)
 
-        painter.fillPath(path, QColor("#151821"))
+        painter.fillPath(path, QColor(ACTIVE_THEME_TOKENS["surface"]))
 
         inner_rect = rect.adjusted(self.padding, self.padding, -self.padding, -self.padding)
         inner_path = QPainterPath()
@@ -1220,18 +1070,20 @@ class RoundedCoverLabel(QLabel):
 
             painter.save()
             painter.setClipPath(inner_path)
-            painter.fillPath(inner_path, QColor("#0f1117"))
+            painter.fillPath(inner_path, QColor(ACTIVE_THEME_TOKENS["window_background"]))
             painter.drawPixmap(int(x), int(y), scaled)
             painter.restore()
         else:
             painter.save()
             painter.setClipPath(inner_path)
-            painter.fillPath(inner_path, QColor("#11131a"))
-            painter.setPen(QColor("#f5f7fb"))
+            painter.fillPath(inner_path, QColor(ACTIVE_THEME_TOKENS["input_background"]))
+            painter.setPen(QColor(ACTIVE_THEME_TOKENS["text_primary"]))
             painter.drawText(inner_rect, Qt.AlignmentFlag.AlignCenter, self.text())
             painter.restore()
 
-        painter.setPen(QPen(QColor(255, 255, 255, 24), 1))
+        border = QColor(ACTIVE_THEME_TOKENS["border"])
+        border.setAlpha(96)
+        painter.setPen(QPen(border, 1))
         painter.drawPath(path)
 
 
@@ -3140,6 +2992,33 @@ class SettingsDialog(QDialog):
         self.settings_scroll.setWidget(self.settings_scroll_content)
         layout.addWidget(self.settings_scroll, 1)
 
+        appearance_card = QFrame()
+        appearance_card.setObjectName("settingsCard")
+        appearance_layout = QVBoxLayout(appearance_card)
+        appearance_layout.setContentsMargins(16, 16, 16, 16)
+        appearance_layout.setSpacing(12)
+        appearance_title = QLabel("外观")
+        appearance_title.setObjectName("settingsCardTitle")
+        appearance_hint = QLabel("切换后立即应用到已打开的窗口。跟随系统会使用 Windows 当前外观。")
+        appearance_hint.setObjectName("settingsHint")
+        appearance_hint.setWordWrap(True)
+        self.appearance_mode_combo = QComboBox()
+        self.appearance_mode_combo.addItem("跟随系统", "system")
+        self.appearance_mode_combo.addItem("浅色", "light")
+        self.appearance_mode_combo.addItem("深色", "dark")
+        appearance_mode = normalize_appearance_mode(
+            settings.get("appearance_mode", "dark")
+        )
+        appearance_index = self.appearance_mode_combo.findData(appearance_mode)
+        self.appearance_mode_combo.setCurrentIndex(max(0, appearance_index))
+        self.appearance_mode_combo.currentIndexChanged.connect(
+            self.apply_appearance_mode
+        )
+        appearance_layout.addWidget(appearance_title)
+        appearance_layout.addWidget(QLabel("主题"))
+        appearance_layout.addWidget(self.appearance_mode_combo)
+        appearance_layout.addWidget(appearance_hint)
+
         playback_card = QFrame()
         playback_card.setObjectName("settingsCard")
         playback_layout = QVBoxLayout(playback_card)
@@ -3507,6 +3386,7 @@ class SettingsDialog(QDialog):
         )
         self.refresh_audio_cache_status()
 
+        self.settings_content_layout.addWidget(appearance_card)
         self.settings_content_layout.addWidget(playback_card)
         self.settings_content_layout.addWidget(immersive_card)
         self.settings_content_layout.addWidget(floating_card)
@@ -3544,6 +3424,9 @@ class SettingsDialog(QDialog):
         for control in self._settings_wheel_passthrough_controls:
             control.installEventFilter(self)
 
+        self.main_window.theme_manager.themeChanged.connect(
+            lambda _mode: self.apply_style()
+        )
         self.apply_style()
 
     def eventFilter(self, watched, event) -> bool:
@@ -3571,41 +3454,42 @@ class SettingsDialog(QDialog):
         return super().eventFilter(watched, event)
 
     def apply_style(self) -> None:
+        t = ACTIVE_THEME_TOKENS
         apply_dark_dialog_style(
             self,
-            "QDialog#settingsDialog { background: #0f1117; color: #e8ecf5; font-family: 'Segoe UI', 'Microsoft YaHei UI', 'Microsoft YaHei'; }"
-            "QDialog#settingsDialog QLabel { color: #b5bbc7; }"
-            "QLabel#settingsDialogTitle { color: #ffffff; font-size: 26px; font-weight: 900; }"
-            "QLabel#settingsDialogSubtitle { color: #8f98aa; font-size: 13px; }"
+            f"QDialog#settingsDialog {{ background: {t['window_background']}; color: {t['text_primary']}; font-family: 'Segoe UI', 'Microsoft YaHei UI', 'Microsoft YaHei'; }}"
+            f"QDialog#settingsDialog QLabel {{ color: {t['text_secondary']}; }}"
+            f"QLabel#settingsDialogTitle {{ color: {t['text_primary']}; font-size: 26px; font-weight: 900; }}"
+            f"QLabel#settingsDialogSubtitle {{ color: {t['text_muted']}; font-size: 13px; }}"
             "QScrollArea#settingsScrollArea, QWidget#settingsScrollContent { background: transparent; border: none; }"
-            "QFrame#settingsCard { background: #151922; border: 1px solid rgba(255,255,255,0.07); border-radius: 18px; }"
-            "QLabel#settingsCardTitle { color: #ffffff; font-size: 16px; font-weight: 800; }"
-            "QLabel#settingsHint { color: #8f98aa; font-size: 12px; }"
-            "QLabel#settingsValueLabel { color: #d9deea; font-size: 12px; min-width: 42px; }"
-            "QCheckBox { color: #dfe4ee; font-size: 13px; spacing: 9px; }"
-            "QCheckBox:disabled { color: #7b8494; }"
-            "QCheckBox::indicator { width: 18px; height: 18px; border-radius: 5px; border: 1px solid rgba(255,255,255,0.14); background: #11131a; }"
-            "QCheckBox::indicator:checked { background: #3b82f6; border: 1px solid #3b82f6; }"
-            "QComboBox { background: #11131a; color: #e8ecf5; border: 1px solid rgba(255,255,255,0.08); border-radius: 10px; padding: 7px 10px; }"
-            "QComboBox:hover, QComboBox:focus { border-color: #4c8dff; }"
-            "QComboBox:disabled { background: #0d0f14; color: #7b8494; border-color: #2a303b; }"
-            "QComboBox QAbstractItemView { background: #1a1f2b; color: #e8ecf5; border: 1px solid rgba(255,255,255,0.11); selection-background-color: rgba(59,130,246,0.18); selection-color: #ffffff; outline: none; }"
-            "QListWidget#settingsFolderList { background: #11131a; color: #e8ecf5; border: 1px solid rgba(255,255,255,0.08); border-radius: 12px; padding: 7px; outline: none; }"
+            f"QFrame#settingsCard {{ background: {t['surface']}; border: 1px solid {t['border']}; border-radius: 18px; }}"
+            f"QLabel#settingsCardTitle {{ color: {t['text_primary']}; font-size: 16px; font-weight: 800; }}"
+            f"QLabel#settingsHint {{ color: {t['text_muted']}; font-size: 12px; }}"
+            f"QLabel#settingsValueLabel {{ color: {t['text_secondary']}; font-size: 12px; min-width: 42px; }}"
+            f"QCheckBox {{ color: {t['text_secondary']}; font-size: 13px; spacing: 9px; }}"
+            f"QCheckBox:disabled {{ color: {t['text_disabled']}; }}"
+            f"QCheckBox::indicator {{ width: 18px; height: 18px; border-radius: 5px; border: 1px solid {t['border_strong']}; background: {t['input_background']}; }}"
+            f"QCheckBox::indicator:checked {{ background: {t['accent']}; border: 1px solid {t['accent']}; }}"
+            f"QComboBox {{ background: {t['input_background']}; color: {t['text_primary']}; border: 1px solid {t['border']}; border-radius: 10px; padding: 7px 10px; }}"
+            f"QComboBox:hover, QComboBox:focus {{ border-color: {t['accent']}; }}"
+            f"QComboBox:disabled {{ background: {t['window_background']}; color: {t['text_disabled']}; border-color: {t['border']}; }}"
+            f"QComboBox QAbstractItemView {{ background: {t['surface_tertiary']}; color: {t['text_primary']}; border: 1px solid {t['border_strong']}; selection-background-color: {t['selection_background']}; selection-color: {t['selection_text']}; outline: none; }}"
+            f"QListWidget#settingsFolderList {{ background: {t['input_background']}; color: {t['text_primary']}; border: 1px solid {t['border']}; border-radius: 12px; padding: 7px; outline: none; }}"
             "QListWidget#settingsFolderList::item { padding: 8px 10px; border-radius: 9px; margin: 2px 0; }"
-            "QListWidget#settingsFolderList::item:hover { background: rgba(255,255,255,0.07); }"
-            "QListWidget#settingsFolderList::item:selected { background: rgba(59,130,246,0.18); color: #ffffff; border: 1px solid rgba(59,130,246,0.38); }"
-            "QListWidget#settingsFolderList:disabled { background: #0d0f14; color: #7b8494; border-color: #2a303b; }"
-            "QPushButton#settingsPrimaryButton { background: #3b82f6; color: #ffffff; border: none; border-radius: 12px; padding: 10px 18px; font-size: 13px; font-weight: 700; }"
-            "QPushButton#settingsPrimaryButton:hover { background: #5594ff; }"
-            "QPushButton#settingsSecondaryButton { background: rgba(255,255,255,0.07); color: #dfe4ee; border: none; border-radius: 12px; padding: 10px 16px; font-size: 13px; }"
-            "QPushButton#settingsSecondaryButton:hover { background: rgba(255,255,255,0.11); color: #ffffff; }"
-            "QPushButton#settingsPrimaryButton:disabled, QPushButton#settingsSecondaryButton:disabled { background: #151922; color: #7b8494; border: 1px solid #2a303b; }"
-            "QSlider::groove:horizontal { height: 5px; background: rgba(255,255,255,0.14); border-radius: 3px; }"
-            "QSlider::handle:horizontal { width: 16px; height: 16px; margin: -6px 0; background: #ffffff; border-radius: 8px; }"
-            "QSlider::sub-page:horizontal { background: #3b82f6; border-radius: 3px; }"
-            "QSlider:disabled::groove:horizontal { background: #2a303b; }"
-            "QSlider:disabled::handle:horizontal { background: #7b8494; }"
-            "QSlider:disabled::sub-page:horizontal { background: #3a4352; }"
+            f"QListWidget#settingsFolderList::item:hover {{ background: {t['surface_hover']}; }}"
+            f"QListWidget#settingsFolderList::item:selected {{ background: {t['selection_background']}; color: {t['selection_text']}; border: 1px solid {t['selection_border']}; }}"
+            f"QListWidget#settingsFolderList:disabled {{ background: {t['window_background']}; color: {t['text_disabled']}; border-color: {t['border']}; }}"
+            f"QPushButton#settingsPrimaryButton {{ background: {t['accent']}; color: {t['on_accent']}; border: none; border-radius: 12px; padding: 10px 18px; font-size: 13px; font-weight: 700; }}"
+            f"QPushButton#settingsPrimaryButton:hover {{ background: {t['accent_hover']}; }}"
+            f"QPushButton#settingsSecondaryButton {{ background: {t['control_overlay']}; color: {t['text_secondary']}; border: none; border-radius: 12px; padding: 10px 16px; font-size: 13px; }}"
+            f"QPushButton#settingsSecondaryButton:hover {{ background: {t['control_overlay_hover']}; color: {t['text_primary']}; }}"
+            f"QPushButton#settingsPrimaryButton:disabled, QPushButton#settingsSecondaryButton:disabled {{ background: {t['surface']}; color: {t['text_disabled']}; border: 1px solid {t['border']}; }}"
+            f"QSlider::groove:horizontal {{ height: 5px; background: {t['slider_groove']}; border-radius: 3px; }}"
+            f"QSlider::handle:horizontal {{ width: 16px; height: 16px; margin: -6px 0; background: {t['slider_handle']}; border-radius: 8px; }}"
+            f"QSlider::sub-page:horizontal {{ background: {t['accent']}; border-radius: 3px; }}"
+            f"QSlider:disabled::groove:horizontal {{ background: {t['border']}; }}"
+            f"QSlider:disabled::handle:horizontal {{ background: {t['text_disabled']}; }}"
+            f"QSlider:disabled::sub-page:horizontal {{ background: {t['border_strong']}; }}"
         )
 
     def get_music_scan_folders_from_list(self) -> list[str]:
@@ -3673,6 +3557,9 @@ class SettingsDialog(QDialog):
             darkness=int(self.alpha_slider.value()),
         )
         updates = {
+            "appearance_mode": normalize_appearance_mode(
+                self.appearance_mode_combo.currentData()
+            ),
             "auto_check_updates_on_startup": self.auto_update_checkbox.isChecked(),
             "update_check_delay_seconds": int(self.update_delay_combo.currentData()),
             "restore_last_playback": self.restore_checkbox.isChecked(),
@@ -3688,6 +3575,12 @@ class SettingsDialog(QDialog):
         }
         updates.update(self.immersive_appearance_config.to_settings())
         return updates
+
+    def apply_appearance_mode(self, _index: int = -1) -> None:
+        self.main_window.set_appearance_mode(
+            self.appearance_mode_combo.currentData(),
+            persist=True,
+        )
 
     def on_update_check_started(self, _manual: bool) -> None:
         self.check_update_button.setText("正在检查更新…")
@@ -3724,10 +3617,9 @@ class SettingsDialog(QDialog):
         QMessageBox.information(self, "桌面歌词", "桌面歌词位置已重置。")
 
     def save_settings(self) -> None:
-        self.main_window.save_hush_settings(
-            self.collect_settings_updates(),
-            immediate=True,
-        )
+        updates = self.collect_settings_updates()
+        self.main_window.save_hush_settings(updates, immediate=True)
+        self.main_window.set_appearance_mode(updates["appearance_mode"], persist=False)
         self.main_window.apply_runtime_settings()
         QMessageBox.information(self, "设置", "设置已保存。")
         self.accept()
@@ -3861,20 +3753,21 @@ class MetadataMatchDialog(QDialog):
         layout.addWidget(self.candidate_list, 1)
         layout.addLayout(button_row)
 
+        t = ACTIVE_THEME_TOKENS
         apply_dark_dialog_style(
             self,
-            "QDialog#metadataMatchDialog { background: #0f1117; color: #e8ecf5; font-family: 'Segoe UI', 'Microsoft YaHei UI', 'Microsoft YaHei'; }"
-            "QLabel#metadataDialogTitle { color: #ffffff; font-size: 24px; font-weight: 900; }"
-            "QLabel#metadataDialogSubtitle { color: #8f98aa; font-size: 13px; }"
-            "QListWidget#metadataCandidateList { background: #11131a; color: #e8ecf5; border: 1px solid rgba(255,255,255,0.08); border-radius: 16px; padding: 8px; outline: none; }"
+            f"QDialog#metadataMatchDialog {{ background: {t['window_background']}; color: {t['text_primary']}; font-family: 'Segoe UI', 'Microsoft YaHei UI', 'Microsoft YaHei'; }}"
+            f"QLabel#metadataDialogTitle {{ color: {t['text_primary']}; font-size: 24px; font-weight: 900; }}"
+            f"QLabel#metadataDialogSubtitle {{ color: {t['text_muted']}; font-size: 13px; }}"
+            f"QListWidget#metadataCandidateList {{ background: {t['input_background']}; color: {t['text_primary']}; border: 1px solid {t['border']}; border-radius: 16px; padding: 8px; outline: none; }}"
             "QListWidget#metadataCandidateList::item { padding: 11px 12px; border-radius: 12px; margin: 3px 0; }"
-            "QListWidget#metadataCandidateList::item:hover { background: rgba(255,255,255,0.07); }"
-            "QListWidget#metadataCandidateList::item:selected { background: rgba(59,130,246,0.18); color: #ffffff; border: 1px solid rgba(59,130,246,0.38); }"
-            "QPushButton#metadataPrimaryButton { background: #3b82f6; color: #ffffff; border: none; border-radius: 12px; padding: 10px 18px; font-size: 13px; font-weight: 700; }"
-            "QPushButton#metadataPrimaryButton:hover { background: #5594ff; }"
-            "QPushButton#metadataSecondaryButton { background: rgba(255,255,255,0.07); color: #dfe4ee; border: none; border-radius: 12px; padding: 10px 16px; font-size: 13px; }"
-            "QPushButton#metadataSecondaryButton:hover { background: rgba(255,255,255,0.11); color: #ffffff; }"
-            "QPushButton#metadataPrimaryButton:disabled, QPushButton#metadataSecondaryButton:disabled { background: #151922; color: #7b8494; border: 1px solid #2a303b; }"
+            f"QListWidget#metadataCandidateList::item:hover {{ background: {t['surface_hover']}; }}"
+            f"QListWidget#metadataCandidateList::item:selected {{ background: {t['selection_background']}; color: {t['selection_text']}; border: 1px solid {t['selection_border']}; }}"
+            f"QPushButton#metadataPrimaryButton {{ background: {t['accent']}; color: {t['on_accent']}; border: none; border-radius: 12px; padding: 10px 18px; font-size: 13px; font-weight: 700; }}"
+            f"QPushButton#metadataPrimaryButton:hover {{ background: {t['accent_hover']}; }}"
+            f"QPushButton#metadataSecondaryButton {{ background: {t['control_overlay']}; color: {t['text_secondary']}; border: none; border-radius: 12px; padding: 10px 16px; font-size: 13px; }}"
+            f"QPushButton#metadataSecondaryButton:hover {{ background: {t['control_overlay_hover']}; color: {t['text_primary']}; }}"
+            f"QPushButton#metadataPrimaryButton:disabled, QPushButton#metadataSecondaryButton:disabled {{ background: {t['surface']}; color: {t['text_disabled']}; border: 1px solid {t['border']}; }}"
         )
 
     def accept_selected_candidate(self) -> None:
@@ -4495,45 +4388,52 @@ class ImmersiveLyricsWindow(QWidget):
         context_padding = max(8, round(10 * font_ratio))
         near_padding = max(10, round(13 * font_ratio))
         current_padding = max(13, round(18 * font_ratio))
-        t = DARK_THEME_TOKENS
+        t = ACTIVE_THEME_TOKENS
+        cover_background = config.background_mode in {"cover", "custom"}
+        lyric_text = t["on_accent"] if cover_background else t["text_primary"]
 
-        button_background = "rgba(31, 35, 44, 190)"
+        def translucent_token(name: str, alpha: int) -> str:
+            color = QColor(t[name])
+            return f"rgba({color.red()}, {color.green()}, {color.blue()}, {alpha})"
+
+        button_background = t["overlay_background"]
         self.background_view.set_config(config)
+        self.background_view.update()
 
         self.setStyleSheet(
             f"QWidget#immersiveLyricsWindow {{ background: transparent; color: {t['text']}; font-family: 'Segoe UI Variable Text', 'Segoe UI', 'Microsoft YaHei UI'; }}"
             "QFrame#immersiveBackgroundPanel { background: transparent; }"
             "QFrame#immersiveBody, QFrame#immersiveArtworkPanel, QFrame#immersiveArtworkContent, QFrame#immersiveTrackInfo, QFrame#immersiveLyricsPanel { background: transparent; border: none; }"
-            f"QFrame#immersiveControlHeader {{ background: rgba(8, 10, 15, 92); border: 1px solid {t['border']}; border-radius: {UI_RADII['card']}px; padding: 8px 10px; }}"
-            f"QFrame#immersivePlaybackFooter {{ background: rgba(8, 10, 15, 150); border: 1px solid {t['border']}; border-radius: {UI_RADII['panel']}px; }}"
+            f"QFrame#immersiveControlHeader {{ background: {t['overlay_background_soft']}; border: 1px solid {t['border']}; border-radius: {UI_RADII['card']}px; padding: 8px 10px; }}"
+            f"QFrame#immersivePlaybackFooter {{ background: {t['overlay_background']}; border: 1px solid {t['border']}; border-radius: {UI_RADII['panel']}px; }}"
             f"QLabel#immersivePageTitle {{ color: {t['text_secondary']}; font-size: 14px; font-weight: 700; }}"
-            f"QLabel#immersiveSongTitle {{ color: {t['text']}; font-size: 28px; font-weight: 900; }}"
+            f"QLabel#immersiveSongTitle {{ color: {lyric_text}; font-size: 28px; font-weight: 900; }}"
             f"QLabel#immersiveSongArtist {{ color: {t['text_secondary']}; font-size: 15px; }}"
             f"QLabel#immersiveStatus {{ color: {t['text_muted']}; font-size: 12px; }}"
             f"QPushButton#immersiveButton, QPushButton#immersiveModeButton {{ background: {button_background}; color: {t['text_secondary']}; border: 1px solid {t['border']}; border-radius: {UI_RADII['button']}px; padding: 8px 12px; font-size: 12px; }}"
             f"QPushButton#immersiveButton:hover, QPushButton#immersiveModeButton:hover {{ background: {t['hover']}; color: {t['text']}; border-color: {t['border_strong']}; }}"
             f"QPushButton#immersiveModeButton[modeActive='true'] {{ background: {t['accent_soft']}; color: {t['accent_hover']}; border-color: {t['selected_border']}; }}"
-            f"QPushButton#immersiveFavoriteButton {{ background: rgba(15, 18, 25, 150); border: 1px solid {t['border']}; border-radius: 20px; }}"
+            f"QPushButton#immersiveFavoriteButton {{ background: {t['overlay_background']}; border: 1px solid {t['border']}; border-radius: 20px; }}"
             f"QPushButton#immersiveFavoriteButton:hover {{ background: {t['hover']}; border-color: {t['border_strong']}; }}"
-            f"QPushButton#immersiveFavoriteButton[liked='true'] {{ background: {t['favorite_soft']}; border-color: rgba(214,111,120,0.34); }}"
-            f"QPushButton#immersiveReturnCurrentButton {{ background: rgba(15,18,25,205); color: {t['text_secondary']}; border: 1px solid {t['border_strong']}; border-radius: {UI_RADII['button']}px; padding: 8px 12px; }}"
+            f"QPushButton#immersiveFavoriteButton[liked='true'] {{ background: {t['favorite_soft']}; border-color: {t['danger']}; }}"
+            f"QPushButton#immersiveReturnCurrentButton {{ background: {t['overlay_background']}; color: {t['text_secondary']}; border: 1px solid {t['border_strong']}; border-radius: {UI_RADII['button']}px; padding: 8px 12px; }}"
             f"QPushButton#immersiveReturnCurrentButton:hover {{ background: {t['accent_soft']}; color: {t['text']}; border-color: {t['selected_border']}; }}"
             "QPushButton#immersiveTransportButton { background: transparent; border: 1px solid transparent; border-radius: 20px; }"
             f"QPushButton#immersiveTransportButton:hover {{ background: {t['hover']}; border-color: {t['border']}; }}"
-            f"QPushButton#immersiveTransportPlayButton {{ background: {t['accent']}; border: 1px solid rgba(255,255,255,0.16); border-radius: 24px; }}"
+            f"QPushButton#immersiveTransportPlayButton {{ background: {t['accent']}; border: 1px solid {t['border_strong']}; border-radius: 24px; }}"
             f"QPushButton#immersiveTransportPlayButton:hover {{ background: {t['accent_hover']}; }}"
-            f"QSlider#immersiveProgressSlider::groove:horizontal, QSlider#immersiveVolumeSlider::groove:horizontal {{ height: 4px; background: rgba(255,255,255,0.14); border-radius: 2px; }}"
+            f"QSlider#immersiveProgressSlider::groove:horizontal, QSlider#immersiveVolumeSlider::groove:horizontal {{ height: 4px; background: {t['slider_groove']}; border-radius: 2px; }}"
             f"QSlider#immersiveProgressSlider::sub-page:horizontal, QSlider#immersiveVolumeSlider::sub-page:horizontal {{ background: {t['accent']}; border-radius: 2px; }}"
-            f"QSlider#immersiveProgressSlider::handle:horizontal, QSlider#immersiveVolumeSlider::handle:horizontal {{ width: 14px; height: 14px; margin: -5px 0; background: {t['text']}; border: 1px solid rgba(15,17,23,0.42); border-radius: 7px; }}"
+            f"QSlider#immersiveProgressSlider::handle:horizontal, QSlider#immersiveVolumeSlider::handle:horizontal {{ width: 14px; height: 14px; margin: -5px 0; background: {t['slider_handle']}; border: 1px solid {t['border_strong']}; border-radius: 7px; }}"
             f"QLabel#immersiveTimeLabel {{ color: {t['text_muted']}; font-size: 12px; font-variant-numeric: tabular-nums; }}"
             "QScrollArea#immersiveLyricsView, QScrollArea#lyricsView { background: transparent; border: none; }"
             "QWidget#lyricsContent { background: transparent; }"
-            f"QLabel#lyricPlaceholderTitle {{ color: {t['text']}; font-size: {placeholder_title_font:.2f}pt; font-weight: 850; }}"
+            f"QLabel#lyricPlaceholderTitle {{ color: {lyric_text}; font-size: {placeholder_title_font:.2f}pt; font-weight: 850; }}"
             f"QLabel#lyricPlaceholderSubtitle {{ color: {t['text_muted']}; font-size: {placeholder_subtitle_font:.2f}pt; }}"
-            f"QLabel#lyricLine {{ color: rgba(215,222,235,74); font-size: {normal_font:.2f}pt; font-weight: 550; padding: {normal_padding}px 12px; }}"
-            f"QLabel#lyricLine[lyricState='context'] {{ color: rgba(222,228,239,112); font-size: {context_font:.2f}pt; font-weight: 600; padding: {context_padding}px 12px; }}"
-            f"QLabel#lyricLine[lyricState='near'] {{ color: rgba(236,240,248,170); font-size: {near_font:.2f}pt; font-weight: 700; padding: {near_padding}px 12px; }}"
-            f"QLabel#lyricLine[lyricState='current'] {{ color: {t['text']}; font-size: {current_font:.2f}pt; font-weight: 850; padding: {current_padding}px 12px; }}"
+            f"QLabel#lyricLine {{ color: {translucent_token('on_accent' if cover_background else 'text_primary', 74)}; font-size: {normal_font:.2f}pt; font-weight: 550; padding: {normal_padding}px 12px; }}"
+            f"QLabel#lyricLine[lyricState='context'] {{ color: {translucent_token('on_accent' if cover_background else 'text_primary', 112)}; font-size: {context_font:.2f}pt; font-weight: 600; padding: {context_padding}px 12px; }}"
+            f"QLabel#lyricLine[lyricState='near'] {{ color: {translucent_token('on_accent' if cover_background else 'text_primary', 170)}; font-size: {near_font:.2f}pt; font-weight: 700; padding: {near_padding}px 12px; }}"
+            f"QLabel#lyricLine[lyricState='current'] {{ color: {lyric_text}; font-size: {current_font:.2f}pt; font-weight: 850; padding: {current_padding}px 12px; }}"
         )
 
     @staticmethod
@@ -5189,8 +5089,10 @@ class MainWindow(QMainWindow):
 
         background = QPainterPath()
         background.addRoundedRect(QRectF(6, 6, 52, 52), 14, 14)
-        painter.fillPath(background, QColor("#151922"))
-        painter.setPen(QPen(QColor(255, 255, 255, 32), 1))
+        painter.fillPath(background, QColor(ACTIVE_THEME_TOKENS["surface"]))
+        border = QColor(ACTIVE_THEME_TOKENS["border"])
+        border.setAlpha(120)
+        painter.setPen(QPen(border, 1))
         painter.drawPath(background)
 
         font = painter.font()
@@ -5198,7 +5100,7 @@ class MainWindow(QMainWindow):
         font.setPointSize(31)
         font.setBold(True)
         painter.setFont(font)
-        painter.setPen(QColor("#f3f4f6"))
+        painter.setPen(QColor(ACTIVE_THEME_TOKENS["text_primary"]))
         painter.drawText(pixmap.rect(), Qt.AlignmentFlag.AlignCenter, "H")
         painter.end()
 
@@ -5501,6 +5403,11 @@ class MainWindow(QMainWindow):
         self.settings_save_timer.setSingleShot(True)
         self.settings_save_timer.setInterval(350)
         self.settings_save_timer.timeout.connect(self.flush_settings)
+        self.theme_manager = get_application_theme_manager(QApplication.instance())
+        self.theme_manager.set_appearance_mode(
+            normalize_appearance_mode(settings.get("appearance_mode", "dark"))
+        )
+        self.theme_manager.themeChanged.connect(self._on_application_theme_changed)
         self.update_service = self.measure_startup_step(
             "应用更新服务对象（无网络请求）",
             lambda: AppUpdateService(self),
@@ -5787,6 +5694,7 @@ class MainWindow(QMainWindow):
             self._style_sheet()
             + self.build_visual_polish_qss()
             + self.build_player_product_qss()
+            + self.build_theme_overrides_qss()
         )
         print(f"[perf] 样式初始化：{(time.perf_counter() - style_started_at) * 1000:.1f} ms")
         library_started_at = time.perf_counter()
@@ -5865,7 +5773,11 @@ class MainWindow(QMainWindow):
             if not hwnd:
                 return
 
-            value = ctypes.c_int(1 if enabled else 0)
+            resolved_mode = getattr(
+                getattr(self, "theme_manager", None), "resolved_mode", "dark"
+            )
+            use_dark_title_bar = bool(enabled) and resolved_mode != "light"
+            value = ctypes.c_int(1 if use_dark_title_bar else 0)
 
             for attribute in (20, 19):
                 result = ctypes.windll.dwmapi.DwmSetWindowAttribute(
@@ -5878,16 +5790,18 @@ class MainWindow(QMainWindow):
                 if result == 0:
                     break
 
-            if not enabled:
-                return
-
             def colorref(red: int, green: int, blue: int):
                 return ctypes.c_uint((blue << 16) | (green << 8) | red)
 
+            t = ACTIVE_THEME_TOKENS
+            def rgb_from_token(name: str):
+                color = QColor(t[name])
+                return colorref(color.red(), color.green(), color.blue())
+
             color_attributes = {
-                35: colorref(0x10, 0x13, 0x1A),
-                34: colorref(0x20, 0x26, 0x36),
-                36: colorref(0xF3, 0xF4, 0xF6),
+                35: rgb_from_token("surface"),
+                34: rgb_from_token("border_strong"),
+                36: rgb_from_token("text_primary"),
             }
 
             for attribute, color_value in color_attributes.items():
@@ -12984,6 +12898,86 @@ class MainWindow(QMainWindow):
             return default
         return deepcopy(settings.get(key, default))
 
+    def appearance_mode(self) -> str:
+        return normalize_appearance_mode(
+            self.get_user_setting("appearance_mode", "dark")
+        )
+
+    def set_appearance_mode(self, mode, *, persist: bool = True) -> bool:
+        """Apply a requested appearance without touching playback or list data."""
+        normalized = normalize_appearance_mode(mode)
+        if persist:
+            self.save_hush_settings({"appearance_mode": normalized})
+        return self.theme_manager.set_appearance_mode(normalized)
+
+    def _on_application_theme_changed(self, _resolved_mode: str) -> None:
+        """Refresh only visual resources for already-open HushPlayer windows."""
+        if not hasattr(self, "root_layout"):
+            return
+        self.setUpdatesEnabled(False)
+        try:
+            self.setStyleSheet(
+                self._style_sheet()
+                + self.build_visual_polish_qss()
+                + self.build_player_product_qss()
+                + self.build_theme_overrides_qss()
+            )
+            for page_name in (
+                "library_page",
+                "search_page",
+                "custom_source_manager_page",
+                "unified_search_panel",
+            ):
+                page = getattr(self, page_name, None)
+                apply_theme = getattr(page, "apply_theme", None)
+                if callable(apply_theme):
+                    apply_theme()
+                elif page is not None:
+                    page.update()
+            for widget in self.findChildren(QWidget):
+                apply_theme = getattr(widget, "apply_theme", None)
+                if callable(apply_theme):
+                    apply_theme()
+            queue_page = getattr(self, "play_queue_page", None)
+            if queue_page is not None:
+                queue_page.setStyleSheet(self.build_play_queue_page_qss())
+            _NAVIGATION_ICON_CACHE.clear()
+            _FAVORITE_ICON_CACHE.clear()
+            _PLAYER_ACTION_ICON_CACHE.clear()
+            for button in self.findChildren(NavButton):
+                button._refresh_navigation_icon()
+            for button in self.findChildren(PlayerIconButton):
+                button._apply_visual(button.toolTip())
+            for icon in self.findChildren(VolumeStatusIcon):
+                icon._refresh_icon()
+            self.update_like_button()
+            self.update_floating_lyrics_button_state()
+            for name, role in (
+                ("immersive_lyrics_button", "immersive_lyrics"),
+                ("desktop_lyrics_button", "desktop_lyrics"),
+            ):
+                button = getattr(self, name, None)
+                if button is not None:
+                    button.setIcon(create_player_action_icon(role))
+            for widget in self.findChildren(QWidget):
+                if widget.objectName() in {"songList", "onlineSearchResults", "playQueuePageList"}:
+                    widget.viewport().update() if hasattr(widget, "viewport") else widget.update()
+            self.apply_windows_dark_title_bar()
+            update_dialog = getattr(self, "update_dialog", None)
+            if update_dialog is not None:
+                self.apply_windows_dark_title_bar(update_dialog)
+            for window in (
+                getattr(self, "floating_lyrics_window", None),
+                getattr(self, "immersive_lyrics_window", None),
+            ):
+                if window is not None:
+                    apply_style = getattr(window, "apply_immersive_style", None) or getattr(window, "apply_style", None)
+                    if callable(apply_style):
+                        apply_style()
+        finally:
+            self.setUpdatesEnabled(True)
+            self.update()
+
     def _write_settings_file(self, settings: dict) -> None:
         self.settings_file.parent.mkdir(parents=True, exist_ok=True)
         temporary_path = self.settings_file.with_suffix(
@@ -13687,12 +13681,12 @@ class MainWindow(QMainWindow):
             f"QListWidget#playQueuePageList::item {{ padding: 12px; border-radius: {UI_RADII['button']}px; margin: 2px; border: 1px solid transparent; }}"
             f"QListWidget#playQueuePageList::item:hover {{ background: {t['hover']}; }}"
             f"QListWidget#playQueuePageList::item:selected {{ background: {t['selected_bg']}; border: 1px solid {t['selected_border']}; color: {t['text']}; }}"
-            f"QPushButton#playQueuePagePrimaryButton {{ background: {t['accent']}; color: #ffffff; border: 1px solid transparent; border-radius: {UI_RADII['button']}px; padding: 10px 16px; font-size: 13px; font-weight: 700; }}"
+            f"QPushButton#playQueuePagePrimaryButton {{ background: {t['accent']}; color: {t['on_accent']}; border: 1px solid transparent; border-radius: {UI_RADII['button']}px; padding: 10px 16px; font-size: 13px; font-weight: 700; }}"
             f"QPushButton#playQueuePagePrimaryButton:hover {{ background: {t['accent_hover']}; }}"
             f"QPushButton#playQueuePageSecondaryButton {{ background: {t['card_bg_alt']}; color: {t['text_secondary']}; border: 1px solid {t['border']}; border-radius: {UI_RADII['button']}px; padding: 10px 16px; font-size: 13px; }}"
             f"QPushButton#playQueuePageSecondaryButton:hover {{ background: {t['hover']}; color: {t['text']}; border-color: {t['border_strong']}; }}"
-            f"QPushButton#playQueuePageDangerButton {{ background: {t['favorite_soft']}; color: #ffd7dd; border: 1px solid rgba(225,91,100,0.28); border-radius: {UI_RADII['button']}px; padding: 10px 16px; font-size: 13px; }}"
-            f"QPushButton#playQueuePageDangerButton:hover {{ background: rgba(225,91,100,0.26); color: #ffffff; border-color: {t['favorite']}; }}"
+            f"QPushButton#playQueuePageDangerButton {{ background: {t['favorite_soft']}; color: {t['danger']}; border: 1px solid {t['danger']}; border-radius: {UI_RADII['button']}px; padding: 10px 16px; font-size: 13px; }}"
+            f"QPushButton#playQueuePageDangerButton:hover {{ background: {t['danger']}; color: {t['on_accent']}; border-color: {t['favorite']}; }}"
         )
 
         stack.addWidget(self.play_queue_page)
@@ -14322,6 +14316,12 @@ class MainWindow(QMainWindow):
             print("设置项 play_mode 无效，使用默认值 list_loop。")
             play_mode = default_settings["play_mode"]
         settings["play_mode"] = play_mode
+
+        if "appearance_mode" in settings:
+            appearance_mode = normalize_appearance_mode(settings["appearance_mode"])
+            if appearance_mode != settings["appearance_mode"]:
+                print("设置项 appearance_mode 无效，使用默认值 dark。")
+            settings["appearance_mode"] = appearance_mode
 
         integer_defaults = {
             "floating_lyrics_opacity": 100,
@@ -18243,7 +18243,50 @@ class MainWindow(QMainWindow):
         super().closeEvent(event)
 
     def get_dark_theme_tokens(self) -> dict:
-        return dict(DARK_THEME_TOKENS)
+        return dict(ACTIVE_THEME_TOKENS)
+
+    def build_theme_overrides_qss(self) -> str:
+        """Late semantic overrides for established main-window object names."""
+        t = self.get_dark_theme_tokens()
+        return f"""
+        QWidget#root {{ background: {t['window_background']}; color: {t['text_primary']}; }}
+        QWidget#root QLabel {{ color: {t['text_primary']}; }}
+        QFrame#shell {{ background: {t['surface_secondary']}; border-color: {t['border']}; }}
+        QFrame#sidebar, QFrame#playerBar, QFrame#nowPlayingPanel {{ background: {t['surface']}; border-color: {t['border']}; }}
+        QLineEdit, QTextEdit, QPlainTextEdit {{ background: {t['input_background']}; color: {t['text_primary']}; border-color: {t['border']}; selection-background-color: {t['accent']}; selection-color: {t['on_accent']}; }}
+        QLineEdit:focus, QTextEdit:focus, QPlainTextEdit:focus {{ border-color: {t['accent']}; }}
+        QComboBox {{ background: {t['input_background']}; color: {t['text_primary']}; border-color: {t['border']}; }}
+        QComboBox QAbstractItemView {{ background: {t['surface_secondary']}; color: {t['text_primary']}; selection-background-color: {t['selection_background']}; selection-color: {t['selection_text']}; }}
+        QListWidget#songList, QListWidget#playQueuePageList {{ background: {t['surface']}; color: {t['text_primary']}; border-color: {t['border']}; }}
+        QListWidget#songList::item:hover, QListWidget#playQueuePageList::item:hover {{ background: {t['surface_hover']}; }}
+        QListWidget#songList::item:selected, QListWidget#playQueuePageList::item:selected {{ background: {t['selection_background']}; color: {t['selection_text']}; }}
+        QSlider#progressSlider::groove:horizontal, QSlider#volumeSlider::groove:horizontal {{ background: {t['slider_groove']}; }}
+        QSlider#progressSlider::handle:horizontal, QSlider#volumeSlider::handle:horizontal {{ background: {t['slider_handle']}; border-color: {t['border_strong']}; }}
+        QPushButton#transportButton, QPushButton#playerLyricsButton, QPushButton#libraryMoreButton {{ background: {t['control_overlay']}; color: {t['text_secondary']}; border-color: {t['border']}; }}
+        QPushButton#transportButton:hover, QPushButton#playerLyricsButton:hover, QPushButton#libraryMoreButton:hover {{ background: {t['control_overlay_hover']}; color: {t['text_primary']}; border-color: {t['border_strong']}; }}
+        QPushButton#transportButton:pressed {{ background: {t['control_overlay_pressed']}; }}
+        QPushButton#transportPlayButton {{ background: {t['accent']}; border-color: {t['border_strong']}; }}
+        QPushButton#transportPlayButton:hover {{ background: {t['accent_hover']}; }}
+        QLabel#listEmptyHint {{ background: {t['surface_secondary']}; color: {t['text_muted']}; border-color: {t['border_strong']}; }}
+        """
+
+    def build_play_queue_page_qss(self) -> str:
+        t = self.get_dark_theme_tokens()
+        return f"""
+        QFrame#playQueuePage {{ background: transparent; color: {t['text_primary']}; }}
+        QLabel#playQueuePageTitle {{ color: {t['text_primary']}; font-size: {UI_TYPOGRAPHY['page_title']}px; font-weight: 900; }}
+        QLabel#playQueuePageSubtitle, QLabel#playQueuePageHint {{ color: {t['text_muted']}; }}
+        QListWidget#playQueuePageList {{ background: {t['surface']}; color: {t['text_primary']}; border: 1px solid {t['border']}; border-radius: {UI_RADII['panel']}px; padding: 8px; outline: none; }}
+        QListWidget#playQueuePageList::item {{ padding: 12px; border-radius: {UI_RADII['button']}px; margin: 2px; border: 1px solid transparent; }}
+        QListWidget#playQueuePageList::item:hover {{ background: {t['surface_hover']}; }}
+        QListWidget#playQueuePageList::item:selected {{ background: {t['selection_background']}; border: 1px solid {t['selection_border']}; color: {t['selection_text']}; }}
+        QPushButton#playQueuePagePrimaryButton {{ background: {t['accent']}; color: {t['on_accent']}; border: 1px solid transparent; border-radius: {UI_RADII['button']}px; padding: 10px 16px; font-size: 13px; font-weight: 700; }}
+        QPushButton#playQueuePagePrimaryButton:hover {{ background: {t['accent_hover']}; }}
+        QPushButton#playQueuePageSecondaryButton {{ background: {t['surface_secondary']}; color: {t['text_secondary']}; border: 1px solid {t['border']}; border-radius: {UI_RADII['button']}px; padding: 10px 16px; font-size: 13px; }}
+        QPushButton#playQueuePageSecondaryButton:hover {{ background: {t['surface_hover']}; color: {t['text_primary']}; border-color: {t['border_strong']}; }}
+        QPushButton#playQueuePageDangerButton {{ background: {t['danger_soft']}; color: {t['danger']}; border: 1px solid {t['danger']}; border-radius: {UI_RADII['button']}px; padding: 10px 16px; font-size: 13px; }}
+        QPushButton#playQueuePageDangerButton:hover {{ background: {t['danger']}; color: {t['on_accent']}; }}
+        """
 
     def build_player_product_qss(self) -> str:
         t = self.get_dark_theme_tokens()
@@ -19179,8 +19222,98 @@ class MainWindow(QMainWindow):
             selection-color: #ffffff;
         }}
         """
+    def _resolve_legacy_style_colors(self, qss: str) -> str:
+        """Translate remaining established QSS literals through semantic tokens.
+
+        This keeps the large, stable layout stylesheet intact while its colour
+        values follow the active appearance mode.
+        """
+        t = self.get_dark_theme_tokens()
+        qss = re.sub(
+            r"rgba\(255\s*,\s*255\s*,\s*255\s*,\s*0?\.\d+\)",
+            t["control_overlay"],
+            qss,
+        )
+        qss = re.sub(
+            r"rgba\(59\s*,\s*130\s*,\s*246\s*,\s*0?\.\d+\)",
+            t["selection_background"],
+            qss,
+        )
+        qss = re.sub(
+            r"rgba\(239\s*,\s*68\s*,\s*68\s*,\s*0?\.\d+\)",
+            t["danger_soft"],
+            qss,
+        )
+        replacements = {
+            "#0f1117": t["window_background"],
+            "#0d0f14": t["window_background"],
+            "#10131a": t["surface_secondary"],
+            "#11131a": t["input_background"],
+            "#12151d": t["window_background"],
+            "#141823": t["surface_secondary"],
+            "#151821": t["surface"],
+            "#151922": t["surface"],
+            "#1a1e28": t["surface_tertiary"],
+            "#1b1f2a": t["surface_tertiary"],
+            "#1a1f2b": t["surface_tertiary"],
+            "#2a3244": t["surface_hover"],
+            "#3b82f6": t["accent"],
+            "#4c8dff": t["accent"],
+            "#5594ff": t["accent_hover"],
+            "#8fb8ff": t["current_track_text"],
+            "#f8fbff": t["text_primary"],
+            "#f5f7fb": t["text_primary"],
+            "#f3f4f6": t["text_primary"],
+            "#e5e9f2": t["text_primary"],
+            "#dfe6f2": t["text_secondary"],
+            "#dfe5ef": t["text_secondary"],
+            "#dfe4ee": t["text_secondary"],
+            "#dce3ee": t["text_secondary"],
+            "#d9deea": t["text_secondary"],
+            "#d7ddea": t["text_secondary"],
+            "#cfd6e3": t["text_secondary"],
+            "#b8bfcc": t["text_secondary"],
+            "#b4bdce": t["text_secondary"],
+            "#a5adbd": t["text_muted"],
+            "#9aa3b5": t["text_muted"],
+            "#8f98aa": t["text_muted"],
+            "#818b9d": t["text_muted"],
+            "#7f8898": t["text_muted"],
+            "#7b8494": t["text_disabled"],
+            "#737d90": t["text_disabled"],
+            "#687386": t["text_disabled"],
+            "#fecdd3": t["danger"],
+            "#ffd7dc": t["danger"],
+            "#ffd7dd": t["danger"],
+            "#ff8fb3": t["danger"],
+            "rgba(255, 255, 255, 0.055)": t["control_overlay"],
+            "rgba(255, 255, 255, 0.045)": t["control_overlay"],
+            "rgba(255, 255, 255, 0.040)": t["control_overlay"],
+            "rgba(255, 255, 255, 0.035)": t["control_overlay"],
+            "rgba(255, 255, 255, 0.06)": t["control_overlay"],
+            "rgba(255, 255, 255, 0.065)": t["control_overlay"],
+            "rgba(255, 255, 255, 0.07)": t["control_overlay"],
+            "rgba(255, 255, 255, 0.075)": t["control_overlay"],
+            "rgba(255, 255, 255, 0.08)": t["control_overlay"],
+            "rgba(255, 255, 255, 0.10)": t["control_overlay_hover"],
+            "rgba(255, 255, 255, 0.11)": t["control_overlay_hover"],
+            "rgba(255, 255, 255, 0.12)": t["control_overlay_hover"],
+            "rgba(255, 255, 255, 0.13)": t["control_overlay_hover"],
+            "rgba(255, 255, 255, 0.14)": t["slider_groove"],
+            "rgba(255, 255, 255, 0.16)": t["control_overlay_hover"],
+            "rgba(255, 255, 255, 0.24)": t["control_overlay_pressed"],
+            "rgba(255, 255, 255, 0.25)": t["control_overlay_pressed"],
+            "rgba(59, 130, 246, 0.18)": t["selection_background"],
+            "rgba(59, 130, 246, 0.20)": t["selection_background"],
+            "rgba(59, 130, 246, 0.22)": t["selection_background"],
+            "rgba(59, 130, 246, 0.42)": t["selection_border"],
+        }
+        for source, target in replacements.items():
+            qss = qss.replace(source, target)
+        return qss
+
     def _style_sheet(self) -> str:
-        return """
+        return self._resolve_legacy_style_colors("""
         QWidget#root {
             background: #0f1117;
             color: #f5f7fb;
@@ -19995,4 +20128,4 @@ class MainWindow(QMainWindow):
             background: #f8fbff;
             border: 1px solid rgba(15, 17, 23, 0.32);
             border-radius: 9px;
-        }        """
+        }        """)

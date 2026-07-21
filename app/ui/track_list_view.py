@@ -22,7 +22,7 @@ from PySide6.QtWidgets import (
 
 from app.models.media_item import MediaItem
 from app.ui.design_system import (
-    DARK_THEME_TOKENS,
+    ACTIVE_THEME_TOKENS,
     UI_CONTROL_SIZES,
     UI_RADII,
     UI_SPACING,
@@ -33,6 +33,13 @@ TRACK_LIKE_WIDTH = UI_CONTROL_SIZES["track_like_width"]
 TRACK_MARKER_WIDTH = 18
 TRACK_DURATION_WIDTH = 62
 TRACK_COLUMN_GAP = UI_SPACING["sm"]
+
+
+def _token_color(name: str, alpha: int | None = None) -> QColor:
+    color = QColor(ACTIVE_THEME_TOKENS[name])
+    if alpha is not None:
+        color.setAlpha(max(0, min(255, int(alpha))))
+    return color
 
 
 def configure_track_columns(layout: QGridLayout) -> None:
@@ -64,7 +71,7 @@ def draw_track_like_icon(
     icon_rect = QRectF(0, 0, icon_size, icon_size)
     icon_rect.moveCenter(rect.center())
     if hovered:
-        hover_color = QColor(225, 91, 100, 38) if liked else QColor(255, 255, 255, 24)
+        hover_color = _token_color("danger" if liked else "surface_hover", 38 if liked else 70)
         painter.setPen(Qt.PenStyle.NoPen)
         painter.setBrush(hover_color)
         painter.drawEllipse(icon_rect.adjusted(-4, -4, 4, 4))
@@ -125,12 +132,12 @@ def draw_track_like_icon(
     )
     path.closeSubpath()
     color = QColor(
-        DARK_THEME_TOKENS["favorite"]
+        ACTIVE_THEME_TOKENS["favorite"]
         if liked
         else (
-            DARK_THEME_TOKENS["text"]
+            ACTIVE_THEME_TOKENS["text"]
             if hovered
-            else DARK_THEME_TOKENS["text_muted"]
+            else ACTIVE_THEME_TOKENS["text_muted"]
         )
     )
     if not liked and not hovered:
@@ -476,13 +483,13 @@ class CanonicalTrackDelegate(QStyledItemDelegate):
             and item.stable_identity == str(self.playing_key_provider() or "")
         )
         if selected and is_playing:
-            background = QColor(76, 141, 255, 48)
+            background = _token_color("accent", 48)
         elif selected:
-            background = QColor(76, 141, 255, 38)
+            background = _token_color("accent", 38)
         elif is_playing:
-            background = QColor(76, 141, 255, 20)
+            background = _token_color("accent", 20)
         elif hovered:
-            background = QColor(255, 255, 255, 13)
+            background = _token_color("surface_hover", 80)
         else:
             background = QColor(0, 0, 0, 0)
         painter.setPen(Qt.PenStyle.NoPen)
@@ -495,7 +502,7 @@ class CanonicalTrackDelegate(QStyledItemDelegate):
         if is_playing:
             painter.fillRect(
                 QRectF(row_rect.left(), row_rect.top() + 8, 3, row_rect.height() - 16),
-                QColor("#4c8dff"),
+                _token_color("accent"),
             )
         rects = self.column_rects(option.rect)
         duration = f"{item.duration // 60}:{item.duration % 60:02d}" if item.duration else "—"
@@ -518,16 +525,16 @@ class CanonicalTrackDelegate(QStyledItemDelegate):
             hovered=like_hovered,
             pressed=like_pressed,
         )
-        self._draw(painter, option, rects["marker"], "▶" if is_playing else "", DARK_THEME_TOKENS["accent"], True)
+        self._draw(painter, option, rects["marker"], "▶" if is_playing else "", ACTIVE_THEME_TOKENS["accent"], True)
         title_color = (
-            DARK_THEME_TOKENS["accent_hover"]
+            ACTIVE_THEME_TOKENS["accent_hover"]
             if is_playing
-            else DARK_THEME_TOKENS["text"]
+            else ACTIVE_THEME_TOKENS["text"]
         )
         self._draw(painter, option, rects["title"], item.title, title_color, is_playing)
-        self._draw(painter, option, rects["artist"], item.artist, DARK_THEME_TOKENS["text_secondary"])
-        self._draw(painter, option, rects["album"], item.album, DARK_THEME_TOKENS["text_secondary"])
-        self._draw(painter, option, rects["duration"], duration, DARK_THEME_TOKENS["text_muted"], align_right=True)
+        self._draw(painter, option, rects["artist"], item.artist, ACTIVE_THEME_TOKENS["text_secondary"])
+        self._draw(painter, option, rects["album"], item.album, ACTIVE_THEME_TOKENS["text_secondary"])
+        self._draw(painter, option, rects["duration"], duration, ACTIVE_THEME_TOKENS["text_muted"], align_right=True)
         painter.restore()
 
     def helpEvent(self, event, view, option, index) -> bool:
@@ -642,13 +649,13 @@ class OnlineTrackDelegate(QStyledItemDelegate):
             and item.stable_identity == str(self.playing_key_provider() or "")
         )
         if selected and is_playing:
-            background = QColor(76, 141, 255, 48)
+            background = _token_color("accent", 48)
         elif selected:
-            background = QColor(76, 141, 255, 38)
+            background = _token_color("accent", 38)
         elif is_playing:
-            background = QColor(76, 141, 255, 20)
+            background = _token_color("accent", 20)
         elif hovered:
-            background = QColor(255, 255, 255, 13)
+            background = _token_color("surface_hover", 80)
         else:
             background = QColor(0, 0, 0, 0)
         painter.setPen(Qt.PenStyle.NoPen)
@@ -657,7 +664,7 @@ class OnlineTrackDelegate(QStyledItemDelegate):
         if is_playing:
             painter.fillRect(
                 QRectF(row_rect.left(), row_rect.top() + 8, 3, row_rect.height() - 16),
-                QColor(DARK_THEME_TOKENS["accent"]),
+                QColor(ACTIVE_THEME_TOKENS["accent"]),
             )
         rects = self.column_rects(option.rect)
         view = self.parent()
@@ -679,22 +686,22 @@ class OnlineTrackDelegate(QStyledItemDelegate):
         )
         unavailable = item.availability != "available" or not item.can_play
         title_color = (
-            DARK_THEME_TOKENS["text_disabled"]
+            ACTIVE_THEME_TOKENS["text_disabled"]
             if unavailable
             else (
-                DARK_THEME_TOKENS["accent_hover"]
+                ACTIVE_THEME_TOKENS["accent_hover"]
                 if is_playing
-                else DARK_THEME_TOKENS["text"]
+                else ACTIVE_THEME_TOKENS["text"]
             )
         )
         secondary = (
-            DARK_THEME_TOKENS["text_disabled"]
+            ACTIVE_THEME_TOKENS["text_disabled"]
             if unavailable
-            else DARK_THEME_TOKENS["text_secondary"]
+            else ACTIVE_THEME_TOKENS["text_secondary"]
         )
         duration = f"{item.duration // 60}:{item.duration % 60:02d}" if item.duration else "—"
         CanonicalTrackDelegate._draw(
-            painter, option, rects["marker"], "▶" if is_playing else "", DARK_THEME_TOKENS["accent"], True
+            painter, option, rects["marker"], "▶" if is_playing else "", ACTIVE_THEME_TOKENS["accent"], True
         )
         CanonicalTrackDelegate._draw(painter, option, rects["title"], item.title, title_color, is_playing)
         CanonicalTrackDelegate._draw(painter, option, rects["artist"], item.artist, secondary)
@@ -702,10 +709,10 @@ class OnlineTrackDelegate(QStyledItemDelegate):
             CanonicalTrackDelegate._draw(painter, option, rects["album"], item.album, secondary)
         if rects["source"].width() > 0:
             CanonicalTrackDelegate._draw(
-                painter, option, rects["source"], item.source_name, DARK_THEME_TOKENS["text_muted"]
+                painter, option, rects["source"], item.source_name, ACTIVE_THEME_TOKENS["text_muted"]
             )
         CanonicalTrackDelegate._draw(
-            painter, option, rects["duration"], duration, DARK_THEME_TOKENS["text_muted"], align_right=True
+            painter, option, rects["duration"], duration, ACTIVE_THEME_TOKENS["text_muted"], align_right=True
         )
         more_hovered = bool(
             hasattr(view, "is_index_more_hovered")
@@ -717,14 +724,14 @@ class OnlineTrackDelegate(QStyledItemDelegate):
         )
         if more_hovered:
             painter.setPen(Qt.PenStyle.NoPen)
-            painter.setBrush(QColor(255, 255, 255, 26 if not more_pressed else 38))
+            painter.setBrush(_token_color("surface_hover", 95 if not more_pressed else 125))
             painter.drawEllipse(rects["more"].adjusted(3, 8, -3, -8))
         CanonicalTrackDelegate._draw(
             painter,
             option,
             rects["more"],
             "⋯",
-            DARK_THEME_TOKENS["text"] if more_hovered else DARK_THEME_TOKENS["text_muted"],
+            ACTIVE_THEME_TOKENS["text"] if more_hovered else ACTIVE_THEME_TOKENS["text_muted"],
             align_right=True,
         )
         painter.restore()
@@ -742,13 +749,13 @@ class OnlineTrackHeader(QFrame):
         super().paintEvent(event)
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
-        painter.setPen(QPen(QColor(DARK_THEME_TOKENS["border"]), 1))
+        painter.setPen(QPen(QColor(ACTIVE_THEME_TOKENS["border"]), 1))
         painter.drawLine(0, self.height() - 1, self.width(), self.height() - 1)
         font = QFont(self.font())
         font.setPointSizeF(max(8.0, font.pointSizeF() - 1.0))
         font.setBold(True)
         painter.setFont(font)
-        painter.setPen(QColor(DARK_THEME_TOKENS["text_muted"]))
+        painter.setPen(QColor(ACTIVE_THEME_TOKENS["text_muted"]))
         rects = OnlineTrackDelegate.column_rects(self.rect())
         for name, text in (
             ("title", "歌曲标题"),
