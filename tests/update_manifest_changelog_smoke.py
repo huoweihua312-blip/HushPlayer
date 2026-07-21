@@ -147,23 +147,35 @@ def main() -> None:
     current_releases = helper.parse_changelog_releases(current_changelog)
     current_document = json.loads(current_manifest.read_text(encoding="utf-8"))
     helper.validate_prebuild_manifest(current_document, current_releases)
+
+    _, _, _, current_sequence = APP_NUMERIC_VERSION
+    current_version, current_numeric_version = manifest_version(current_sequence)
+    current_release_document = dict(current_document)
+    current_release_document["version"] = current_version
+    current_release_document["numeric_version"] = current_numeric_version
+    current_release_document = helper.synchronize_manifest_document(
+        current_release_document,
+        current_releases,
+    )
+    helper.validate_prebuild_manifest(current_release_document, current_releases)
+    helper.validate_manifest_matches_application(current_release_document)
+
+    previous_version, previous_numeric_version = manifest_version(
+        current_sequence - 1
+    )
+    previous_document = dict(current_document)
+    previous_document["version"] = previous_version
+    previous_document["numeric_version"] = previous_numeric_version
+    previous_document = helper.synchronize_manifest_document(
+        previous_document,
+        current_releases,
+    )
+    helper.validate_prebuild_manifest(previous_document, current_releases)
     assert_validation_rejected(
-        lambda: helper.validate_manifest_matches_application(current_document),
+        lambda: helper.validate_manifest_matches_application(previous_document),
         "version 与 app/core/version.py 不一致",
     )
 
-    strict_document = dict(current_document)
-    strict_document["version"] = APP_VERSION
-    strict_document["numeric_version"] = APP_NUMERIC_VERSION_TEXT
-    strict_document = helper.synchronize_manifest_document(
-        strict_document,
-        current_releases,
-    )
-    helper.validate_manifest_document(strict_document, current_releases)
-    helper.validate_manifest_matches_application(strict_document)
-    helper.validate_prebuild_manifest(strict_document, current_releases)
-
-    _, _, _, current_sequence = APP_NUMERIC_VERSION
     stale_version, stale_numeric_version = manifest_version(current_sequence - 2)
     stale_document = dict(current_document)
     stale_document["version"] = stale_version
@@ -287,7 +299,7 @@ def main() -> None:
         )
         assert_validation_rejected(
             lambda: helper.validate_final_manifest(
-                current_document,
+                previous_document,
                 current_releases,
                 installer,
             ),
