@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import re
 import sys
@@ -8,6 +9,7 @@ from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -45,6 +47,11 @@ _UNRELEASED_HEADING_PATTERN = re.compile(r"^## 未发布\s*$", re.MULTILINE)
 
 MAX_NOTES_PER_RELEASE = 50
 MAX_NOTE_LENGTH = 1000
+MANIFEST_SCHEMA_VERSION = 1
+RELEASE_DOWNLOAD_BASE_URL = (
+    "https://gitcode.com/gcw_iPVB8B5g/HushPlayer-updates/releases/download"
+)
+_SHA256_PATTERN = re.compile(r"^[0-9a-fA-F]{64}$")
 
 
 class ChangelogValidationError(ValueError):
@@ -242,6 +249,45 @@ def validate_manifest_document(
         )
 
 
+def expected_installer_filename() -> str:
+    return f"HushPlayer-{APP_VERSION}-{UPDATE_ARCHITECTURE}-setup.exe"
+
+
+def default_staged_setup_url() -> str:
+    return (
+        f"{RELEASE_DOWNLOAD_BASE_URL}/v{APP_VERSION}/"
+        f"{expected_installer_filename()}"
+    )
+
+
+def _validate_https_url(setup_url: object) -> str:
+    if not isinstance(setup_url, str):
+        raise ChangelogValidationError("更新清单 setup_url 必须是 HTTPS URL。")
+    normalized = setup_url.strip()
+    parsed = urlparse(normalized)
+    if parsed.scheme != "https" or not parsed.netloc:
+        raise ChangelogValidationError("更新清单 setup_url 必须是 HTTPS URL。")
+    return normalized
+
+
+def _validate_manifest_transport_fields(document: dict[str, Any]) -> None:
+    if document.get("schema_version") != MANIFEST_SCHEMA_VERSION:
+        raise ChangelogValidationError("更新清单 schema_version 不受支持。")
+    if not isinstance(document.get("mandatory"), bool):
+        raise ChangelogValidationError("更新清单 mandatory 必须是布尔值。")
+    _validate_https_url(document.get("setup_url"))
+    setup_size = document.get("setup_size")
+    if (
+        not isinstance(setup_size, int)
+        or isinstance(setup_size, bool)
+        or setup_size <= 0
+    ):
+        raise ChangelogValidationError("更新清单 setup_size 必须是正整数。")
+    sha256 = document.get("sha256")
+    if not isinstance(sha256, str) or _SHA256_PATTERN.fullmatch(sha256) is None:
+        raise ChangelogValidationError("更新清单 sha256 格式无效。")
+
+
 def _manifest_release_identity(
     document: dict[str, Any],
 ) -> tuple[tuple[int, int, int, int], str]:
@@ -266,6 +312,41 @@ def _manifest_release_identity(
             "更新清单 version 与 numeric_version 不一致。"
         )
     return numeric_version, match.group("channel")
+
+
+def validate_application_release_identity() -> None:
+    match = _MANIFEST_VERSION_PATTERN.fullmatch(APP_VERSION)
+    if match is None:
+        raise ChangelogValidationError("当前 APP_VERSION 格式无效。")
+    label_numeric_version = (
+        int(match.group("major")),
+        int(match.group("minor")),
+        int(match.group("patch")),
+        int(match.group("sequence")),
+    )
+    if label_numeric_version != APP_NUMERIC_VERSION:
+        raise ChangelogValidationError(
+            "APP_VERSION 与 APP_NUMERIC_VERSION 不一致。"
+        )
+    if match.group("channel") != UPDATE_CHANNEL:
+        raise ChangelogValidationError("APP_VERSION channel 与当前更新通道不一致。")
+
+
+def validate_current_application_changelog(
+    releases: tuple[ChangelogRelease, ...],
+) -> None:
+    validate_application_release_identity()
+    for release in releases:
+        if (
+            release.version == APP_VERSION
+            and release.numeric_version == APP_NUMERIC_VERSION
+            and release.channel == UPDATE_CHANNEL
+        ):
+            return
+    raise ChangelogValidationError(
+        "CHANGELOG 缺少当前应用版本的正式章节："
+        f"{APP_VERSION}。"
+    )
 
 
 def _validate_manifest_platform(
@@ -300,6 +381,18 @@ def validate_published_manifest_for_source(document: dict[str, Any]) -> None:
         )
 
 
+def validate_prebuild_manifest(
+    document: dict[str, Any],
+    releases: tuple[ChangelogRelease, ...],
+) -> None:
+    """Validate the published manifest without requiring the next installer."""
+
+    validate_current_application_changelog(releases)
+    validate_manifest_document(document, releases)
+    _validate_manifest_transport_fields(document)
+    validate_published_manifest_for_source(document)
+
+
 def validate_manifest_matches_application(document: dict[str, Any]) -> None:
     numeric_version, _ = _validate_manifest_platform(document)
     if document.get("version") != APP_VERSION:
@@ -312,6 +405,80 @@ def validate_manifest_matches_application(document: dict[str, Any]) -> None:
         raise ChangelogValidationError(
             "更新清单 numeric_version 与 app/core/version.py 不一致。"
         )
+
+
+def _file_sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as stream:
+        while chunk := stream.read(1024 * 1024):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def build_staged_manifest(
+    published_document: dict[str, Any],
+    releases: tuple[ChangelogRelease, ...],
+    installer_path: str | Path,
+    setup_url: str | None = None,
+) -> dict[str, Any]:
+    """Build an untracked final manifest from a verified installer artifact."""
+
+    validate_prebuild_manifest(published_document, releases)
+    installer = Path(installer_path)
+    if not installer.is_file():
+        raise ChangelogValidationError(f"安装包不存在：{installer}")
+    if installer.name != expected_installer_filename():
+        raise ChangelogValidationError(
+            "安装包文件名与当前版本或架构不一致。"
+        )
+
+    staged = dict(published_document)
+    staged.update(
+        {
+            "schema_version": MANIFEST_SCHEMA_VERSION,
+            "channel": UPDATE_CHANNEL,
+            "version": APP_VERSION,
+            "numeric_version": APP_NUMERIC_VERSION_TEXT,
+            "architecture": UPDATE_ARCHITECTURE,
+            "setup_url": _validate_https_url(
+                setup_url if setup_url is not None else default_staged_setup_url()
+            ),
+            "setup_size": installer.stat().st_size,
+            "sha256": _file_sha256(installer),
+        }
+    )
+    return synchronize_manifest_document(staged, releases)
+
+
+def validate_final_manifest(
+    document: dict[str, Any],
+    releases: tuple[ChangelogRelease, ...],
+    installer_path: str | Path,
+) -> None:
+    """Require a current manifest whose installer metadata matches the file."""
+
+    validate_current_application_changelog(releases)
+    validate_manifest_document(document, releases)
+    _validate_manifest_transport_fields(document)
+    validate_manifest_matches_application(document)
+
+    installer = Path(installer_path)
+    if not installer.is_file():
+        raise ChangelogValidationError(f"安装包不存在：{installer}")
+    expected_filename = expected_installer_filename()
+    if installer.name != expected_filename:
+        raise ChangelogValidationError(
+            "安装包文件名与当前版本或架构不一致。"
+        )
+    setup_url = _validate_https_url(document.get("setup_url"))
+    if Path(urlparse(setup_url).path).name != expected_filename:
+        raise ChangelogValidationError(
+            "更新清单 setup_url 文件名与当前版本或架构不一致。"
+        )
+    if document["setup_size"] != installer.stat().st_size:
+        raise ChangelogValidationError("更新清单 setup_size 与安装包实际大小不一致。")
+    if document["sha256"].lower() != _file_sha256(installer):
+        raise ChangelogValidationError("更新清单 sha256 与安装包实际文件不一致。")
 
 
 def _load_manifest(path: Path) -> dict[str, Any]:
@@ -339,10 +506,48 @@ def main() -> None:
         action="store_true",
         help="将目标版本摘要和有序 release_history 写入更新清单。",
     )
+    parser.add_argument(
+        "--prebuild",
+        action="store_true",
+        help="校验构建前允许落后一个 beta 的已发布清单。",
+    )
+    parser.add_argument(
+        "--stage-installer",
+        type=Path,
+        help="根据安装包生成并校验未发布的暂存清单。",
+    )
+    parser.add_argument(
+        "--setup-url",
+        help="暂存清单使用的 HTTPS 安装包下载地址。",
+    )
+    parser.add_argument(
+        "--output",
+        type=Path,
+        help="暂存清单的输出路径。",
+    )
+    parser.add_argument(
+        "--final-installer",
+        type=Path,
+        help="严格校验当前清单与指定安装包。",
+    )
     arguments = parser.parse_args()
 
     document = _load_manifest(arguments.manifest)
     releases = parse_changelog_releases(arguments.changelog)
+    selected_modes = sum(
+        bool(mode)
+        for mode in (
+            arguments.write,
+            arguments.prebuild,
+            arguments.stage_installer,
+            arguments.final_installer,
+        )
+    )
+    if selected_modes > 1:
+        parser.error(
+            "--write、--prebuild、--stage-installer 与 --final-installer "
+            "只能选择一种。"
+        )
     if arguments.write:
         document = synchronize_manifest_document(document, releases)
         arguments.manifest.write_text(
@@ -352,6 +557,40 @@ def main() -> None:
         print(
             "update manifest synchronized: "
             f"{arguments.manifest} ({len(document['release_history'])} releases)"
+        )
+        return
+    if arguments.prebuild:
+        validate_prebuild_manifest(document, releases)
+        print(
+            "prebuild update manifest validation: OK "
+            f"({arguments.manifest}, published={document['version']})"
+        )
+        return
+    if arguments.stage_installer:
+        if arguments.output is None:
+            parser.error("--stage-installer 需要 --output。")
+        staged = build_staged_manifest(
+            document,
+            releases,
+            arguments.stage_installer,
+            arguments.setup_url,
+        )
+        validate_final_manifest(staged, releases, arguments.stage_installer)
+        arguments.output.parent.mkdir(parents=True, exist_ok=True)
+        arguments.output.write_text(
+            json.dumps(staged, ensure_ascii=False, indent=4) + "\n",
+            encoding="utf-8",
+        )
+        print(
+            "staged release manifest: "
+            f"{arguments.output} ({staged['version']})"
+        )
+        return
+    if arguments.final_installer:
+        validate_final_manifest(document, releases, arguments.final_installer)
+        print(
+            "final update manifest validation: OK "
+            f"({arguments.manifest}, {document['version']})"
         )
         return
     validate_manifest_document(document, releases)

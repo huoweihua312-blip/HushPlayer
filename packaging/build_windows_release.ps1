@@ -62,7 +62,7 @@ if ($DiagnosticOnly) {
     Write-Host "DiagnosticOnly=OK"
     return
 }
-& $Python $UpdateManifestHelper --manifest $UpdateManifest
+& $Python $UpdateManifestHelper --manifest $UpdateManifest --prebuild
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 . $NodeRuntimeHelper
 $NodeRuntime = Prepare-HushPlayerNodeRuntime -ProjectRoot $ProjectRoot

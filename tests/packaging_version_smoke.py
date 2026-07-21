@@ -93,6 +93,20 @@ def check_sources() -> None:
         assert "HUSHPLAYER_VERSION_INFO" in source
         assert "3.12" not in source
 
+    release_source = (
+        PROJECT_ROOT / "packaging" / "build_windows_release.ps1"
+    ).read_text(encoding="utf-8")
+    installer_build_source = (
+        PROJECT_ROOT / "packaging" / "build_windows_installer.ps1"
+    ).read_text(encoding="utf-8")
+    assert "--manifest $UpdateManifest --prebuild" in release_source
+    assert "--manifest $UpdateManifest --prebuild" in installer_build_source
+    assert "--stage-installer $InstallerPath" in installer_build_source
+    assert "--final-installer $InstallerPath" in installer_build_source
+    assert "build\\release-manifest\\win-x64.json" in installer_build_source
+    assert "--write" not in release_source
+    assert "--write" not in installer_build_source
+
     installer_source = (
         PROJECT_ROOT / "packaging" / "installer" / "HushPlayer.iss"
     ).read_text(encoding="utf-8")

@@ -56,7 +56,7 @@ if ($DiagnosticOnly) {
     return
 }
 
-& $Python $UpdateManifestHelper --manifest $UpdateManifest
+& $Python $UpdateManifestHelper --manifest $UpdateManifest --prebuild
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
 $ReleaseExe = Join-Path $ProjectRoot "dist\HushPlayer\HushPlayer.exe"
@@ -85,9 +85,20 @@ if (-not (Test-Path -LiteralPath $InstallerPath -PathType Leaf)) {
 
 $InstallerItem = Get-Item -LiteralPath $InstallerPath
 $InstallerSha256 = (Get-FileHash -LiteralPath $InstallerPath -Algorithm SHA256).Hash.ToLowerInvariant()
+$ReleaseManifest = Join-Path $ProjectRoot "build\release-manifest\win-x64.json"
+& $Python $UpdateManifestHelper `
+    --manifest $UpdateManifest `
+    --stage-installer $InstallerPath `
+    --output $ReleaseManifest
+if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+& $Python $UpdateManifestHelper `
+    --manifest $ReleaseManifest `
+    --final-installer $InstallerPath
+if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 Write-Host "Installer build complete."
 Write-Host "AppVersion=$($VersionMetadata.app_version)"
 Write-Host "NumericVersion=$($VersionMetadata.numeric_version)"
 Write-Host "Installer=$InstallerPath"
 Write-Host "SetupSize=$($InstallerItem.Length)"
 Write-Host "SHA256=$InstallerSha256"
+Write-Host "StagedManifest=$ReleaseManifest"
