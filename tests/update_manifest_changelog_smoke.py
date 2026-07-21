@@ -11,6 +11,14 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
+from app.core.version import (
+    APP_NUMERIC_VERSION,
+    APP_NUMERIC_VERSION_TEXT,
+    APP_VERSION,
+    UPDATE_CHANNEL,
+    numeric_version_text,
+)
+
 
 def load_manifest_helper():
     helper_path = PROJECT_ROOT / "packaging" / "prepare_update_manifest.py"
@@ -67,6 +75,24 @@ def manifest_document() -> dict:
     }
 
 
+def manifest_version(sequence: int) -> tuple[str, str]:
+    major, minor, patch, _ = APP_NUMERIC_VERSION
+    numeric_version = (major, minor, patch, sequence)
+    return (
+        f"{major}.{minor}.{patch}-{UPDATE_CHANNEL}.{sequence}",
+        numeric_version_text(numeric_version),
+    )
+
+
+def assert_validation_rejected(callback, expected: str) -> None:
+    try:
+        callback()
+    except ValueError as error:
+        assert expected in str(error), (expected, str(error))
+    else:
+        raise AssertionError("invalid manifest unexpectedly validated")
+
+
 def main() -> None:
     helper = load_manifest_helper()
     with tempfile.TemporaryDirectory(prefix="hushplayer_manifest_changelog_") as temp_dir:
@@ -111,7 +137,70 @@ def main() -> None:
     current_releases = helper.parse_changelog_releases(current_changelog)
     current_document = json.loads(current_manifest.read_text(encoding="utf-8"))
     helper.validate_manifest_document(current_document, current_releases)
-    helper.validate_manifest_matches_application(current_document)
+    helper.validate_published_manifest_for_source(current_document)
+    assert_validation_rejected(
+        lambda: helper.validate_manifest_matches_application(current_document),
+        "version 与 app/core/version.py 不一致",
+    )
+
+    strict_document = dict(current_document)
+    strict_document["version"] = APP_VERSION
+    strict_document["numeric_version"] = APP_NUMERIC_VERSION_TEXT
+    strict_document = helper.synchronize_manifest_document(
+        strict_document,
+        current_releases,
+    )
+    helper.validate_manifest_document(strict_document, current_releases)
+    helper.validate_manifest_matches_application(strict_document)
+
+    _, _, _, current_sequence = APP_NUMERIC_VERSION
+    stale_version, stale_numeric_version = manifest_version(current_sequence - 2)
+    stale_document = dict(current_document)
+    stale_document["version"] = stale_version
+    stale_document["numeric_version"] = stale_numeric_version
+    assert_validation_rejected(
+        lambda: helper.validate_published_manifest_for_source(stale_document),
+        "最多只能落后",
+    )
+
+    future_version, future_numeric_version = manifest_version(current_sequence + 1)
+    future_document = dict(current_document)
+    future_document["version"] = future_version
+    future_document["numeric_version"] = future_numeric_version
+    assert_validation_rejected(
+        lambda: helper.validate_published_manifest_for_source(future_document),
+        "不得高于",
+    )
+
+    wrong_channel = dict(current_document)
+    wrong_channel["channel"] = "stable"
+    assert_validation_rejected(
+        lambda: helper.validate_published_manifest_for_source(wrong_channel),
+        "channel",
+    )
+
+    wrong_architecture = dict(current_document)
+    wrong_architecture["architecture"] = "win-arm64"
+    assert_validation_rejected(
+        lambda: helper.validate_published_manifest_for_source(wrong_architecture),
+        "architecture",
+    )
+
+    wrong_platform_version = dict(current_document)
+    wrong_platform_version["version"] = (
+        f"{APP_NUMERIC_VERSION[0] + 1}.{APP_NUMERIC_VERSION[1]}."
+        f"{APP_NUMERIC_VERSION[2]}-{UPDATE_CHANNEL}.{current_sequence - 1}"
+    )
+    wrong_platform_version["numeric_version"] = (
+        f"{APP_NUMERIC_VERSION[0] + 1}.{APP_NUMERIC_VERSION[1]}."
+        f"{APP_NUMERIC_VERSION[2]}.{current_sequence - 1}"
+    )
+    assert_validation_rejected(
+        lambda: helper.validate_published_manifest_for_source(
+            wrong_platform_version
+        ),
+        "major/minor/patch",
+    )
 
     print("update manifest changelog smoke: OK")
 

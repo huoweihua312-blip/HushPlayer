@@ -15,8 +15,11 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from app.core.version import (
+    APP_NUMERIC_VERSION,
     APP_NUMERIC_VERSION_TEXT,
     APP_VERSION,
+    UPDATE_ARCHITECTURE,
+    UPDATE_CHANNEL,
     numeric_version_text,
     parse_numeric_version,
 )
@@ -27,8 +30,13 @@ _RELEASE_HEADING_PATTERN = re.compile(
     r"(?P<major>0|[1-9]\d*)\.(?P<minor>0|[1-9]\d*)\."
     r"(?P<patch>0|[1-9]\d*)-(?P<channel>[a-z][a-z0-9-]*)\."
     r"(?P<sequence>0|[1-9]\d*)"
-    r")\s+—\s+(?P<release_date>\d{4}-\d{2}-\d{2})\s*$",
+    r")\s+(?:—|-)\s+(?P<release_date>\d{4}-\d{2}-\d{2})\s*$",
     re.MULTILINE,
+)
+_MANIFEST_VERSION_PATTERN = re.compile(
+    r"^(?P<major>0|[1-9]\d*)\.(?P<minor>0|[1-9]\d*)\."
+    r"(?P<patch>0|[1-9]\d*)-(?P<channel>[a-z][a-z0-9-]*)\."
+    r"(?P<sequence>0|[1-9]\d*)$"
 )
 _SUMMARY_HEADING_PATTERN = re.compile(r"^### 在线更新摘要\s*$", re.MULTILINE)
 _SECTION_HEADING_PATTERN = re.compile(r"^#{2,3}\s+", re.MULTILINE)
@@ -234,12 +242,73 @@ def validate_manifest_document(
         )
 
 
+def _manifest_release_identity(
+    document: dict[str, Any],
+) -> tuple[tuple[int, int, int, int], str]:
+    version = str(document.get("version") or "").strip()
+    match = _MANIFEST_VERSION_PATTERN.fullmatch(version)
+    if match is None:
+        raise ChangelogValidationError("更新清单 version 格式无效。")
+    try:
+        numeric_version = parse_numeric_version(
+            str(document.get("numeric_version") or "")
+        )
+    except ValueError as error:
+        raise ChangelogValidationError("更新清单 numeric_version 无效。") from error
+    label_numeric_version = (
+        int(match.group("major")),
+        int(match.group("minor")),
+        int(match.group("patch")),
+        int(match.group("sequence")),
+    )
+    if numeric_version != label_numeric_version:
+        raise ChangelogValidationError(
+            "更新清单 version 与 numeric_version 不一致。"
+        )
+    return numeric_version, match.group("channel")
+
+
+def _validate_manifest_platform(
+    document: dict[str, Any],
+) -> tuple[tuple[int, int, int, int], str]:
+    numeric_version, channel = _manifest_release_identity(document)
+    if channel != UPDATE_CHANNEL or document.get("channel") != UPDATE_CHANNEL:
+        raise ChangelogValidationError(
+            "更新清单 channel 与当前应用不一致。"
+        )
+    if document.get("architecture") != UPDATE_ARCHITECTURE:
+        raise ChangelogValidationError(
+            "更新清单 architecture 与当前应用不一致。"
+        )
+    return numeric_version, channel
+
+
+def validate_published_manifest_for_source(document: dict[str, Any]) -> None:
+    """Allow only the current or immediately previous beta during source prep."""
+
+    numeric_version, _ = _validate_manifest_platform(document)
+    if numeric_version[:3] != APP_NUMERIC_VERSION[:3]:
+        raise ChangelogValidationError(
+            "更新清单与当前应用的 major/minor/patch 不一致。"
+        )
+    if numeric_version > APP_NUMERIC_VERSION:
+        raise ChangelogValidationError("更新清单版本不得高于当前源码版本。")
+    sequence_lag = APP_NUMERIC_VERSION[3] - numeric_version[3]
+    if sequence_lag > 1:
+        raise ChangelogValidationError(
+            "更新清单版本最多只能落后当前源码一个 beta 序号。"
+        )
+
+
 def validate_manifest_matches_application(document: dict[str, Any]) -> None:
+    numeric_version, _ = _validate_manifest_platform(document)
     if document.get("version") != APP_VERSION:
         raise ChangelogValidationError(
             "更新清单 version 与 app/core/version.py 不一致。"
         )
-    if document.get("numeric_version") != APP_NUMERIC_VERSION_TEXT:
+    if numeric_version != APP_NUMERIC_VERSION or (
+        document.get("numeric_version") != APP_NUMERIC_VERSION_TEXT
+    ):
         raise ChangelogValidationError(
             "更新清单 numeric_version 与 app/core/version.py 不一致。"
         )

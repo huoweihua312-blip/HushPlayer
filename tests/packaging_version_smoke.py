@@ -12,6 +12,7 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from app.core.version import (
+    APP_NUMERIC_VERSION,
     APP_NUMERIC_VERSION_TEXT,
     APP_VERSION,
     UPDATE_ARCHITECTURE,
@@ -60,15 +61,15 @@ def check_metadata_generator(temp_root: Path) -> None:
     assert metadata["numeric_version"] == APP_NUMERIC_VERSION_TEXT
     assert metadata["architecture"] == UPDATE_ARCHITECTURE
     assert metadata["installer_filename"] == (
-        "HushPlayer-0.5.0-beta.5-win-x64-setup.exe"
+        f"HushPlayer-{APP_VERSION}-{UPDATE_ARCHITECTURE}-setup.exe"
     )
     version_info_path = Path(metadata["version_info_file"])
     version_info = version_info_path.read_text(encoding="utf-8")
     compile(version_info, str(version_info_path), "eval")
-    assert "filevers=(0, 5, 0, 5)" in version_info
-    assert "prodvers=(0, 5, 0, 5)" in version_info
-    assert "FileVersion', '0.5.0-beta.5'" in version_info
-    assert "ProductVersion', '0.5.0-beta.5'" in version_info
+    assert f"filevers={APP_NUMERIC_VERSION!r}" in version_info
+    assert f"prodvers={APP_NUMERIC_VERSION!r}" in version_info
+    assert f"FileVersion', '{APP_VERSION}'" in version_info
+    assert f"ProductVersion', '{APP_VERSION}'" in version_info
 
 
 def check_sources() -> None:
@@ -182,7 +183,7 @@ OutputBaseFilename=Macro-{#MyAppVersion}-{#MyAppArchitecture}
     )
     assert (
         output_dir
-        / "Macro-0.5.0-beta.5-win-x64.exe"
+        / f"Macro-{APP_VERSION}-{UPDATE_ARCHITECTURE}.exe"
     ).is_file()
 
 

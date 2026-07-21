@@ -33,6 +33,13 @@ from app.services.app_update_service import (
     select_update_release_notes,
     verify_installer_file,
 )
+from app.core.version import (
+    APP_NUMERIC_VERSION,
+    APP_VERSION,
+    UPDATE_ARCHITECTURE,
+    UPDATE_CHANNEL,
+    numeric_version_text,
+)
 from app.ui import main_window as main_window_module
 from app.ui.main_window import MainWindow
 from app.ui.update_dialog import UpdateDialog
@@ -118,22 +125,47 @@ def wait_until(predicate, timeout: float = 5.0) -> bool:
     return bool(predicate())
 
 
+def fixture_numeric_version(offset: int) -> tuple[int, int, int, int]:
+    """Build fixture versions relative to the installed application version."""
+
+    major, minor, patch, sequence = APP_NUMERIC_VERSION
+    candidate = (major, minor, patch, sequence + offset)
+    assert candidate[3] >= 0
+    return candidate
+
+
+def fixture_release(offset: int) -> tuple[str, str]:
+    numeric_version = fixture_numeric_version(offset)
+    version = (
+        f"{numeric_version[0]}.{numeric_version[1]}.{numeric_version[2]}-"
+        f"{UPDATE_CHANNEL}.{numeric_version[3]}"
+    )
+    return version, numeric_version_text(numeric_version)
+
+
+def fixture_release_date(offset: int) -> str:
+    """Return a stable, valid date for release-history fixture entries."""
+
+    return f"2026-07-{10 + offset:02d}"
+
+
 def manifest_document(
     setup_url: str,
     setup: bytes,
     *,
-    version: str = "0.5.0-beta.6",
-    numeric_version: str = "0.5.0.6",
+    version: str | None = None,
+    numeric_version: str | None = None,
     sha256: str | None = None,
     setup_size: int | None = None,
     release_history: object | None = None,
 ) -> dict:
+    default_version, default_numeric_version = fixture_release(1)
     document = {
         "schema_version": 1,
-        "channel": "beta",
-        "version": version,
-        "numeric_version": numeric_version,
-        "architecture": "win-x64",
+        "channel": UPDATE_CHANNEL,
+        "version": version or default_version,
+        "numeric_version": numeric_version or default_numeric_version,
+        "architecture": UPDATE_ARCHITECTURE,
         "mandatory": False,
         "setup_url": setup_url,
         "setup_size": len(setup) if setup_size is None else setup_size,
@@ -162,12 +194,16 @@ def parser_checks(setup: bytes) -> None:
     valid = manifest_document("https://example.com/HushPlayer-setup.exe", setup)
     manifest = parse_update_manifest(encoded_manifest(valid))
     assert manifest.is_newer
-    assert manifest.numeric_version == (0, 5, 0, 6)
-    assert manifest.installer_filename == "HushPlayer-0.5.0-beta.6-win-x64-setup.exe"
+    assert manifest.numeric_version == fixture_numeric_version(1)
+    assert manifest.installer_filename == (
+        f"HushPlayer-{fixture_release(1)[0]}-{UPDATE_ARCHITECTURE}-setup.exe"
+    )
     assert manifest.release_history == ()
 
-    same = dict(valid, version="0.5.0-beta.5", numeric_version="0.5.0.5")
-    old = dict(valid, version="0.5.0-beta.4", numeric_version="0.5.0.4")
+    same_version, same_numeric_version = fixture_release(0)
+    old_version, old_numeric_version = fixture_release(-1)
+    same = dict(valid, version=same_version, numeric_version=same_numeric_version)
+    old = dict(valid, version=old_version, numeric_version=old_numeric_version)
     assert not parse_update_manifest(encoded_manifest(same)).is_newer
     assert not parse_update_manifest(encoded_manifest(old)).is_newer
 
@@ -184,7 +220,7 @@ def parser_checks(setup: bytes) -> None:
         "安装包大小",
     )
     assert_manifest_rejected(
-        dict(valid, numeric_version="0.5.0.5"),
+        dict(valid, numeric_version=fixture_release(0)[1]),
         "version 与 numeric_version",
     )
     try:
@@ -195,22 +231,23 @@ def parser_checks(setup: bytes) -> None:
         raise AssertionError("oversized manifest accepted")
 
 
-def release_history_entry(sequence: int, notes: list[str]) -> dict:
+def release_history_entry(offset: int, notes: list[str]) -> dict:
+    version, numeric_version = fixture_release(offset)
     return {
-        "version": f"0.5.0-beta.{sequence}",
-        "numeric_version": f"0.5.0.{sequence}",
-        "release_date": f"2026-07-{sequence:02d}",
+        "version": version,
+        "numeric_version": numeric_version,
+        "release_date": fixture_release_date(offset),
         "notes": notes,
     }
 
 
 def release_history_checks(setup: bytes) -> None:
     ordered_history = [
-        release_history_entry(8, ["beta.8 历史日志"]),
-        release_history_entry(6, ["beta.6 历史日志"]),
-        release_history_entry(7, ["beta.7 历史日志"]),
-        release_history_entry(7, ["重复 beta.7 日志"]),
-        {"version": "invalid", "numeric_version": "0.5.0.9"},
+        release_history_entry(3, ["未来第三个版本历史日志"]),
+        release_history_entry(1, ["未来第一个版本历史日志"]),
+        release_history_entry(2, ["未来第二个版本历史日志"]),
+        release_history_entry(2, ["重复版本日志"]),
+        {"version": "invalid", "numeric_version": fixture_release(4)[1]},
     ]
     logger = logging.getLogger("app.services.app_update_service")
     messages: list[str] = []
@@ -229,8 +266,8 @@ def release_history_checks(setup: bytes) -> None:
                 manifest_document(
                     "https://example.com/HushPlayer-setup.exe",
                     setup,
-                    version="0.5.0-beta.8",
-                    numeric_version="0.5.0.8",
+                    version=fixture_release(3)[0],
+                    numeric_version=fixture_release(3)[1],
                     release_history=ordered_history,
                 )
             )
@@ -240,45 +277,45 @@ def release_history_checks(setup: bytes) -> None:
         logger.setLevel(previous_level)
 
     assert [item.version for item in manifest.release_history] == [
-        "0.5.0-beta.6",
-        "0.5.0-beta.7",
-        "0.5.0-beta.8",
+        fixture_release(1)[0],
+        fixture_release(2)[0],
+        fixture_release(3)[0],
     ]
-    assert manifest.release_history[1].notes == ("beta.7 历史日志",)
+    assert manifest.release_history[1].notes == ("未来第二个版本历史日志",)
     assert any("duplicate release_history" in message for message in messages)
     assert any("invalid release_history" in message for message in messages)
 
-    beta_five_to_beta_eight = select_update_release_notes(manifest)
-    assert [item.version for item in beta_five_to_beta_eight] == [
-        "0.5.0-beta.6",
-        "0.5.0-beta.7",
-        "0.5.0-beta.8",
+    all_future_releases = select_update_release_notes(manifest)
+    assert [item.version for item in all_future_releases] == [
+        fixture_release(1)[0],
+        fixture_release(2)[0],
+        fixture_release(3)[0],
     ]
     assert all(
         note != "更新服务自动测试"
-        for item in beta_five_to_beta_eight
+        for item in all_future_releases
         for note in item.notes
     )
 
-    beta_five_to_beta_six = parse_update_manifest(
+    next_release = parse_update_manifest(
         encoded_manifest(
             manifest_document(
                 "https://example.com/HushPlayer-setup.exe",
                 setup,
-                release_history=[release_history_entry(6, ["beta.6 历史日志"])],
+                release_history=[release_history_entry(1, ["下一版本历史日志"])],
             )
         )
     )
-    assert [item.version for item in select_update_release_notes(beta_five_to_beta_six)] == [
-        "0.5.0-beta.6"
+    assert [item.version for item in select_update_release_notes(next_release)] == [
+        fixture_release(1)[0]
     ]
     assert [
         item.version
         for item in select_update_release_notes(
             manifest,
-            current_numeric_version="0.5.0.7",
+            current_numeric_version=fixture_release(2)[1],
         )
-    ] == ["0.5.0-beta.8"]
+    ] == [fixture_release(3)[0]]
 
     legacy = parse_update_manifest(
         encoded_manifest(
@@ -306,7 +343,7 @@ def release_history_checks(setup: bytes) -> None:
             manifest_document(
                 "https://example.com/HushPlayer-setup.exe",
                 setup,
-                release_history=[release_history_entry(4, ["已安装的旧版本日志"])],
+                release_history=[release_history_entry(-1, ["已安装的旧版本日志"])],
             )
         )
     )
@@ -317,14 +354,14 @@ def release_history_checks(setup: bytes) -> None:
             manifest_document(
                 "https://example.com/HushPlayer-setup.exe",
                 setup,
-                version="0.5.0-beta.8",
-                numeric_version="0.5.0.8",
+                version=fixture_release(3)[0],
+                numeric_version=fixture_release(3)[1],
                 release_history=[
-                    release_history_entry(6, ["仍可显示的 beta.6 日志"]),
+                    release_history_entry(1, ["仍可显示的下一版本日志"]),
                     {
-                        "version": "0.5.0-beta.7",
+                        "version": fixture_release(2)[0],
                         "numeric_version": "invalid",
-                        "release_date": "2026-07-07",
+                        "release_date": fixture_release_date(2),
                         "notes": ["损坏条目"],
                     },
                 ],
@@ -333,8 +370,8 @@ def release_history_checks(setup: bytes) -> None:
     )
     partial_sections = select_update_release_notes(partial_history)
     assert [item.version for item in partial_sections] == [
-        "0.5.0-beta.6",
-        "0.5.0-beta.8",
+        fixture_release(1)[0],
+        fixture_release(3)[0],
     ]
     assert partial_sections[-1].release_date is None
     assert partial_sections[-1].notes == ("更新服务自动测试",)
@@ -344,13 +381,13 @@ def release_history_checks(setup: bytes) -> None:
             manifest_document(
                 "https://example.com/HushPlayer-setup.exe",
                 setup,
-                version="0.5.0-beta.8",
-                numeric_version="0.5.0.8",
+                version=fixture_release(3)[0],
+                numeric_version=fixture_release(3)[1],
                 release_history=[
-                    release_history_entry(6, ["仍可显示的 beta.6 日志"]),
+                    release_history_entry(1, ["仍可显示的下一版本日志"]),
                     {
-                        "version": "0.5.0-beta.7",
-                        "numeric_version": "0.5.0.7",
+                        "version": fixture_release(2)[0],
+                        "numeric_version": fixture_release(2)[1],
                         "release_date": "2026-07-XX",
                         "notes": ["无效日期条目"],
                     },
@@ -360,8 +397,8 @@ def release_history_checks(setup: bytes) -> None:
     )
     invalid_date_sections = select_update_release_notes(invalid_date_history)
     assert [item.version for item in invalid_date_sections] == [
-        "0.5.0-beta.6",
-        "0.5.0-beta.8",
+        fixture_release(1)[0],
+        fixture_release(3)[0],
     ]
     assert invalid_date_sections[-1].notes == ("更新服务自动测试",)
 
@@ -372,8 +409,8 @@ def release_history_checks(setup: bytes) -> None:
                 setup,
                 release_history=[
                     {
-                        "version": "0.5.0-beta.6",
-                        "numeric_version": "0.5.0.6",
+                        "version": fixture_release(1)[0],
+                        "numeric_version": fixture_release(1)[1],
                         "release_date": "2026-07-XX",
                         "notes": ["无效日期条目"],
                     },
@@ -399,9 +436,9 @@ def release_history_checks(setup: bytes) -> None:
             manifest_document(
                 "https://example.com/HushPlayer-setup.exe",
                 setup,
-                version="0.5.0-beta.5",
-                numeric_version="0.5.0.5",
-                release_history=[release_history_entry(5, ["不应显示"])],
+                version=fixture_release(0)[0],
+                numeric_version=fixture_release(0)[1],
+                release_history=[release_history_entry(0, ["不应显示"])],
             )
         )
     )
@@ -801,7 +838,7 @@ def service_checks(root: Path, server: FixtureServer, setup: bytes) -> None:
     document = manifest_document(
         f"{server.base_url}/setup.exe",
         setup,
-        release_history=[release_history_entry(6, ["beta.6 更新日志"])],
+        release_history=[release_history_entry(1, ["下一版本更新日志"])],
     )
     configure_manifest_route(server, document)
     assert service.check_for_updates(manual=True)
@@ -809,7 +846,7 @@ def service_checks(root: Path, server: FixtureServer, setup: bytes) -> None:
     manifest, manual = available[-1]
     assert manual is True
     manual_sections = select_update_release_notes(manifest)
-    assert [item.version for item in manual_sections] == ["0.5.0-beta.6"]
+    assert [item.version for item in manual_sections] == [fixture_release(1)[0]]
 
     assert service.check_for_updates(manual=False)
     assert wait_until(lambda: len(available) >= 2)
@@ -822,8 +859,8 @@ def service_checks(root: Path, server: FixtureServer, setup: bytes) -> None:
         manifest_document(
             f"{server.base_url}/setup.exe",
             setup,
-            version="0.5.0-beta.5",
-            numeric_version="0.5.0.5",
+            version=fixture_release(0)[0],
+            numeric_version=fixture_release(0)[1],
         ),
     )
     assert service.check_for_updates(manual=False)
@@ -919,7 +956,10 @@ def service_checks(root: Path, server: FixtureServer, setup: bytes) -> None:
     assert dialog.install_button.isEnabled()
     assert not dialog.download_button.isEnabled()
     assert "SHA-256 已校验" in dialog.status_label.text()
-    assert "0.5.0-beta.6 · 2026-07-06" in dialog.notes.toPlainText()
+    assert (
+        f"{fixture_release(1)[0]} · {fixture_release_date(1)}"
+        in dialog.notes.toPlainText()
+    )
     dialog.deleteLater()
     QCoreApplication.sendPostedEvents(dialog, QEvent.Type.DeferredDelete)
 
@@ -986,21 +1026,22 @@ def shutdown_callback_check(root: Path, server: FixtureServer, setup: bytes) -> 
 
 def update_dialog_history_layout_check(setup: bytes) -> None:
     long_history = []
-    for sequence in (6, 7, 8):
+    for offset in (1, 2, 3):
+        version, _ = fixture_release(offset)
         notes = [
-            f"beta.{sequence} 长更新日志 {index}: " + "内容" * 80
+            f"{version} 长更新日志 {index}: " + "内容" * 80
             for index in range(50)
         ]
-        if sequence == 6:
+        if offset == 1:
             notes[0] = "<b>普通文本</b>"
-        long_history.append(release_history_entry(sequence, notes))
+        long_history.append(release_history_entry(offset, notes))
     manifest = parse_update_manifest(
         encoded_manifest(
             manifest_document(
                 "https://example.com/HushPlayer-setup.exe",
                 setup,
-                version="0.5.0-beta.8",
-                numeric_version="0.5.0.8",
+                version=fixture_release(3)[0],
+                numeric_version=fixture_release(3)[1],
                 release_history=long_history,
             )
         )
@@ -1008,11 +1049,14 @@ def update_dialog_history_layout_check(setup: bytes) -> None:
     service = AppUpdateService(manifest_url="https://example.com/manifest.json")
     dialog = UpdateDialog(service, manifest)
     try:
-        assert "将从 0.5.0-beta.5 更新到 0.5.0-beta.8" in dialog.subtitle.text()
+        assert (
+            f"将从 {APP_VERSION} 更新到 {fixture_release(3)[0]}"
+            in dialog.subtitle.text()
+        )
         notes_text = dialog.notes.toPlainText()
-        assert "0.5.0-beta.6 · 2026-07-06" in notes_text
-        assert "0.5.0-beta.7 · 2026-07-07" in notes_text
-        assert "0.5.0-beta.8 · 2026-07-08" in notes_text
+        assert f"{fixture_release(1)[0]} · {fixture_release_date(1)}" in notes_text
+        assert f"{fixture_release(2)[0]} · {fixture_release_date(2)}" in notes_text
+        assert f"{fixture_release(3)[0]} · {fixture_release_date(3)}" in notes_text
         assert "更新服务自动测试" not in notes_text
         assert "<b>普通文本</b>" in notes_text
         dialog.resize(560, 430)

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 import sys
 from pathlib import Path
 
@@ -10,6 +11,7 @@ if str(PROJECT_ROOT) not in sys.path:
 from app.core.version import (
     APP_NUMERIC_VERSION,
     APP_NUMERIC_VERSION_TEXT,
+    APP_USER_AGENT,
     APP_VERSION,
     UPDATE_ARCHITECTURE,
     UPDATE_CHANNEL,
@@ -21,9 +23,22 @@ from app.core.version import (
 
 
 def main() -> None:
-    assert APP_VERSION == "0.5.0-beta.5"
-    assert APP_NUMERIC_VERSION == (0, 5, 0, 5)
-    assert APP_NUMERIC_VERSION_TEXT == "0.5.0.5"
+    match = re.fullmatch(
+        r"(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)-beta\.(0|[1-9]\d*)",
+        APP_VERSION,
+    )
+    assert match is not None
+    assert len(APP_NUMERIC_VERSION) == 4
+    assert all(
+        isinstance(part, int) and not isinstance(part, bool) and part >= 0
+        for part in APP_NUMERIC_VERSION
+    )
+    assert APP_NUMERIC_VERSION == tuple(int(part) for part in match.groups())
+    assert APP_NUMERIC_VERSION_TEXT == ".".join(
+        str(part) for part in APP_NUMERIC_VERSION
+    )
+    assert parse_numeric_version(APP_NUMERIC_VERSION_TEXT) == APP_NUMERIC_VERSION
+    assert APP_VERSION in APP_USER_AGENT
     assert UPDATE_CHANNEL == "beta"
     assert UPDATE_ARCHITECTURE == "win-x64"
     assert UPDATE_MANIFEST_URL == (
