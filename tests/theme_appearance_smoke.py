@@ -18,6 +18,7 @@ from _smoke_storage import activate_isolated_app_storage
 
 ISOLATED_STORAGE = activate_isolated_app_storage("hushplayer-theme-")
 
+from PySide6.QtGui import QPalette
 from PySide6.QtWidgets import QApplication
 
 from app.services.app_update_service import UpdateManifest
@@ -55,6 +56,42 @@ def _snapshot_file(path: Path) -> bytes | None:
     return path.read_bytes() if path.exists() else None
 
 
+def _relative_luminance(color: str) -> float:
+    value = str(color).lstrip("#")
+    channels = [int(value[index:index + 2], 16) / 255 for index in range(0, 6, 2)]
+
+    def linearize(channel: float) -> float:
+        return channel / 12.92 if channel <= 0.04045 else ((channel + 0.055) / 1.055) ** 2.4
+
+    red, green, blue = (linearize(channel) for channel in channels)
+    return 0.2126 * red + 0.7152 * green + 0.0722 * blue
+
+
+def _contrast_ratio(first: str, second: str) -> float:
+    first_luminance = _relative_luminance(first)
+    second_luminance = _relative_luminance(second)
+    lighter, darker = max(first_luminance, second_luminance), min(first_luminance, second_luminance)
+    return (lighter + 0.05) / (darker + 0.05)
+
+
+def _assert_navigation_tokens(tokens: dict[str, str]) -> None:
+    for key in (
+        "navigation_text",
+        "navigation_text_hover",
+        "navigation_text_selected",
+        "navigation_text_disabled",
+        "icon_default",
+        "icon_selected",
+        "icon_disabled",
+    ):
+        assert _COLOR_PATTERN.match(tokens[key])
+    assert _contrast_ratio(tokens["navigation_text"], tokens["surface"]) >= 4.5
+    assert _contrast_ratio(tokens["navigation_text_disabled"], tokens["surface"]) >= 3.0
+    assert tokens["navigation_text"] != tokens["navigation_text_hover"]
+    assert tokens["navigation_text"] != tokens["navigation_text_selected"]
+    assert tokens["icon_default"] != tokens["icon_disabled"]
+
+
 def run_test(app: QApplication) -> None:
     assert normalize_appearance_mode(None) == "dark"
     assert normalize_appearance_mode("dark") == "dark"
@@ -69,6 +106,7 @@ def run_test(app: QApplication) -> None:
     for tokens in (DARK_THEME_TOKENS, LIGHT_THEME_TOKENS):
         assert all(_COLOR_PATTERN.match(value) for value in tokens.values())
         assert tokens["text_primary"] != tokens["window_background"]
+        _assert_navigation_tokens(tokens)
     assert LIGHT_THEME_TOKENS["text_primary"] != LIGHT_THEME_TOKENS["surface"]
 
     manager = ThemeManager(app, system_resolver=lambda: "light")
@@ -96,6 +134,42 @@ def run_test(app: QApplication) -> None:
         window.settings_file = invalid_settings_file
         assert window.load_settings()["appearance_mode"] == "dark"
         window.settings_file = original_settings_file
+
+        window.playlists["theme-empty-playlist"] = {
+            "name": "主题空歌单",
+            "songs": [],
+            "remoteSongs": [],
+            "members": [],
+            "fixed": False,
+            "created_at": 1,
+        }
+        window.refresh_playlist_view_buttons()
+        app.processEvents()
+        navigation_buttons = {
+            "liked": window.liked_playlist_button,
+            "search": window.search_nav_button,
+            "library": window.library_nav_button,
+            "pending": window.pending_nav_button,
+            "custom_sources": window.custom_sources_nav_button,
+            "settings": window.settings_nav_button,
+            "new_playlist": window.new_playlist_button,
+            "empty_playlist": window.custom_view_buttons[0],
+        }
+        assert all(button.isEnabled() for button in navigation_buttons.values())
+        assert all(
+            bool(button.property("navigationItem"))
+            for key, button in navigation_buttons.items()
+            if key not in {"new_playlist"}
+        )
+        assert bool(window.new_playlist_button.property("navigationAction"))
+        window.show_pending_imports_page()
+        assert window.content_stack.currentWidget() is window.pending_imports_page
+        window.show_custom_source_manager_page()
+        assert window.content_stack.currentWidget() is window.custom_source_manager_page
+        window.set_library_view("playlist:theme-empty-playlist")
+        assert window.current_library_view == "playlist:theme-empty-playlist"
+        assert window.custom_view_buttons[0].isEnabled()
+        window.set_library_view("all")
 
         original_files = {
             "library": _snapshot_file(window.library_file),
@@ -140,6 +214,33 @@ def run_test(app: QApplication) -> None:
         assert "QPushButton#themeQuickButton" in qss
         assert "QListWidget#pendingImportsList::item:selected" in qss
         assert "QPushButton#likeButton[liked=\"true\"]" in qss
+        assert "QWidget:disabled" not in qss
+        assert "QPushButton:disabled" not in qss
+        for button in navigation_buttons.values():
+            assert button.isEnabled()
+        assert LIGHT_THEME_TOKENS["navigation_text"] in window.search_nav_button.styleSheet()
+        assert LIGHT_THEME_TOKENS["navigation_text_disabled"] in window.search_nav_button.styleSheet()
+        assert (
+            window.search_nav_button.palette().color(
+                QPalette.ColorGroup.Active,
+                QPalette.ColorRole.ButtonText,
+            ).name()
+            == LIGHT_THEME_TOKENS["navigation_text"]
+        )
+        window.search_nav_button.setEnabled(False)
+        app.processEvents()
+        assert not window.search_nav_button.isEnabled()
+        assert LIGHT_THEME_TOKENS["navigation_text_disabled"] in window.search_nav_button.styleSheet()
+        assert (
+            window.search_nav_button.palette().color(
+                QPalette.ColorGroup.Disabled,
+                QPalette.ColorRole.ButtonText,
+            ).name()
+            == LIGHT_THEME_TOKENS["navigation_text_disabled"]
+        )
+        window.search_nav_button.setEnabled(True)
+        app.processEvents()
+        assert window.search_nav_button.isEnabled()
         cover_image = window.cover_label.grab().toImage()
         cover_border = cover_image.pixelColor(
             max(2, cover_image.width() // 2),
@@ -157,8 +258,24 @@ def run_test(app: QApplication) -> None:
         )} == original_files
 
         window.set_appearance_mode("dark", persist=False)
+        app.processEvents()
+        for button in navigation_buttons.values():
+            assert button.isEnabled()
+        assert DARK_THEME_TOKENS["navigation_text"] in window.search_nav_button.styleSheet()
+        assert (
+            window.search_nav_button.palette().color(
+                QPalette.ColorGroup.Active,
+                QPalette.ColorRole.ButtonText,
+            ).name()
+            == DARK_THEME_TOKENS["navigation_text"]
+        )
+        assert not window.library_nav_button.icon().isNull()
+        window.set_appearance_mode("system", persist=False)
+        app.processEvents()
+        for button in navigation_buttons.values():
+            assert button.isEnabled()
         window.set_appearance_mode("light", persist=True)
-        assert window.flush_settings() is True
+        window.flush_settings()
         persisted = json.loads(window.settings_file.read_text(encoding="utf-8"))
         assert persisted["appearance_mode"] == "light"
         assert window.load_settings()["appearance_mode"] == "light"

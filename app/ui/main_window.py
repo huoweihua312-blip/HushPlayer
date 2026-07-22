@@ -180,13 +180,17 @@ def apply_dark_dialog_style(dialog: QDialog, extra_qss: str = "") -> None:
     apply_dialog_style(dialog, extra_qss)
 
 
-_NAVIGATION_ICON_CACHE: dict[tuple[str, bool], QIcon] = {}
+_NAVIGATION_ICON_CACHE: dict[tuple[str, bool, bool], QIcon] = {}
 
 
-def create_navigation_icon(navigation_id: str, active: bool = False) -> QIcon:
+def create_navigation_icon(
+    navigation_id: str,
+    active: bool = False,
+    enabled: bool = True,
+) -> QIcon:
     """Create one cached, font-independent sidebar icon."""
     role = str(navigation_id or "default")
-    cache_key = (role, bool(active))
+    cache_key = (role, bool(active), bool(enabled))
     cached = _NAVIGATION_ICON_CACHE.get(cache_key)
     if cached is not None:
         return QIcon(cached)
@@ -196,11 +200,14 @@ def create_navigation_icon(navigation_id: str, active: bool = False) -> QIcon:
     painter = QPainter(pixmap)
     painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
     painter.scale(2.0, 2.0)
-    color = QColor(
-        ACTIVE_THEME_TOKENS["accent"]
+    color_key = (
+        "icon_disabled"
+        if not enabled
+        else "icon_selected"
         if active
-        else ACTIVE_THEME_TOKENS["text_muted"]
+        else "icon_default"
     )
+    color = QColor(ACTIVE_THEME_TOKENS[color_key])
     pen = QPen(color, 1.45)
     pen.setCapStyle(Qt.PenCapStyle.RoundCap)
     pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
@@ -284,6 +291,34 @@ def create_navigation_icon(navigation_id: str, active: bool = False) -> QIcon:
     return QIcon(icon)
 
 
+def apply_sidebar_navigation_theme(button: QPushButton) -> None:
+    """Keep sidebar destinations independent from broad button disabled rules."""
+    t = ACTIVE_THEME_TOKENS
+    button.setStyleSheet(
+        f"QPushButton {{ background: transparent; color: {t['navigation_text']}; "
+        f"border: 1px solid transparent; border-radius: {UI_RADII['button']}px; }}"
+        f"QPushButton:hover {{ background: {t['surface_hover']}; color: {t['navigation_text_hover']}; }}"
+        f"QPushButton[active=\"true\"] {{ background: {t['selection_background']}; "
+        f"color: {t['navigation_text_selected']}; border: 1px solid {t['selection_border']}; "
+        f"border-left: 3px solid {t['accent']}; font-weight: 700; }}"
+        f"QPushButton:disabled {{ background: transparent; color: {t['navigation_text_disabled']}; "
+        f"border-color: transparent; }}"
+    )
+
+
+def apply_sidebar_action_theme(button: QPushButton) -> None:
+    """Style sidebar actions without making them inherit navigation destinations."""
+    t = ACTIVE_THEME_TOKENS
+    button.setStyleSheet(
+        f"QPushButton {{ background: {t['control_overlay']}; color: {t['navigation_text']}; "
+        f"border: 1px solid {t['border']}; border-radius: {UI_RADII['button']}px; }}"
+        f"QPushButton:hover {{ background: {t['control_overlay_hover']}; color: {t['navigation_text_hover']}; "
+        f"border-color: {t['border_strong']}; }}"
+        f"QPushButton:disabled {{ background: {t['control_overlay']}; color: {t['navigation_text_disabled']}; "
+        f"border-color: {t['border']}; }}"
+    )
+
+
 class NavButton(QPushButton):
     def __init__(
         self,
@@ -297,7 +332,9 @@ class NavButton(QPushButton):
         self._navigation_drag_origin = None
         self._navigation_dragging = False
         self.setObjectName("sidebarButton")
+        self.setProperty("navigationItem", True)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.setEnabled(True)
         self.setProperty("active", active)
         self.setMinimumHeight(UI_CONTROL_SIZES["navigation_height"])
         self.setIconSize(
@@ -322,6 +359,11 @@ class NavButton(QPushButton):
             self._refresh_navigation_icon()
         return result
 
+    def changeEvent(self, event) -> None:
+        super().changeEvent(event)
+        if event.type() == QEvent.Type.EnabledChange:
+            self._refresh_navigation_icon()
+
     def _refresh_navigation_icon(self) -> None:
         navigation_id = str(getattr(self, "navigation_id", "") or "")
         if not navigation_id:
@@ -330,8 +372,10 @@ class NavButton(QPushButton):
             create_navigation_icon(
                 navigation_id,
                 bool(self.property("active")),
+                self.isEnabled(),
             )
         )
+        apply_sidebar_navigation_theme(self)
 
     def mousePressEvent(self, event) -> None:
         if (
@@ -6923,7 +6967,9 @@ class MainWindow(QMainWindow):
             view_name = f"playlist:{playlist_id}"
             button = QPushButton(playlist_name)
             button.setObjectName("playlistSidebarButton")
+            button.setProperty("navigationItem", True)
             button.setCursor(Qt.CursorShape.PointingHandCursor)
+            button.setEnabled(True)
             button.setToolTip(playlist_name)
             button.setMinimumHeight(button.fontMetrics().height() + 16)
             button.setSizePolicy(
@@ -6940,6 +6986,7 @@ class MainWindow(QMainWindow):
                     position,
                 )
             )
+            apply_sidebar_navigation_theme(button)
 
             self.sidebar_playlist_layout.addWidget(button)
             self.custom_view_buttons.append(button)
@@ -9934,13 +9981,16 @@ class MainWindow(QMainWindow):
 
         new_playlist_btn = QPushButton("+ 新建歌单")
         new_playlist_btn.setObjectName("sidebarWideButton")
+        new_playlist_btn.setProperty("navigationAction", True)
         new_playlist_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        new_playlist_btn.setEnabled(True)
         new_playlist_btn.setMinimumHeight(new_playlist_btn.fontMetrics().height() + 16)
         new_playlist_btn.setSizePolicy(
             QSizePolicy.Policy.Expanding,
             QSizePolicy.Policy.Preferred,
         )
         new_playlist_btn.clicked.connect(self.create_new_playlist)
+        apply_sidebar_action_theme(new_playlist_btn)
         self.new_playlist_button = new_playlist_btn
 
         layout.addWidget(new_playlist_btn)
@@ -13081,6 +13131,13 @@ class MainWindow(QMainWindow):
             _THEME_QUICK_ICON_CACHE.clear()
             for button in self.findChildren(NavButton):
                 button._refresh_navigation_icon()
+            for button in self.findChildren(QPushButton):
+                if isinstance(button, NavButton):
+                    continue
+                if bool(button.property("navigationItem")):
+                    apply_sidebar_navigation_theme(button)
+                elif bool(button.property("navigationAction")):
+                    apply_sidebar_action_theme(button)
             for button in self.findChildren(PlayerIconButton):
                 button._apply_visual(button.toolTip())
             for icon in self.findChildren(VolumeStatusIcon):
@@ -18399,13 +18456,13 @@ class MainWindow(QMainWindow):
         QFrame#sidebar, QFrame#playerBar, QFrame#nowPlayingPanel {{ background: {t['surface']}; border-color: {t['border']}; }}
         QLabel#appTitle {{ color: {t['text_primary']}; }}
         QLabel#appSubtitle, QLabel#sidebarGroupHint, QLabel#sidebarHint, QLabel#sidebarSectionTitle {{ color: {t['text_muted']}; }}
-        QPushButton#sidebarButton, QPushButton#playlistSidebarButton {{ background: transparent; color: {t['text_secondary']}; border-color: transparent; }}
-        QPushButton#sidebarButton:hover, QPushButton#playlistSidebarButton:hover {{ background: {t['surface_hover']}; color: {t['text_primary']}; }}
-        QPushButton#sidebarButton[active="true"], QPushButton#playlistSidebarButton[active="true"] {{ background: {t['selection_background']}; color: {t['selection_text']}; border: 1px solid {t['selection_border']}; border-left: 3px solid {t['accent']}; }}
-        QPushButton#sidebarButton:disabled, QPushButton#playlistSidebarButton:disabled {{ background: transparent; color: {t['text_disabled']}; border-color: transparent; }}
-        QPushButton#sidebarWideButton, QPushButton#sidebarMiniButton {{ background: {t['control_overlay']}; color: {t['text_secondary']}; border: 1px solid {t['border']}; }}
-        QPushButton#sidebarWideButton:hover, QPushButton#sidebarMiniButton:hover {{ background: {t['control_overlay_hover']}; color: {t['text_primary']}; border-color: {t['border_strong']}; }}
-        QPushButton#sidebarWideButton:disabled, QPushButton#sidebarMiniButton:disabled {{ background: {t['control_overlay']}; color: {t['text_disabled']}; border-color: {t['border']}; }}
+        QFrame#sidebar QPushButton[navigationItem="true"] {{ background: transparent; color: {t['navigation_text']}; border-color: transparent; }}
+        QFrame#sidebar QPushButton[navigationItem="true"]:hover {{ background: {t['surface_hover']}; color: {t['navigation_text_hover']}; }}
+        QFrame#sidebar QPushButton[navigationItem="true"][active="true"] {{ background: {t['selection_background']}; color: {t['navigation_text_selected']}; border: 1px solid {t['selection_border']}; border-left: 3px solid {t['accent']}; }}
+        QFrame#sidebar QPushButton[navigationItem="true"]:disabled {{ background: transparent; color: {t['navigation_text_disabled']}; border-color: transparent; }}
+        QFrame#sidebar QPushButton[navigationAction="true"] {{ background: {t['control_overlay']}; color: {t['navigation_text']}; border: 1px solid {t['border']}; }}
+        QFrame#sidebar QPushButton[navigationAction="true"]:hover {{ background: {t['control_overlay_hover']}; color: {t['navigation_text_hover']}; border-color: {t['border_strong']}; }}
+        QFrame#sidebar QPushButton[navigationAction="true"]:disabled {{ background: {t['control_overlay']}; color: {t['navigation_text_disabled']}; border-color: {t['border']}; }}
         QLineEdit, QTextEdit, QPlainTextEdit {{ background: {t['input_background']}; color: {t['text_primary']}; border-color: {t['border']}; selection-background-color: {t['accent']}; selection-color: {t['on_accent']}; }}
         QLineEdit:focus, QTextEdit:focus, QPlainTextEdit:focus {{ border-color: {t['accent']}; }}
         QComboBox {{ background: {t['input_background']}; color: {t['text_primary']}; border-color: {t['border']}; }}
