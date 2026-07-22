@@ -17,10 +17,31 @@ from _smoke_storage import activate_isolated_app_storage
 activate_isolated_app_storage("hushplayer-bottom-lyrics-layout-")
 
 from PySide6.QtCore import Qt
+from PySide6.QtGui import QPixmap
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication, QPushButton, QSizePolicy
 
+from app.ui.design_system import UI_CONTROL_SIZES, UI_SPACING
 from app.ui.main_window import MainWindow, NowPlayingLyricsView
+
+
+PLAYER_COVER_RESPONSIVE_TOKENS = {
+    "narrow": (
+        "player_cover_size_compact",
+        "player_height_narrow",
+        "player_vertical_padding_narrow",
+    ),
+    "compact": (
+        "player_cover_size",
+        "player_height_compact",
+        "player_vertical_padding_compact",
+    ),
+    "full": (
+        "player_cover_size_full",
+        "player_height_full",
+        "player_vertical_padding_full",
+    ),
+}
 
 
 def process_layout(
@@ -35,15 +56,44 @@ def process_layout(
         app.processEvents()
 
 
+def assert_bottom_player_cover_profile(window: MainWindow, expected_mode: str) -> None:
+    cover_key, height_key, padding_key = PLAYER_COVER_RESPONSIVE_TOKENS[
+        expected_mode
+    ]
+    expected_cover_size = UI_CONTROL_SIZES[cover_key]
+    assert window._responsive_mode == expected_mode
+    assert window.bottom_cover_label.width() == expected_cover_size
+    assert window.bottom_cover_label.height() == expected_cover_size
+    assert window.player_bar.height() == UI_CONTROL_SIZES[height_key]
+    assert window.player_bar.height() >= expected_cover_size + (
+        UI_CONTROL_SIZES[padding_key] * 2
+    )
+    assert window.play_btn.isVisible()
+    assert window.progress_slider.isVisible()
+    assert window.volume_slider.isVisible()
+    assert window.progress_slider.width() >= window.progress_slider.minimumWidth()
+    assert window.volume_slider.width() >= window.volume_slider.minimumWidth()
+
+
 def run_test(app: QApplication) -> None:
     window = MainWindow()
     window.show()
     process_layout(app, window, 1600, 900)
     try:
-        assert window.bottom_cover_label.size().width() == 48
+        narrow_cover = UI_CONTROL_SIZES["player_cover_size_compact"]
+        compact_cover = UI_CONTROL_SIZES["player_cover_size"]
+        full_cover = UI_CONTROL_SIZES["player_cover_size_full"]
+        assert UI_CONTROL_SIZES["play_button_size"] <= narrow_cover < compact_cover < full_cover
+        assert full_cover <= UI_CONTROL_SIZES["now_playing_cover_size_compact"]
+        assert_bottom_player_cover_profile(window, "full")
+        empty_cover_size = window.bottom_cover_label.size()
+        test_cover = QPixmap(8, 8)
+        test_cover.fill(Qt.GlobalColor.darkBlue)
+        window.show_cover_pixmap(test_cover)
+        assert window.bottom_cover_label.size() == empty_cover_size
         assert window.player_left_box.findChildren(QPushButton) == []
         assert not hasattr(window, "bottom_source_badge")
-        assert window.player_left_box.layout().spacing() == 10
+        assert window.player_left_box.layout().spacing() == UI_SPACING["sm"]
 
         window.bottom_song_title.setText("一首用于验证省略号与提示的很长歌曲标题")
         window.bottom_song_artist.setText("一位名字同样很长的测试歌手")
@@ -51,7 +101,7 @@ def run_test(app: QApplication) -> None:
         assert window.bottom_song_artist.toolTip().endswith("测试歌手")
 
         assert window.like_btn.parent() is window.player_leading_controls
-        assert window.like_btn.size().width() == 36
+        assert window.like_btn.size().width() == UI_CONTROL_SIZES["transport_button_size"]
         assert window.like_btn.iconSize().width() == 20
         assert window.like_btn.text() == ""
         assert not window.like_btn.isEnabled()
@@ -115,6 +165,10 @@ def run_test(app: QApplication) -> None:
 
         for width in (900, 1100, 1450, 1600, 1920, 2560):
             process_layout(app, window, width, 760)
+            expected_mode = "narrow" if width < 1100 else (
+                "compact" if width < 1450 else "full"
+            )
+            assert_bottom_player_cover_profile(window, expected_mode)
             assert window.player_left_box.geometry().right() <= (
                 window.player_center_box.geometry().left()
             )
@@ -127,6 +181,16 @@ def run_test(app: QApplication) -> None:
             assert window.desktop_lyrics_button.geometry().right() <= (
                 window.player_right_box.contentsRect().right()
             )
+
+        process_layout(app, window, 900, 760)
+        assert_bottom_player_cover_profile(window, "narrow")
+        process_layout(app, window, 1600, 900)
+        assert_bottom_player_cover_profile(window, "full")
+        full_cover_size = window.bottom_cover_label.size()
+        for appearance in ("light", "dark", "system"):
+            window.set_appearance_mode(appearance, persist=False)
+            app.processEvents()
+            assert window.bottom_cover_label.size() == full_cover_size
 
         lyrics = [
             (
