@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 import sys
 import time
+from inspect import getsource
 from pathlib import Path
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
@@ -19,11 +20,18 @@ activate_isolated_app_storage("hushplayer-main-ui-third-polish-")
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QColor, QPixmap
 from PySide6.QtTest import QTest
-from PySide6.QtWidgets import QApplication, QListWidgetItem
+from PySide6.QtWidgets import QApplication, QListWidgetItem, QStyleOptionViewItem
 
-from app.ui.design_system import UI_CONTROL_SIZES
-from app.ui.main_window import MainWindow
+from app.ui.design_system import UI_CONTROL_SIZES, UI_TYPOGRAPHY
+from app.ui.main_window import MainWindow, SongLibraryDelegate
 from app.ui.track_list_view import OnlineTrackDelegate, OnlineTrackListWidget
+
+
+# beta.7 intentionally uses a denser, token-driven standard row height.
+BETA7_STANDARD_TRACK_ROW_HEIGHT = 46
+MIN_TRACK_ROW_HEIGHT = 42
+MAX_TRACK_ROW_HEIGHT = 48
+TRACK_ROW_VERTICAL_PADDING = 24
 
 
 def online_track(track_id: str, *, can_play: bool = True) -> dict:
@@ -49,12 +57,43 @@ def process_layout(app: QApplication, window: MainWindow, width: int) -> None:
         app.processEvents()
 
 
+def assert_track_row_design(app: QApplication, window: MainWindow) -> None:
+    """Protect beta.7 list density without pinning it to a stale historical value."""
+    row_height = UI_CONTROL_SIZES["track_row_height"]
+    header_height = UI_CONTROL_SIZES["table_header_height"]
+
+    assert isinstance(row_height, int) and not isinstance(row_height, bool)
+    assert MIN_TRACK_ROW_HEIGHT <= row_height <= MAX_TRACK_ROW_HEIGHT
+    assert row_height == BETA7_STANDARD_TRACK_ROW_HEIGHT
+    assert row_height >= UI_TYPOGRAPHY["font_body"] + TRACK_ROW_VERTICAL_PADDING
+    assert 0 < header_height <= row_height
+
+    delegate = window.song_list.itemDelegate()
+    assert isinstance(delegate, SongLibraryDelegate)
+    first_index = window.song_list.model().index(0, 0)
+    assert first_index.isValid()
+    assert delegate.sizeHint(QStyleOptionViewItem(), first_index).height() == row_height
+    assert 'UI_CONTROL_SIZES["track_row_height"]' in getsource(
+        SongLibraryDelegate.sizeHint
+    )
+
+    for width in (900, 1100, 1450):
+        process_layout(app, window, width)
+        assert UI_CONTROL_SIZES["track_row_height"] == row_height
+        assert delegate.sizeHint(QStyleOptionViewItem(), first_index).height() == row_height
+
+    for appearance_mode in ("light", "dark"):
+        window.set_appearance_mode(appearance_mode, persist=False)
+        app.processEvents()
+        assert UI_CONTROL_SIZES["track_row_height"] == row_height
+        assert delegate.sizeHint(QStyleOptionViewItem(), first_index).height() == row_height
+
+
 def run_test(app: QApplication) -> None:
     window = MainWindow()
     window.show()
     app.processEvents()
     try:
-        assert UI_CONTROL_SIZES["track_row_height"] == 52
         assert window.library_page.page_header.minimumHeight() == 58
         assert window.search_page.page_header.minimumHeight() == 58
         assert window.library_page.page_header.objectName() == "pageHeader"
@@ -108,6 +147,7 @@ def run_test(app: QApplication) -> None:
             window.song_list.itemWidget(window.song_list.item(row)) is None
             for row in range(window.song_list.count())
         )
+        assert_track_row_design(app, window)
         scroll_bar = window.song_list.verticalScrollBar()
         started = time.perf_counter()
         for value in (0, scroll_bar.maximum() // 3, scroll_bar.maximum() * 2 // 3, scroll_bar.maximum()):
