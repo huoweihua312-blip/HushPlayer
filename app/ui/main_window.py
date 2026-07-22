@@ -37,6 +37,7 @@ from app.services.remote_track_store import RemoteTrackStore, RemoteTrackStoreEr
 from app.services.source_registry import SourceRegistryManager
 from app.services.unified_search_service import UnifiedSearchService
 from app.ui.custom_source_manager_page import CustomSourceManagerPage
+from app.ui.clickable_slider import ClickableSlider
 from app.ui.design_system import (
     ACTIVE_THEME_TOKENS,
     UI_CONTROL_SIZES,
@@ -10508,7 +10509,7 @@ class MainWindow(QMainWindow):
         controls_layout.addWidget(trailing_controls)
         controls_layout.addStretch(1)
 
-        self.progress_slider = QSlider(Qt.Orientation.Horizontal)
+        self.progress_slider = ClickableSlider(Qt.Orientation.Horizontal)
         self.progress_slider.setObjectName("progressSlider")
         self.progress_slider.setRange(0, 100)
         self.progress_slider.setValue(0)
@@ -10520,6 +10521,7 @@ class MainWindow(QMainWindow):
         )
         self.progress_slider.sliderPressed.connect(self.on_seek_start)
         self.progress_slider.sliderReleased.connect(self.on_seek_end)
+        self.progress_slider.seekRequested.connect(self.on_progress_slider_seek_requested)
 
         progress_row = QHBoxLayout()
         progress_row.setContentsMargins(0, 0, 0, 0)
@@ -17972,15 +17974,63 @@ class MainWindow(QMainWindow):
 
     def on_seek_end(self) -> None:
         self.is_seeking = False
+        self._submit_progress_seek(self.progress_slider.value())
 
+    def _can_seek_current_media(self) -> bool:
         if self.current_duration <= 0:
-            return
+            return False
+        try:
+            if self.media_player.mediaStatus() in {
+                QMediaPlayer.MediaStatus.NoMedia,
+                QMediaPlayer.MediaStatus.InvalidMedia,
+            }:
+                return False
+            return bool(self.media_player.isSeekable())
+        except (AttributeError, RuntimeError):
+            return False
 
-        slider_value = self.progress_slider.value()
-        target_position = int(self.current_duration * slider_value / 100)
+    def _progress_value_to_position(self, slider_value: int) -> int:
+        minimum = int(self.progress_slider.minimum())
+        maximum = int(self.progress_slider.maximum())
+        value = max(minimum, min(maximum, int(slider_value)))
+        span = max(0, maximum - minimum)
+        if span <= 0 or self.current_duration <= 0:
+            return 0
+        ratio = (value - minimum) / span
+        return max(0, min(int(self.current_duration), round(self.current_duration * ratio)))
+
+    def _restore_progress_slider_position(self) -> None:
+        minimum = int(self.progress_slider.minimum())
+        maximum = int(self.progress_slider.maximum())
+        span = max(0, maximum - minimum)
+        if self.current_duration <= 0 or span <= 0:
+            self.progress_slider.setValue(minimum)
+            return
+        try:
+            position = int(self.media_player.position())
+        except RuntimeError:
+            position = 0
+        position = max(0, min(int(self.current_duration), position))
+        self.progress_slider.setValue(
+            minimum + round(span * position / self.current_duration)
+        )
+
+    def _submit_progress_seek(self, slider_value: int) -> bool:
+        if not self._can_seek_current_media():
+            self._restore_progress_slider_position()
+            return False
+
+        target_position = self._progress_value_to_position(slider_value)
         self.pending_restore_position = 0
         self.media_player.setPosition(target_position)
         self.last_recorded_position = target_position
+        return True
+
+    def on_progress_slider_seek_requested(self, slider_value: int) -> None:
+        """Commit one track-click seek through the same player entry point as drag."""
+        if self.is_seeking:
+            return
+        self._submit_progress_seek(slider_value)
 
     def on_position_changed(self, position: int) -> None:
         if self.is_seeking or self.current_duration <= 0:
