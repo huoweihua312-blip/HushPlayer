@@ -543,6 +543,7 @@ class PlayerIconButton(QPushButton):
     def __init__(self, role: str) -> None:
         super().__init__("")
         self.role = role
+        self._hovered = False
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         self.setIconSize(QSize(22, 22))
 
@@ -566,23 +567,45 @@ class PlayerIconButton(QPushButton):
         if self.role == "play":
             icon_role = "pause" if state_text == "暂停" else "play"
 
-        self.setIcon(self._create_transport_icon(icon_role))
+        self.setIcon(
+            self._create_transport_icon(
+                icon_role,
+                hovered=self._hovered,
+                enabled=self.isEnabled(),
+            )
+        )
         self.setToolTip(state_text)
         self.setAccessibleName(state_text)
         super().setText("")
 
     @staticmethod
-    def _create_transport_icon(role: str) -> QIcon:
+    def _create_transport_icon(
+        role: str,
+        *,
+        hovered: bool = False,
+        enabled: bool = True,
+    ) -> QIcon:
         pixmap = QPixmap(32, 32)
         pixmap.fill(Qt.GlobalColor.transparent)
 
         painter = QPainter(pixmap)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
-        color = QColor(
-            ACTIVE_THEME_TOKENS["on_accent"]
-            if role in {"play", "pause"}
-            else ACTIVE_THEME_TOKENS["text_secondary"]
-        )
+        if role in {"play", "pause"}:
+            color = QColor(
+                ACTIVE_THEME_TOKENS["on_accent"]
+                if enabled
+                else ACTIVE_THEME_TOKENS["text_disabled"]
+            )
+        else:
+            color = QColor(
+                ACTIVE_THEME_TOKENS["player_secondary_hover_icon"]
+                if hovered and enabled
+                else (
+                    ACTIVE_THEME_TOKENS["player_secondary_icon"]
+                    if enabled
+                    else ACTIVE_THEME_TOKENS["player_secondary_disabled_icon"]
+                )
+            )
 
         if role == "play":
             path = QPainterPath()
@@ -613,6 +636,21 @@ class PlayerIconButton(QPushButton):
 
         painter.end()
         return QIcon(pixmap)
+
+    def enterEvent(self, event) -> None:
+        self._hovered = True
+        self._apply_visual(self.toolTip())
+        super().enterEvent(event)
+
+    def leaveEvent(self, event) -> None:
+        self._hovered = False
+        self._apply_visual(self.toolTip())
+        super().leaveEvent(event)
+
+    def changeEvent(self, event) -> None:
+        super().changeEvent(event)
+        if event.type() == QEvent.Type.EnabledChange and hasattr(self, "role"):
+            self._apply_visual(self.toolTip())
 
 
 class VolumeStatusIcon(QLabel):
@@ -651,9 +689,9 @@ class VolumeStatusIcon(QLabel):
         painter = QPainter(pixmap)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
         color = QColor(
-            ACTIVE_THEME_TOKENS["text_primary"]
+            ACTIVE_THEME_TOKENS["player_secondary_hover_icon"]
             if self._hovered
-            else ACTIVE_THEME_TOKENS["text_secondary"]
+            else ACTIVE_THEME_TOKENS["player_secondary_icon"]
         )
 
         speaker = QPainterPath()
@@ -710,6 +748,11 @@ def create_favorite_icon(liked: bool) -> QIcon:
         QRectF(0, 0, 36, 36),
         liked=liked,
         hovered=False,
+        color_override=(
+            None
+            if liked
+            else QColor(ACTIVE_THEME_TOKENS["player_secondary_icon"])
+        ),
     )
     painter.end()
     icon = QIcon(pixmap)
@@ -727,7 +770,7 @@ def create_player_action_icon(role: str) -> QIcon:
     pixmap.fill(Qt.GlobalColor.transparent)
     painter = QPainter(pixmap)
     painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
-    color = QColor(ACTIVE_THEME_TOKENS["text_secondary"])
+    color = QColor(ACTIVE_THEME_TOKENS["player_secondary_icon"])
     pen = QPen(color, 1.8)
     pen.setCapStyle(Qt.PenCapStyle.RoundCap)
     pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
@@ -18600,7 +18643,8 @@ class MainWindow(QMainWindow):
         QMenu#themeQuickMenu::item {{ padding: 8px 28px 8px 10px; border-radius: {UI_RADII['small']}px; }}
         QMenu#themeQuickMenu::item:selected {{ background: {t['surface_hover']}; color: {t['text_primary']}; }}
         QMenu#themeQuickMenu::indicator:checked {{ background: {t['accent']}; border-radius: 4px; }}
-        QFrame#sidebar, QFrame#playerBar, QFrame#nowPlayingPanel {{ background: {t['surface']}; border-color: {t['border']}; }}
+        QFrame#sidebar, QFrame#nowPlayingPanel {{ background: {t['surface']}; border-color: {t['border']}; }}
+        QFrame#playerBar {{ background: {t['player_surface']}; border: none; border-top: 1px solid {t['player_surface_separator']}; border-bottom-left-radius: {UI_RADII['shell']}px; border-bottom-right-radius: {UI_RADII['shell']}px; }}
         QLabel#appTitle {{ color: {t['text_primary']}; }}
         QLabel#appSubtitle, QLabel#sidebarGroupHint, QLabel#sidebarHint, QLabel#sidebarSectionTitle {{ color: {t['text_muted']}; }}
         QFrame#sidebar QPushButton[navigationItem="true"] {{ background: transparent; color: {t['navigation_text']}; border-color: transparent; }}
@@ -18637,30 +18681,40 @@ class MainWindow(QMainWindow):
         QListWidget#songList::item:hover, QListWidget#playQueuePageList::item:hover {{ background: {t['surface_hover']}; }}
         QListWidget#songList::item:selected, QListWidget#playQueuePageList::item:selected {{ background: {t['selection_background']}; color: {t['selection_text']}; }}
         QSlider#progressSlider::groove:horizontal, QSlider#volumeSlider::groove:horizontal {{ background: {t['slider_groove']}; }}
-        QSlider#progressSlider::handle:horizontal, QSlider#volumeSlider::handle:horizontal {{ background: {t['slider_handle']}; border-color: {t['border_strong']}; }}
-        QPushButton#transportButton[playerTransportButton="true"], QPushButton#likeButton[playerFavoriteButton="true"] {{ background: {t['control_overlay']}; color: {t['text_secondary']}; border: 1px solid {t['border']}; border-radius: {UI_CONTROL_SIZES['transport_button_size'] // 2}px; padding: 0; }}
-        QPushButton#transportButton[playerTransportButton="true"]:hover, QPushButton#likeButton[playerFavoriteButton="true"]:hover {{ background: {t['control_overlay_hover']}; color: {t['text_primary']}; border-color: {t['border_strong']}; }}
-        QPushButton#transportButton[playerTransportButton="true"]:pressed, QPushButton#likeButton[playerFavoriteButton="true"]:pressed {{ background: {t['control_overlay_pressed']}; }}
-        QPushButton#transportButton[playerTransportButton="true"]:disabled, QPushButton#likeButton[playerFavoriteButton="true"]:disabled {{ background: {t['control_overlay']}; color: {t['text_disabled']}; border-color: {t['border']}; }}
-        QPushButton#playerLyricsButton, QPushButton#libraryMoreButton {{ background: {t['control_overlay']}; color: {t['text_secondary']}; border-color: {t['border']}; }}
-        QPushButton#playerLyricsButton:hover, QPushButton#libraryMoreButton:hover {{ background: {t['control_overlay_hover']}; color: {t['text_primary']}; border-color: {t['border_strong']}; }}
+        QSlider#progressSlider::sub-page:horizontal, QSlider#volumeSlider::sub-page:horizontal {{ background: {t['slider_fill']}; }}
+        QSlider#progressSlider::handle:horizontal, QSlider#volumeSlider::handle:horizontal {{ background: {t['slider_handle']}; border: 1px solid {t['slider_handle_border']}; }}
+        QSlider#progressSlider::handle:horizontal:hover, QSlider#volumeSlider::handle:horizontal:hover {{ background: {t['slider_handle_hover']}; border-color: {t['player_secondary_hover_border']}; }}
+        QSlider#progressSlider:disabled::groove:horizontal, QSlider#volumeSlider:disabled::groove:horizontal {{ background: {t['slider_disabled']}; }}
+        QSlider#progressSlider:disabled::sub-page:horizontal, QSlider#volumeSlider:disabled::sub-page:horizontal {{ background: {t['slider_disabled']}; }}
+        QSlider#progressSlider:disabled::handle:horizontal, QSlider#volumeSlider:disabled::handle:horizontal {{ background: {t['player_secondary_disabled_background']}; border-color: {t['slider_disabled']}; }}
+        QPushButton#transportButton[playerTransportButton="true"], QPushButton#likeButton[playerFavoriteButton="true"] {{ background: {t['player_secondary_background']}; color: {t['player_secondary_icon']}; border: 1px solid {t['player_secondary_border']}; border-radius: {UI_CONTROL_SIZES['transport_button_size'] // 2}px; padding: 0; }}
+        QPushButton#transportButton[playerTransportButton="true"]:hover, QPushButton#likeButton[playerFavoriteButton="true"]:hover {{ background: {t['player_secondary_hover_background']}; color: {t['player_secondary_hover_icon']}; border-color: {t['player_secondary_hover_border']}; }}
+        QPushButton#transportButton[playerTransportButton="true"]:pressed, QPushButton#likeButton[playerFavoriteButton="true"]:pressed {{ background: {t['player_secondary_pressed_background']}; color: {t['player_secondary_hover_icon']}; border-color: {t['player_secondary_pressed_border']}; }}
+        QPushButton#transportButton[playerTransportButton="true"]:disabled, QPushButton#likeButton[playerFavoriteButton="true"]:disabled {{ background: {t['player_secondary_disabled_background']}; color: {t['player_secondary_disabled_icon']}; border-color: {t['player_secondary_border']}; }}
+        QPushButton#playerLyricsButton {{ background: {t['player_secondary_background']}; color: {t['player_secondary_icon']}; border: 1px solid {t['player_secondary_border']}; }}
+        QPushButton#playerLyricsButton:hover {{ background: {t['player_secondary_hover_background']}; color: {t['player_secondary_hover_icon']}; border-color: {t['player_secondary_hover_border']}; }}
+        QPushButton#playerLyricsButton:pressed {{ background: {t['player_secondary_pressed_background']}; color: {t['player_secondary_hover_icon']}; border-color: {t['player_secondary_pressed_border']}; }}
+        QPushButton#playerLyricsButton:disabled {{ background: {t['player_secondary_disabled_background']}; color: {t['player_secondary_disabled_icon']}; border-color: {t['player_secondary_border']}; }}
+        QPushButton#libraryMoreButton {{ background: {t['control_overlay']}; color: {t['text_secondary']}; border-color: {t['border']}; }}
+        QPushButton#libraryMoreButton:hover {{ background: {t['control_overlay_hover']}; color: {t['text_primary']}; border-color: {t['border_strong']}; }}
         QPushButton#transportPlayButton[playerPrimaryButton="true"] {{ background: {t['accent']}; color: {t['on_accent']}; border: 1px solid {t['border']}; border-radius: {UI_CONTROL_SIZES['play_button_size'] // 2}px; padding: 0; }}
         QPushButton#transportPlayButton[playerPrimaryButton="true"]:hover {{ background: {t['accent_hover']}; border-color: {t['border_strong']}; }}
         QPushButton#transportPlayButton[playerPrimaryButton="true"]:pressed {{ background: {t['accent_pressed']}; }}
         QPushButton#transportPlayButton[playerPrimaryButton="true"]:disabled {{ background: {t['surface_pressed']}; color: {t['text_disabled']}; border-color: {t['border']}; }}
-        QPushButton#controlButton[playerModeButton="true"] {{ background: {t['control_overlay']}; color: {t['text_secondary']}; border: 1px solid {t['border']}; border-radius: {UI_CONTROL_SIZES['player_mode_button_height'] // 2}px; padding: 0 {UI_SPACING['sm']}px; font-size: {UI_TYPOGRAPHY['font_secondary']}px; font-weight: 600; }}
-        QPushButton#controlButton[playerModeButton="true"]:hover {{ background: {t['control_overlay_hover']}; color: {t['text_primary']}; border-color: {t['border_strong']}; }}
-        QPushButton#controlButton[playerModeButton="true"]:pressed {{ background: {t['control_overlay_pressed']}; color: {t['text_primary']}; border-color: {t['border_strong']}; }}
-        QPushButton#controlButton[playerModeButton="true"]:disabled {{ background: {t['control_overlay']}; color: {t['text_disabled']}; border-color: {t['border']}; }}
+        QPushButton#controlButton[playerModeButton="true"] {{ background: {t['player_secondary_background']}; color: {t['player_secondary_icon']}; border: 1px solid {t['player_secondary_border']}; border-radius: {UI_CONTROL_SIZES['player_mode_button_height'] // 2}px; padding: 0 {UI_SPACING['sm']}px; font-size: {UI_TYPOGRAPHY['font_secondary']}px; font-weight: 600; }}
+        QPushButton#controlButton[playerModeButton="true"]:hover {{ background: {t['player_secondary_hover_background']}; color: {t['player_secondary_hover_icon']}; border-color: {t['player_secondary_hover_border']}; }}
+        QPushButton#controlButton[playerModeButton="true"]:pressed {{ background: {t['player_secondary_pressed_background']}; color: {t['player_secondary_hover_icon']}; border-color: {t['player_secondary_pressed_border']}; }}
+        QPushButton#controlButton[playerModeButton="true"]:disabled {{ background: {t['player_secondary_disabled_background']}; color: {t['player_secondary_disabled_icon']}; border-color: {t['player_secondary_border']}; }}
         QLabel#coverLabel, QLabel#bottomCoverLabel {{ background: transparent; border: none; }}
-        QPushButton#likeButton[playerFavoriteButton="true"][liked="true"] {{ background: {t['control_overlay']}; color: {t['danger']}; border-color: {t['border']}; }}
-        QPushButton#likeButton[playerFavoriteButton="true"][liked="true"]:hover, QPushButton#likeButton[playerFavoriteButton="true"][liked="true"]:pressed {{ background: {t['danger_soft']}; color: {t['danger']}; border-color: {t['border_strong']}; }}
-        QPushButton#likeButton[playerFavoriteButton="true"][liked="true"]:disabled {{ background: {t['control_overlay']}; color: {t['text_disabled']}; border-color: {t['border']}; }}
-        QPushButton#nowLikeButton {{ background: {t['control_overlay']}; color: {t['text_secondary']}; border: 1px solid {t['border']}; }}
-        QPushButton#nowLikeButton:hover {{ background: {t['control_overlay_hover']}; color: {t['text_primary']}; border-color: {t['border_strong']}; }}
-        QPushButton#nowLikeButton[liked="true"] {{ background: {t['danger_soft']}; color: {t['danger']}; border-color: {t['danger']}; }}
-        QPushButton#nowLikeButton[liked="true"]:hover {{ background: {t['danger_soft']}; color: {t['danger']}; border-color: {t['danger']}; }}
-        QPushButton#nowLikeButton:disabled {{ background: {t['control_overlay']}; color: {t['text_disabled']}; border-color: {t['border']}; }}
+        QPushButton#likeButton[playerFavoriteButton="true"][liked="true"] {{ background: {t['danger_soft']}; color: {t['danger']}; border-color: {t['player_secondary_border']}; }}
+        QPushButton#likeButton[playerFavoriteButton="true"][liked="true"]:hover, QPushButton#likeButton[playerFavoriteButton="true"][liked="true"]:pressed {{ background: {t['danger_soft']}; color: {t['danger']}; border-color: {t['player_secondary_hover_border']}; }}
+        QPushButton#likeButton[playerFavoriteButton="true"][liked="true"]:disabled {{ background: {t['player_secondary_disabled_background']}; color: {t['player_secondary_disabled_icon']}; border-color: {t['player_secondary_border']}; }}
+        QPushButton#nowLikeButton, QPushButton#nowPlayingMoreButton {{ background: {t['player_secondary_background']}; color: {t['player_secondary_icon']}; border: 1px solid {t['player_secondary_border']}; }}
+        QPushButton#nowLikeButton:hover, QPushButton#nowPlayingMoreButton:hover {{ background: {t['player_secondary_hover_background']}; color: {t['player_secondary_hover_icon']}; border-color: {t['player_secondary_hover_border']}; }}
+        QPushButton#nowLikeButton:pressed, QPushButton#nowPlayingMoreButton:pressed {{ background: {t['player_secondary_pressed_background']}; color: {t['player_secondary_hover_icon']}; border-color: {t['player_secondary_pressed_border']}; }}
+        QPushButton#nowLikeButton[liked="true"] {{ background: {t['danger_soft']}; color: {t['danger']}; border-color: {t['player_secondary_border']}; }}
+        QPushButton#nowLikeButton[liked="true"]:hover, QPushButton#nowLikeButton[liked="true"]:pressed {{ background: {t['danger_soft']}; color: {t['danger']}; border-color: {t['player_secondary_hover_border']}; }}
+        QPushButton#nowLikeButton:disabled, QPushButton#nowPlayingMoreButton:disabled {{ background: {t['player_secondary_disabled_background']}; color: {t['player_secondary_disabled_icon']}; border-color: {t['player_secondary_border']}; }}
         QLabel#listEmptyHint {{ background: {t['surface_secondary']}; color: {t['text_muted']}; border-color: {t['border_strong']}; }}
         """
 

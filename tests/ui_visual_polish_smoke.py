@@ -143,10 +143,14 @@ def run_test(app: QApplication) -> None:
             assert 'QPushButton#controlButton[playerModeButton="true"]:disabled' in player_qss
             assert 'QPushButton#controlButton[playerModeButton="true"]' in player_qss
             assert "modeActive" not in player_qss
-            assert (
-                f"background: {tokens['control_overlay']}; "
-                f"color: {tokens['text_secondary']};"
-            ) in player_qss
+            assert f"background: {tokens['player_secondary_background']};" in player_qss
+            assert f"color: {tokens['player_secondary_icon']};" in player_qss
+            assert f"border-color: {tokens['player_secondary_border']};" in player_qss
+            assert f"background: {tokens['player_surface']};" in player_qss
+            assert f"border-top: 1px solid {tokens['player_surface_separator']};" in player_qss
+            assert f"background: {tokens['slider_groove']};" in player_qss
+            assert f"background: {tokens['slider_fill']};" in player_qss
+            assert f"border: 1px solid {tokens['slider_handle_border']};" in player_qss
             for mode, label in expected_mode_labels.items():
                 window.play_mode = mode
                 window.update_play_mode_button()

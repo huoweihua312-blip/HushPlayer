@@ -64,6 +64,7 @@ def draw_track_like_icon(
     liked: bool,
     hovered: bool = False,
     pressed: bool = False,
+    color_override: QColor | None = None,
 ) -> None:
     icon_size = min(20.0, max(14.0, min(rect.width(), rect.height()) - 8.0))
     if pressed:
@@ -132,15 +133,19 @@ def draw_track_like_icon(
     )
     path.closeSubpath()
     color = QColor(
-        ACTIVE_THEME_TOKENS["favorite"]
-        if liked
+        color_override
+        if color_override is not None
         else (
-            ACTIVE_THEME_TOKENS["text"]
-            if hovered
-            else ACTIVE_THEME_TOKENS["text_muted"]
+            ACTIVE_THEME_TOKENS["favorite"]
+            if liked
+            else (
+                ACTIVE_THEME_TOKENS["text"]
+                if hovered
+                else ACTIVE_THEME_TOKENS["text_muted"]
+            )
         )
     )
-    if not liked and not hovered:
+    if not liked and not hovered and color_override is None:
         color.setAlpha(145)
     pen = QPen(color, 1.8)
     pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)

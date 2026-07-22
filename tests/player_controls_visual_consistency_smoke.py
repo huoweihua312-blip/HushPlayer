@@ -17,7 +17,7 @@ activate_isolated_app_storage("hushplayer-player-controls-")
 
 from PySide6.QtWidgets import QApplication
 
-from app.ui.design_system import UI_CONTROL_SIZES
+from app.ui.design_system import DARK_THEME_TOKENS, LIGHT_THEME_TOKENS, UI_CONTROL_SIZES
 from app.ui.main_window import MainWindow
 
 
@@ -32,6 +32,24 @@ def _qss_rule(qss: str, selector: str) -> str:
     start = qss.index(selector)
     end = qss.index("}", start) + 1
     return qss[start:end]
+
+
+def _relative_luminance(color: str) -> float:
+    value = color.lstrip("#")
+    channels = [int(value[index:index + 2], 16) / 255 for index in range(0, 6, 2)]
+
+    def linearize(channel: float) -> float:
+        return channel / 12.92 if channel <= 0.04045 else ((channel + 0.055) / 1.055) ** 2.4
+
+    red, green, blue = (linearize(channel) for channel in channels)
+    return 0.2126 * red + 0.7152 * green + 0.0722 * blue
+
+
+def _contrast_ratio(first: str, second: str) -> float:
+    first_luminance = _relative_luminance(first)
+    second_luminance = _relative_luminance(second)
+    lighter, darker = sorted((first_luminance, second_luminance), reverse=True)
+    return (lighter + 0.05) / (darker + 0.05)
 
 
 def _assert_control_geometry(window: MainWindow) -> None:
@@ -59,6 +77,41 @@ def _assert_control_geometry(window: MainWindow) -> None:
 
 
 def run_test(app: QApplication) -> None:
+    player_tokens = {
+        "player_surface",
+        "player_border",
+        "player_surface_separator",
+        "player_secondary_background",
+        "player_secondary_border",
+        "player_secondary_icon",
+        "player_secondary_hover_background",
+        "player_secondary_hover_border",
+        "player_secondary_hover_icon",
+        "player_secondary_pressed_background",
+        "player_secondary_pressed_border",
+        "player_secondary_disabled_background",
+        "player_secondary_disabled_icon",
+        "slider_groove",
+        "slider_fill",
+        "slider_handle",
+        "slider_handle_border",
+        "slider_handle_hover",
+        "slider_disabled",
+    }
+    assert player_tokens.issubset(DARK_THEME_TOKENS)
+    assert player_tokens.issubset(LIGHT_THEME_TOKENS)
+    assert LIGHT_THEME_TOKENS["player_surface"] != LIGHT_THEME_TOKENS["surface"]
+    assert LIGHT_THEME_TOKENS["player_surface_separator"] != LIGHT_THEME_TOKENS["player_surface"]
+    assert LIGHT_THEME_TOKENS["player_secondary_background"] != LIGHT_THEME_TOKENS["player_surface"]
+    assert _contrast_ratio(
+        LIGHT_THEME_TOKENS["player_secondary_icon"],
+        LIGHT_THEME_TOKENS["player_secondary_background"],
+    ) >= 4.5
+    assert _contrast_ratio(
+        LIGHT_THEME_TOKENS["player_secondary_disabled_icon"],
+        LIGHT_THEME_TOKENS["player_secondary_disabled_background"],
+    ) >= 3.0
+
     window = MainWindow()
     window.show()
     app.processEvents()
@@ -91,14 +144,32 @@ def run_test(app: QApplication) -> None:
             assert f"border-radius: {UI_CONTROL_SIZES['play_button_size'] // 2}px" in qss
             assert tokens["text_secondary"] != tokens["surface"]
             assert tokens["text_primary"] != tokens["surface"]
+            assert f"background: {tokens['player_surface']};" in qss
+            assert f"border-top: 1px solid {tokens['player_surface_separator']};" in qss
+            assert f"background: {tokens['player_secondary_background']};" in qss
+            assert f"color: {tokens['player_secondary_icon']};" in qss
+            assert f"background: {tokens['player_secondary_hover_background']};" in qss
+            assert f"background: {tokens['player_secondary_pressed_background']};" in qss
+            assert f"background: {tokens['player_secondary_disabled_background']};" in qss
+            assert f"background: {tokens['slider_groove']};" in qss
+            assert f"background: {tokens['slider_fill']};" in qss
+            assert f"border: 1px solid {tokens['slider_handle_border']};" in qss
+            assert 'QSlider#progressSlider:disabled::groove:horizontal' in qss
+            assert 'QPushButton#playerLyricsButton:pressed' in qss
 
             liked_rule = _qss_rule(
                 qss,
                 'QPushButton#likeButton[playerFavoriteButton="true"][liked="true"]',
             )
             assert f"color: {tokens['danger']}" in liked_rule
-            assert f"border-color: {tokens['border']}" in liked_rule
+            assert f"border-color: {tokens['player_secondary_border']}" in liked_rule
             assert f"border-color: {tokens['danger']}" not in liked_rule
+
+            now_liked_rule = _qss_rule(qss, 'QPushButton#nowLikeButton[liked="true"]')
+            assert f"background: {tokens['danger_soft']}" in now_liked_rule
+            assert f"color: {tokens['danger']}" in now_liked_rule
+            assert f"border-color: {tokens['player_secondary_border']}" in now_liked_rule
+            assert f"border-color: {tokens['danger']}" not in now_liked_rule
 
             for width in (900, 1100, 1450, 1920, 2560):
                 _process_layout(app, window, width)
