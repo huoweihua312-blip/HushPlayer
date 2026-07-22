@@ -10472,10 +10472,11 @@ class MainWindow(QMainWindow):
 
         self.like_btn = QPushButton("")
         self.like_btn.setObjectName("likeButton")
+        self.like_btn.setProperty("playerFavoriteButton", True)
         self.like_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.like_btn.setFixedSize(
-            UI_CONTROL_SIZES["control_height_normal"],
-            UI_CONTROL_SIZES["control_height_normal"],
+            UI_CONTROL_SIZES["transport_button_size"],
+            UI_CONTROL_SIZES["transport_button_size"],
         )
         self.like_btn.setIconSize(
             QSize(UI_CONTROL_SIZES["icon_normal"], UI_CONTROL_SIZES["icon_normal"])
@@ -10498,8 +10499,11 @@ class MainWindow(QMainWindow):
         )
 
         self.prev_btn.setObjectName("transportButton")
+        self.prev_btn.setProperty("playerTransportButton", True)
         self.play_btn.setObjectName("transportPlayButton")
+        self.play_btn.setProperty("playerPrimaryButton", True)
         self.next_btn.setObjectName("transportButton")
+        self.next_btn.setProperty("playerTransportButton", True)
 
         self.prev_btn.setToolTip("上一首  Ctrl+←")
         self.play_btn.setToolTip("播放  Ctrl+Space")
@@ -10511,29 +10515,36 @@ class MainWindow(QMainWindow):
 
         self.play_mode_btn = QPushButton("列表循环")
         self.play_mode_btn.setObjectName("controlButton")
+        self.play_mode_btn.setProperty("playerModeButton", True)
         self.play_mode_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.play_mode_btn.setMinimumWidth(76)
-        self.play_mode_btn.setMaximumWidth(96)
-        self.play_mode_btn.setFixedHeight(UI_CONTROL_SIZES["control_height_normal"])
+        self.play_mode_btn.setMinimumWidth(UI_CONTROL_SIZES["player_mode_button_min_width"])
+        self.play_mode_btn.setMaximumWidth(UI_CONTROL_SIZES["player_mode_button_max_width"])
+        self.play_mode_btn.setFixedHeight(UI_CONTROL_SIZES["player_mode_button_height"])
         self.play_mode_btn.setToolTip("切换播放模式")
         self.play_mode_btn.clicked.connect(self.toggle_play_mode)
 
         leading_controls = QFrame()
         leading_controls.setObjectName("playerControlSide")
-        leading_controls.setFixedWidth(120)
+        leading_controls.setFixedSize(
+            UI_CONTROL_SIZES["player_control_group_width"],
+            UI_CONTROL_SIZES["play_button_size"],
+        )
         leading_layout = QHBoxLayout(leading_controls)
         leading_layout.setContentsMargins(0, 0, 0, 0)
-        leading_layout.setSpacing(UI_SPACING["xs"])
+        leading_layout.setSpacing(UI_SPACING["sm"])
         leading_layout.addStretch(1)
         leading_layout.addWidget(self.like_btn)
         leading_layout.addWidget(self.prev_btn)
 
         trailing_controls = QFrame()
         trailing_controls.setObjectName("playerControlSide")
-        trailing_controls.setFixedWidth(120)
+        trailing_controls.setFixedSize(
+            UI_CONTROL_SIZES["player_control_group_width"],
+            UI_CONTROL_SIZES["play_button_size"],
+        )
         trailing_layout = QHBoxLayout(trailing_controls)
         trailing_layout.setContentsMargins(0, 0, 0, 0)
-        trailing_layout.setSpacing(UI_SPACING["xs"])
+        trailing_layout.setSpacing(UI_SPACING["sm"])
         trailing_layout.addWidget(self.next_btn)
         trailing_layout.addWidget(self.play_mode_btn)
         trailing_layout.addStretch(1)
@@ -17730,12 +17741,8 @@ class MainWindow(QMainWindow):
         self.play_mode_btn.setText(text)
         self.play_mode_btn.setToolTip(f"当前模式：{text}；点击切换")
         self.play_mode_btn.setAccessibleName(f"播放模式：{text}")
-        # This button always represents the current playback mode.  Keep every
-        # mode on the same subtle selected treatment instead of making only
-        # sequence look inactive and the other labels turn accent blue.
-        self.play_mode_btn.setProperty("modeActive", True)
-        self.play_mode_btn.style().unpolish(self.play_mode_btn)
-        self.play_mode_btn.style().polish(self.play_mode_btn)
+        # The label itself communicates the current mode.  Keeping a dedicated
+        # button role avoids inheriting a generic checked/selected button style.
         self.play_mode_btn.update()
 
     def play_song_by_row(self, row: int) -> None:
@@ -18631,27 +18638,29 @@ class MainWindow(QMainWindow):
         QListWidget#songList::item:selected, QListWidget#playQueuePageList::item:selected {{ background: {t['selection_background']}; color: {t['selection_text']}; }}
         QSlider#progressSlider::groove:horizontal, QSlider#volumeSlider::groove:horizontal {{ background: {t['slider_groove']}; }}
         QSlider#progressSlider::handle:horizontal, QSlider#volumeSlider::handle:horizontal {{ background: {t['slider_handle']}; border-color: {t['border_strong']}; }}
-        QPushButton#transportButton {{ background: {t['control_overlay']}; color: {t['text_secondary']}; border: 1px solid {t['border']}; border-radius: {UI_CONTROL_SIZES['transport_button_size'] // 2}px; padding: 0; }}
-        QPushButton#transportButton:hover {{ background: {t['control_overlay_hover']}; color: {t['text_primary']}; border-color: {t['border_strong']}; }}
-        QPushButton#transportButton:pressed {{ background: {t['control_overlay_pressed']}; }}
-        QPushButton#transportButton:disabled {{ background: {t['control_overlay']}; color: {t['text_disabled']}; border-color: {t['border']}; }}
+        QPushButton#transportButton[playerTransportButton="true"], QPushButton#likeButton[playerFavoriteButton="true"] {{ background: {t['control_overlay']}; color: {t['text_secondary']}; border: 1px solid {t['border']}; border-radius: {UI_CONTROL_SIZES['transport_button_size'] // 2}px; padding: 0; }}
+        QPushButton#transportButton[playerTransportButton="true"]:hover, QPushButton#likeButton[playerFavoriteButton="true"]:hover {{ background: {t['control_overlay_hover']}; color: {t['text_primary']}; border-color: {t['border_strong']}; }}
+        QPushButton#transportButton[playerTransportButton="true"]:pressed, QPushButton#likeButton[playerFavoriteButton="true"]:pressed {{ background: {t['control_overlay_pressed']}; }}
+        QPushButton#transportButton[playerTransportButton="true"]:disabled, QPushButton#likeButton[playerFavoriteButton="true"]:disabled {{ background: {t['control_overlay']}; color: {t['text_disabled']}; border-color: {t['border']}; }}
         QPushButton#playerLyricsButton, QPushButton#libraryMoreButton {{ background: {t['control_overlay']}; color: {t['text_secondary']}; border-color: {t['border']}; }}
         QPushButton#playerLyricsButton:hover, QPushButton#libraryMoreButton:hover {{ background: {t['control_overlay_hover']}; color: {t['text_primary']}; border-color: {t['border_strong']}; }}
-        QPushButton#transportPlayButton {{ background: {t['accent']}; color: {t['on_accent']}; border-color: {t['border_strong']}; border-radius: {UI_CONTROL_SIZES['play_button_size'] // 2}px; padding: 0; }}
-        QPushButton#transportPlayButton:hover {{ background: {t['accent_hover']}; }}
-        QPushButton#controlButton {{ background: {t['control_overlay']}; color: {t['text_secondary']}; border: 1px solid {t['border']}; border-radius: {UI_RADII['control']}px; padding: 0 10px; font-size: {UI_TYPOGRAPHY['font_secondary']}px; font-weight: 600; }}
-        QPushButton#controlButton:hover {{ background: {t['control_overlay_hover']}; color: {t['text_primary']}; border-color: {t['border_strong']}; }}
-        QPushButton#controlButton:pressed {{ background: {t['control_overlay_pressed']}; }}
-        QPushButton#controlButton:disabled {{ background: {t['control_overlay']}; color: {t['text_disabled']}; border-color: {t['border']}; }}
-        QPushButton#controlButton[modeActive="true"] {{ background: {t['selection_background']}; color: {t['text_primary']}; border-color: {t['selection_border']}; font-weight: 600; }}
-        QPushButton#controlButton[modeActive="true"]:hover {{ background: {t['selection_background']}; color: {t['text_primary']}; border-color: {t['accent']}; }}
-        QPushButton#controlButton[modeActive="true"]:pressed {{ background: {t['surface_pressed']}; color: {t['text_primary']}; border-color: {t['selection_border']}; }}
+        QPushButton#transportPlayButton[playerPrimaryButton="true"] {{ background: {t['accent']}; color: {t['on_accent']}; border: 1px solid {t['border']}; border-radius: {UI_CONTROL_SIZES['play_button_size'] // 2}px; padding: 0; }}
+        QPushButton#transportPlayButton[playerPrimaryButton="true"]:hover {{ background: {t['accent_hover']}; border-color: {t['border_strong']}; }}
+        QPushButton#transportPlayButton[playerPrimaryButton="true"]:pressed {{ background: {t['accent_pressed']}; }}
+        QPushButton#transportPlayButton[playerPrimaryButton="true"]:disabled {{ background: {t['surface_pressed']}; color: {t['text_disabled']}; border-color: {t['border']}; }}
+        QPushButton#controlButton[playerModeButton="true"] {{ background: {t['control_overlay']}; color: {t['text_secondary']}; border: 1px solid {t['border']}; border-radius: {UI_CONTROL_SIZES['player_mode_button_height'] // 2}px; padding: 0 {UI_SPACING['sm']}px; font-size: {UI_TYPOGRAPHY['font_secondary']}px; font-weight: 600; }}
+        QPushButton#controlButton[playerModeButton="true"]:hover {{ background: {t['control_overlay_hover']}; color: {t['text_primary']}; border-color: {t['border_strong']}; }}
+        QPushButton#controlButton[playerModeButton="true"]:pressed {{ background: {t['control_overlay_pressed']}; color: {t['text_primary']}; border-color: {t['border_strong']}; }}
+        QPushButton#controlButton[playerModeButton="true"]:disabled {{ background: {t['control_overlay']}; color: {t['text_disabled']}; border-color: {t['border']}; }}
         QLabel#coverLabel, QLabel#bottomCoverLabel {{ background: transparent; border: none; }}
-        QPushButton#likeButton, QPushButton#nowLikeButton {{ background: {t['control_overlay']}; color: {t['text_secondary']}; border: 1px solid {t['border']}; }}
-        QPushButton#likeButton:hover, QPushButton#nowLikeButton:hover {{ background: {t['control_overlay_hover']}; color: {t['text_primary']}; border-color: {t['border_strong']}; }}
-        QPushButton#likeButton[liked="true"], QPushButton#nowLikeButton[liked="true"] {{ background: {t['danger_soft']}; color: {t['danger']}; border-color: {t['danger']}; }}
-        QPushButton#likeButton[liked="true"]:hover, QPushButton#nowLikeButton[liked="true"]:hover {{ background: {t['danger_soft']}; color: {t['danger']}; border-color: {t['danger']}; }}
-        QPushButton#likeButton:disabled, QPushButton#nowLikeButton:disabled {{ background: {t['control_overlay']}; color: {t['text_disabled']}; border-color: {t['border']}; }}
+        QPushButton#likeButton[playerFavoriteButton="true"][liked="true"] {{ background: {t['control_overlay']}; color: {t['danger']}; border-color: {t['border']}; }}
+        QPushButton#likeButton[playerFavoriteButton="true"][liked="true"]:hover, QPushButton#likeButton[playerFavoriteButton="true"][liked="true"]:pressed {{ background: {t['danger_soft']}; color: {t['danger']}; border-color: {t['border_strong']}; }}
+        QPushButton#likeButton[playerFavoriteButton="true"][liked="true"]:disabled {{ background: {t['control_overlay']}; color: {t['text_disabled']}; border-color: {t['border']}; }}
+        QPushButton#nowLikeButton {{ background: {t['control_overlay']}; color: {t['text_secondary']}; border: 1px solid {t['border']}; }}
+        QPushButton#nowLikeButton:hover {{ background: {t['control_overlay_hover']}; color: {t['text_primary']}; border-color: {t['border_strong']}; }}
+        QPushButton#nowLikeButton[liked="true"] {{ background: {t['danger_soft']}; color: {t['danger']}; border-color: {t['danger']}; }}
+        QPushButton#nowLikeButton[liked="true"]:hover {{ background: {t['danger_soft']}; color: {t['danger']}; border-color: {t['danger']}; }}
+        QPushButton#nowLikeButton:disabled {{ background: {t['control_overlay']}; color: {t['text_disabled']}; border-color: {t['border']}; }}
         QLabel#listEmptyHint {{ background: {t['surface_secondary']}; color: {t['text_muted']}; border-color: {t['border_strong']}; }}
         """
 
@@ -18713,7 +18722,8 @@ class MainWindow(QMainWindow):
             border-color: {t["selected_border"]};
         }}
 
-        QPushButton#transportButton {{
+        QPushButton#transportButton[playerTransportButton="true"],
+        QPushButton#likeButton[playerFavoriteButton="true"] {{
             background: {t["control_overlay"]};
             color: {t["text_secondary"]};
             border: 1px solid {t["border"]};
@@ -18721,35 +18731,39 @@ class MainWindow(QMainWindow):
             padding: 0;
         }}
 
-        QPushButton#transportButton:hover {{
+        QPushButton#transportButton[playerTransportButton="true"]:hover,
+        QPushButton#likeButton[playerFavoriteButton="true"]:hover {{
             background: {t["control_overlay_hover"]};
             color: {t["text_primary"]};
             border-color: {t["border_strong"]};
         }}
 
-        QPushButton#transportButton:pressed {{
+        QPushButton#transportButton[playerTransportButton="true"]:pressed,
+        QPushButton#likeButton[playerFavoriteButton="true"]:pressed {{
             background: {t["control_overlay_pressed"]};
         }}
 
-        QPushButton#transportButton:disabled,
-        QPushButton#transportPlayButton:disabled {{
+        QPushButton#transportButton[playerTransportButton="true"]:disabled,
+        QPushButton#likeButton[playerFavoriteButton="true"]:disabled,
+        QPushButton#transportPlayButton[playerPrimaryButton="true"]:disabled {{
             background: {t["panel_bg"]};
             color: {t["text_disabled"]};
             border-color: {t["border"]};
         }}
 
-        QPushButton#transportPlayButton {{
+        QPushButton#transportPlayButton[playerPrimaryButton="true"] {{
             background: {t["accent"]};
-            border: 1px solid rgba(255, 255, 255, 0.16);
-            border-radius: 25px;
+            color: {t["on_accent"]};
+            border: 1px solid {t["border"]};
+            border-radius: {UI_CONTROL_SIZES["play_button_size"] // 2}px;
             padding: 0;
         }}
 
-        QPushButton#transportPlayButton:hover {{
+        QPushButton#transportPlayButton[playerPrimaryButton="true"]:hover {{
             background: {t["accent_hover"]};
         }}
 
-        QPushButton#transportPlayButton:pressed {{
+        QPushButton#transportPlayButton[playerPrimaryButton="true"]:pressed {{
             background: {t["accent_pressed"]};
         }}
 
@@ -19047,35 +19061,17 @@ class MainWindow(QMainWindow):
             font-weight: 700;
         }}
 
-        QPushButton#likeButton {{
-            background: transparent;
-            color: {t["text_secondary"]};
-            border: 1px solid transparent;
-            border-radius: {UI_RADII["control"]}px;
-            padding: 0;
-        }}
-
-        QPushButton#likeButton:hover {{
-            background: {t["hover"]};
-            color: {t["text"]};
-        }}
-
-        QPushButton#likeButton[liked="true"] {{
-            background: transparent;
+        QPushButton#likeButton[playerFavoriteButton="true"][liked="true"] {{
+            background: {t["control_overlay"]};
             color: {t["favorite"]};
-            border-color: transparent;
+            border-color: {t["border"]};
         }}
 
-        QPushButton#likeButton[liked="true"]:hover {{
+        QPushButton#likeButton[playerFavoriteButton="true"][liked="true"]:hover,
+        QPushButton#likeButton[playerFavoriteButton="true"][liked="true"]:pressed {{
             background: {t["favorite_soft"]};
             color: {t["favorite"]};
-            border-color: transparent;
-        }}
-
-        QPushButton#likeButton:disabled {{
-            background: transparent;
-            color: {t["text_disabled"]};
-            border-color: transparent;
+            border-color: {t["border_strong"]};
         }}
 
         """

@@ -139,18 +139,20 @@ def run_test(app: QApplication) -> None:
                 f"border-radius: {UI_CONTROL_SIZES['transport_button_size'] // 2}px"
                 in player_qss
             )
-            assert 'QPushButton#transportButton:disabled' in player_qss
-            assert 'QPushButton#controlButton:disabled' in player_qss
-            assert 'QPushButton#controlButton[modeActive="true"]' in player_qss
+            assert 'QPushButton#transportButton[playerTransportButton="true"]:disabled' in player_qss
+            assert 'QPushButton#controlButton[playerModeButton="true"]:disabled' in player_qss
+            assert 'QPushButton#controlButton[playerModeButton="true"]' in player_qss
+            assert "modeActive" not in player_qss
             assert (
-                f"background: {tokens['selection_background']}; "
-                f"color: {tokens['text_primary']};"
+                f"background: {tokens['control_overlay']}; "
+                f"color: {tokens['text_secondary']};"
             ) in player_qss
             for mode, label in expected_mode_labels.items():
                 window.play_mode = mode
                 window.update_play_mode_button()
                 assert window.play_mode_btn.text() == label
-                assert window.play_mode_btn.property("modeActive") is True
+                assert window.play_mode_btn.property("playerModeButton") is True
+                assert window.play_mode_btn.property("modeActive") is None
         window.set_appearance_mode("dark", persist=False)
         app.processEvents()
 

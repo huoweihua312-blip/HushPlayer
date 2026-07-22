@@ -213,7 +213,7 @@ def run_test(app: QApplication) -> None:
         assert f"color: {LIGHT_THEME_TOKENS['selection_text']}" in qss
         assert "QPushButton#themeQuickButton" in qss
         assert "QListWidget#pendingImportsList::item:selected" in qss
-        assert "QPushButton#likeButton[liked=\"true\"]" in qss
+        assert 'QPushButton#likeButton[playerFavoriteButton="true"][liked="true"]' in qss
         assert "QWidget:disabled" not in qss
         assert "QPushButton:disabled" not in qss
         for button in navigation_buttons.values():

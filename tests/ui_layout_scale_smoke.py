@@ -70,6 +70,10 @@ def run_test(app: QApplication) -> None:
         "now_playing_cover_size",
         "play_button_size",
         "transport_button_size",
+        "player_mode_button_height",
+        "player_mode_button_min_width",
+        "player_mode_button_max_width",
+        "player_control_group_width",
     }
     assert required_typography.issubset(UI_TYPOGRAPHY)
     assert required_controls.issubset(UI_CONTROL_SIZES)
@@ -77,6 +81,8 @@ def run_test(app: QApplication) -> None:
     assert {"spacing_xs", "spacing_sm", "spacing_md", "spacing_lg", "spacing_xl"}.issubset(UI_SPACING)
     assert all(value >= 0 for value in UI_CONTROL_SIZES.values())
     assert UI_CONTROL_SIZES["play_button_size"] > UI_CONTROL_SIZES["icon_large"]
+    assert UI_CONTROL_SIZES["transport_button_size"] == UI_CONTROL_SIZES["player_mode_button_height"]
+    assert UI_CONTROL_SIZES["player_mode_button_min_width"] <= UI_CONTROL_SIZES["player_mode_button_max_width"]
     assert UI_CONTROL_SIZES["player_height_compact"] >= UI_CONTROL_SIZES["player_cover_size"] + 24
     assert UI_CONTROL_SIZES["player_height_full"] >= UI_CONTROL_SIZES["player_cover_size_full"] + 24
     assert UI_CONTROL_SIZES["player_height_narrow"] >= UI_CONTROL_SIZES["player_cover_size_compact"] + 24
