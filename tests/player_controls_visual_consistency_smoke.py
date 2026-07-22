@@ -15,10 +15,12 @@ from _smoke_storage import activate_isolated_app_storage
 
 activate_isolated_app_storage("hushplayer-player-controls-")
 
+from PySide6.QtCore import QPoint, Qt
+from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication
 
 from app.ui.design_system import DARK_THEME_TOKENS, LIGHT_THEME_TOKENS, UI_CONTROL_SIZES
-from app.ui.main_window import MainWindow
+from app.ui.main_window import MainWindow, PlayerProgressSlider, PlayerVolumeSlider
 
 
 def _process_layout(app: QApplication, window: MainWindow, width: int) -> None:
@@ -76,6 +78,60 @@ def _assert_control_geometry(window: MainWindow) -> None:
     assert len(set(centers.values())) == 1, centers
 
 
+def _pixel_rgba(image, point: QPoint) -> tuple[int, int, int, int]:
+    color = image.pixelColor(point)
+    return (color.red(), color.green(), color.blue(), color.alpha())
+
+
+def _assert_slider_has_no_background_block(
+    app: QApplication,
+    window: MainWindow,
+    slider,
+) -> None:
+    """The 32px slider body must blend into the player surface around its track."""
+    slider.setValue(50)
+    slider.setEnabled(True)
+    app.processEvents()
+
+    def capture() -> tuple[tuple[int, int, int, int], ...]:
+        image = window.player_bar.grab().toImage()
+        origin = slider.mapTo(window.player_bar, QPoint(0, 0))
+        x = origin.x() + max(2, slider.width() * 3 // 4)
+        center_y = origin.y() + slider.height() // 2
+        surface = _pixel_rgba(
+            image,
+            QPoint(x, max(1, origin.y() - 7)),
+        )
+        top = _pixel_rgba(image, QPoint(x, origin.y() + 2))
+        bottom = _pixel_rgba(
+            image,
+            QPoint(x, origin.y() + slider.height() - 3),
+        )
+        groove = _pixel_rgba(image, QPoint(x, center_y))
+        return surface, top, bottom, groove
+
+    surface, top, bottom, groove = capture()
+    assert top == surface, (slider.objectName(), "normal-top", surface, top)
+    assert bottom == surface, (slider.objectName(), "normal-bottom", surface, bottom)
+    assert groove != surface, (slider.objectName(), "normal-groove", surface, groove)
+
+    slider.setFocus(Qt.FocusReason.OtherFocusReason)
+    QTest.mouseMove(slider, QPoint(slider.width() // 2, slider.height() // 2))
+    app.processEvents()
+    surface, top, bottom, _ = capture()
+    assert top == surface, (slider.objectName(), "hover-focus-top", surface, top)
+    assert bottom == surface, (slider.objectName(), "hover-focus-bottom", surface, bottom)
+
+    slider.setEnabled(False)
+    app.processEvents()
+    surface, top, bottom, groove = capture()
+    assert top == surface, (slider.objectName(), "disabled-top", surface, top)
+    assert bottom == surface, (slider.objectName(), "disabled-bottom", surface, bottom)
+    assert groove != surface, (slider.objectName(), "disabled-groove", surface, groove)
+    slider.setEnabled(True)
+    app.processEvents()
+
+
 def run_test(app: QApplication) -> None:
     player_tokens = {
         "player_surface",
@@ -103,6 +159,8 @@ def run_test(app: QApplication) -> None:
     assert LIGHT_THEME_TOKENS["player_surface"] != LIGHT_THEME_TOKENS["surface"]
     assert LIGHT_THEME_TOKENS["player_surface_separator"] != LIGHT_THEME_TOKENS["player_surface"]
     assert LIGHT_THEME_TOKENS["player_secondary_background"] != LIGHT_THEME_TOKENS["player_surface"]
+    assert UI_CONTROL_SIZES["player_slider_groove_height"] == 4
+    assert UI_CONTROL_SIZES["player_slider_handle_size"] == 14
     assert _contrast_ratio(
         LIGHT_THEME_TOKENS["player_secondary_icon"],
         LIGHT_THEME_TOKENS["player_secondary_background"],
@@ -122,6 +180,13 @@ def run_test(app: QApplication) -> None:
         assert window.play_btn.property("playerPrimaryButton") is True
         assert window.play_mode_btn.property("playerModeButton") is True
         assert not window.play_mode_btn.isCheckable()
+        assert isinstance(window.progress_slider, PlayerProgressSlider)
+        assert isinstance(window.volume_slider, PlayerVolumeSlider)
+        for slider in (window.progress_slider, window.volume_slider):
+            local_qss = slider.styleSheet()
+            assert "background: transparent" in local_qss
+            assert "border-image: none" in local_qss
+            assert "::groove" not in local_qss
 
         source = (PROJECT_ROOT / "app" / "ui" / "main_window.py").read_text(encoding="utf-8")
         assert "self.prev_btn.clicked.connect(self.play_previous_song)" in source
@@ -154,8 +219,69 @@ def run_test(app: QApplication) -> None:
             assert f"background: {tokens['slider_groove']};" in qss
             assert f"background: {tokens['slider_fill']};" in qss
             assert f"border: 1px solid {tokens['slider_handle_border']};" in qss
+            assert "QFrame#playerBar QFrame#playerCenter, QFrame#playerBar QFrame#playerRight" in qss
+            assert "QFrame#playerBar QSlider#progressSlider," in qss
+            assert "QFrame#playerBar QSlider#volumeSlider:focus" in qss
+            assert "QFrame#playerBar QSlider#progressSlider:disabled" in qss
+            slider_root_rule = _qss_rule(
+                qss,
+                "QFrame#playerBar QSlider#progressSlider,",
+            )
+            assert "background: transparent;" in slider_root_rule
+            assert "border: none;" in slider_root_rule
+            assert "outline: none;" in slider_root_rule
+            slider_parent_rule = _qss_rule(
+                qss,
+                "QFrame#playerBar QFrame#playerCenter,",
+            )
+            assert "background: transparent;" in slider_parent_rule
+            assert "border: none;" in slider_parent_rule
+            groove_rule = _qss_rule(
+                qss,
+                "QFrame#playerBar QSlider#progressSlider::groove:horizontal,",
+            )
+            add_page_rule = _qss_rule(
+                qss,
+                "QFrame#playerBar QSlider#progressSlider::add-page:horizontal,",
+            )
+            sub_page_rule = _qss_rule(
+                qss,
+                "QFrame#playerBar QSlider#progressSlider::sub-page:horizontal,",
+            )
+            for rule in (groove_rule, add_page_rule, sub_page_rule):
+                assert "height: 4px;" in rule
+                assert "border: none;" in rule
+                assert "border-radius: 2px;" in rule
+            handle_rule = _qss_rule(
+                qss,
+                "QFrame#playerBar QSlider#progressSlider::handle:horizontal,",
+            )
+            assert "width: 14px;" in handle_rule
+            assert "height: 14px;" in handle_rule
+            assert "margin: -5px 0;" in handle_rule
+            assert "QFrame#playerBar QSlider#progressSlider:focus::handle:horizontal" in qss
             assert 'QSlider#progressSlider:disabled::groove:horizontal' in qss
             assert 'QPushButton#playerLyricsButton:pressed' in qss
+
+            # Legacy stylesheet layers must not paint another player-slider
+            # groove, fill, or handle behind the final scoped player rules.
+            for legacy_qss in (
+                window._style_sheet(),
+                window.build_visual_polish_qss(),
+                window.build_player_product_qss(),
+            ):
+                assert "QSlider#progressSlider::groove:horizontal" not in legacy_qss
+                assert "QSlider#volumeSlider::groove:horizontal" not in legacy_qss
+                assert "QSlider#progressSlider::add-page:horizontal" not in legacy_qss
+                assert "QSlider#volumeSlider::add-page:horizontal" not in legacy_qss
+                assert "QSlider#progressSlider::sub-page:horizontal" not in legacy_qss
+                assert "QSlider#volumeSlider::sub-page:horizontal" not in legacy_qss
+
+            main_play_rule = _qss_rule(
+                qss,
+                'QPushButton#transportPlayButton[playerPrimaryButton="true"]',
+            )
+            assert f"border: 1px solid {tokens['border']};" in main_play_rule
 
             liked_rule = _qss_rule(
                 qss,
@@ -182,6 +308,9 @@ def run_test(app: QApplication) -> None:
             after = (window.like_btn.size(), window.like_btn.minimumSize(), window.like_btn.maximumSize())
             assert before == after
             assert window.like_btn.property("liked") is True
+            assert "self.volume_slider.valueChanged.connect(self.change_volume)" in source
+            _assert_slider_has_no_background_block(app, window, window.progress_slider)
+            _assert_slider_has_no_background_block(app, window, window.volume_slider)
 
             mode_width = window.play_mode_btn.width()
             for mode in ("sequence", "list_loop", "single_loop", "shuffle"):

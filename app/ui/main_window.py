@@ -101,6 +101,7 @@ from PySide6.QtWidgets import (
     QStackedWidget,
     QStyle,
     QStyledItemDelegate,
+    QStyleOptionSlider,
     QToolTip,
     QVBoxLayout,
     QWidget,
@@ -727,6 +728,130 @@ class VolumeStatusIcon(QLabel):
         state_text = "静音" if self._muted else "音量"
         self.setToolTip(state_text)
         self.setAccessibleName(state_text)
+
+
+def _qss_color(value: str) -> QColor:
+    """Convert the small semantic QSS colour vocabulary for painter use."""
+    color = QColor(value)
+    if color.isValid():
+        return color
+
+    normalized = str(value).strip()
+    if normalized.startswith("rgba(") and normalized.endswith(")"):
+        parts = [part.strip() for part in normalized[5:-1].split(",")]
+        if len(parts) == 4:
+            try:
+                red, green, blue = (int(part) for part in parts[:3])
+                raw_alpha = float(parts[3])
+            except ValueError:
+                pass
+            else:
+                alpha = round(raw_alpha * 255) if raw_alpha <= 1 else round(raw_alpha)
+                return QColor(red, green, blue, max(0, min(255, alpha)))
+    raise ValueError(f"Unsupported player-slider colour token: {value!r}")
+
+
+class PlayerSliderVisualMixin:
+    """Paint player sliders without Qt's opaque complex-control background."""
+
+    def enable_player_slider_visuals(self) -> None:
+        self.setAutoFillBackground(False)
+        self.setStyleSheet(
+            "QSlider, QSlider:hover, QSlider:pressed, QSlider:focus, QSlider:disabled "
+            "{ background: transparent; background-color: transparent; border: none; "
+            "border-image: none; outline: none; }"
+        )
+
+    def paintEvent(self, event) -> None:
+        _ = event
+        option = QStyleOptionSlider()
+        self.initStyleOption(option)
+
+        track_height = float(UI_CONTROL_SIZES["player_slider_groove_height"])
+        handle_size = float(UI_CONTROL_SIZES["player_slider_handle_size"])
+        track = QRectF(
+            handle_size / 2.0,
+            (self.height() - track_height) / 2.0,
+            max(0.0, self.width() - handle_size),
+            track_height,
+        )
+        handle_span = max(0, int(self.width() - handle_size))
+        handle_x = QStyle.sliderPositionFromValue(
+            self.minimum(),
+            self.maximum(),
+            self.sliderPosition(),
+            handle_span,
+            option.upsideDown,
+        )
+        handle = QRectF(
+            handle_x,
+            (self.height() - handle_size) / 2.0,
+            handle_size,
+            handle_size,
+        )
+
+        if not self.isEnabled():
+            groove_color = _qss_color(ACTIVE_THEME_TOKENS["slider_disabled"])
+            fill_color = groove_color
+            handle_color = _qss_color(
+                ACTIVE_THEME_TOKENS["player_secondary_disabled_background"]
+            )
+            handle_border = groove_color
+        else:
+            groove_color = _qss_color(ACTIVE_THEME_TOKENS["slider_groove"])
+            fill_color = _qss_color(ACTIVE_THEME_TOKENS["slider_fill"])
+            handle_color = _qss_color(
+                ACTIVE_THEME_TOKENS[
+                    "slider_handle_hover"
+                    if self.underMouse() or self.isSliderDown()
+                    else "slider_handle"
+                ]
+            )
+            handle_border = _qss_color(
+                ACTIVE_THEME_TOKENS[
+                    "accent" if self.hasFocus() else "slider_handle_border"
+                ]
+            )
+
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(groove_color)
+        painter.drawRoundedRect(track, track_height / 2.0, track_height / 2.0)
+
+        handle_center = handle.center().x()
+        if option.upsideDown:
+            filled_track = QRectF(
+                handle_center,
+                track.y(),
+                max(0.0, track.right() - handle_center),
+                track.height(),
+            )
+        else:
+            filled_track = QRectF(
+                track.x(),
+                track.y(),
+                max(0.0, handle_center - track.x()),
+                track.height(),
+            )
+        painter.setBrush(fill_color)
+        painter.drawRoundedRect(
+            filled_track,
+            track_height / 2.0,
+            track_height / 2.0,
+        )
+        painter.setBrush(handle_color)
+        painter.setPen(QPen(handle_border, 1.0))
+        painter.drawEllipse(handle)
+        painter.end()
+
+
+class PlayerProgressSlider(PlayerSliderVisualMixin, ClickableSlider):
+    """Clickable seek slider with the bottom player's transparent paint path."""
+
+
+class PlayerVolumeSlider(PlayerSliderVisualMixin, QSlider):
+    """Volume slider with the same bottom-player paint path."""
 
 
 _FAVORITE_ICON_CACHE: dict[bool, QIcon] = {}
@@ -3996,6 +4121,7 @@ class ImmersiveLyricsWindow(QWidget):
 
         self.control_header = QFrame()
         self.control_header.setObjectName("immersiveControlHeader")
+        self.setAccessibleName("沉浸歌词")
         self.control_header.setMouseTracking(True)
         self.control_header.installEventFilter(self)
 
@@ -4003,10 +4129,6 @@ class ImmersiveLyricsWindow(QWidget):
         header.setContentsMargins(0, 0, 0, 0)
         header.setSpacing(UI_SPACING["sm"])
 
-        self.immersive_title = QLabel("沉浸歌词")
-        self.immersive_title.setObjectName("immersivePageTitle")
-        self.immersive_title.installEventFilter(self)
-        header.addWidget(self.immersive_title)
         header.addStretch(1)
 
         self.fullscreen_btn = QPushButton("进入全屏")
@@ -4326,11 +4448,7 @@ class ImmersiveLyricsWindow(QWidget):
                         event.accept()
                         return True
             if (
-                watched
-                in {
-                    getattr(self, "control_header", None),
-                    getattr(self, "immersive_title", None),
-                }
+                watched is getattr(self, "control_header", None)
                 and event_type == QEvent.Type.MouseButtonPress
                 and event.button() == Qt.MouseButton.LeftButton
             ):
@@ -4535,7 +4653,6 @@ class ImmersiveLyricsWindow(QWidget):
             color = QColor(t[name])
             return f"rgba({color.red()}, {color.green()}, {color.blue()}, {alpha})"
 
-        button_background = t["overlay_background"]
         self.background_view.set_config(config)
         self.background_view.update()
 
@@ -4543,14 +4660,18 @@ class ImmersiveLyricsWindow(QWidget):
             f"QWidget#immersiveLyricsWindow {{ background: transparent; color: {t['text']}; font-family: 'Segoe UI Variable Text', 'Segoe UI', 'Microsoft YaHei UI'; }}"
             "QFrame#immersiveBackgroundPanel { background: transparent; }"
             "QFrame#immersiveBody, QFrame#immersiveArtworkPanel, QFrame#immersiveArtworkContent, QFrame#immersiveTrackInfo, QFrame#immersiveLyricsPanel { background: transparent; border: none; }"
-            f"QFrame#immersiveControlHeader {{ background: {t['overlay_background_soft']}; border: 1px solid {t['border']}; border-radius: {UI_RADII['card']}px; padding: 8px 10px; }}"
-            f"QFrame#immersivePlaybackFooter {{ background: {t['overlay_background']}; border: 1px solid {t['border']}; border-radius: {UI_RADII['panel']}px; }}"
-            f"QLabel#immersivePageTitle {{ color: {t['text_secondary']}; font-size: 14px; font-weight: 700; }}"
+            f"QFrame#immersiveControlHeader {{ background: transparent; border: none; border-radius: {UI_RADII['card']}px; padding: 8px 10px; }}"
+            f"QFrame#immersivePlaybackFooter {{ background: {t['immersive_player_surface']}; border: 1px solid {t['immersive_player_border']}; border-radius: {UI_RADII['panel']}px; }}"
             f"QLabel#immersiveSongTitle {{ color: {lyric_text}; font-size: 28px; font-weight: 900; }}"
             f"QLabel#immersiveSongArtist {{ color: {t['text_secondary']}; font-size: 15px; }}"
             f"QLabel#immersiveStatus {{ color: {t['text_muted']}; font-size: 12px; }}"
-            f"QPushButton#immersiveButton, QPushButton#immersiveModeButton {{ background: {button_background}; color: {t['text_secondary']}; border: 1px solid {t['border']}; border-radius: {UI_RADII['button']}px; padding: 8px 12px; font-size: 12px; }}"
-            f"QPushButton#immersiveButton:hover, QPushButton#immersiveModeButton:hover {{ background: {t['hover']}; color: {t['text']}; border-color: {t['border_strong']}; }}"
+            f"QPushButton#immersiveButton {{ background: {t['immersive_button_surface']}; color: {t['immersive_button_text']}; border: 1px solid {t['immersive_button_border']}; border-radius: {UI_RADII['button']}px; padding: 8px 12px; font-size: 12px; }}"
+            f"QPushButton#immersiveButton:hover {{ background: {t['immersive_button_hover_surface']}; color: {t['immersive_button_text']}; border-color: {t['immersive_button_border']}; }}"
+            f"QPushButton#immersiveButton:pressed {{ background: {t['immersive_button_pressed_surface']}; color: {t['immersive_button_text']}; border-color: {t['immersive_button_border']}; }}"
+            f"QPushButton#immersiveButton:disabled {{ background: {t['immersive_button_surface']}; color: {t['text_disabled']}; border-color: {t['immersive_button_border']}; }}"
+            f"QPushButton#immersiveModeButton {{ background: {t['immersive_player_surface']}; color: {t['immersive_player_secondary_text']}; border: 1px solid {t['immersive_player_border']}; border-radius: {UI_RADII['button']}px; padding: 8px 12px; font-size: 12px; }}"
+            f"QPushButton#immersiveModeButton:hover {{ background: {t['immersive_button_hover_surface']}; color: {t['immersive_player_text']}; border-color: {t['immersive_button_border']}; }}"
+            f"QPushButton#immersiveModeButton:pressed {{ background: {t['immersive_button_pressed_surface']}; color: {t['immersive_player_text']}; border-color: {t['immersive_button_border']}; }}"
             f"QPushButton#immersiveModeButton[modeActive='true'] {{ background: {t['accent_soft']}; color: {t['accent_hover']}; border-color: {t['selected_border']}; }}"
             f"QPushButton#immersiveFavoriteButton {{ background: {t['overlay_background']}; border: 1px solid {t['border']}; border-radius: 20px; }}"
             f"QPushButton#immersiveFavoriteButton:hover {{ background: {t['hover']}; border-color: {t['border_strong']}; }}"
@@ -4559,12 +4680,20 @@ class ImmersiveLyricsWindow(QWidget):
             f"QPushButton#immersiveReturnCurrentButton:hover {{ background: {t['accent_soft']}; color: {t['text']}; border-color: {t['selected_border']}; }}"
             "QPushButton#immersiveTransportButton { background: transparent; border: 1px solid transparent; border-radius: 20px; }"
             f"QPushButton#immersiveTransportButton:hover {{ background: {t['hover']}; border-color: {t['border']}; }}"
-            f"QPushButton#immersiveTransportPlayButton {{ background: {t['accent']}; border: 1px solid {t['border_strong']}; border-radius: 24px; }}"
-            f"QPushButton#immersiveTransportPlayButton:hover {{ background: {t['accent_hover']}; }}"
-            f"QSlider#immersiveProgressSlider::groove:horizontal, QSlider#immersiveVolumeSlider::groove:horizontal {{ height: 4px; background: {t['slider_groove']}; border-radius: 2px; }}"
-            f"QSlider#immersiveProgressSlider::sub-page:horizontal, QSlider#immersiveVolumeSlider::sub-page:horizontal {{ background: {t['accent']}; border-radius: 2px; }}"
-            f"QSlider#immersiveProgressSlider::handle:horizontal, QSlider#immersiveVolumeSlider::handle:horizontal {{ width: 14px; height: 14px; margin: -5px 0; background: {t['slider_handle']}; border: 1px solid {t['border_strong']}; border-radius: 7px; }}"
-            f"QLabel#immersiveTimeLabel {{ color: {t['text_muted']}; font-size: 12px; font-variant-numeric: tabular-nums; }}"
+            f"QPushButton#immersiveTransportPlayButton {{ background: {t['accent']}; border: none; border-radius: 24px; outline: none; }}"
+            f"QPushButton#immersiveTransportPlayButton:hover {{ background: {t['accent_hover']}; border: none; }}"
+            f"QPushButton#immersiveTransportPlayButton:pressed {{ background: {t['accent_pressed']}; border: none; }}"
+            f"QPushButton#immersiveTransportPlayButton:focus {{ background: {t['accent_hover']}; border: none; outline: none; }}"
+            "QFrame#immersivePlaybackFooter QSlider#immersiveProgressSlider, QFrame#immersivePlaybackFooter QSlider#immersiveVolumeSlider, QFrame#immersivePlaybackFooter QSlider#immersiveProgressSlider:hover, QFrame#immersivePlaybackFooter QSlider#immersiveVolumeSlider:hover, QFrame#immersivePlaybackFooter QSlider#immersiveProgressSlider:pressed, QFrame#immersivePlaybackFooter QSlider#immersiveVolumeSlider:pressed, QFrame#immersivePlaybackFooter QSlider#immersiveProgressSlider:focus, QFrame#immersivePlaybackFooter QSlider#immersiveVolumeSlider:focus, QFrame#immersivePlaybackFooter QSlider#immersiveProgressSlider:disabled, QFrame#immersivePlaybackFooter QSlider#immersiveVolumeSlider:disabled { background: transparent; border: none; outline: none; }"
+            f"QFrame#immersivePlaybackFooter QSlider#immersiveProgressSlider::groove:horizontal, QFrame#immersivePlaybackFooter QSlider#immersiveVolumeSlider::groove:horizontal {{ height: 4px; background: {t['slider_groove']}; border: none; border-radius: 2px; }}"
+            f"QFrame#immersivePlaybackFooter QSlider#immersiveProgressSlider::groove:horizontal:hover, QFrame#immersivePlaybackFooter QSlider#immersiveVolumeSlider::groove:horizontal:hover {{ height: 4px; border-radius: 2px; }}"
+            f"QFrame#immersivePlaybackFooter QSlider#immersiveProgressSlider::add-page:horizontal, QFrame#immersivePlaybackFooter QSlider#immersiveVolumeSlider::add-page:horizontal {{ height: 4px; background: {t['slider_groove']}; border: none; border-radius: 2px; }}"
+            f"QFrame#immersivePlaybackFooter QSlider#immersiveProgressSlider::sub-page:horizontal, QFrame#immersivePlaybackFooter QSlider#immersiveVolumeSlider::sub-page:horizontal {{ height: 4px; background: {t['slider_fill']}; border: none; border-radius: 2px; }}"
+            f"QSlider#immersiveProgressSlider::handle:horizontal, QSlider#immersiveVolumeSlider::handle:horizontal {{ width: 14px; height: 14px; margin: -5px 0; background: {t['slider_handle']}; border: 1px solid {t['slider_handle_border']}; border-radius: 7px; }}"
+            f"QSlider#immersiveProgressSlider:focus::handle:horizontal, QSlider#immersiveVolumeSlider:focus::handle:horizontal {{ border-color: {t['accent']}; }}"
+            f"QSlider#immersiveProgressSlider:disabled::groove:horizontal, QSlider#immersiveVolumeSlider:disabled::groove:horizontal, QSlider#immersiveProgressSlider:disabled::add-page:horizontal, QSlider#immersiveVolumeSlider:disabled::add-page:horizontal, QSlider#immersiveProgressSlider:disabled::sub-page:horizontal, QSlider#immersiveVolumeSlider:disabled::sub-page:horizontal {{ background: {t['slider_disabled']}; }}"
+            f"QSlider#immersiveProgressSlider:disabled::handle:horizontal, QSlider#immersiveVolumeSlider:disabled::handle:horizontal {{ background: {t['player_secondary_disabled_background']}; border-color: {t['slider_disabled']}; }}"
+            f"QLabel#immersiveTimeLabel {{ color: {t['immersive_player_secondary_text']}; font-size: 12px; font-variant-numeric: tabular-nums; }}"
             "QScrollArea#immersiveLyricsView, QScrollArea#lyricsView { background: transparent; border: none; }"
             "QWidget#lyricsContent { background: transparent; }"
             f"QLabel#lyricPlaceholderTitle {{ color: {lyric_text}; font-size: {placeholder_title_font:.2f}pt; font-weight: 850; }}"
@@ -10600,8 +10729,9 @@ class MainWindow(QMainWindow):
         controls_layout.addWidget(trailing_controls)
         controls_layout.addStretch(1)
 
-        self.progress_slider = ClickableSlider(Qt.Orientation.Horizontal)
+        self.progress_slider = PlayerProgressSlider(Qt.Orientation.Horizontal)
         self.progress_slider.setObjectName("progressSlider")
+        self.progress_slider.enable_player_slider_visuals()
         self.progress_slider.setRange(0, 100)
         self.progress_slider.setValue(0)
         self.progress_slider.setMinimumWidth(120)
@@ -10696,8 +10826,9 @@ class MainWindow(QMainWindow):
         self.volume_icon_label = VolumeStatusIcon()
         self.volume_icon_label.setObjectName("volumeIconLabel")
 
-        self.volume_slider = QSlider(Qt.Orientation.Horizontal)
+        self.volume_slider = PlayerVolumeSlider(Qt.Orientation.Horizontal)
         self.volume_slider.setObjectName("volumeSlider")
+        self.volume_slider.enable_player_slider_visuals()
         self.volume_slider.setRange(0, 100)
         self.volume_slider.setValue(self.current_volume)
         self.volume_slider.setMinimumWidth(70)
@@ -18680,13 +18811,18 @@ class MainWindow(QMainWindow):
         QListWidget#songList, QListWidget#playQueuePageList {{ background: {t['surface']}; color: {t['text_primary']}; border-color: {t['border']}; }}
         QListWidget#songList::item:hover, QListWidget#playQueuePageList::item:hover {{ background: {t['surface_hover']}; }}
         QListWidget#songList::item:selected, QListWidget#playQueuePageList::item:selected {{ background: {t['selection_background']}; color: {t['selection_text']}; }}
-        QSlider#progressSlider::groove:horizontal, QSlider#volumeSlider::groove:horizontal {{ background: {t['slider_groove']}; }}
-        QSlider#progressSlider::sub-page:horizontal, QSlider#volumeSlider::sub-page:horizontal {{ background: {t['slider_fill']}; }}
-        QSlider#progressSlider::handle:horizontal, QSlider#volumeSlider::handle:horizontal {{ background: {t['slider_handle']}; border: 1px solid {t['slider_handle_border']}; }}
-        QSlider#progressSlider::handle:horizontal:hover, QSlider#volumeSlider::handle:horizontal:hover {{ background: {t['slider_handle_hover']}; border-color: {t['player_secondary_hover_border']}; }}
-        QSlider#progressSlider:disabled::groove:horizontal, QSlider#volumeSlider:disabled::groove:horizontal {{ background: {t['slider_disabled']}; }}
-        QSlider#progressSlider:disabled::sub-page:horizontal, QSlider#volumeSlider:disabled::sub-page:horizontal {{ background: {t['slider_disabled']}; }}
-        QSlider#progressSlider:disabled::handle:horizontal, QSlider#volumeSlider:disabled::handle:horizontal {{ background: {t['player_secondary_disabled_background']}; border-color: {t['slider_disabled']}; }}
+        QFrame#playerBar QFrame#playerCenter, QFrame#playerBar QFrame#playerRight {{ background: transparent; border: none; }}
+        QFrame#playerBar QSlider#progressSlider, QFrame#playerBar QSlider#volumeSlider, QFrame#playerBar QSlider#progressSlider:hover, QFrame#playerBar QSlider#volumeSlider:hover, QFrame#playerBar QSlider#progressSlider:pressed, QFrame#playerBar QSlider#volumeSlider:pressed, QFrame#playerBar QSlider#progressSlider:focus, QFrame#playerBar QSlider#volumeSlider:focus, QFrame#playerBar QSlider#progressSlider:disabled, QFrame#playerBar QSlider#volumeSlider:disabled {{ background: transparent; border: none; outline: none; }}
+        QFrame#playerBar QSlider#progressSlider::groove:horizontal, QFrame#playerBar QSlider#volumeSlider::groove:horizontal {{ height: 4px; background: {t['slider_groove']}; border: none; border-radius: 2px; }}
+        QFrame#playerBar QSlider#progressSlider::groove:horizontal:hover, QFrame#playerBar QSlider#volumeSlider::groove:horizontal:hover {{ height: 4px; border-radius: 2px; }}
+        QFrame#playerBar QSlider#progressSlider::add-page:horizontal, QFrame#playerBar QSlider#volumeSlider::add-page:horizontal {{ height: 4px; background: {t['slider_groove']}; border: none; border-radius: 2px; }}
+        QFrame#playerBar QSlider#progressSlider::sub-page:horizontal, QFrame#playerBar QSlider#volumeSlider::sub-page:horizontal {{ height: 4px; background: {t['slider_fill']}; border: none; border-radius: 2px; }}
+        QFrame#playerBar QSlider#progressSlider::handle:horizontal, QFrame#playerBar QSlider#volumeSlider::handle:horizontal {{ width: 14px; height: 14px; margin: -5px 0; background: {t['slider_handle']}; border: 1px solid {t['slider_handle_border']}; border-radius: 7px; }}
+        QFrame#playerBar QSlider#progressSlider::handle:horizontal:hover, QFrame#playerBar QSlider#volumeSlider::handle:horizontal:hover {{ background: {t['slider_handle_hover']}; border-color: {t['player_secondary_hover_border']}; }}
+        QFrame#playerBar QSlider#progressSlider:focus::handle:horizontal, QFrame#playerBar QSlider#volumeSlider:focus::handle:horizontal {{ border-color: {t['accent']}; }}
+        QFrame#playerBar QSlider#progressSlider:disabled::groove:horizontal, QFrame#playerBar QSlider#volumeSlider:disabled::groove:horizontal, QFrame#playerBar QSlider#progressSlider:disabled::add-page:horizontal, QFrame#playerBar QSlider#volumeSlider:disabled::add-page:horizontal {{ background: {t['slider_disabled']}; }}
+        QFrame#playerBar QSlider#progressSlider:disabled::sub-page:horizontal, QFrame#playerBar QSlider#volumeSlider:disabled::sub-page:horizontal {{ background: {t['slider_disabled']}; }}
+        QFrame#playerBar QSlider#progressSlider:disabled::handle:horizontal, QFrame#playerBar QSlider#volumeSlider:disabled::handle:horizontal {{ background: {t['player_secondary_disabled_background']}; border-color: {t['slider_disabled']}; }}
         QPushButton#transportButton[playerTransportButton="true"], QPushButton#likeButton[playerFavoriteButton="true"] {{ background: {t['player_secondary_background']}; color: {t['player_secondary_icon']}; border: 1px solid {t['player_secondary_border']}; border-radius: {UI_CONTROL_SIZES['transport_button_size'] // 2}px; padding: 0; }}
         QPushButton#transportButton[playerTransportButton="true"]:hover, QPushButton#likeButton[playerFavoriteButton="true"]:hover {{ background: {t['player_secondary_hover_background']}; color: {t['player_secondary_hover_icon']}; border-color: {t['player_secondary_hover_border']}; }}
         QPushButton#transportButton[playerTransportButton="true"]:pressed, QPushButton#likeButton[playerFavoriteButton="true"]:pressed {{ background: {t['player_secondary_pressed_background']}; color: {t['player_secondary_hover_icon']}; border-color: {t['player_secondary_pressed_border']}; }}
@@ -18831,39 +18967,6 @@ class MainWindow(QMainWindow):
 
         QLabel#volumeIconLabel {{
             background: transparent;
-        }}
-
-        QSlider#progressSlider::groove:horizontal,
-        QSlider#volumeSlider::groove:horizontal {{
-            height: 4px;
-            background: rgba(255, 255, 255, 0.14);
-            border-radius: 2px;
-        }}
-
-        QSlider#progressSlider::sub-page:horizontal {{
-            background: {t["accent"]};
-            border-radius: 2px;
-        }}
-
-        QSlider#volumeSlider::sub-page:horizontal {{
-            background: #8fb8ff;
-            border-radius: 2px;
-        }}
-
-        QSlider#progressSlider::handle:horizontal,
-        QSlider#volumeSlider::handle:horizontal {{
-            width: 14px;
-            height: 14px;
-            margin: -5px 0;
-            background: #f8fbff;
-            border: 1px solid rgba(15, 17, 23, 0.38);
-            border-radius: 7px;
-        }}
-
-        QSlider#progressSlider::groove:horizontal:hover,
-        QSlider#volumeSlider::groove:horizontal:hover {{
-            height: 6px;
-            border-radius: 3px;
         }}
 
         QFrame#nowPlayingPanel {{
@@ -19508,29 +19611,6 @@ class MainWindow(QMainWindow):
             background: {t["hover"]};
             color: #ffffff;
             border: 1px solid {t["border_strong"]};
-        }}
-
-        QSlider#progressSlider::groove:horizontal,
-        QSlider#volumeSlider::groove:horizontal {{
-            height: 6px;
-            background: rgba(255, 255, 255, 0.12);
-            border-radius: 3px;
-        }}
-
-        QSlider#progressSlider::sub-page:horizontal,
-        QSlider#volumeSlider::sub-page:horizontal {{
-            background: {t["accent"]};
-            border-radius: 3px;
-        }}
-
-        QSlider#progressSlider::handle:horizontal,
-        QSlider#volumeSlider::handle:horizontal {{
-            width: 18px;
-            height: 18px;
-            margin: -7px 0;
-            background: #f8fbff;
-            border: 1px solid rgba(15, 17, 23, 0.36);
-            border-radius: 9px;
         }}
 
         QScrollBar:vertical {{
@@ -20408,29 +20488,9 @@ class MainWindow(QMainWindow):
         QSlider#progressSlider,
         QSlider#volumeSlider {
             background: transparent;
+            border: none;
+            outline: none;
             min-height: 32px;
-        }
-
-        QSlider#progressSlider::groove:horizontal,
-        QSlider#volumeSlider::groove:horizontal {
-            height: 5px;
-            background: rgba(255, 255, 255, 0.14);
-            border-radius: 3px;
-        }
-
-        QSlider#progressSlider::handle:horizontal,
-        QSlider#volumeSlider::handle:horizontal {
-            width: 16px;
-            height: 16px;
-            margin: -6px 0;
-            background: #ffffff;
-            border-radius: 8px;
-        }
-
-        QSlider#progressSlider::sub-page:horizontal,
-        QSlider#volumeSlider::sub-page:horizontal {
-            background: #3b82f6;
-            border-radius: 3px;
         }
 
         QToolTip {
@@ -20561,19 +20621,4 @@ class MainWindow(QMainWindow):
             background: rgba(255, 255, 255, 0.13);
         }
 
-        QSlider#progressSlider::groove:horizontal,
-        QSlider#volumeSlider::groove:horizontal {
-            height: 6px;
-            background: rgba(255, 255, 255, 0.13);
-            border-radius: 3px;
-        }
-
-        QSlider#progressSlider::handle:horizontal,
-        QSlider#volumeSlider::handle:horizontal {
-            width: 18px;
-            height: 18px;
-            margin: -7px 0;
-            background: #f8fbff;
-            border: 1px solid rgba(15, 17, 23, 0.32);
-            border-radius: 9px;
-        }        """)
+        """)

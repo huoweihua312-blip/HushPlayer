@@ -23,6 +23,7 @@ from app.ui.immersive_appearance import (
     ImmersiveAppearanceConfig,
     ImmersiveAppearanceDialog,
 )
+from app.ui.design_system import DARK_THEME_TOKENS, LIGHT_THEME_TOKENS, set_active_theme_tokens
 from app.ui.main_window import ImmersiveLyricsWindow, LyricsView
 
 
@@ -122,6 +123,128 @@ def config_checks() -> None:
         {"immersive_lyrics_font_scale": {"bad": True}}
     )
     assert invalid_type.lyrics_font_scale == 100
+
+
+def _rgba_alpha(value: str) -> int:
+    assert value.startswith("rgba(") and value.endswith(")"), value
+    return int(value[:-1].rsplit(",", 1)[1].strip())
+
+
+def _qss_rule(qss: str, selector: str) -> str:
+    start = qss.index(selector)
+    end = qss.index("}", start) + 1
+    return qss[start:end]
+
+
+def overlay_style_checks(app: QApplication) -> None:
+    """Keep translucent immersive chrome scoped without changing its geometry."""
+    main = StubMainWindow()
+    window = ImmersiveLyricsWindow(main)
+    main.immersive_lyrics_window = window
+    window.resize(1100, 720)
+    window.show()
+    assert wait_until(app, lambda: window.isVisible())
+
+    header_size = window.control_header.size()
+    footer_size = window.footer.size()
+    header_margins = window.control_header.layout().contentsMargins()
+    footer_margins = window.footer.layout().contentsMargins()
+    header_layout = window.control_header.layout()
+    source = (PROJECT_ROOT / "app" / "ui" / "main_window.py").read_text(encoding="utf-8")
+    immersive_window_source = source[
+        source.index("class ImmersiveLyricsWindow") : source.index("class MainWindow")
+    ]
+    assert "self.immersive_progress_slider.sliderPressed.connect(" in source
+    assert "self.immersive_progress_slider.sliderReleased.connect(" in source
+    assert "self.immersive_volume_slider.valueChanged.connect(" in source
+    assert "self.fullscreen_btn.clicked.connect(self.toggle_fullscreen)" in source
+    assert window.accessibleName() == "沉浸歌词"
+    assert not hasattr(window, "immersive_title")
+    assert 'QLabel("沉浸歌词")' not in immersive_window_source
+    assert "self.immersive_title" not in immersive_window_source
+    assert header_layout.count() == 4
+    assert header_layout.itemAt(0).spacerItem() is not None
+    assert [header_layout.itemAt(index).widget() for index in range(1, 4)] == [
+        window.fullscreen_btn,
+        window.display_settings_btn,
+        window.close_btn,
+    ]
+
+    try:
+        for resolved_mode, tokens in (
+            ("dark", DARK_THEME_TOKENS),
+            ("light", LIGHT_THEME_TOKENS),
+        ):
+            set_active_theme_tokens(resolved_mode)
+            window.apply_immersive_style()
+            app.processEvents()
+            qss = window.styleSheet()
+
+            assert (
+                "QFrame#immersiveControlHeader { background: transparent; border: none;"
+                in qss
+            )
+            assert "QLabel#immersivePageTitle" not in qss
+            assert f"QPushButton#immersiveButton {{ background: {tokens['immersive_button_surface']};" in qss
+            assert f"QPushButton#immersiveButton:hover {{ background: {tokens['immersive_button_hover_surface']};" in qss
+            assert f"QPushButton#immersiveButton:pressed {{ background: {tokens['immersive_button_pressed_surface']};" in qss
+            assert f"border: 1px solid {tokens['immersive_button_border']};" in qss
+            assert f"QFrame#immersivePlaybackFooter {{ background: {tokens['immersive_player_surface']};" in qss
+            assert f"border: 1px solid {tokens['immersive_player_border']};" in qss
+            assert f"QLabel#immersiveTimeLabel {{ color: {tokens['immersive_player_secondary_text']};" in qss
+            surface_alpha = _rgba_alpha(tokens["immersive_player_surface"])
+            border_alpha = _rgba_alpha(tokens["immersive_player_border"])
+            if resolved_mode == "dark":
+                assert 90 <= surface_alpha <= 115
+            else:
+                assert 80 <= surface_alpha <= 100
+            assert 0 <= border_alpha < surface_alpha
+
+            play_button_rules = {
+                "normal": _qss_rule(qss, "QPushButton#immersiveTransportPlayButton {"),
+                "hover": _qss_rule(qss, "QPushButton#immersiveTransportPlayButton:hover {"),
+                "pressed": _qss_rule(qss, "QPushButton#immersiveTransportPlayButton:pressed {"),
+                "focus": _qss_rule(qss, "QPushButton#immersiveTransportPlayButton:focus {"),
+            }
+            assert f"background: {tokens['accent']};" in play_button_rules["normal"]
+            for rule in play_button_rules.values():
+                assert "border: none;" in rule
+                assert "border: 1px solid" not in rule
+                assert "border-color:" not in rule
+                assert "#ffffff" not in rule.casefold()
+                assert "rgba(255, 255, 255" not in rule
+
+            assert "QFrame#immersivePlaybackFooter QSlider#immersiveProgressSlider," in qss
+            assert "QFrame#immersivePlaybackFooter QSlider#immersiveVolumeSlider:focus" in qss
+            assert "background: transparent; border: none; outline: none;" in qss
+            groove_rule = _qss_rule(
+                qss,
+                "QFrame#immersivePlaybackFooter QSlider#immersiveProgressSlider::groove:horizontal,",
+            )
+            add_page_rule = _qss_rule(
+                qss,
+                "QFrame#immersivePlaybackFooter QSlider#immersiveProgressSlider::add-page:horizontal,",
+            )
+            sub_page_rule = _qss_rule(
+                qss,
+                "QFrame#immersivePlaybackFooter QSlider#immersiveProgressSlider::sub-page:horizontal,",
+            )
+            for rule in (groove_rule, add_page_rule, sub_page_rule):
+                assert "height: 4px;" in rule
+                assert "border: none;" in rule
+                assert "border-radius: 2px;" in rule
+            assert "QSlider#immersiveProgressSlider:focus::handle:horizontal" in qss
+
+            assert window.control_header.size() == header_size
+            assert window.footer.size() == footer_size
+            assert window.control_header.layout().contentsMargins() == header_margins
+            assert window.footer.layout().contentsMargins() == footer_margins
+    finally:
+        set_active_theme_tokens("dark")
+        window.close()
+        assert wait_until(app, lambda: not window.isVisible())
+        assert wait_until(app, lambda: not window.background_view.task_running)
+        QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
 
 
 def background_checks(app: QApplication, root: Path) -> tuple[dict, int]:
@@ -438,6 +561,7 @@ def main() -> None:
     )
     app = QApplication.instance() or QApplication([])
     config_checks()
+    overlay_style_checks(app)
     supported_formats = {bytes(item).decode("ascii").casefold() for item in QImageReader.supportedImageFormats()}
     assert {"jpg", "jpeg", "png", "webp"}.issubset(supported_formats), supported_formats
     with tempfile.TemporaryDirectory(prefix="hushplayer_immersive_appearance_") as temp_dir:
