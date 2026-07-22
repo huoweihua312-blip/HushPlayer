@@ -648,6 +648,7 @@ class VolumeStatusIcon(QLabel):
 
 _FAVORITE_ICON_CACHE: dict[bool, QIcon] = {}
 _PLAYER_ACTION_ICON_CACHE: dict[str, QIcon] = {}
+_THEME_QUICK_ICON_CACHE: dict[str, QIcon] = {}
 
 
 def create_favorite_icon(liked: bool) -> QIcon:
@@ -702,6 +703,56 @@ def create_player_action_icon(role: str) -> QIcon:
     painter.end()
     icon = QIcon(pixmap)
     _PLAYER_ACTION_ICON_CACHE[role] = icon
+    return QIcon(icon)
+
+
+def create_theme_quick_icon(mode: str) -> QIcon:
+    """Draw a compact, recolourable appearance-mode icon without assets."""
+    mode = normalize_appearance_mode(mode)
+    cached = _THEME_QUICK_ICON_CACHE.get(mode)
+    if cached is not None:
+        return QIcon(cached)
+
+    pixmap = QPixmap(32, 32)
+    pixmap.fill(Qt.GlobalColor.transparent)
+    painter = QPainter(pixmap)
+    painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+    color = QColor(ACTIVE_THEME_TOKENS["text_secondary"])
+    pen = QPen(color, 1.8)
+    pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+    pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
+    painter.setPen(pen)
+    painter.setBrush(Qt.BrushStyle.NoBrush)
+
+    if mode == "light":
+        painter.drawEllipse(QRectF(11, 11, 10, 10))
+        for start, end in (
+            ((16, 5), (16, 8)),
+            ((16, 24), (16, 27)),
+            ((5, 16), (8, 16)),
+            ((24, 16), (27, 16)),
+            ((8.2, 8.2), (10.3, 10.3)),
+            ((21.7, 21.7), (23.8, 23.8)),
+            ((23.8, 8.2), (21.7, 10.3)),
+            ((10.3, 21.7), (8.2, 23.8)),
+        ):
+            painter.drawLine(QPointF(*start), QPointF(*end))
+    elif mode == "dark":
+        moon = QPainterPath()
+        moon.addEllipse(QRectF(9, 7, 15, 18))
+        cutout = QPainterPath()
+        cutout.addEllipse(QRectF(14, 5, 15, 18))
+        painter.drawPath(moon.subtracted(cutout))
+    else:
+        painter.drawRoundedRect(QRectF(6, 7, 20, 14), 3, 3)
+        painter.drawLine(QPointF(12, 25), QPointF(20, 25))
+        painter.drawLine(QPointF(16, 21), QPointF(16, 25))
+        painter.drawLine(QPointF(10, 11), QPointF(22, 11))
+        painter.drawLine(QPointF(10, 15), QPointF(18, 15))
+
+    painter.end()
+    icon = QIcon(pixmap)
+    _THEME_QUICK_ICON_CACHE[mode] = icon
     return QIcon(icon)
 
 
@@ -5679,6 +5730,8 @@ class MainWindow(QMainWindow):
         player_bar = self.measure_startup_step("底部播放栏 UI", self._create_player_bar)
         self.player_bar = player_bar
 
+        self.theme_quick_actions = self._create_theme_quick_actions()
+        shell_layout.addWidget(self.theme_quick_actions)
         shell_layout.addWidget(body_splitter, 1)
         shell_layout.addWidget(player_bar)
 
@@ -9665,6 +9718,82 @@ class MainWindow(QMainWindow):
             self.full_lyrics_status.setText("当前歌曲暂无歌词")
             self.sync_immersive_lyrics()
 
+    def _create_theme_quick_actions(self) -> QFrame:
+        """Create a safe content-area appearance shortcut, outside the title bar."""
+        frame = QFrame()
+        frame.setObjectName("themeQuickActions")
+        frame.setFixedHeight(44)
+        layout = QHBoxLayout(frame)
+        layout.setContentsMargins(12, 6, 12, 2)
+        layout.setSpacing(0)
+        layout.addStretch(1)
+
+        button = QPushButton()
+        button.setObjectName("themeQuickButton")
+        button.setCursor(Qt.CursorShape.PointingHandCursor)
+        button.setFixedSize(34, 34)
+        button.setIconSize(QSize(20, 20))
+        button.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        button.clicked.connect(self.toggle_quick_appearance_mode)
+        button.customContextMenuRequested.connect(self.show_theme_quick_menu)
+        self.theme_quick_button = button
+        self._refresh_theme_quick_button()
+        layout.addWidget(button)
+        return frame
+
+    def _refresh_theme_quick_button(self) -> None:
+        button = getattr(self, "theme_quick_button", None)
+        if button is None:
+            return
+        mode = self.appearance_mode()
+        labels = {
+            "system": "跟随系统",
+            "light": "浅色",
+            "dark": "深色",
+        }
+        button.setIcon(create_theme_quick_icon(mode))
+        button.setProperty("appearanceMode", mode)
+        button.setToolTip(
+            f"当前：{labels[mode]}。单击在浅色和深色之间切换；右键选择外观模式"
+        )
+        button.setAccessibleName(f"主题快捷切换，当前{labels[mode]}")
+        button.style().unpolish(button)
+        button.style().polish(button)
+        button.update()
+
+    def toggle_quick_appearance_mode(self) -> None:
+        """Switch the resolved light/dark presentation with one left click."""
+        resolved = getattr(self.theme_manager, "resolved_mode", "dark")
+        self.set_appearance_mode("light" if resolved == "dark" else "dark")
+
+    def create_theme_quick_menu(self) -> QMenu:
+        """Return the three-mode menu used by the shortcut's context action."""
+        menu = QMenu(self.theme_quick_button)
+        menu.setObjectName("themeQuickMenu")
+        current_mode = self.appearance_mode()
+        for label, mode in (
+            ("跟随系统", "system"),
+            ("浅色", "light"),
+            ("深色", "dark"),
+        ):
+            action = menu.addAction(create_theme_quick_icon(mode), label)
+            action.setData(mode)
+            action.setCheckable(True)
+            action.setChecked(mode == current_mode)
+            action.triggered.connect(
+                lambda _checked=False, selected_mode=mode: self.set_appearance_mode(
+                    selected_mode
+                )
+            )
+        return menu
+
+    def show_theme_quick_menu(self, position: QPoint) -> None:
+        menu = self.create_theme_quick_menu()
+        try:
+            menu.exec(self.theme_quick_button.mapToGlobal(position))
+        finally:
+            menu.deleteLater()
+
     def _create_sidebar(self) -> QFrame:
         sidebar = QFrame()
         sidebar.setObjectName("sidebar")
@@ -12899,6 +13028,11 @@ class MainWindow(QMainWindow):
         return deepcopy(settings.get(key, default))
 
     def appearance_mode(self) -> str:
+        manager = getattr(self, "theme_manager", None)
+        if manager is not None:
+            return normalize_appearance_mode(
+                getattr(manager, "appearance_mode", "dark")
+            )
         return normalize_appearance_mode(
             self.get_user_setting("appearance_mode", "dark")
         )
@@ -12944,6 +13078,7 @@ class MainWindow(QMainWindow):
             _NAVIGATION_ICON_CACHE.clear()
             _FAVORITE_ICON_CACHE.clear()
             _PLAYER_ACTION_ICON_CACHE.clear()
+            _THEME_QUICK_ICON_CACHE.clear()
             for button in self.findChildren(NavButton):
                 button._refresh_navigation_icon()
             for button in self.findChildren(PlayerIconButton):
@@ -12951,6 +13086,7 @@ class MainWindow(QMainWindow):
             for icon in self.findChildren(VolumeStatusIcon):
                 icon._refresh_icon()
             self.update_like_button()
+            self._refresh_theme_quick_button()
             self.update_floating_lyrics_button_state()
             for name, role in (
                 ("immersive_lyrics_button", "immersive_lyrics"),
@@ -18252,11 +18388,47 @@ class MainWindow(QMainWindow):
         QWidget#root {{ background: {t['window_background']}; color: {t['text_primary']}; }}
         QWidget#root QLabel {{ color: {t['text_primary']}; }}
         QFrame#shell {{ background: {t['surface_secondary']}; border-color: {t['border']}; }}
+        QFrame#themeQuickActions {{ background: transparent; border: none; }}
+        QPushButton#themeQuickButton {{ background: {t['control_overlay']}; color: {t['text_secondary']}; border: 1px solid {t['border']}; border-radius: {UI_RADII['control']}px; padding: 0; }}
+        QPushButton#themeQuickButton:hover {{ background: {t['control_overlay_hover']}; color: {t['text_primary']}; border-color: {t['border_strong']}; }}
+        QPushButton#themeQuickButton:pressed {{ background: {t['control_overlay_pressed']}; }}
+        QMenu#themeQuickMenu {{ background: {t['surface']}; color: {t['text_primary']}; border: 1px solid {t['border']}; border-radius: {UI_RADII['button']}px; padding: 5px; }}
+        QMenu#themeQuickMenu::item {{ padding: 8px 28px 8px 10px; border-radius: {UI_RADII['small']}px; }}
+        QMenu#themeQuickMenu::item:selected {{ background: {t['surface_hover']}; color: {t['text_primary']}; }}
+        QMenu#themeQuickMenu::indicator:checked {{ background: {t['accent']}; border-radius: 4px; }}
         QFrame#sidebar, QFrame#playerBar, QFrame#nowPlayingPanel {{ background: {t['surface']}; border-color: {t['border']}; }}
+        QLabel#appTitle {{ color: {t['text_primary']}; }}
+        QLabel#appSubtitle, QLabel#sidebarGroupHint, QLabel#sidebarHint, QLabel#sidebarSectionTitle {{ color: {t['text_muted']}; }}
+        QPushButton#sidebarButton, QPushButton#playlistSidebarButton {{ background: transparent; color: {t['text_secondary']}; border-color: transparent; }}
+        QPushButton#sidebarButton:hover, QPushButton#playlistSidebarButton:hover {{ background: {t['surface_hover']}; color: {t['text_primary']}; }}
+        QPushButton#sidebarButton[active="true"], QPushButton#playlistSidebarButton[active="true"] {{ background: {t['selection_background']}; color: {t['selection_text']}; border: 1px solid {t['selection_border']}; border-left: 3px solid {t['accent']}; }}
+        QPushButton#sidebarButton:disabled, QPushButton#playlistSidebarButton:disabled {{ background: transparent; color: {t['text_disabled']}; border-color: transparent; }}
+        QPushButton#sidebarWideButton, QPushButton#sidebarMiniButton {{ background: {t['control_overlay']}; color: {t['text_secondary']}; border: 1px solid {t['border']}; }}
+        QPushButton#sidebarWideButton:hover, QPushButton#sidebarMiniButton:hover {{ background: {t['control_overlay_hover']}; color: {t['text_primary']}; border-color: {t['border_strong']}; }}
+        QPushButton#sidebarWideButton:disabled, QPushButton#sidebarMiniButton:disabled {{ background: {t['control_overlay']}; color: {t['text_disabled']}; border-color: {t['border']}; }}
         QLineEdit, QTextEdit, QPlainTextEdit {{ background: {t['input_background']}; color: {t['text_primary']}; border-color: {t['border']}; selection-background-color: {t['accent']}; selection-color: {t['on_accent']}; }}
         QLineEdit:focus, QTextEdit:focus, QPlainTextEdit:focus {{ border-color: {t['accent']}; }}
         QComboBox {{ background: {t['input_background']}; color: {t['text_primary']}; border-color: {t['border']}; }}
         QComboBox QAbstractItemView {{ background: {t['surface_secondary']}; color: {t['text_primary']}; selection-background-color: {t['selection_background']}; selection-color: {t['selection_text']}; }}
+        QLabel#pageTitle {{ color: {t['text_primary']}; }}
+        QLabel#pageSubtitle, QLabel#pendingEmptyHint {{ color: {t['text_muted']}; }}
+        QFrame#pendingImportsPage {{ background: transparent; }}
+        QPushButton#secondaryButton {{ background: {t['control_overlay']}; color: {t['text_secondary']}; border: 1px solid {t['border']}; }}
+        QPushButton#secondaryButton:hover {{ background: {t['control_overlay_hover']}; color: {t['text_primary']}; border-color: {t['border_strong']}; }}
+        QPushButton#secondaryButton:disabled {{ background: {t['control_overlay']}; color: {t['text_disabled']}; border-color: {t['border']}; }}
+        QPushButton#primaryButton {{ background: {t['accent']}; color: {t['on_accent']}; border-color: transparent; }}
+        QPushButton#primaryButton:hover {{ background: {t['accent_hover']}; }}
+        QPushButton#primaryButton:disabled {{ background: {t['surface_pressed']}; color: {t['text_disabled']}; border-color: {t['border']}; }}
+        QPushButton#dangerButton {{ background: {t['danger_soft']}; color: {t['danger']}; border: 1px solid {t['danger']}; }}
+        QPushButton#dangerButton:hover {{ background: {t['danger']}; color: {t['on_accent']}; }}
+        QPushButton#dangerButton:disabled {{ background: {t['control_overlay']}; color: {t['text_disabled']}; border-color: {t['border']}; }}
+        QListWidget#pendingImportsList {{ background: {t['surface']}; color: {t['text_primary']}; border-color: {t['border']}; }}
+        QListWidget#pendingImportsList::item {{ color: {t['text_primary']}; border: 1px solid transparent; }}
+        QListWidget#pendingImportsList::item:hover {{ background: {t['surface_hover']}; color: {t['text_primary']}; }}
+        QListWidget#pendingImportsList::item:selected {{ background: {t['selection_background']}; color: {t['selection_text']}; border: 1px solid {t['selection_border']}; }}
+        QListWidget#pendingImportsList:disabled, QListWidget#pendingImportsList::item:disabled {{ color: {t['text_disabled']}; }}
+        QListWidget#pendingImportsList::indicator:unchecked {{ background: {t['input_background']}; border: 1px solid {t['border_strong']}; border-radius: 4px; }}
+        QListWidget#pendingImportsList::indicator:checked {{ background: {t['accent']}; border: 1px solid {t['accent']}; border-radius: 4px; }}
         QListWidget#songList, QListWidget#playQueuePageList {{ background: {t['surface']}; color: {t['text_primary']}; border-color: {t['border']}; }}
         QListWidget#songList::item:hover, QListWidget#playQueuePageList::item:hover {{ background: {t['surface_hover']}; }}
         QListWidget#songList::item:selected, QListWidget#playQueuePageList::item:selected {{ background: {t['selection_background']}; color: {t['selection_text']}; }}
@@ -18267,6 +18439,12 @@ class MainWindow(QMainWindow):
         QPushButton#transportButton:pressed {{ background: {t['control_overlay_pressed']}; }}
         QPushButton#transportPlayButton {{ background: {t['accent']}; border-color: {t['border_strong']}; }}
         QPushButton#transportPlayButton:hover {{ background: {t['accent_hover']}; }}
+        QLabel#coverLabel, QLabel#bottomCoverLabel {{ background: transparent; border: none; }}
+        QPushButton#likeButton, QPushButton#nowLikeButton {{ background: {t['control_overlay']}; color: {t['text_secondary']}; border: 1px solid {t['border']}; }}
+        QPushButton#likeButton:hover, QPushButton#nowLikeButton:hover {{ background: {t['control_overlay_hover']}; color: {t['text_primary']}; border-color: {t['border_strong']}; }}
+        QPushButton#likeButton[liked="true"], QPushButton#nowLikeButton[liked="true"] {{ background: {t['danger_soft']}; color: {t['danger']}; border-color: {t['danger']}; }}
+        QPushButton#likeButton[liked="true"]:hover, QPushButton#nowLikeButton[liked="true"]:hover {{ background: {t['danger_soft']}; color: {t['danger']}; border-color: {t['danger']}; }}
+        QPushButton#likeButton:disabled, QPushButton#nowLikeButton:disabled {{ background: {t['control_overlay']}; color: {t['text_disabled']}; border-color: {t['border']}; }}
         QLabel#listEmptyHint {{ background: {t['surface_secondary']}; color: {t['text_muted']}; border-color: {t['border_strong']}; }}
         """
 

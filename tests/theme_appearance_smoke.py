@@ -112,6 +112,40 @@ def run_test(app: QApplication) -> None:
         app.processEvents()
         assert window.theme_manager.resolved_mode == "light"
         assert window.get_dark_theme_tokens()["window_background"] == LIGHT_THEME_TOKENS["window_background"]
+        assert window.theme_quick_button.objectName() == "themeQuickButton"
+        assert not window.theme_quick_button.icon().isNull()
+        assert "单击在浅色和深色之间切换" in window.theme_quick_button.toolTip()
+        theme_menu = window.create_theme_quick_menu()
+        try:
+            assert [action.data() for action in theme_menu.actions()] == [
+                "system",
+                "light",
+                "dark",
+            ]
+            assert theme_menu.actions()[1].isChecked()
+        finally:
+            theme_menu.close()
+            theme_menu.deleteLater()
+
+        window.toggle_quick_appearance_mode()
+        app.processEvents()
+        assert window.appearance_mode() == "dark"
+        assert window.theme_manager.resolved_mode == "dark"
+        window.toggle_quick_appearance_mode()
+        app.processEvents()
+        assert window.appearance_mode() == "light"
+
+        qss = window.styleSheet()
+        assert f"color: {LIGHT_THEME_TOKENS['selection_text']}" in qss
+        assert "QPushButton#themeQuickButton" in qss
+        assert "QListWidget#pendingImportsList::item:selected" in qss
+        assert "QPushButton#likeButton[liked=\"true\"]" in qss
+        cover_image = window.cover_label.grab().toImage()
+        cover_border = cover_image.pixelColor(
+            max(2, cover_image.width() // 2),
+            2,
+        )
+        assert max(cover_border.red(), cover_border.green(), cover_border.blue()) > 80
         assert window.current_song_path == playback_snapshot["path"]
         assert window.media_player.position() == playback_snapshot["position"]
         assert window.play_queue == playback_snapshot["queue"]

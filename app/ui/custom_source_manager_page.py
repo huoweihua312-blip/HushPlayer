@@ -175,8 +175,9 @@ class CustomSourceManagerPage(QFrame):
             f"QLabel#settingsCardTitle {{ color: {t['text']}; font-size: 16px; font-weight: 800; }}"
             f"QListWidget#customSourceList {{ background: {t['sidebar_bg']}; color: {t['text']}; border: 1px solid {t['border']}; border-radius: {UI_RADII['card']}px; padding: 7px; outline: none; }}"
             f"QListWidget#customSourceList::item {{ padding: 10px; border-radius: {UI_RADII['button']}px; margin: 2px 0; border: 1px solid transparent; }}"
-            f"QListWidget#customSourceList::item:hover {{ background: {t['hover']}; }}"
-            f"QListWidget#customSourceList::item:selected {{ background: {t['selected_bg']}; border: 1px solid {t['selected_border']}; }}"
+            f"QListWidget#customSourceList::item:hover {{ background: {t['hover']}; color: {t['text_primary']}; }}"
+            f"QListWidget#customSourceList::item:selected {{ background: {t['selected_bg']}; color: {t['selection_text']}; border: 1px solid {t['selected_border']}; }}"
+            f"QListWidget#customSourceList:disabled, QListWidget#customSourceList::item:disabled {{ color: {t['text_disabled']}; }}"
             f"QPlainTextEdit#sourceUrlBatchInput, QFrame#customSourceManagerPage QLineEdit, QFrame#customSourceManagerPage QComboBox {{ background: {t['sidebar_bg']}; color: {t['text']}; border: 1px solid {t['border_strong']}; border-radius: {UI_RADII['button']}px; padding: 8px; }}"
             f"QPlainTextEdit#sourceUrlBatchInput:focus, QFrame#customSourceManagerPage QLineEdit:focus {{ border-color: {t['accent']}; }}"
         )
