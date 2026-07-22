@@ -5774,8 +5774,6 @@ class MainWindow(QMainWindow):
         player_bar = self.measure_startup_step("底部播放栏 UI", self._create_player_bar)
         self.player_bar = player_bar
 
-        self.theme_quick_actions = self._create_theme_quick_actions()
-        shell_layout.addWidget(self.theme_quick_actions)
         shell_layout.addWidget(body_splitter, 1)
         shell_layout.addWidget(player_bar)
 
@@ -6068,31 +6066,31 @@ class MainWindow(QMainWindow):
 
         if mode == "full":
             root_margin = UI_SPACING["md"]
-            sidebar_limits = (180, 230, 220)
+            sidebar_limits = (210, 236, 224)
             now_limits = (280, 340, 330)
             content_minimum = 600
-            cover_size = 236
-            player_margins = (24, 16, 24, 16)
+            cover_size = UI_CONTROL_SIZES["now_playing_cover_size"]
+            player_margins = (24, 8, 24, 8)
             player_spacing = UI_SPACING["lg"]
-            player_limits = ((200, 280), 340, (180, 230))
+            player_limits = ((212, 300), 340, (180, 230))
         elif mode == "compact":
             root_margin = UI_SPACING["sm"]
-            sidebar_limits = (170, 205, 196)
+            sidebar_limits = (176, 214, 198)
             now_limits = (220, 270, 250)
             content_minimum = 480
-            cover_size = 184
-            player_margins = (20, 12, 20, 12)
+            cover_size = UI_CONTROL_SIZES["now_playing_cover_size_compact"]
+            player_margins = (16, 8, 16, 8)
             player_spacing = UI_SPACING["sm"]
-            player_limits = ((160, 230), 340, (88, 112))
+            player_limits = ((180, 250), 300, (88, 112))
         else:
             root_margin = UI_SPACING["xs"]
-            sidebar_limits = (160, 185, 178)
+            sidebar_limits = (164, 190, 180)
             now_limits = (0, 0, 0)
             content_minimum = 520
             cover_size = 0
             player_margins = (12, 8, 12, 8)
             player_spacing = UI_SPACING["xs"]
-            player_limits = ((118, 180), 340, (80, 96))
+            player_limits = ((150, 208), 260, (80, 96))
 
         self.root_layout.setContentsMargins(
             root_margin, root_margin, root_margin, root_margin
@@ -6105,6 +6103,7 @@ class MainWindow(QMainWindow):
 
         show_now_panel = mode != "narrow"
         now_panel.setVisible(show_now_panel)
+        self._place_theme_quick_button(mode)
         if show_now_panel:
             now_panel.setMinimumWidth(now_limits[0])
             now_panel.setMaximumWidth(now_limits[1])
@@ -6150,12 +6149,17 @@ class MainWindow(QMainWindow):
         left_limits, center_minimum, right_limits = player_limits
         self.player_bar_layout.setContentsMargins(*player_margins)
         self.player_bar_layout.setSpacing(player_spacing)
+        self.player_bar.setFixedHeight(UI_CONTROL_SIZES["player_height"])
         self.player_left_box.setMinimumWidth(left_limits[0])
         self.player_left_box.setMaximumWidth(left_limits[1])
         self.player_center_box.setMinimumWidth(center_minimum)
         self.player_right_box.setMinimumWidth(right_limits[0])
         self.player_right_box.setMaximumWidth(right_limits[1])
         self.bottom_cover_label.show()
+        player_cover_size = UI_CONTROL_SIZES[
+            "player_cover_size_compact" if mode == "narrow" else "player_cover_size"
+        ]
+        self.bottom_cover_label.setFixedSize(player_cover_size, player_cover_size)
         self.like_btn.show()
         self.volume_slider.show()
         self.volume_value_label.setVisible(mode == "full")
@@ -9765,28 +9769,40 @@ class MainWindow(QMainWindow):
             self.full_lyrics_status.setText("当前歌曲暂无歌词")
             self.sync_immersive_lyrics()
 
-    def _create_theme_quick_actions(self) -> QFrame:
-        """Create a safe content-area appearance shortcut, outside the title bar."""
-        frame = QFrame()
-        frame.setObjectName("themeQuickActions")
-        frame.setFixedHeight(44)
-        layout = QHBoxLayout(frame)
-        layout.setContentsMargins(12, 6, 12, 2)
-        layout.setSpacing(0)
-        layout.addStretch(1)
-
+    def _create_theme_quick_button(self) -> QPushButton:
+        """Create the compact content-area appearance shortcut."""
         button = QPushButton()
         button.setObjectName("themeQuickButton")
         button.setCursor(Qt.CursorShape.PointingHandCursor)
-        button.setFixedSize(34, 34)
-        button.setIconSize(QSize(20, 20))
+        button.setFixedSize(
+            UI_CONTROL_SIZES["theme_quick_button_size"],
+            UI_CONTROL_SIZES["theme_quick_button_size"],
+        )
+        button.setIconSize(
+            QSize(UI_CONTROL_SIZES["icon_normal"], UI_CONTROL_SIZES["icon_normal"])
+        )
         button.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         button.clicked.connect(self.toggle_quick_appearance_mode)
         button.customContextMenuRequested.connect(self.show_theme_quick_menu)
         self.theme_quick_button = button
         self._refresh_theme_quick_button()
-        layout.addWidget(button)
-        return frame
+        return button
+
+    def _place_theme_quick_button(self, mode: str) -> None:
+        """Keep the appearance shortcut in an existing header at every width."""
+        button = getattr(self, "theme_quick_button", None)
+        sidebar_layout = getattr(self, "sidebar_title_layout", None)
+        now_layout = getattr(self, "now_playing_title_layout", None)
+        if button is None or sidebar_layout is None or now_layout is None:
+            return
+
+        target_layout = sidebar_layout if mode == "narrow" else now_layout
+        if target_layout.indexOf(button) >= 0:
+            return
+        for layout in (sidebar_layout, now_layout):
+            layout.removeWidget(button)
+        target_layout.addWidget(button)
+        button.show()
 
     def _refresh_theme_quick_button(self) -> None:
         button = getattr(self, "theme_quick_button", None)
@@ -9871,6 +9887,11 @@ class MainWindow(QMainWindow):
         layout.setContentsMargins(16, 20, 16, 16)
         layout.setSpacing(10)
 
+        title_row = QHBoxLayout()
+        title_row.setContentsMargins(0, 0, 0, 0)
+        title_row.setSpacing(UI_SPACING["xs"])
+        self.sidebar_title_layout = title_row
+
         title = QLabel("HushPlayer")
         title.setObjectName("appTitle")
         self.sidebar_title = title
@@ -9879,7 +9900,9 @@ class MainWindow(QMainWindow):
         subtitle.setObjectName("appSubtitle")
         self.sidebar_subtitle = subtitle
 
-        layout.addWidget(title)
+        title_row.addWidget(title)
+        title_row.addStretch(1)
+        layout.addLayout(title_row)
         layout.addWidget(subtitle)
         layout.addSpacing(12)
 
@@ -10157,14 +10180,25 @@ class MainWindow(QMainWindow):
         layout.setSpacing(12)
         self.now_playing_layout = layout
 
+        title_row = QHBoxLayout()
+        title_row.setContentsMargins(0, 0, 0, 0)
+        title_row.setSpacing(UI_SPACING["xs"])
+        self.now_playing_title_layout = title_row
+
         title = QLabel("正在播放")
         title.setObjectName("sectionTitle")
         title.setAlignment(Qt.AlignmentFlag.AlignLeft)
         self.now_playing_title = title
+        title_row.addWidget(title)
+        title_row.addStretch(1)
+        title_row.addWidget(self._create_theme_quick_button())
 
         self.cover_label = RoundedCoverLabel("暂无封面")
         self.cover_label.setObjectName("coverLabel")
-        self.cover_label.setFixedSize(236, 236)
+        self.cover_label.setFixedSize(
+            UI_CONTROL_SIZES["now_playing_cover_size"],
+            UI_CONTROL_SIZES["now_playing_cover_size"],
+        )
 
         now_info_box = QFrame()
         now_info_box.setObjectName("nowInfoBox")
@@ -10303,7 +10337,7 @@ class MainWindow(QMainWindow):
         file_box.hide()
         side_info_layout.addStretch()
 
-        layout.addWidget(title)
+        layout.addLayout(title_row)
         layout.addSpacing(2)
         layout.addWidget(self.cover_label, alignment=Qt.AlignmentFlag.AlignHCenter)
         layout.addWidget(now_info_box)
@@ -10318,12 +10352,12 @@ class MainWindow(QMainWindow):
     def _create_player_bar(self) -> QFrame:
         bar = QFrame()
         bar.setObjectName("playerBar")
-        bar.setMinimumHeight(116)
+        bar.setFixedHeight(UI_CONTROL_SIZES["player_height"])
 
         layout = QHBoxLayout(bar)
         self.player_bar_layout = layout
-        layout.setContentsMargins(24, 16, 24, 16)
-        layout.setSpacing(20)
+        layout.setContentsMargins(24, 8, 24, 8)
+        layout.setSpacing(UI_SPACING["lg"])
 
         left_box = QFrame()
         left_box.setObjectName("playerLeft")
@@ -10337,11 +10371,11 @@ class MainWindow(QMainWindow):
 
         left_layout = QHBoxLayout(left_box)
         left_layout.setContentsMargins(0, 0, 0, 0)
-        left_layout.setSpacing(10)
+        left_layout.setSpacing(UI_SPACING["sm"])
 
         self.bottom_cover_label = RoundedCoverLabel("")
         self.bottom_cover_label.setObjectName("bottomCoverLabel")
-        self.bottom_cover_label.radius = 10
+        self.bottom_cover_label.radius = UI_RADII["button"]
         self.bottom_cover_label.padding = 2
         self.bottom_cover_label.setFixedSize(
             UI_CONTROL_SIZES["player_cover"],
@@ -10350,7 +10384,7 @@ class MainWindow(QMainWindow):
 
         bottom_text_layout = QVBoxLayout()
         bottom_text_layout.setContentsMargins(0, 0, 0, 0)
-        bottom_text_layout.setSpacing(3)
+        bottom_text_layout.setSpacing(UI_SPACING["xxs"])
 
         self.bottom_song_title = ElidedLabel("未播放")
         self.bottom_song_title.setObjectName("bottomSongTitle")
@@ -10388,11 +10422,11 @@ class MainWindow(QMainWindow):
 
         center_layout = QVBoxLayout(center_box)
         center_layout.setContentsMargins(0, 0, 0, 0)
-        center_layout.setSpacing(10)
+        center_layout.setSpacing(UI_SPACING["xs"])
 
         controls_layout = QHBoxLayout()
         controls_layout.setContentsMargins(0, 0, 0, 0)
-        controls_layout.setSpacing(12)
+        controls_layout.setSpacing(UI_SPACING["sm"])
 
         self.prev_btn = PlayerIconButton("previous")
         self.play_btn = PlayerIconButton("play")
@@ -10401,15 +10435,29 @@ class MainWindow(QMainWindow):
         self.like_btn = QPushButton("")
         self.like_btn.setObjectName("likeButton")
         self.like_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.like_btn.setFixedSize(36, 36)
-        self.like_btn.setIconSize(QSize(20, 20))
+        self.like_btn.setFixedSize(
+            UI_CONTROL_SIZES["control_height_normal"],
+            UI_CONTROL_SIZES["control_height_normal"],
+        )
+        self.like_btn.setIconSize(
+            QSize(UI_CONTROL_SIZES["icon_normal"], UI_CONTROL_SIZES["icon_normal"])
+        )
         self.like_btn.setAccessibleName("收藏当前歌曲")
         self.like_btn.setEnabled(False)
         self.like_btn.clicked.connect(self.toggle_like_current_song)
 
-        self.prev_btn.setFixedSize(42, 42)
-        self.play_btn.setFixedSize(50, 50)
-        self.next_btn.setFixedSize(42, 42)
+        self.prev_btn.setFixedSize(
+            UI_CONTROL_SIZES["transport_button_size"],
+            UI_CONTROL_SIZES["transport_button_size"],
+        )
+        self.play_btn.setFixedSize(
+            UI_CONTROL_SIZES["play_button_size"],
+            UI_CONTROL_SIZES["play_button_size"],
+        )
+        self.next_btn.setFixedSize(
+            UI_CONTROL_SIZES["transport_button_size"],
+            UI_CONTROL_SIZES["transport_button_size"],
+        )
 
         self.prev_btn.setObjectName("transportButton")
         self.play_btn.setObjectName("transportPlayButton")
@@ -10428,25 +10476,26 @@ class MainWindow(QMainWindow):
         self.play_mode_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.play_mode_btn.setMinimumWidth(76)
         self.play_mode_btn.setMaximumWidth(96)
+        self.play_mode_btn.setFixedHeight(UI_CONTROL_SIZES["control_height_normal"])
         self.play_mode_btn.setToolTip("切换播放模式")
         self.play_mode_btn.clicked.connect(self.toggle_play_mode)
 
         leading_controls = QFrame()
         leading_controls.setObjectName("playerControlSide")
-        leading_controls.setFixedWidth(128)
+        leading_controls.setFixedWidth(120)
         leading_layout = QHBoxLayout(leading_controls)
         leading_layout.setContentsMargins(0, 0, 0, 0)
-        leading_layout.setSpacing(10)
+        leading_layout.setSpacing(UI_SPACING["xs"])
         leading_layout.addStretch(1)
         leading_layout.addWidget(self.like_btn)
         leading_layout.addWidget(self.prev_btn)
 
         trailing_controls = QFrame()
         trailing_controls.setObjectName("playerControlSide")
-        trailing_controls.setFixedWidth(128)
+        trailing_controls.setFixedWidth(120)
         trailing_layout = QHBoxLayout(trailing_controls)
         trailing_layout.setContentsMargins(0, 0, 0, 0)
-        trailing_layout.setSpacing(10)
+        trailing_layout.setSpacing(UI_SPACING["xs"])
         trailing_layout.addWidget(self.next_btn)
         trailing_layout.addWidget(self.play_mode_btn)
         trailing_layout.addStretch(1)
@@ -18445,7 +18494,6 @@ class MainWindow(QMainWindow):
         QWidget#root {{ background: {t['window_background']}; color: {t['text_primary']}; }}
         QWidget#root QLabel {{ color: {t['text_primary']}; }}
         QFrame#shell {{ background: {t['surface_secondary']}; border-color: {t['border']}; }}
-        QFrame#themeQuickActions {{ background: transparent; border: none; }}
         QPushButton#themeQuickButton {{ background: {t['control_overlay']}; color: {t['text_secondary']}; border: 1px solid {t['border']}; border-radius: {UI_RADII['control']}px; padding: 0; }}
         QPushButton#themeQuickButton:hover {{ background: {t['control_overlay_hover']}; color: {t['text_primary']}; border-color: {t['border_strong']}; }}
         QPushButton#themeQuickButton:pressed {{ background: {t['control_overlay_pressed']}; }}
@@ -18657,6 +18705,12 @@ class MainWindow(QMainWindow):
             border: none;
         }}
 
+        QLabel#sectionTitle {{
+            color: {t["text_primary"]};
+            font-size: {UI_TYPOGRAPHY["font_section"]}px;
+            font-weight: 700;
+        }}
+
         QLabel#coverLabel {{
             border: none;
             border-radius: {UI_RADII["card"]}px;
@@ -18667,13 +18721,13 @@ class MainWindow(QMainWindow):
 
         QLabel#nowSongTitle {{
             color: {t["text"]};
-            font-size: 19px;
-            font-weight: 800;
+            font-size: {UI_TYPOGRAPHY["font_section"]}px;
+            font-weight: 700;
         }}
 
         QLabel#nowArtist {{
             color: {t["text_secondary"]};
-            font-size: 13px;
+            font-size: {UI_TYPOGRAPHY["font_secondary"]}px;
         }}
 
         QPushButton#nowLikeButton,
@@ -18797,7 +18851,7 @@ class MainWindow(QMainWindow):
             border: none;
             border-bottom: 1px solid {t["border"]};
             border-radius: 0;
-            min-height: 36px;
+            min-height: {UI_CONTROL_SIZES["table_header_height"]}px;
         }}
 
         QPushButton#songTableHeaderButton {{
@@ -18806,7 +18860,7 @@ class MainWindow(QMainWindow):
             border: none;
             padding: 6px 2px;
             text-align: left;
-            font-size: 12px;
+            font-size: {UI_TYPOGRAPHY["font_caption"]}px;
             font-weight: 600;
         }}
 
@@ -18824,7 +18878,7 @@ class MainWindow(QMainWindow):
 
         QLabel#songTableHeaderLabel {{
             color: {t["text_muted"]};
-            font-size: 12px;
+            font-size: {UI_TYPOGRAPHY["font_caption"]}px;
             font-weight: 600;
         }}
 
@@ -18856,7 +18910,18 @@ class MainWindow(QMainWindow):
         QLabel#bottomCoverLabel {{
             background: {t["panel_bg"]};
             border: none;
-            border-radius: 10px;
+            border-radius: {UI_RADII["button"]}px;
+        }}
+
+        QLabel#bottomSongTitle {{
+            color: {t["text_primary"]};
+            font-size: {UI_TYPOGRAPHY["font_player_title"]}px;
+            font-weight: 600;
+        }}
+
+        QLabel#bottomSongArtist {{
+            color: {t["text_secondary"]};
+            font-size: {UI_TYPOGRAPHY["font_player_artist"]}px;
         }}
 
         QLabel#listEmptyHint {{

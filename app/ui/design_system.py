@@ -153,6 +153,12 @@ def set_active_theme_tokens(resolved_mode: str) -> dict[str, str]:
 
 
 UI_RADII = {
+    # Semantic names are the preferred vocabulary for new UI work.  The
+    # established aliases remain below so existing widgets do not need a
+    # broad, risky migration.
+    "radius_sm": 6,
+    "radius_md": 10,
+    "radius_lg": 16,
     "small": 6,
     "control": 8,
     "button": 10,
@@ -163,6 +169,12 @@ UI_RADII = {
 
 
 UI_SPACING = {
+    "spacing_xs": 4,
+    "spacing_sm": 8,
+    "spacing_md": 12,
+    "spacing_lg": 16,
+    "spacing_xl": 24,
+    "spacing_xxl": 32,
     "xxs": 4,
     "xs": 8,
     "sm": 12,
@@ -173,6 +185,15 @@ UI_SPACING = {
 
 
 UI_TYPOGRAPHY = {
+    "font_caption": 12,
+    "font_secondary": 13,
+    "font_body": 14,
+    "font_body_emphasis": 14,
+    "font_section": 17,
+    "font_page_title": 23,
+    "font_track_title": 14,
+    "font_player_title": 15,
+    "font_player_artist": 13,
     "page_title": 24,
     "section_title": 18,
     "body": 14,
@@ -183,14 +204,30 @@ UI_TYPOGRAPHY = {
 
 
 UI_CONTROL_SIZES = {
+    "icon_small": 16,
+    "icon_normal": 18,
+    "icon_large": 22,
+    "control_height_small": 32,
+    "control_height_normal": 36,
+    "navigation_item_height": 40,
+    "table_row_height": 46,
+    "table_header_height": 36,
+    "player_height": 92,
+    "player_cover_size": 64,
+    "player_cover_size_compact": 56,
+    "now_playing_cover_size": 228,
+    "now_playing_cover_size_compact": 184,
+    "play_button_size": 44,
+    "transport_button_size": 36,
+    "theme_quick_button_size": 32,
     "navigation_height": 40,
     "navigation_icon": 18,
     "search_height": 38,
     "compact_button_height": 34,
     "icon_button": 36,
-    "track_row_height": 52,
+    "track_row_height": 46,
     "track_like_width": 28,
-    "player_cover": 48,
+    "player_cover": 64,
     "player_center_max_width": 800,
     "scrollbar_width": 10,
 }

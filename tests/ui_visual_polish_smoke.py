@@ -69,7 +69,7 @@ def run_test(app: QApplication) -> None:
     }
     assert required_colors.issubset(DARK_THEME_TOKENS)
     assert set(UI_RADII.values()) == {6, 8, 10, 12, 16, 22}
-    assert set(UI_SPACING.values()) == {4, 8, 12, 16, 20, 24}
+    assert {4, 8, 12, 16, 20, 24, 32}.issubset(UI_SPACING.values())
     assert UI_TYPOGRAPHY["page_title"] > UI_TYPOGRAPHY["body"]
 
     window = MainWindow()

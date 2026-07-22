@@ -743,7 +743,7 @@ class OnlineTrackHeader(QFrame):
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.setObjectName("onlineTableHeader")
-        self.setFixedHeight(36)
+        self.setFixedHeight(UI_CONTROL_SIZES["table_header_height"])
 
     def paintEvent(self, event) -> None:
         super().paintEvent(event)
