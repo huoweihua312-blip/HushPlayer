@@ -58,8 +58,15 @@ def run_test(app: QApplication) -> None:
         "navigation_item_height",
         "table_row_height",
         "player_height",
+        "player_height_narrow",
+        "player_height_compact",
+        "player_height_full",
+        "player_vertical_padding_narrow",
+        "player_vertical_padding_compact",
+        "player_vertical_padding_full",
         "player_cover_size",
         "player_cover_size_compact",
+        "player_cover_size_full",
         "now_playing_cover_size",
         "play_button_size",
         "transport_button_size",
@@ -70,7 +77,9 @@ def run_test(app: QApplication) -> None:
     assert {"spacing_xs", "spacing_sm", "spacing_md", "spacing_lg", "spacing_xl"}.issubset(UI_SPACING)
     assert all(value >= 0 for value in UI_CONTROL_SIZES.values())
     assert UI_CONTROL_SIZES["play_button_size"] > UI_CONTROL_SIZES["icon_large"]
-    assert UI_CONTROL_SIZES["player_height"] >= UI_CONTROL_SIZES["player_cover_size"] + 16
+    assert UI_CONTROL_SIZES["player_height_compact"] >= UI_CONTROL_SIZES["player_cover_size"] + 24
+    assert UI_CONTROL_SIZES["player_height_full"] >= UI_CONTROL_SIZES["player_cover_size_full"] + 24
+    assert UI_CONTROL_SIZES["player_height_narrow"] >= UI_CONTROL_SIZES["player_cover_size_compact"] + 24
     assert UI_CONTROL_SIZES["table_row_height"] >= UI_TYPOGRAPHY["font_body"] + 24
     assert UI_CONTROL_SIZES["navigation_item_height"] >= UI_CONTROL_SIZES["icon_normal"] + 16
 
@@ -78,20 +87,42 @@ def run_test(app: QApplication) -> None:
     window.show()
     app.processEvents()
     try:
-        for width, expected_mode in ((900, "narrow"), (1100, "compact"), (1450, "full")):
+        responsive_profiles = {
+            "narrow": ("player_height_narrow", "player_cover_size_compact"),
+            "compact": ("player_height_compact", "player_cover_size"),
+            "full": ("player_height_full", "player_cover_size_full"),
+        }
+        expected_spacings = {
+            "narrow": (UI_SPACING["xxs"], UI_SPACING["xs"], UI_SPACING["xxs"]),
+            "compact": (UI_SPACING["xs"], UI_SPACING["sm"], UI_SPACING["xs"]),
+            "full": (UI_SPACING["sm"], UI_SPACING["sm"], UI_SPACING["sm"]),
+        }
+        for width, expected_mode in (
+            (900, "narrow"),
+            (1100, "compact"),
+            (1450, "full"),
+            (1600, "full"),
+            (1920, "full"),
+            (2560, "full"),
+        ):
             _process_layout(app, window, width)
             assert window._responsive_mode == expected_mode
-            assert window.player_bar.height() == UI_CONTROL_SIZES["player_height"]
+            height_key, cover_key = responsive_profiles[expected_mode]
+            assert window.player_bar.height() == UI_CONTROL_SIZES[height_key]
+            assert window.bottom_cover_label.width() == UI_CONTROL_SIZES[cover_key]
+            assert (
+                window.player_center_layout.spacing(),
+                window.player_progress_layout.spacing(),
+                window.player_right_layout.spacing(),
+            ) == expected_spacings[expected_mode]
             assert window.library_nav_button.minimumHeight() == UI_CONTROL_SIZES["navigation_item_height"]
             assert UI_CONTROL_SIZES["table_row_height"] >= UI_TYPOGRAPHY["font_body"] + 24
             assert window.progress_slider.minimumHeight() >= 20
             assert window.theme_quick_button.isVisible()
             if expected_mode == "narrow":
                 assert window.theme_quick_button.parentWidget() is window.sidebar_content
-                assert window.bottom_cover_label.width() == UI_CONTROL_SIZES["player_cover_size_compact"]
             else:
                 assert window.theme_quick_button.parentWidget() is window.now_playing_panel
-                assert window.bottom_cover_label.width() == UI_CONTROL_SIZES["player_cover_size"]
                 assert window.cover_label.width() <= UI_CONTROL_SIZES["now_playing_cover_size"]
             assert window.theme_quick_button.parentWidget() is not window.centralWidget()
 

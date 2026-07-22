@@ -124,7 +124,35 @@ def run_test(app: QApplication) -> None:
         assert window.lyrics_view.target_position_ratio == 0.45
         assert window.lyrics_view.scroll_animation.duration() == 0
         assert DARK_THEME_TOKENS["favorite"] in window.build_player_product_qss()
-        assert "modeActive" in window.build_player_product_qss()
+        expected_mode_labels = {
+            "sequence": "顺序播放",
+            "list_loop": "列表循环",
+            "single_loop": "单曲循环",
+            "shuffle": "随机播放",
+        }
+        for appearance in ("light", "dark"):
+            window.set_appearance_mode(appearance, persist=False)
+            app.processEvents()
+            tokens = window.get_dark_theme_tokens()
+            player_qss = window.build_theme_overrides_qss()
+            assert (
+                f"border-radius: {UI_CONTROL_SIZES['transport_button_size'] // 2}px"
+                in player_qss
+            )
+            assert 'QPushButton#transportButton:disabled' in player_qss
+            assert 'QPushButton#controlButton:disabled' in player_qss
+            assert 'QPushButton#controlButton[modeActive="true"]' in player_qss
+            assert (
+                f"background: {tokens['selection_background']}; "
+                f"color: {tokens['text_primary']};"
+            ) in player_qss
+            for mode, label in expected_mode_labels.items():
+                window.play_mode = mode
+                window.update_play_mode_button()
+                assert window.play_mode_btn.text() == label
+                assert window.play_mode_btn.property("modeActive") is True
+        window.set_appearance_mode("dark", persist=False)
+        app.processEvents()
 
         music_root = ISOLATED_STORAGE.root / "music"
         songs = [fixture_song(music_root / f"track-{index}.mp3", index) for index in range(3)]

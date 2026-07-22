@@ -6071,27 +6071,57 @@ class MainWindow(QMainWindow):
             now_limits = (280, 340, 330)
             content_minimum = 600
             cover_size = UI_CONTROL_SIZES["now_playing_cover_size"]
-            player_margins = (24, 8, 24, 8)
+            player_margins = (
+                24,
+                UI_CONTROL_SIZES["player_vertical_padding_full"],
+                24,
+                UI_CONTROL_SIZES["player_vertical_padding_full"],
+            )
             player_spacing = UI_SPACING["lg"]
             player_limits = ((212, 300), 340, (180, 230))
+            player_height_key = "player_height_full"
+            player_cover_key = "player_cover_size_full"
+            player_center_spacing = UI_SPACING["sm"]
+            player_progress_spacing = UI_SPACING["sm"]
+            player_right_spacing = UI_SPACING["sm"]
         elif mode == "compact":
             root_margin = UI_SPACING["sm"]
             sidebar_limits = (176, 214, 198)
             now_limits = (220, 270, 250)
             content_minimum = 480
             cover_size = UI_CONTROL_SIZES["now_playing_cover_size_compact"]
-            player_margins = (16, 8, 16, 8)
+            player_margins = (
+                16,
+                UI_CONTROL_SIZES["player_vertical_padding_compact"],
+                16,
+                UI_CONTROL_SIZES["player_vertical_padding_compact"],
+            )
             player_spacing = UI_SPACING["sm"]
             player_limits = ((180, 250), 300, (88, 112))
+            player_height_key = "player_height_compact"
+            player_cover_key = "player_cover_size"
+            player_center_spacing = UI_SPACING["xs"]
+            player_progress_spacing = UI_SPACING["sm"]
+            player_right_spacing = UI_SPACING["xs"]
         else:
             root_margin = UI_SPACING["xs"]
             sidebar_limits = (164, 190, 180)
             now_limits = (0, 0, 0)
             content_minimum = 520
             cover_size = 0
-            player_margins = (12, 8, 12, 8)
+            player_margins = (
+                12,
+                UI_CONTROL_SIZES["player_vertical_padding_narrow"],
+                12,
+                UI_CONTROL_SIZES["player_vertical_padding_narrow"],
+            )
             player_spacing = UI_SPACING["xs"]
             player_limits = ((150, 208), 260, (80, 96))
+            player_height_key = "player_height_narrow"
+            player_cover_key = "player_cover_size_compact"
+            player_center_spacing = UI_SPACING["xxs"]
+            player_progress_spacing = UI_SPACING["xs"]
+            player_right_spacing = UI_SPACING["xxs"]
 
         self.root_layout.setContentsMargins(
             root_margin, root_margin, root_margin, root_margin
@@ -6150,16 +6180,17 @@ class MainWindow(QMainWindow):
         left_limits, center_minimum, right_limits = player_limits
         self.player_bar_layout.setContentsMargins(*player_margins)
         self.player_bar_layout.setSpacing(player_spacing)
-        self.player_bar.setFixedHeight(UI_CONTROL_SIZES["player_height"])
+        self.player_bar.setFixedHeight(UI_CONTROL_SIZES[player_height_key])
+        self.player_center_layout.setSpacing(player_center_spacing)
+        self.player_progress_layout.setSpacing(player_progress_spacing)
+        self.player_right_layout.setSpacing(player_right_spacing)
         self.player_left_box.setMinimumWidth(left_limits[0])
         self.player_left_box.setMaximumWidth(left_limits[1])
         self.player_center_box.setMinimumWidth(center_minimum)
         self.player_right_box.setMinimumWidth(right_limits[0])
         self.player_right_box.setMaximumWidth(right_limits[1])
         self.bottom_cover_label.show()
-        player_cover_size = UI_CONTROL_SIZES[
-            "player_cover_size_compact" if mode == "narrow" else "player_cover_size"
-        ]
+        player_cover_size = UI_CONTROL_SIZES[player_cover_key]
         self.bottom_cover_label.setFixedSize(player_cover_size, player_cover_size)
         self.like_btn.show()
         self.volume_slider.show()
@@ -10357,7 +10388,12 @@ class MainWindow(QMainWindow):
 
         layout = QHBoxLayout(bar)
         self.player_bar_layout = layout
-        layout.setContentsMargins(24, 8, 24, 8)
+        layout.setContentsMargins(
+            24,
+            UI_CONTROL_SIZES["player_vertical_padding_compact"],
+            24,
+            UI_CONTROL_SIZES["player_vertical_padding_compact"],
+        )
         layout.setSpacing(UI_SPACING["lg"])
 
         left_box = QFrame()
@@ -10424,6 +10460,7 @@ class MainWindow(QMainWindow):
         center_layout = QVBoxLayout(center_box)
         center_layout.setContentsMargins(0, 0, 0, 0)
         center_layout.setSpacing(UI_SPACING["xs"])
+        self.player_center_layout = center_layout
 
         controls_layout = QHBoxLayout()
         controls_layout.setContentsMargins(0, 0, 0, 0)
@@ -10525,7 +10562,8 @@ class MainWindow(QMainWindow):
 
         progress_row = QHBoxLayout()
         progress_row.setContentsMargins(0, 0, 0, 0)
-        progress_row.setSpacing(10)
+        progress_row.setSpacing(UI_SPACING["sm"])
+        self.player_progress_layout = progress_row
 
         self.current_time_label = QLabel("0:00")
         self.current_time_label.setObjectName("playerTimeLabel")
@@ -10558,7 +10596,8 @@ class MainWindow(QMainWindow):
 
         right_layout = QVBoxLayout(right_box)
         right_layout.setContentsMargins(0, 0, 0, 0)
-        right_layout.setSpacing(9)
+        right_layout.setSpacing(UI_SPACING["xs"])
+        self.player_right_layout = right_layout
 
         lyrics_actions_row = QHBoxLayout()
         lyrics_actions_row.setContentsMargins(0, 0, 0, 0)
@@ -17691,7 +17730,10 @@ class MainWindow(QMainWindow):
         self.play_mode_btn.setText(text)
         self.play_mode_btn.setToolTip(f"当前模式：{text}；点击切换")
         self.play_mode_btn.setAccessibleName(f"播放模式：{text}")
-        self.play_mode_btn.setProperty("modeActive", self.play_mode != "sequence")
+        # This button always represents the current playback mode.  Keep every
+        # mode on the same subtle selected treatment instead of making only
+        # sequence look inactive and the other labels turn accent blue.
+        self.play_mode_btn.setProperty("modeActive", True)
         self.play_mode_btn.style().unpolish(self.play_mode_btn)
         self.play_mode_btn.style().polish(self.play_mode_btn)
         self.play_mode_btn.update()
@@ -18589,11 +18631,21 @@ class MainWindow(QMainWindow):
         QListWidget#songList::item:selected, QListWidget#playQueuePageList::item:selected {{ background: {t['selection_background']}; color: {t['selection_text']}; }}
         QSlider#progressSlider::groove:horizontal, QSlider#volumeSlider::groove:horizontal {{ background: {t['slider_groove']}; }}
         QSlider#progressSlider::handle:horizontal, QSlider#volumeSlider::handle:horizontal {{ background: {t['slider_handle']}; border-color: {t['border_strong']}; }}
-        QPushButton#transportButton, QPushButton#playerLyricsButton, QPushButton#libraryMoreButton {{ background: {t['control_overlay']}; color: {t['text_secondary']}; border-color: {t['border']}; }}
-        QPushButton#transportButton:hover, QPushButton#playerLyricsButton:hover, QPushButton#libraryMoreButton:hover {{ background: {t['control_overlay_hover']}; color: {t['text_primary']}; border-color: {t['border_strong']}; }}
+        QPushButton#transportButton {{ background: {t['control_overlay']}; color: {t['text_secondary']}; border: 1px solid {t['border']}; border-radius: {UI_CONTROL_SIZES['transport_button_size'] // 2}px; padding: 0; }}
+        QPushButton#transportButton:hover {{ background: {t['control_overlay_hover']}; color: {t['text_primary']}; border-color: {t['border_strong']}; }}
         QPushButton#transportButton:pressed {{ background: {t['control_overlay_pressed']}; }}
-        QPushButton#transportPlayButton {{ background: {t['accent']}; border-color: {t['border_strong']}; }}
+        QPushButton#transportButton:disabled {{ background: {t['control_overlay']}; color: {t['text_disabled']}; border-color: {t['border']}; }}
+        QPushButton#playerLyricsButton, QPushButton#libraryMoreButton {{ background: {t['control_overlay']}; color: {t['text_secondary']}; border-color: {t['border']}; }}
+        QPushButton#playerLyricsButton:hover, QPushButton#libraryMoreButton:hover {{ background: {t['control_overlay_hover']}; color: {t['text_primary']}; border-color: {t['border_strong']}; }}
+        QPushButton#transportPlayButton {{ background: {t['accent']}; color: {t['on_accent']}; border-color: {t['border_strong']}; border-radius: {UI_CONTROL_SIZES['play_button_size'] // 2}px; padding: 0; }}
         QPushButton#transportPlayButton:hover {{ background: {t['accent_hover']}; }}
+        QPushButton#controlButton {{ background: {t['control_overlay']}; color: {t['text_secondary']}; border: 1px solid {t['border']}; border-radius: {UI_RADII['control']}px; padding: 0 10px; font-size: {UI_TYPOGRAPHY['font_secondary']}px; font-weight: 600; }}
+        QPushButton#controlButton:hover {{ background: {t['control_overlay_hover']}; color: {t['text_primary']}; border-color: {t['border_strong']}; }}
+        QPushButton#controlButton:pressed {{ background: {t['control_overlay_pressed']}; }}
+        QPushButton#controlButton:disabled {{ background: {t['control_overlay']}; color: {t['text_disabled']}; border-color: {t['border']}; }}
+        QPushButton#controlButton[modeActive="true"] {{ background: {t['selection_background']}; color: {t['text_primary']}; border-color: {t['selection_border']}; font-weight: 600; }}
+        QPushButton#controlButton[modeActive="true"]:hover {{ background: {t['selection_background']}; color: {t['text_primary']}; border-color: {t['accent']}; }}
+        QPushButton#controlButton[modeActive="true"]:pressed {{ background: {t['surface_pressed']}; color: {t['text_primary']}; border-color: {t['selection_border']}; }}
         QLabel#coverLabel, QLabel#bottomCoverLabel {{ background: transparent; border: none; }}
         QPushButton#likeButton, QPushButton#nowLikeButton {{ background: {t['control_overlay']}; color: {t['text_secondary']}; border: 1px solid {t['border']}; }}
         QPushButton#likeButton:hover, QPushButton#nowLikeButton:hover {{ background: {t['control_overlay_hover']}; color: {t['text_primary']}; border-color: {t['border_strong']}; }}
@@ -18662,19 +18714,21 @@ class MainWindow(QMainWindow):
         }}
 
         QPushButton#transportButton {{
-            background: rgba(255, 255, 255, 0.055);
+            background: {t["control_overlay"]};
+            color: {t["text_secondary"]};
             border: 1px solid {t["border"]};
-            border-radius: 21px;
+            border-radius: {UI_CONTROL_SIZES["transport_button_size"] // 2}px;
             padding: 0;
         }}
 
         QPushButton#transportButton:hover {{
-            background: rgba(255, 255, 255, 0.105);
+            background: {t["control_overlay_hover"]};
+            color: {t["text_primary"]};
             border-color: {t["border_strong"]};
         }}
 
         QPushButton#transportButton:pressed {{
-            background: rgba(255, 255, 255, 0.145);
+            background: {t["control_overlay_pressed"]};
         }}
 
         QPushButton#transportButton:disabled,
@@ -19024,12 +19078,6 @@ class MainWindow(QMainWindow):
             border-color: transparent;
         }}
 
-        QPushButton#controlButton[modeActive="true"] {{
-            background: {t["accent_soft"]};
-            color: {t["accent_hover"]};
-            border-color: {t["selected_border"]};
-            font-weight: 700;
-        }}
         """
 
     def build_visual_polish_qss(self) -> str:
