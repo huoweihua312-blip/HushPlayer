@@ -20,7 +20,7 @@ if str(PROJECT_ROOT) not in sys.path:
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PySide6.QtCore import QPoint, QPointF, QProcess, QThread, QUrl, Qt
+from PySide6.QtCore import QObject, QPoint, QPointF, QProcess, QThread, QUrl, Qt, Signal
 from PySide6.QtGui import QWheelEvent
 from PySide6.QtMultimedia import QMediaPlayer
 from PySide6.QtWidgets import QApplication, QLabel, QMainWindow, QPushButton
@@ -110,6 +110,12 @@ class FixtureServer:
         return f"http://127.0.0.1:{self.server.server_port}{path}"
 
 
+class SettingsDialogThemeManagerStub(QObject):
+    """Provide the SettingsDialog theme notification contract without app state."""
+
+    themeChanged = Signal(str)
+
+
 def track(track_id: str, quality: str = "standard") -> dict:
     return {
         "sourceId": "open_fixture",
@@ -167,12 +173,18 @@ def test_cache_service(app: QApplication, server: FixtureServer) -> None:
         assert service.index_path == cache_root.resolve() / "cache_index.sqlite3"
 
         class SettingsHost(QMainWindow):
+            def __init__(self) -> None:
+                super().__init__()
+                self.theme_manager = SettingsDialogThemeManagerStub(self)
+
             def get_hush_settings(self) -> dict:
                 return {}
 
         settings_host = SettingsHost()
         settings_host.online_audio_cache = service
         dialog = SettingsDialog(settings_host)
+        settings_host.theme_manager.themeChanged.emit("dark")
+        app.processEvents()
         assert str(cache_root.resolve()) in dialog.audio_cache_path_label.text()
         assert "已缓存歌曲" in dialog.audio_cache_summary_label.text()
         button_texts = {button.text() for button in dialog.findChildren(QPushButton)}
