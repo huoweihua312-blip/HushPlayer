@@ -5,7 +5,7 @@
     "numeric_version":  "0.5.0.7",
     "architecture":  "win-x64",
     "mandatory":  false,
-    "setup_url":  "https://github.com/huoweihua312-blip/HushPlayer/releases/download/v0.5.0-beta.7/HushPlayer-0.5.0-beta.7-win-x64-setup.exe",
+    "setup_url":  "https://api.gitcode.com/api/v5/repos/gcw_iPVB8B5g/HushPlayer-updates/releases/v0.5.0-beta.7/attach_files/HushPlayer-0.5.0-beta.7-win-x64-setup.exe/download",
     "setup_size":  67731510,
     "sha256":  "f11742a5b3e9bb32302fb9090abb1375190e811eee1d94d45c18eb16d41b5bdf",
     "release_notes":  [
