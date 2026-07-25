@@ -84,6 +84,24 @@ class LibraryCollectionAdapter(QObject):
         self.track_updated.emit(updated)
         self.favorite_changed.emit(updated.id, updated.is_favorite)
 
+    def upsert_track(self, track: Track) -> Track:
+        """Add or replace one UI-only Track without rebuilding the shared collection."""
+        existing = self._track_by_id.get(track.id)
+        if existing is None:
+            self._tracks.append(track)
+            self._track_by_id[track.id] = track
+            if track.is_favorite:
+                self._favorite_at[track.id] = self._next_timestamp()
+            self.tracks_changed.emit()
+            return track
+        if existing == track:
+            return existing
+        index = next(index for index, item in enumerate(self._tracks) if item.id == track.id)
+        self._tracks[index] = track
+        self._track_by_id[track.id] = track
+        self.track_updated.emit(track)
+        return track
+
     def favorite_at(self, track_id: str) -> datetime | None:
         return self._favorite_at.get(track_id)
 

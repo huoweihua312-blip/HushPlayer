@@ -7,6 +7,7 @@ from PySide6.QtWidgets import QHBoxLayout, QMainWindow, QVBoxLayout, QWidget
 from app.ui_v2.adapters.library_adapter import LibraryAdapter
 from app.ui_v2.adapters.library_collection import LibraryCollectionAdapter
 from app.ui_v2.adapters.navigation_adapter import NavigationAdapter
+from app.ui_v2.adapters.online_adapter import OnlineAdapter
 from app.ui_v2.adapters.playback_adapter import PlaybackAdapter
 from app.ui_v2.adapters.playlist_adapter import PlaylistAdapter
 from app.ui_v2.mock.track_factory import create_mock_tracks
@@ -26,6 +27,9 @@ class MainWindow(QMainWindow):
         self._theme = get_theme("dark")
         self.library_collection = LibraryCollectionAdapter(create_mock_tracks(1000), self)
         self.playlist_adapter = PlaylistAdapter(self.library_collection, self)
+        self.online_adapter = OnlineAdapter(
+            self.library_collection, self.playlist_adapter, self
+        )
         self.library_adapter = LibraryAdapter(collection=self.library_collection, parent=self)
         self.navigation_adapter = NavigationAdapter(self.playlist_adapter, self)
         self.playback_adapter = PlaybackAdapter(self)
@@ -37,6 +41,7 @@ class MainWindow(QMainWindow):
             self.navigation_adapter,
             self.library_collection,
             self.playlist_adapter,
+            self.online_adapter,
             self._theme,
             self,
         )
@@ -88,6 +93,7 @@ class MainWindow(QMainWindow):
         self.library_page.theme_changed.connect(self.set_theme)
         self.router.track_play_requested.connect(self._play_tracks)
         self.router.queue_requested.connect(self._play_queue)
+        self.router.online_play_requested.connect(self._play_online_track)
         self.playback_adapter.track_changed.connect(self._on_playback_track_changed)
         self.library_collection.track_updated.connect(self.playback_adapter.update_track)
         self.library_collection.favorite_changed.connect(self._sync_favorite_from_library)
@@ -109,9 +115,14 @@ class MainWindow(QMainWindow):
             self.playback_adapter.toggle_shuffle()
         self.playback_adapter.play_track(available[0].id)
 
+    def _play_online_track(self, track) -> None:
+        self.playback_adapter.set_queue((track,))
+        self.playback_adapter.play_track(track.id)
+
     def _on_playback_track_changed(self, track) -> None:
         track_id = track.id if track is not None else ""
         self.library_collection.set_playing_track(track_id)
+        self.router.set_playing_track(track_id)
         if track is not None:
             self.library_collection.record_play(track.id)
 

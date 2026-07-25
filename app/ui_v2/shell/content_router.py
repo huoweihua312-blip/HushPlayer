@@ -10,6 +10,8 @@ from app.ui_v2.adapters.artists_adapter import ArtistsAdapter
 from app.ui_v2.adapters.favorites_adapter import FavoritesAdapter
 from app.ui_v2.adapters.library_collection import LibraryCollectionAdapter
 from app.ui_v2.adapters.navigation_adapter import NavigationAdapter
+from app.ui_v2.adapters.online_adapter import OnlineAdapter
+from app.ui_v2.adapters.online_source_adapter import OnlineSourceAdapter
 from app.ui_v2.adapters.playlist_adapter import PlaylistAdapter, PlaylistTrackAdapter
 from app.ui_v2.adapters.recent_adapter import RecentAdapter
 from app.ui_v2.pages.album_detail_page import AlbumDetailPage
@@ -18,6 +20,8 @@ from app.ui_v2.pages.artist_detail_page import ArtistDetailPage
 from app.ui_v2.pages.artists_page import ArtistsPage
 from app.ui_v2.pages.favorites_page import FavoritesPage
 from app.ui_v2.pages.library_page import LibraryPage
+from app.ui_v2.pages.online_search_page import OnlineSearchPage
+from app.ui_v2.pages.online_source_page import OnlineSourcePage
 from app.ui_v2.pages.playlist_page import PlaylistPage
 from app.ui_v2.pages.recent_page import RecentPage
 from app.ui_v2.pages.track_list_page import TrackListPage
@@ -67,6 +71,7 @@ class ContentRouter(QStackedWidget):
 
     track_play_requested = Signal(object, str)
     queue_requested = Signal(object, bool)
+    online_play_requested = Signal(object)
 
     ROUTE_METADATA = {
         "online_search": ("在线搜索", "search"),
@@ -80,6 +85,7 @@ class ContentRouter(QStackedWidget):
         navigation: NavigationAdapter,
         collection: LibraryCollectionAdapter,
         playlists: PlaylistAdapter,
+        online: OnlineAdapter,
         theme: Theme,
         parent: QWidget | None = None,
     ) -> None:
@@ -88,6 +94,8 @@ class ContentRouter(QStackedWidget):
         self._navigation = navigation
         self._collection = collection
         self._playlists = playlists
+        self._online_adapter = online
+        self._online_sources = OnlineSourceAdapter(online, self)
         self._pages: dict[str, QWidget] = {"library": library_page}
         self._favorites_adapter = FavoritesAdapter(collection, self)
         self._recent_adapter = RecentAdapter(collection, self)
@@ -112,6 +120,10 @@ class ContentRouter(QStackedWidget):
             return self._cached_page("artists", self._create_artists_page)
         if route_id == "albums":
             return self._cached_page("albums", self._create_albums_page)
+        if route_id == "online_search":
+            return self._cached_page("online_search", self._create_online_search_page)
+        if route_id == "online_sources":
+            return self._cached_page("online_sources", self._create_online_source_page)
         if route_id.startswith("playlist:"):
             page = self._cached_page("playlist", self._create_playlist_page)
             page.set_playlist(route_id.removeprefix("playlist:"))
@@ -141,6 +153,9 @@ class ContentRouter(QStackedWidget):
         for page in dict.fromkeys(self._pages.values()):
             if hasattr(page, "set_responsive_reference_width"):
                 page.set_responsive_reference_width(width)
+
+    def set_playing_track(self, track_id: str) -> None:
+        self._online_adapter.set_playing_track(track_id)
 
     @property
     def cached_page_count(self) -> int:
@@ -193,6 +208,19 @@ class ContentRouter(QStackedWidget):
         page = AlbumDetailPage(self._collection, self._albums_adapter, self._theme, self)
         page.back_button.clicked.connect(lambda: self._navigation.set_route("albums"))
         return self._wire_track_page(page)
+
+    def _create_online_search_page(self) -> OnlineSearchPage:
+        page = OnlineSearchPage(self._online_adapter, self._playlists, self._theme, self)
+        page.source_management_requested.connect(
+            lambda: self._navigation.set_route("online_sources")
+        )
+        self._online_adapter.play_requested.connect(self.online_play_requested)
+        return page
+
+    def _create_online_source_page(self) -> OnlineSourcePage:
+        page = OnlineSourcePage(self._online_sources, self._theme, self)
+        page.back_requested.connect(lambda: self._navigation.set_route("online_search"))
+        return page
 
     def _create_coming_soon(self, route_id: str) -> ComingSoonPage:
         title, icon_name = self.ROUTE_METADATA.get(route_id, ("页面", "library"))
