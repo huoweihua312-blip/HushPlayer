@@ -1,4 +1,4 @@
-"""Launch the isolated UI V2 preview without changing the stable main entry."""
+"""Launch the isolated second-phase UI V2 shell without changing main.py."""
 
 from __future__ import annotations
 
@@ -9,7 +9,7 @@ from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QGuiApplication
 from PySide6.QtWidgets import QApplication
 
-from app.ui_v2.shell.preview_window import PreviewWindow
+from app.ui_v2.shell.main_window import MainWindow
 
 
 def main() -> int:
@@ -17,7 +17,7 @@ def main() -> int:
         Qt.HighDpiScaleFactorRoundingPolicy.PassThrough
     )
     app = QApplication(sys.argv)
-    window = PreviewWindow()
+    window = MainWindow()
     window.show()
     smoke_exit_text = str(os.environ.get("HUSHPLAYER_UI_V2_SMOKE_EXIT_MS") or "").strip()
     if smoke_exit_text:

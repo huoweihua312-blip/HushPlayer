@@ -118,6 +118,7 @@ class TrackTable(QTableView):
         self._theme = theme
         self._hovered_row = -1
         self._column_profile = "narrow"
+        self._responsive_reference_width: int | None = None
         self.setObjectName("trackTable")
         self.header = TrackHeaderView(theme, self)
         self.setHorizontalHeader(self.header)
@@ -188,6 +189,14 @@ class TrackTable(QTableView):
     def column_profile(self) -> str:
         return self._column_profile
 
+    def set_responsive_reference_width(self, width: int | None) -> None:
+        """Use a shell width for profile choice while sizing against the viewport."""
+        reference = max(1, int(width)) if width is not None else None
+        if reference == self._responsive_reference_width:
+            return
+        self._responsive_reference_width = reference
+        self._apply_column_widths()
+
     def is_row_hovered(self, row: int) -> bool:
         return row >= 0 and row == self._hovered_row
 
@@ -250,9 +259,15 @@ class TrackTable(QTableView):
         self.horizontalHeader().setSortIndicator(section, order)
 
     def _apply_column_widths(self) -> None:
-        width = max(1, self.viewport().width())
+        viewport_width = max(1, self.viewport().width())
+        width = max(1, viewport_width - 16)
+        profile_width = self._responsive_reference_width or viewport_width
         self._column_profile = (
-            "narrow" if width < 950 else "standard" if width < 1220 else "wide"
+            "narrow"
+            if profile_width < 950
+            else "standard"
+            if profile_width < 1220
+            else "wide"
         )
         self.setColumnHidden(
             int(TrackColumn.ADDED_AT), self._column_profile == "narrow"
@@ -286,10 +301,10 @@ class TrackTable(QTableView):
 
     @staticmethod
     def _standard_column_widths(width: int) -> dict[TrackColumn, int]:
-        favorite, duration, artist, album, source, date = 40, 74, 170, 164, 104, 110
+        favorite, duration, artist, album, source, date = 40, 74, 140, 130, 92, 90
         return {
             TrackColumn.FAVORITE: favorite,
-            TrackColumn.TITLE: max(170, width - favorite - duration - artist - album - source - date),
+            TrackColumn.TITLE: max(120, width - favorite - duration - artist - album - source - date),
             TrackColumn.ARTIST: artist,
             TrackColumn.ALBUM: album,
             TrackColumn.DURATION: duration,

@@ -71,10 +71,18 @@ class LibraryAdapter(QObject):
         self.play_requested.emit(track.id)
 
     def toggle_favorite(self, track_id: str) -> None:
+        track = self.track_for_id(track_id)
+        if track is not None:
+            self.set_favorite(track_id, not track.is_favorite)
+
+    def set_favorite(self, track_id: str, value: bool) -> None:
         for row, track in enumerate(self._all_tracks):
             if track.id != track_id:
                 continue
-            updated = replace(track, is_favorite=not track.is_favorite)
+            favorite = bool(value)
+            if track.is_favorite == favorite:
+                return
+            updated = replace(track, is_favorite=favorite)
             self._all_tracks[row] = updated
             visible_row = next(
                 (index for index, item in enumerate(self._visible_tracks) if item.id == track_id),
@@ -85,6 +93,12 @@ class LibraryAdapter(QObject):
                 self.track_updated.emit(updated)
             self.favorite_changed.emit(updated.id, updated.is_favorite)
             return
+
+    def all_tracks(self) -> tuple[Track, ...]:
+        return tuple(self._all_tracks)
+
+    def track_for_id(self, track_id: str) -> Track | None:
+        return self._track_by_id(track_id)
 
     def set_tracks(self, tracks: Iterable[Track]) -> None:
         self._all_tracks = list(tracks)

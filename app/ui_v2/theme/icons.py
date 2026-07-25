@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import math
 from typing import Literal
 
 from PySide6.QtCore import QRectF, QSize, Qt
@@ -21,6 +22,23 @@ IconName = Literal[
     "search",
     "sort_ascending",
     "sort_descending",
+    "library",
+    "recent",
+    "artist",
+    "album",
+    "playlist",
+    "add",
+    "lyrics",
+    "settings",
+    "shuffle",
+    "previous",
+    "play",
+    "pause",
+    "next",
+    "repeat",
+    "queue",
+    "volume",
+    "volume_mute",
 ]
 IconState = Literal["normal", "hover", "selected", "disabled"]
 
@@ -96,7 +114,103 @@ def _paint_shape(painter: QPainter, name: IconName, rect: QRectF, color: QColor)
     elif name == "search":
         painter.drawEllipse(rect.adjusted(rect.width() * 0.1, rect.height() * 0.1, -rect.width() * 0.38, -rect.height() * 0.38))
         painter.drawLine(rect.left() + rect.width() * 0.59, rect.top() + rect.height() * 0.59, rect.left() + rect.width() * 0.86, rect.top() + rect.height() * 0.86)
-    else:
+    elif name == "library":
+        for row in range(3):
+            y = rect.top() + rect.height() * (0.22 + row * 0.28)
+            painter.drawLine(rect.left() + rect.width() * 0.18, y, rect.left() + rect.width() * 0.82, y)
+            painter.drawPoint(rect.left() + rect.width() * 0.08, y)
+    elif name == "recent":
+        painter.drawEllipse(rect.adjusted(rect.width() * 0.13, rect.height() * 0.13, -rect.width() * 0.13, -rect.height() * 0.13))
+        painter.drawLine(rect.center().x(), rect.center().y(), rect.center().x(), rect.top() + rect.height() * 0.3)
+        painter.drawLine(rect.center().x(), rect.center().y(), rect.left() + rect.width() * 0.66, rect.center().y())
+    elif name == "artist":
+        painter.drawEllipse(QRectF(rect.left() + rect.width() * 0.35, rect.top() + rect.height() * 0.1, rect.width() * 0.3, rect.height() * 0.3))
+        painter.drawArc(QRectF(rect.left() + rect.width() * 0.18, rect.top() + rect.height() * 0.39, rect.width() * 0.64, rect.height() * 0.48), 20 * 16, 140 * 16)
+    elif name == "album":
+        painter.drawEllipse(rect.adjusted(rect.width() * 0.1, rect.height() * 0.1, -rect.width() * 0.1, -rect.height() * 0.1))
+        painter.drawEllipse(rect.adjusted(rect.width() * 0.41, rect.height() * 0.41, -rect.width() * 0.41, -rect.height() * 0.41))
+    elif name == "playlist":
+        for row, width in enumerate((0.62, 0.62, 0.42)):
+            y = rect.top() + rect.height() * (0.24 + row * 0.25)
+            painter.drawLine(rect.left() + rect.width() * 0.11, y, rect.left() + rect.width() * (0.11 + width), y)
+        painter.drawEllipse(QRectF(rect.left() + rect.width() * 0.66, rect.top() + rect.height() * 0.58, rect.width() * 0.16, rect.height() * 0.16))
+    elif name == "add":
+        painter.drawLine(rect.left() + rect.width() * 0.5, rect.top() + rect.height() * 0.18, rect.left() + rect.width() * 0.5, rect.top() + rect.height() * 0.82)
+        painter.drawLine(rect.left() + rect.width() * 0.18, rect.top() + rect.height() * 0.5, rect.left() + rect.width() * 0.82, rect.top() + rect.height() * 0.5)
+    elif name == "lyrics":
+        body = rect.adjusted(rect.width() * 0.18, rect.height() * 0.12, -rect.width() * 0.18, -rect.height() * 0.12)
+        painter.drawRoundedRect(body, rect.width() * 0.08, rect.width() * 0.08)
+        for row, width in enumerate((0.44, 0.34, 0.48)):
+            y = rect.top() + rect.height() * (0.33 + row * 0.18)
+            painter.drawLine(rect.left() + rect.width() * 0.29, y, rect.left() + rect.width() * (0.29 + width), y)
+    elif name == "settings":
+        painter.drawEllipse(rect.adjusted(rect.width() * 0.18, rect.height() * 0.18, -rect.width() * 0.18, -rect.height() * 0.18))
+        painter.drawEllipse(rect.adjusted(rect.width() * 0.4, rect.height() * 0.4, -rect.width() * 0.4, -rect.height() * 0.4))
+        for angle in range(0, 360, 45):
+            radians = angle * 3.14159265 / 180
+            dx = rect.width() * 0.38
+            dy = rect.height() * 0.38
+            painter.drawLine(
+                rect.center().x() + math.cos(radians) * dx * 0.75,
+                rect.center().y() + math.sin(radians) * dy * 0.75,
+                rect.center().x() + math.cos(radians) * dx,
+                rect.center().y() + math.sin(radians) * dy,
+            )
+    elif name == "shuffle":
+        painter.drawLine(rect.left() + rect.width() * 0.1, rect.top() + rect.height() * 0.28, rect.left() + rect.width() * 0.42, rect.top() + rect.height() * 0.28)
+        painter.drawLine(rect.left() + rect.width() * 0.42, rect.top() + rect.height() * 0.28, rect.left() + rect.width() * 0.78, rect.top() + rect.height() * 0.72)
+        painter.drawLine(rect.left() + rect.width() * 0.1, rect.top() + rect.height() * 0.72, rect.left() + rect.width() * 0.42, rect.top() + rect.height() * 0.72)
+        painter.drawLine(rect.left() + rect.width() * 0.42, rect.top() + rect.height() * 0.72, rect.left() + rect.width() * 0.58, rect.top() + rect.height() * 0.52)
+        painter.drawLine(rect.left() + rect.width() * 0.7, rect.top() + rect.height() * 0.58, rect.left() + rect.width() * 0.84, rect.top() + rect.height() * 0.72)
+        painter.drawLine(rect.left() + rect.width() * 0.84, rect.top() + rect.height() * 0.72, rect.left() + rect.width() * 0.7, rect.top() + rect.height() * 0.86)
+    elif name in ("previous", "next", "play"):
+        path = QPainterPath()
+        if name == "play":
+            path.moveTo(rect.left() + rect.width() * 0.32, rect.top() + rect.height() * 0.18)
+            path.lineTo(rect.left() + rect.width() * 0.78, rect.center().y())
+            path.lineTo(rect.left() + rect.width() * 0.32, rect.top() + rect.height() * 0.82)
+        elif name == "previous":
+            path.moveTo(rect.left() + rect.width() * 0.68, rect.top() + rect.height() * 0.18)
+            path.lineTo(rect.left() + rect.width() * 0.26, rect.center().y())
+            path.lineTo(rect.left() + rect.width() * 0.68, rect.top() + rect.height() * 0.82)
+            painter.drawLine(rect.left() + rect.width() * 0.18, rect.top() + rect.height() * 0.2, rect.left() + rect.width() * 0.18, rect.top() + rect.height() * 0.8)
+        else:
+            path.moveTo(rect.left() + rect.width() * 0.32, rect.top() + rect.height() * 0.18)
+            path.lineTo(rect.left() + rect.width() * 0.74, rect.center().y())
+            path.lineTo(rect.left() + rect.width() * 0.32, rect.top() + rect.height() * 0.82)
+            painter.drawLine(rect.left() + rect.width() * 0.82, rect.top() + rect.height() * 0.2, rect.left() + rect.width() * 0.82, rect.top() + rect.height() * 0.8)
+        painter.setBrush(color)
+        painter.drawPath(path)
+    elif name == "pause":
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(color)
+        painter.drawRoundedRect(QRectF(rect.left() + rect.width() * 0.25, rect.top() + rect.height() * 0.18, rect.width() * 0.17, rect.height() * 0.64), 2, 2)
+        painter.drawRoundedRect(QRectF(rect.left() + rect.width() * 0.58, rect.top() + rect.height() * 0.18, rect.width() * 0.17, rect.height() * 0.64), 2, 2)
+    elif name == "repeat":
+        painter.drawArc(rect.adjusted(rect.width() * 0.14, rect.height() * 0.2, -rect.width() * 0.14, -rect.height() * 0.2), 35 * 16, 250 * 16)
+        painter.drawLine(rect.right() - rect.width() * 0.2, rect.top() + rect.height() * 0.22, rect.right() - rect.width() * 0.2, rect.top() + rect.height() * 0.42)
+        painter.drawLine(rect.right() - rect.width() * 0.2, rect.top() + rect.height() * 0.22, rect.right() - rect.width() * 0.38, rect.top() + rect.height() * 0.3)
+    elif name == "queue":
+        for row, width in enumerate((0.68, 0.5, 0.62)):
+            y = rect.top() + rect.height() * (0.24 + row * 0.26)
+            painter.drawLine(rect.left() + rect.width() * 0.12, y, rect.left() + rect.width() * (0.12 + width), y)
+            painter.drawPoint(rect.right() - rect.width() * 0.1, y)
+    elif name in ("volume", "volume_mute"):
+        speaker = QPainterPath()
+        speaker.moveTo(rect.left() + rect.width() * 0.14, rect.top() + rect.height() * 0.42)
+        speaker.lineTo(rect.left() + rect.width() * 0.35, rect.top() + rect.height() * 0.42)
+        speaker.lineTo(rect.left() + rect.width() * 0.58, rect.top() + rect.height() * 0.22)
+        speaker.lineTo(rect.left() + rect.width() * 0.58, rect.top() + rect.height() * 0.78)
+        speaker.lineTo(rect.left() + rect.width() * 0.35, rect.top() + rect.height() * 0.58)
+        speaker.lineTo(rect.left() + rect.width() * 0.14, rect.top() + rect.height() * 0.58)
+        speaker.closeSubpath()
+        painter.drawPath(speaker)
+        if name == "volume_mute":
+            painter.drawLine(rect.left() + rect.width() * 0.68, rect.top() + rect.height() * 0.34, rect.left() + rect.width() * 0.88, rect.top() + rect.height() * 0.66)
+            painter.drawLine(rect.left() + rect.width() * 0.88, rect.top() + rect.height() * 0.34, rect.left() + rect.width() * 0.68, rect.top() + rect.height() * 0.66)
+        else:
+            painter.drawArc(QRectF(rect.left() + rect.width() * 0.5, rect.top() + rect.height() * 0.28, rect.width() * 0.36, rect.height() * 0.44), -55 * 16, 110 * 16)
+    elif name in ("sort_ascending", "sort_descending"):
         descending = name == "sort_descending"
         for row, x_ratio in enumerate((0.17, 0.17, 0.17)):
             y = rect.top() + rect.height() * (0.25 + row * 0.25)
