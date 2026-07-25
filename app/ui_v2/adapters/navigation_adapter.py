@@ -1,14 +1,17 @@
-"""In-memory navigation and playlist state for the UI V2 shell."""
+"""Route selection backed by the shared mock PlaylistAdapter source."""
 
 from __future__ import annotations
 
 from PySide6.QtCore import QObject, Signal
 
-from app.ui_v2.models.navigation_item import MockPlaylist, NavigationItem
+from app.ui_v2.adapters.library_collection import LibraryCollectionAdapter
+from app.ui_v2.adapters.playlist_adapter import PlaylistAdapter
+from app.ui_v2.models.navigation_item import NavigationItem
+from app.ui_v2.models.playlist import Playlist
 
 
 class NavigationAdapter(QObject):
-    """Owns route selection and mock playlists without persistent storage."""
+    """Owns only route state; playlists are supplied by PlaylistAdapter."""
 
     route_changed = Signal(str)
     playlists_changed = Signal(object)
@@ -25,16 +28,19 @@ class NavigationAdapter(QObject):
         NavigationItem("settings", "设置", "settings", "其他"),
     )
 
-    def __init__(self, parent: QObject | None = None) -> None:
+    def __init__(
+        self,
+        playlists: PlaylistAdapter | None = None,
+        parent: QObject | None = None,
+    ) -> None:
         super().__init__(parent)
+        self._owned_playlists = playlists is None
+        self.playlist_adapter = playlists or PlaylistAdapter(
+            LibraryCollectionAdapter(), self
+        )
         self._route = "library"
         self._current_playlist_id = ""
-        self._playlists = [
-            MockPlaylist("playlist-focus", "专注时刻"),
-            MockPlaylist("playlist-night", "深夜电台与缓慢的城市灯光"),
-            MockPlaylist("playlist-weekend", "周末收藏"),
-        ]
-        self._next_playlist_number = 1
+        self.playlist_adapter.playlists_changed.connect(self._on_playlists_changed)
 
     @property
     def route(self) -> str:
@@ -47,13 +53,13 @@ class NavigationAdapter(QObject):
     def items(self) -> tuple[NavigationItem, ...]:
         return self.MAIN_ITEMS
 
-    def playlists(self) -> tuple[MockPlaylist, ...]:
-        return tuple(self._playlists)
+    def playlists(self) -> tuple[Playlist, ...]:
+        return self.playlist_adapter.playlists()
 
     def set_route(self, route_id: str) -> None:
         route = str(route_id or "library")
         playlist_id = route.removeprefix("playlist:") if route.startswith("playlist:") else ""
-        if playlist_id and not any(item.id == playlist_id for item in self._playlists):
+        if playlist_id and self.playlist_adapter.playlist_for_id(playlist_id) is None:
             route = "library"
             playlist_id = ""
         if route == self._route and playlist_id == self._current_playlist_id:
@@ -64,34 +70,20 @@ class NavigationAdapter(QObject):
         if playlist_id:
             self.current_playlist_changed.emit(playlist_id)
 
-    def create_playlist(self, name: str = "") -> MockPlaylist:
-        title = str(name or "").strip() or f"新建歌单 {self._next_playlist_number}"
-        playlist = MockPlaylist(f"playlist-custom-{self._next_playlist_number}", title)
-        self._next_playlist_number += 1
-        self._playlists.append(playlist)
-        self.playlists_changed.emit(self.playlists())
-        return playlist
+    def create_playlist(self, name: str = "") -> Playlist:
+        return self.playlist_adapter.create_playlist(name)
 
     def rename_playlist(self, playlist_id: str, name: str) -> bool:
-        title = str(name or "").strip()
-        if not title:
-            return False
-        for index, playlist in enumerate(self._playlists):
-            if playlist.id == playlist_id:
-                self._playlists[index] = MockPlaylist(playlist.id, title)
-                self.playlists_changed.emit(self.playlists())
-                return True
-        return False
+        return self.playlist_adapter.rename_playlist(playlist_id, name)
 
     def delete_playlist(self, playlist_id: str) -> bool:
-        for index, playlist in enumerate(self._playlists):
-            if playlist.id != playlist_id:
-                continue
-            del self._playlists[index]
-            self.playlists_changed.emit(self.playlists())
-            if self._current_playlist_id == playlist_id:
-                self._current_playlist_id = ""
-                self._route = "library"
-                self.route_changed.emit("library")
-            return True
-        return False
+        return self.playlist_adapter.delete_playlist(playlist_id)
+
+    def _on_playlists_changed(self, playlists: object) -> None:
+        self.playlists_changed.emit(playlists)
+        if self._current_playlist_id and self.playlist_adapter.playlist_for_id(
+            self._current_playlist_id
+        ) is None:
+            self._current_playlist_id = ""
+            self._route = "library"
+            self.route_changed.emit("library")

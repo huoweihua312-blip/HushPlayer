@@ -1,12 +1,15 @@
-"""Second-phase UI V2 main shell, isolated from the stable application window."""
+"""Third-stage UI V2 shell using one mock collection for every library page."""
 
 from __future__ import annotations
 
 from PySide6.QtWidgets import QHBoxLayout, QMainWindow, QVBoxLayout, QWidget
 
 from app.ui_v2.adapters.library_adapter import LibraryAdapter
+from app.ui_v2.adapters.library_collection import LibraryCollectionAdapter
 from app.ui_v2.adapters.navigation_adapter import NavigationAdapter
 from app.ui_v2.adapters.playback_adapter import PlaybackAdapter
+from app.ui_v2.adapters.playlist_adapter import PlaylistAdapter
+from app.ui_v2.mock.track_factory import create_mock_tracks
 from app.ui_v2.pages.library_page import LibraryPage
 from app.ui_v2.shell.content_router import ContentRouter
 from app.ui_v2.shell.navigation_sidebar import NavigationSidebar
@@ -16,20 +19,26 @@ from app.ui_v2.theme.tokens import Theme, get_theme
 
 
 class MainWindow(QMainWindow):
-    """Composes V2-only state adapters and reusable visual surfaces."""
+    """Composes cached V2 pages around shared mock music-library state."""
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self._theme = get_theme("dark")
-        self.library_adapter = LibraryAdapter(parent=self)
-        self.library_adapter.load_mock_tracks(1000)
-        self.navigation_adapter = NavigationAdapter(self)
+        self.library_collection = LibraryCollectionAdapter(create_mock_tracks(1000), self)
+        self.playlist_adapter = PlaylistAdapter(self.library_collection, self)
+        self.library_adapter = LibraryAdapter(collection=self.library_collection, parent=self)
+        self.navigation_adapter = NavigationAdapter(self.playlist_adapter, self)
         self.playback_adapter = PlaybackAdapter(self)
-        self.playback_adapter.set_queue(self.library_adapter.all_tracks())
+        self.playback_adapter.set_queue(self.library_collection.tracks())
         self.library_page = LibraryPage(self.library_adapter, self._theme, self)
         self.sidebar = NavigationSidebar(self.navigation_adapter, self._theme, self)
         self.router = ContentRouter(
-            self.library_page, self.navigation_adapter, self._theme, self
+            self.library_page,
+            self.navigation_adapter,
+            self.library_collection,
+            self.playlist_adapter,
+            self._theme,
+            self,
         )
         self.player_bar = PlayerBar(self.playback_adapter, self._theme, self)
         self._build_shell()
@@ -57,6 +66,7 @@ class MainWindow(QMainWindow):
         self.sidebar.set_compact(compact)
         self.player_bar.set_compact(compact)
         self.library_page.track_table.set_responsive_reference_width(self.width())
+        self.router.set_responsive_reference_width(self.width())
 
     def _build_shell(self) -> None:
         self.root = QWidget(self)
@@ -76,16 +86,36 @@ class MainWindow(QMainWindow):
 
     def _connect_state(self) -> None:
         self.library_page.theme_changed.connect(self.set_theme)
-        self.library_adapter.play_requested.connect(self.playback_adapter.play_track)
-        self.playback_adapter.track_changed.connect(self._sync_playing_track)
-        self.library_adapter.favorite_changed.connect(self._sync_favorite_from_library)
+        self.router.track_play_requested.connect(self._play_tracks)
+        self.router.queue_requested.connect(self._play_queue)
+        self.playback_adapter.track_changed.connect(self._on_playback_track_changed)
+        self.library_collection.track_updated.connect(self.playback_adapter.update_track)
+        self.library_collection.favorite_changed.connect(self._sync_favorite_from_library)
         self.playback_adapter.favorite_changed.connect(self._sync_favorite_from_player)
 
-    def _sync_playing_track(self, track) -> None:
-        self.library_adapter.set_playing_track(track.id if track is not None else "")
+    def _play_tracks(self, tracks, track_id: str) -> None:
+        available = tuple(track for track in tracks if not track.is_missing)
+        if not available:
+            return
+        self.playback_adapter.set_queue(available)
+        self.playback_adapter.play_track(track_id)
+
+    def _play_queue(self, tracks, shuffle: bool) -> None:
+        available = tuple(track for track in tracks if not track.is_missing)
+        if not available:
+            return
+        self.playback_adapter.set_queue(available)
+        if self.playback_adapter.state.shuffle_enabled != shuffle:
+            self.playback_adapter.toggle_shuffle()
+        self.playback_adapter.play_track(available[0].id)
+
+    def _on_playback_track_changed(self, track) -> None:
+        track_id = track.id if track is not None else ""
+        self.library_collection.set_playing_track(track_id)
+        if track is not None:
+            self.library_collection.record_play(track.id)
 
     def _sync_favorite_from_library(self, track_id: str, favorite: bool) -> None:
-        self.playback_adapter.set_queue(self.library_adapter.all_tracks())
         current = self.playback_adapter.state.current_track
         if current is not None and current.id == track_id:
             self.playback_adapter.set_current_favorite(favorite)
@@ -93,4 +123,4 @@ class MainWindow(QMainWindow):
     def _sync_favorite_from_player(self, favorite: bool) -> None:
         current = self.playback_adapter.state.current_track
         if current is not None:
-            self.library_adapter.set_favorite(current.id, favorite)
+            self.library_collection.set_favorite(current.id, favorite)

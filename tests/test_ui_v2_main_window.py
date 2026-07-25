@@ -170,6 +170,8 @@ class UiV2MainWindowTests(unittest.TestCase):
             self.assertEqual(self.window.navigation_adapter.route, route_id)
             if route_id == "library":
                 self.assertIs(self.window.router.currentWidget(), self.window.library_page)
+            elif route_id in {"liked", "recent", "artists", "albums"}:
+                self.assertNotIsInstance(self.window.router.currentWidget(), ComingSoonPage)
             else:
                 self.assertIsInstance(self.window.router.currentWidget(), ComingSoonPage)
 
@@ -182,7 +184,7 @@ class UiV2MainWindowTests(unittest.TestCase):
             self.assertEqual(
                 self.window.navigation_adapter.route, f"playlist:{playlist_id}"
             )
-            self.assertIsInstance(self.window.router.currentWidget(), ComingSoonPage)
+            self.assertNotIsInstance(self.window.router.currentWidget(), ComingSoonPage)
 
     def test_player_bar_empty_state_recovers_without_recreation(self) -> None:
         player_bar = self.window.player_bar

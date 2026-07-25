@@ -58,6 +58,15 @@ class PlaybackAdapter(QObject):
             )
             self._state = replace(self._state, current_index=current_index)
 
+    def update_track(self, updated: Track) -> None:
+        """Refresh one mock queue reference after shared UI-only metadata changes."""
+        self._queue = [
+            updated if track.id == updated.id else track for track in self._queue
+        ]
+        current = self._state.current_track
+        if current is not None and current.id == updated.id:
+            self._state = replace(self._state, current_track=updated)
+
     def play_track(self, track_id: str) -> None:
         target_index = next(
             (

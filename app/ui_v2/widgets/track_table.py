@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
+
 from PySide6.QtCore import QModelIndex, QRectF, Qt, Signal
 from PySide6.QtGui import QColor, QContextMenuEvent, QFont, QPainter, QPen
 from PySide6.QtWidgets import (
@@ -119,6 +121,7 @@ class TrackTable(QTableView):
         self._hovered_row = -1
         self._column_profile = "narrow"
         self._responsive_reference_width: int | None = None
+        self._playlist_remove_callback: Callable[[str], None] | None = None
         self.setObjectName("trackTable")
         self.header = TrackHeaderView(theme, self)
         self.setHorizontalHeader(self.header)
@@ -200,6 +203,9 @@ class TrackTable(QTableView):
     def is_row_hovered(self, row: int) -> bool:
         return row >= 0 and row == self._hovered_row
 
+    def set_playlist_context(self, remove_callback: Callable[[str], None] | None) -> None:
+        self._playlist_remove_callback = remove_callback
+
     def contextMenuEvent(self, event: QContextMenuEvent) -> None:  # noqa: N802
         index = self.indexAt(event.pos())
         menu = self.build_context_menu(index)
@@ -220,6 +226,11 @@ class TrackTable(QTableView):
         favorite_action.triggered.connect(lambda: self._toggle_from_menu(track))
         playlist_action = menu.addAction("添加到歌单")
         playlist_action.triggered.connect(lambda: self.mock_action_requested.emit("add_to_playlist", track.id))
+        if self._playlist_remove_callback is not None:
+            remove_action = menu.addAction("从当前歌单移除")
+            remove_action.triggered.connect(
+                lambda: self._playlist_remove_callback(track.id)
+            )
         info_action = menu.addAction("查看歌曲信息")
         info_action.triggered.connect(lambda: self.mock_action_requested.emit("show_info", track.id))
         return menu

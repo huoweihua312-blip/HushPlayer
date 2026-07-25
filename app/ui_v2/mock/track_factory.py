@@ -24,14 +24,14 @@ ARTISTS = (
     "A Very Long Artist Name for Elision Coverage",
     "白昼电台",
     "Kite Harbor",
-)
+) + tuple(f"Mock Artist {index:02d}" for index in range(1, 59))
 ALBUMS = (
     "冬日信箱",
     "Notes for an Unnamed City",
     "零点之后的蓝色房间",
     "A Deliberately Long Album Title for Responsive Layout Validation",
     "海风与旧磁带",
-)
+) + tuple(f"Mock Album Collection {index:02d}" for index in range(1, 92))
 ONLINE_SOURCES = (
     ("open-catalog", "Open Catalog"),
     ("radio-archive", "Radio Archive"),
@@ -60,12 +60,14 @@ def create_mock_tracks(count: int = 1000) -> list[Track]:
         title = TITLES[index % len(TITLES)]
         if index % 17 == 0:
             title = f"{title} ({index // 17 + 1})"
+        artist = "" if index % 97 == 0 else ARTISTS[(index * 5) % len(ARTISTS)]
+        album = "" if index % 89 == 0 else ALBUMS[index % len(ALBUMS)]
         tracks.append(
             Track(
                 id=f"mock-{index:04d}",
                 title=title,
-                artist=ARTISTS[index % len(ARTISTS)],
-                album=ALBUMS[index % len(ALBUMS)],
+                artist=artist,
+                album=album,
                 duration_ms=duration_ms,
                 source_id=source_id,
                 source_name=source_name,

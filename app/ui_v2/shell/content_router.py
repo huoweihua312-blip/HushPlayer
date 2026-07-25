@@ -1,18 +1,32 @@
-"""Page cache and route switching for the UI V2 main shell."""
+"""Cached UI V2 music-library route pages and their shared action bridge."""
 
 from __future__ import annotations
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import QLabel, QStackedWidget, QVBoxLayout, QWidget
 
+from app.ui_v2.adapters.albums_adapter import AlbumsAdapter
+from app.ui_v2.adapters.artists_adapter import ArtistsAdapter
+from app.ui_v2.adapters.favorites_adapter import FavoritesAdapter
+from app.ui_v2.adapters.library_collection import LibraryCollectionAdapter
 from app.ui_v2.adapters.navigation_adapter import NavigationAdapter
+from app.ui_v2.adapters.playlist_adapter import PlaylistAdapter, PlaylistTrackAdapter
+from app.ui_v2.adapters.recent_adapter import RecentAdapter
+from app.ui_v2.pages.album_detail_page import AlbumDetailPage
+from app.ui_v2.pages.albums_page import AlbumsPage
+from app.ui_v2.pages.artist_detail_page import ArtistDetailPage
+from app.ui_v2.pages.artists_page import ArtistsPage
+from app.ui_v2.pages.favorites_page import FavoritesPage
 from app.ui_v2.pages.library_page import LibraryPage
+from app.ui_v2.pages.playlist_page import PlaylistPage
+from app.ui_v2.pages.recent_page import RecentPage
+from app.ui_v2.pages.track_list_page import TrackListPage
 from app.ui_v2.theme.icons import icon
 from app.ui_v2.theme.tokens import Theme
 
 
 class ComingSoonPage(QWidget):
-    """A formal V2 destination for routes outside this implementation stage."""
+    """A formal V2 destination for routes outside the current implementation stage."""
 
     def __init__(
         self, title: str, icon_name: str, theme: Theme, parent: QWidget | None = None
@@ -41,8 +55,7 @@ class ComingSoonPage(QWidget):
         self.setStyleSheet(f"background: {theme.colors.content_background};")
         self.icon_label.setPixmap(icon(self._icon_name, theme, "selected").pixmap(32, 32))
         self.title_label.setStyleSheet(
-            f"font-size: {theme.fonts.page_title}px; font-weight: 600; "
-            f"color: {theme.colors.primary_text};"
+            f"font-size: {theme.fonts.page_title}px; font-weight: 600; color: {theme.colors.primary_text};"
         )
         self.detail_label.setStyleSheet(
             f"font-size: {theme.fonts.secondary}px; color: {theme.colors.secondary_text};"
@@ -50,13 +63,12 @@ class ComingSoonPage(QWidget):
 
 
 class ContentRouter(QStackedWidget):
-    """Caches pages so route changes preserve search, selection, and scroll state."""
+    """Caches static pages and reuses one detail page per entity kind."""
+
+    track_play_requested = Signal(object, str)
+    queue_requested = Signal(object, bool)
 
     ROUTE_METADATA = {
-        "liked": ("我喜欢", "favorite"),
-        "recent": ("最近播放", "recent"),
-        "artists": ("歌手", "artist"),
-        "albums": ("专辑", "album"),
         "online_search": ("在线搜索", "search"),
         "lyrics": ("歌词", "lyrics"),
         "settings": ("设置", "settings"),
@@ -66,44 +78,122 @@ class ContentRouter(QStackedWidget):
         self,
         library_page: LibraryPage,
         navigation: NavigationAdapter,
+        collection: LibraryCollectionAdapter,
+        playlists: PlaylistAdapter,
         theme: Theme,
         parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
         self._theme = theme
         self._navigation = navigation
+        self._collection = collection
+        self._playlists = playlists
         self._pages: dict[str, QWidget] = {"library": library_page}
+        self._favorites_adapter = FavoritesAdapter(collection, self)
+        self._recent_adapter = RecentAdapter(collection, self)
+        self._playlist_tracks = PlaylistTrackAdapter(collection, playlists, self)
+        self._artists_adapter = ArtistsAdapter(collection, self)
+        self._albums_adapter = AlbumsAdapter(collection, self)
         self.addWidget(library_page)
+        library_page.track_table.play_requested.connect(
+            lambda track_id: self.track_play_requested.emit(
+                library_page.adapter.tracks(), track_id
+            )
+        )
         navigation.route_changed.connect(self.show_route)
         self.show_route(navigation.route)
 
     def page_for_route(self, route_id: str) -> QWidget:
-        if route_id not in self._pages:
-            self._pages[route_id] = self._create_page(route_id)
-            self.addWidget(self._pages[route_id])
-        return self._pages[route_id]
+        if route_id in {"liked", "favorites"}:
+            return self._cached_page("favorites", self._create_favorites_page)
+        if route_id == "recent":
+            return self._cached_page("recent", self._create_recent_page)
+        if route_id == "artists":
+            return self._cached_page("artists", self._create_artists_page)
+        if route_id == "albums":
+            return self._cached_page("albums", self._create_albums_page)
+        if route_id.startswith("playlist:"):
+            page = self._cached_page("playlist", self._create_playlist_page)
+            page.set_playlist(route_id.removeprefix("playlist:"))
+            return page
+        if route_id.startswith("artist_detail:"):
+            page = self._cached_page("artist_detail", self._create_artist_detail_page)
+            page.set_artist(route_id.removeprefix("artist_detail:"))
+            return page
+        if route_id.startswith("album_detail:"):
+            page = self._cached_page("album_detail", self._create_album_detail_page)
+            page.set_album(route_id.removeprefix("album_detail:"))
+            return page
+        if route_id == "library":
+            return self._pages["library"]
+        return self._cached_page(route_id, lambda: self._create_coming_soon(route_id))
 
     def show_route(self, route_id: str) -> None:
         self.setCurrentWidget(self.page_for_route(route_id))
 
     def set_theme(self, theme: Theme) -> None:
         self._theme = theme
-        for page in self._pages.values():
-            if isinstance(page, (LibraryPage, ComingSoonPage)):
+        for page in dict.fromkeys(self._pages.values()):
+            if hasattr(page, "set_theme"):
                 page.set_theme(theme)
+
+    def set_responsive_reference_width(self, width: int) -> None:
+        for page in dict.fromkeys(self._pages.values()):
+            if hasattr(page, "set_responsive_reference_width"):
+                page.set_responsive_reference_width(width)
 
     @property
     def cached_page_count(self) -> int:
         return len(self._pages)
 
-    def _create_page(self, route_id: str) -> ComingSoonPage:
-        if route_id.startswith("playlist:"):
-            playlist_id = route_id.removeprefix("playlist:")
-            playlist = next(
-                (item for item in self._navigation.playlists() if item.id == playlist_id),
-                None,
-            )
-            title = playlist.name if playlist is not None else "歌单"
-            return ComingSoonPage(title, "playlist", self._theme, self)
+    def _cached_page(self, key: str, factory) -> QWidget:
+        if key not in self._pages:
+            page = factory()
+            self._pages[key] = page
+            self.addWidget(page)
+        return self._pages[key]
+
+    def _wire_track_page(self, page: TrackListPage) -> TrackListPage:
+        page.track_play_requested.connect(self.track_play_requested)
+        page.queue_requested.connect(self.queue_requested)
+        page.browse_library_requested.connect(lambda: self._navigation.set_route("library"))
+        return page
+
+    def _create_favorites_page(self) -> FavoritesPage:
+        return self._wire_track_page(FavoritesPage(self._favorites_adapter, self._theme, self))
+
+    def _create_recent_page(self) -> RecentPage:
+        return self._wire_track_page(RecentPage(self._recent_adapter, self._theme, self))
+
+    def _create_playlist_page(self) -> PlaylistPage:
+        page = PlaylistPage(self._playlist_tracks, self._playlists, self._theme, self)
+        page.playlist_deleted.connect(lambda _playlist_id: self._navigation.set_route("library"))
+        return self._wire_track_page(page)
+
+    def _create_artists_page(self) -> ArtistsPage:
+        page = ArtistsPage(self._artists_adapter, self._theme, self)
+        page.entity_requested.connect(
+            lambda artist_id: self._navigation.set_route(f"artist_detail:{artist_id}")
+        )
+        return page
+
+    def _create_albums_page(self) -> AlbumsPage:
+        page = AlbumsPage(self._albums_adapter, self._theme, self)
+        page.entity_requested.connect(
+            lambda album_id: self._navigation.set_route(f"album_detail:{album_id}")
+        )
+        return page
+
+    def _create_artist_detail_page(self) -> ArtistDetailPage:
+        page = ArtistDetailPage(self._collection, self._artists_adapter, self._theme, self)
+        page.back_button.clicked.connect(lambda: self._navigation.set_route("artists"))
+        return self._wire_track_page(page)
+
+    def _create_album_detail_page(self) -> AlbumDetailPage:
+        page = AlbumDetailPage(self._collection, self._albums_adapter, self._theme, self)
+        page.back_button.clicked.connect(lambda: self._navigation.set_route("albums"))
+        return self._wire_track_page(page)
+
+    def _create_coming_soon(self, route_id: str) -> ComingSoonPage:
         title, icon_name = self.ROUTE_METADATA.get(route_id, ("页面", "library"))
         return ComingSoonPage(title, icon_name, self._theme, self)
