@@ -47,101 +47,262 @@ class SettingsDialog(QDialog):
         self.main_window = main_window
         self.setWindowTitle("HushPlayer 设置")
         self.setObjectName("settingsDialog")
-        self.setMinimumWidth(520)
+        self.setMinimumSize(900, 600)
 
         settings = self.main_window.get_hush_settings()
         self.immersive_appearance_config = ImmersiveAppearanceConfig.from_settings(
             settings
         )
 
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(24, 22, 24, 22)
-        layout.setSpacing(18)
+        # Main horizontal layout
+        main_layout = QHBoxLayout(self)
+        main_layout.setContentsMargins(0, 0, 0, 0)
+        main_layout.setSpacing(0)
 
-        title = QLabel("设置")
-        title.setObjectName("settingsDialogTitle")
+        # Left navigation panel
+        nav_panel = QFrame()
+        nav_panel.setObjectName("settingsNavPanel")
+        nav_panel.setFixedWidth(200)
+        nav_layout = QVBoxLayout(nav_panel)
+        nav_layout.setContentsMargins(16, 20, 8, 20)
+        nav_layout.setSpacing(4)
 
-        subtitle = QLabel("管理应用更新、播放恢复、歌词显示与本地音乐文件夹。")
-        subtitle.setObjectName("settingsDialogSubtitle")
-        subtitle.setWordWrap(True)
+        self.nav_list = QListWidget()
+        self.nav_list.setObjectName("settingsNavList")
 
-        layout.addWidget(title)
-        layout.addWidget(subtitle)
+        categories = [
+            "常规",
+            "外观",
+            "播放",
+            "歌词",
+            "音乐库",
+            "缓存",
+            "更新",
+            "关于"
+        ]
 
-        self.settings_scroll = QScrollArea(self)
+        for cat in categories:
+            item = QListWidgetItem(cat)
+            self.nav_list.addItem(item)
+
+        nav_layout.addWidget(self.nav_list)
+        main_layout.addWidget(nav_panel)
+
+        # Right content panel
+        content_panel = QFrame()
+        content_panel.setObjectName("settingsContentPanel")
+        content_layout = QVBoxLayout(content_panel)
+        content_layout.setContentsMargins(0, 0, 0, 0)
+        content_layout.setSpacing(0)
+
+        # Header
+        header_frame = QFrame()
+        header_frame.setObjectName("settingsContentHeader")
+        header_layout = QVBoxLayout(header_frame)
+        header_layout.setContentsMargins(32, 24, 32, 16)
+        header_layout.setSpacing(0)
+
+        self.content_title = QLabel("常规")
+        self.content_title.setObjectName("settingsContentTitle")
+        header_layout.addWidget(self.content_title)
+        content_layout.addWidget(header_frame)
+
+        # Scrollable content
+        self.settings_scroll = QScrollArea()
         self.settings_scroll.setObjectName("settingsScrollArea")
         self.settings_scroll.setWidgetResizable(True)
-        self.settings_scroll.setVerticalScrollBarPolicy(
-            Qt.ScrollBarPolicy.ScrollBarAsNeeded
-        )
-        self.settings_scroll.setHorizontalScrollBarPolicy(
-            Qt.ScrollBarPolicy.ScrollBarAlwaysOff
-        )
+        self.settings_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.settings_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         self.settings_scroll.setFrameShape(QFrame.Shape.NoFrame)
 
         self.settings_scroll_content = QWidget()
-        self.settings_scroll_content.setObjectName("settingsScrollContent")
-        self.settings_scroll_content.setSizePolicy(
-            QSizePolicy.Policy.Expanding,
-            QSizePolicy.Policy.Preferred,
-        )
         self.settings_content_layout = QVBoxLayout(self.settings_scroll_content)
-        self.settings_content_layout.setContentsMargins(0, 0, 8, 0)
-        self.settings_content_layout.setSpacing(18)
-        self.settings_scroll.setWidget(self.settings_scroll_content)
-        layout.addWidget(self.settings_scroll, 1)
+        self.settings_content_layout.setContentsMargins(32, 16, 32, 32)
+        self.settings_content_layout.setSpacing(24)
 
-        appearance_card = QFrame()
-        appearance_card.setObjectName("settingsCard")
-        appearance_layout = QVBoxLayout(appearance_card)
-        appearance_layout.setContentsMargins(16, 16, 16, 16)
-        appearance_layout.setSpacing(12)
-        appearance_title = QLabel("外观")
-        appearance_title.setObjectName("settingsCardTitle")
-        appearance_hint = QLabel("切换后立即应用到已打开的窗口。跟随系统会使用 Windows 当前外观。")
-        appearance_hint.setObjectName("settingsHint")
-        appearance_hint.setWordWrap(True)
+        # Create all category pages
+        self.page_general = QWidget()
+        self.page_appearance = QWidget()
+        self.page_playback = QWidget()
+        self.page_lyrics = QWidget()
+        self.page_library = QWidget()
+        self.page_cache = QWidget()
+        self.page_updates = QWidget()
+        self.page_about = QWidget()
+
+        # Add pages to content layout (manual show/hide)
+        self.pages = [
+            self.page_general,
+            self.page_appearance,
+            self.page_playback,
+            self.page_lyrics,
+            self.page_library,
+            self.page_cache,
+            self.page_updates,
+            self.page_about,
+        ]
+
+        for page in self.pages:
+            page.setVisible(False)
+            self.settings_content_layout.addWidget(page)
+
+        self.pages[0].setVisible(True)
+        self.settings_content_layout.addStretch(1)
+
+        self.settings_scroll.setWidget(self.settings_scroll_content)
+        content_layout.addWidget(self.settings_scroll, 1)
+
+        # Footer with buttons
+        footer_frame = QFrame()
+        footer_frame.setObjectName("settingsContentFooter")
+        footer_layout = QHBoxLayout(footer_frame)
+        footer_layout.setContentsMargins(32, 12, 32, 20)
+        footer_layout.setSpacing(12)
+        footer_layout.addStretch(1)
+
+        cancel_btn = QPushButton("取消")
+        cancel_btn.setObjectName("settingsSecondaryButton")
+        cancel_btn.clicked.connect(self.reject)
+
+        save_btn = QPushButton("保存设置")
+        save_btn.setObjectName("settingsPrimaryButton")
+        save_btn.clicked.connect(self.save_settings)
+
+        footer_layout.addWidget(cancel_btn)
+        footer_layout.addWidget(save_btn)
+        content_layout.addWidget(footer_frame)
+
+        main_layout.addWidget(content_panel, 1)
+
+        # Initialize all controls in pages
+        self._init_general_page(settings)
+        self._init_appearance_page(settings)
+        self._init_playback_page(settings)
+        self._init_lyrics_page(settings)
+        self._init_library_page(settings)
+        self._init_cache_page(settings)
+        self._init_updates_page(settings)
+        self._init_about_page()
+
+        # Connect navigation
+        self.nav_list.currentRowChanged.connect(self._on_category_changed)
+
+        # Connect signals
+        self.update_service = getattr(self.main_window, "update_service", None)
+        if self.update_service is not None:
+            self.update_service.checkStarted.connect(self.on_update_check_started)
+            self.update_service.checkCompleted.connect(self.on_update_check_completed)
+
+        self.main_window.online_audio_cache.statisticsChanged.connect(
+            self.refresh_audio_cache_status
+        )
+        self.main_window.theme_manager.themeChanged.connect(
+            lambda _mode: self.apply_style()
+        )
+
+        # Wheel passthrough for controls
+        self._settings_wheel_passthrough_controls = (
+            self.alpha_slider,
+            self.floating_color_combo,
+            self.floating_opacity_slider,
+            self.floating_font_slider,
+            self.floating_width_slider,
+            self.music_scan_import_mode_combo,
+        )
+        for control in self._settings_wheel_passthrough_controls:
+            control.installEventFilter(self)
+
+        self.nav_list.setCurrentRow(0)
+        self.refresh_audio_cache_status()
+        self.apply_style()
+
+    def _on_category_changed(self, index: int) -> None:
+        """Handle category navigation"""
+        if index < 0 or index >= len(self.pages):
+            return
+
+        # Hide all pages
+        for page in self.pages:
+            page.setVisible(False)
+
+        # Show selected page
+        self.pages[index].setVisible(True)
+
+        # Update title
+        item = self.nav_list.item(index)
+        if item:
+            self.content_title.setText(item.text())
+
+    def _init_general_page(self, settings: dict) -> None:
+        """Initialize general settings page"""
+        layout = QVBoxLayout(self.page_general)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(18)
+
+        # Startup behavior
+        section_title = QLabel("启动行为")
+        section_title.setObjectName("settingsSectionTitle")
+        layout.addWidget(section_title)
+
+        self.auto_scan_checkbox = QCheckBox("启动时自动扫描这些文件夹")
+        self.auto_scan_checkbox.setChecked(bool(settings.get("auto_scan_music_folders_on_startup", True)))
+        layout.addWidget(self.auto_scan_checkbox)
+
+        self.floating_auto_open_checkbox = QCheckBox("启动时自动打开桌面歌词")
+        self.floating_auto_open_checkbox.setChecked(bool(settings.get("floating_lyrics_auto_open", False)))
+        layout.addWidget(self.floating_auto_open_checkbox)
+
+    def _init_appearance_page(self, settings: dict) -> None:
+        """Initialize appearance settings page"""
+        layout = QVBoxLayout(self.page_appearance)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(18)
+
+        section_title = QLabel("主题")
+        section_title.setObjectName("settingsSectionTitle")
+        layout.addWidget(section_title)
+
+        hint = QLabel("切换后立即应用到已打开的窗口。跟随系统会使用 Windows 当前外观。")
+        hint.setObjectName("settingsHint")
+        hint.setWordWrap(True)
+        layout.addWidget(hint)
+
         self.appearance_mode_combo = QComboBox()
         self.appearance_mode_combo.addItem("跟随系统", "system")
         self.appearance_mode_combo.addItem("浅色", "light")
         self.appearance_mode_combo.addItem("深色", "dark")
-        appearance_mode = normalize_appearance_mode(
-            settings.get("appearance_mode", "dark")
-        )
+        appearance_mode = normalize_appearance_mode(settings.get("appearance_mode", "dark"))
         appearance_index = self.appearance_mode_combo.findData(appearance_mode)
         self.appearance_mode_combo.setCurrentIndex(max(0, appearance_index))
-        self.appearance_mode_combo.currentIndexChanged.connect(
-            self.apply_appearance_mode
-        )
-        appearance_layout.addWidget(appearance_title)
-        appearance_layout.addWidget(QLabel("主题"))
-        appearance_layout.addWidget(self.appearance_mode_combo)
-        appearance_layout.addWidget(appearance_hint)
+        self.appearance_mode_combo.currentIndexChanged.connect(self.apply_appearance_mode)
+        layout.addWidget(self.appearance_mode_combo)
 
-        playback_card = QFrame()
-        playback_card.setObjectName("settingsCard")
-        playback_layout = QVBoxLayout(playback_card)
-        playback_layout.setContentsMargins(16, 16, 16, 16)
-        playback_layout.setSpacing(12)
+    def _init_playback_page(self, settings: dict) -> None:
+        """Initialize playback settings page"""
+        layout = QVBoxLayout(self.page_playback)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(18)
 
-        playback_title = QLabel("播放")
-        playback_title.setObjectName("settingsCardTitle")
+        section_title = QLabel("播放恢复")
+        section_title.setObjectName("settingsSectionTitle")
+        layout.addWidget(section_title)
 
         self.restore_checkbox = QCheckBox("启动时恢复上次播放的歌曲和进度")
         self.restore_checkbox.setChecked(bool(settings.get("restore_last_playback", True)))
+        layout.addWidget(self.restore_checkbox)
 
-        playback_layout.addWidget(playback_title)
-        playback_layout.addWidget(self.restore_checkbox)
+    def _init_lyrics_page(self, settings: dict) -> None:
+        """Initialize lyrics settings page"""
+        layout = QVBoxLayout(self.page_lyrics)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(18)
 
-        immersive_card = QFrame()
-        immersive_card.setObjectName("settingsCard")
-        immersive_layout = QVBoxLayout(immersive_card)
-        immersive_layout.setContentsMargins(16, 16, 16, 16)
-        immersive_layout.setSpacing(12)
-
+        # Immersive lyrics section
         immersive_title = QLabel("沉浸歌词")
-        immersive_title.setObjectName("settingsCardTitle")
+        immersive_title.setObjectName("settingsSectionTitle")
+        layout.addWidget(immersive_title)
 
+        layout.addWidget(QLabel("背景模式"))
         self.immersive_background_mode_combo = QComboBox()
         self.immersive_background_mode_combo.addItem("封面模糊", "cover")
         self.immersive_background_mode_combo.addItem("纯色背景", "default")
@@ -150,49 +311,40 @@ class SettingsDialog(QDialog):
         immersive_mode_index = self.immersive_background_mode_combo.findData(
             self.immersive_appearance_config.background_mode
         )
-        self.immersive_background_mode_combo.setCurrentIndex(
-            max(0, immersive_mode_index)
-        )
+        self.immersive_background_mode_combo.setCurrentIndex(max(0, immersive_mode_index))
+        layout.addWidget(self.immersive_background_mode_combo)
 
         self.auto_hide_checkbox = QCheckBox("默认自动隐藏沉浸歌词 UI")
         self.auto_hide_checkbox.setChecked(bool(settings.get("immersive_auto_hide_ui", True)))
+        layout.addWidget(self.auto_hide_checkbox)
 
+        # Alpha slider
         alpha_row = QHBoxLayout()
-        alpha_row.setContentsMargins(0, 0, 0, 0)
         alpha_row.setSpacing(12)
-
         self.alpha_label = QLabel()
         self.alpha_label.setObjectName("settingsValueLabel")
-
         self.alpha_slider = QSlider(Qt.Orientation.Horizontal)
         self.alpha_slider.setRange(0, 90)
         self.alpha_slider.setValue(self.immersive_appearance_config.darkness)
         self.alpha_slider.valueChanged.connect(self.update_alpha_label)
-
         alpha_row.addWidget(QLabel("背景暗度"))
         alpha_row.addWidget(self.alpha_slider, 1)
         alpha_row.addWidget(self.alpha_label)
-
+        layout.addLayout(alpha_row)
         self.update_alpha_label(self.alpha_slider.value())
 
-        immersive_layout.addWidget(immersive_title)
-        immersive_layout.addWidget(QLabel("背景模式"))
-        immersive_layout.addWidget(self.immersive_background_mode_combo)
-        immersive_layout.addWidget(self.auto_hide_checkbox)
-        immersive_layout.addLayout(alpha_row)
-        immersive_hint = QLabel("自定义图片、模糊、透明度、填充方式和歌词字号可在沉浸歌词右上角“显示设置”中调整。")
+        immersive_hint = QLabel("自定义图片、模糊、透明度、填充方式和歌词字号可在沉浸歌词右上角「显示设置」中调整。")
         immersive_hint.setWordWrap(True)
         immersive_hint.setObjectName("settingsHint")
-        immersive_layout.addWidget(immersive_hint)
+        layout.addWidget(immersive_hint)
 
-        floating_card = QFrame()
-        floating_card.setObjectName("settingsCard")
-        floating_layout = QVBoxLayout(floating_card)
-        floating_layout.setContentsMargins(16, 16, 16, 16)
-        floating_layout.setSpacing(12)
+        # Spacing between sections
+        layout.addSpacing(24)
 
+        # Floating lyrics section
         floating_title = QLabel("桌面歌词")
-        floating_title.setObjectName("settingsCardTitle")
+        floating_title.setObjectName("settingsSectionTitle")
+        layout.addWidget(floating_title)
 
         self.floating_color_combo = QComboBox()
         self.floating_color_combo.addItem("白色", "white")
@@ -204,313 +356,251 @@ class SettingsDialog(QDialog):
         self.floating_color_combo.addItem("紫色", "purple")
         current_floating_color = str(settings.get("floating_lyrics_color", "white"))
         color_index = self.floating_color_combo.findData(current_floating_color)
-
         if color_index >= 0:
             self.floating_color_combo.setCurrentIndex(color_index)
 
-        floating_color_row = QHBoxLayout()
-        floating_color_row.setContentsMargins(0, 0, 0, 0)
-        floating_color_row.setSpacing(12)
-        floating_color_row.addWidget(QLabel("默认歌词颜色"))
-        floating_color_row.addWidget(self.floating_color_combo, 1)
+        color_row = QHBoxLayout()
+        color_row.setSpacing(12)
+        color_row.addWidget(QLabel("默认歌词颜色"))
+        color_row.addWidget(self.floating_color_combo, 1)
+        layout.addLayout(color_row)
 
-        floating_opacity_row = QHBoxLayout()
-        floating_opacity_row.setContentsMargins(0, 0, 0, 0)
-        floating_opacity_row.setSpacing(12)
-
+        # Opacity slider
         self.floating_opacity_label = QLabel()
         self.floating_opacity_label.setObjectName("settingsValueLabel")
-
         self.floating_opacity_slider = QSlider(Qt.Orientation.Horizontal)
         self.floating_opacity_slider.setRange(20, 100)
         self.floating_opacity_slider.setValue(int(settings.get("floating_lyrics_opacity", 100)))
         self.floating_opacity_slider.valueChanged.connect(self.update_floating_opacity_label)
+        opacity_row = QHBoxLayout()
+        opacity_row.setSpacing(12)
+        opacity_row.addWidget(QLabel("默认不透明度"))
+        opacity_row.addWidget(self.floating_opacity_slider, 1)
+        opacity_row.addWidget(self.floating_opacity_label)
+        layout.addLayout(opacity_row)
+        self.update_floating_opacity_label(self.floating_opacity_slider.value())
 
-        floating_opacity_row.addWidget(QLabel("默认不透明度"))
-        floating_opacity_row.addWidget(self.floating_opacity_slider, 1)
-        floating_opacity_row.addWidget(self.floating_opacity_label)
-
-        floating_font_row = QHBoxLayout()
-        floating_font_row.setContentsMargins(0, 0, 0, 0)
-        floating_font_row.setSpacing(12)
-
+        # Font size slider
         self.floating_font_label = QLabel()
         self.floating_font_label.setObjectName("settingsValueLabel")
-
         self.floating_font_slider = QSlider(Qt.Orientation.Horizontal)
         self.floating_font_slider.setRange(22, 84)
         self.floating_font_slider.setValue(int(settings.get("floating_lyrics_font_size", 42)))
         self.floating_font_slider.valueChanged.connect(self.update_floating_font_label)
+        font_row = QHBoxLayout()
+        font_row.setSpacing(12)
+        font_row.addWidget(QLabel("默认字号"))
+        font_row.addWidget(self.floating_font_slider, 1)
+        font_row.addWidget(self.floating_font_label)
+        layout.addLayout(font_row)
+        self.update_floating_font_label(self.floating_font_slider.value())
 
-        floating_font_row.addWidget(QLabel("默认字号"))
-        floating_font_row.addWidget(self.floating_font_slider, 1)
-        floating_font_row.addWidget(self.floating_font_label)
-
-        floating_width_row = QHBoxLayout()
-        floating_width_row.setContentsMargins(0, 0, 0, 0)
-        floating_width_row.setSpacing(12)
-
+        # Width slider
         self.floating_width_label = QLabel()
         self.floating_width_label.setObjectName("settingsValueLabel")
-
         self.floating_width_slider = QSlider(Qt.Orientation.Horizontal)
         self.floating_width_slider.setRange(420, 1600)
         self.floating_width_slider.setValue(int(settings.get("floating_lyrics_width", 980)))
         self.floating_width_slider.valueChanged.connect(self.update_floating_width_label)
-
-        floating_width_row.addWidget(QLabel("默认宽度"))
-        floating_width_row.addWidget(self.floating_width_slider, 1)
-        floating_width_row.addWidget(self.floating_width_label)
-
-        self.floating_auto_open_checkbox = QCheckBox("启动时自动打开桌面歌词")
-        self.floating_auto_open_checkbox.setChecked(bool(settings.get("floating_lyrics_auto_open", False)))
-
-        reset_floating_position_btn = QPushButton("重置桌面歌词位置")
-        reset_floating_position_btn.setObjectName("settingsSecondaryButton")
-        reset_floating_position_btn.clicked.connect(self.reset_floating_lyrics_position)
-
-        floating_layout.addWidget(floating_title)
-        floating_layout.addLayout(floating_color_row)
-        floating_layout.addLayout(floating_opacity_row)
-        floating_layout.addLayout(floating_font_row)
-        floating_layout.addLayout(floating_width_row)
-        floating_layout.addWidget(self.floating_auto_open_checkbox)
-        floating_layout.addWidget(reset_floating_position_btn)
-
-        self.update_floating_opacity_label(self.floating_opacity_slider.value())
-        self.update_floating_font_label(self.floating_font_slider.value())
+        width_row = QHBoxLayout()
+        width_row.setSpacing(12)
+        width_row.addWidget(QLabel("默认宽度"))
+        width_row.addWidget(self.floating_width_slider, 1)
+        width_row.addWidget(self.floating_width_label)
+        layout.addLayout(width_row)
         self.update_floating_width_label(self.floating_width_slider.value())
 
-        scan_card = QFrame()
-        scan_card.setObjectName("settingsCard")
-        scan_layout = QVBoxLayout(scan_card)
-        scan_layout.setContentsMargins(16, 16, 16, 16)
-        scan_layout.setSpacing(12)
+        # Reset button
+        reset_btn = QPushButton("重置桌面歌词位置")
+        reset_btn.setObjectName("settingsSecondaryButton")
+        reset_btn.clicked.connect(self.reset_floating_lyrics_position)
+        layout.addWidget(reset_btn)
 
-        scan_title = QLabel("音乐文件夹 / 网盘同步目录")
-        scan_title.setObjectName("settingsCardTitle")
+    def _init_library_page(self, settings: dict) -> None:
+        """Initialize music library settings page"""
+        layout = QVBoxLayout(self.page_library)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(18)
 
-        scan_hint = QLabel("可以添加百度网盘同步空间、夸克网盘下载目录、OneDrive、NAS 或本地音乐文件夹。如果播放卡顿，建议在网盘客户端中把音乐文件设为本地可用。")
-        scan_hint.setObjectName("settingsHint")
-        scan_hint.setWordWrap(True)
+        section_title = QLabel("音乐文件夹 / 网盘同步目录")
+        section_title.setObjectName("settingsSectionTitle")
+        layout.addWidget(section_title)
+
+        hint = QLabel("可以添加百度网盘同步空间、夸克网盘下载目录、OneDrive、NAS 或本地音乐文件夹。如果播放卡顿，建议在网盘客户端中把音乐文件设为本地可用。")
+        hint.setObjectName("settingsHint")
+        hint.setWordWrap(True)
+        layout.addWidget(hint)
 
         self.music_scan_folder_list = QListWidget()
         self.music_scan_folder_list.setObjectName("settingsFolderList")
         self.music_scan_folder_list.setMinimumHeight(110)
-
         for folder in settings.get("music_scan_folders", []):
             if isinstance(folder, str) and folder.strip():
                 self.music_scan_folder_list.addItem(folder.strip())
+        layout.addWidget(self.music_scan_folder_list)
 
-        scan_button_row = QHBoxLayout()
-        scan_button_row.setContentsMargins(0, 0, 0, 0)
-        scan_button_row.setSpacing(10)
+        # Buttons row
+        btn_row = QHBoxLayout()
+        btn_row.setSpacing(10)
 
-        add_scan_folder_btn = QPushButton("添加文件夹")
-        add_scan_folder_btn.setObjectName("settingsSecondaryButton")
-        add_scan_folder_btn.clicked.connect(self.add_music_scan_folder)
+        add_btn = QPushButton("添加文件夹")
+        add_btn.setObjectName("settingsSecondaryButton")
+        add_btn.clicked.connect(self.add_music_scan_folder)
 
-        remove_scan_folder_btn = QPushButton("移除选中文件夹")
-        remove_scan_folder_btn.setObjectName("settingsSecondaryButton")
-        remove_scan_folder_btn.clicked.connect(self.remove_music_scan_folder)
+        remove_btn = QPushButton("移除选中文件夹")
+        remove_btn.setObjectName("settingsSecondaryButton")
+        remove_btn.clicked.connect(self.remove_music_scan_folder)
 
-        scan_now_btn = QPushButton("手动重新扫描")
-        scan_now_btn.setObjectName("settingsSecondaryButton")
-        scan_now_btn.clicked.connect(self.scan_music_folders_now)
+        scan_btn = QPushButton("手动重新扫描")
+        scan_btn.setObjectName("settingsSecondaryButton")
+        scan_btn.clicked.connect(self.scan_music_folders_now)
 
-        scan_button_row.addWidget(add_scan_folder_btn)
-        scan_button_row.addWidget(remove_scan_folder_btn)
-        scan_button_row.addWidget(scan_now_btn)
-        scan_button_row.addStretch(1)
+        btn_row.addWidget(add_btn)
+        btn_row.addWidget(remove_btn)
+        btn_row.addWidget(scan_btn)
+        btn_row.addStretch(1)
+        layout.addLayout(btn_row)
 
-        self.auto_scan_checkbox = QCheckBox("启动时自动扫描这些文件夹")
-        self.auto_scan_checkbox.setChecked(bool(settings.get("auto_scan_music_folders_on_startup", True)))
-
-        import_mode_row = QHBoxLayout()
-        import_mode_row.setContentsMargins(0, 0, 0, 0)
-        import_mode_row.setSpacing(12)
-
+        # Import mode
+        import_row = QHBoxLayout()
+        import_row.setSpacing(12)
         self.music_scan_import_mode_combo = QComboBox()
         self.music_scan_import_mode_combo.addItem("进入待导入列表，手动确认", "pending")
         self.music_scan_import_mode_combo.addItem("自动加入音乐库", "auto")
         current_import_mode = str(settings.get("music_scan_import_mode", "pending"))
         import_mode_index = self.music_scan_import_mode_combo.findData(current_import_mode)
-
         if import_mode_index >= 0:
             self.music_scan_import_mode_combo.setCurrentIndex(import_mode_index)
+        import_row.addWidget(QLabel("扫描新音乐后的处理方式"))
+        import_row.addWidget(self.music_scan_import_mode_combo, 1)
+        layout.addLayout(import_row)
 
-        import_mode_row.addWidget(QLabel("扫描新音乐后的处理方式"))
-        import_mode_row.addWidget(self.music_scan_import_mode_combo, 1)
-        scan_cloud_hint = QLabel("推荐用百度网盘客户端的同步空间，或夸克网盘的下载目录，把音乐文件同步/下载到本地后由 HushPlayer 自动扫描。这样最稳定，也不需要登录网盘 API。")
-        scan_cloud_hint.setObjectName("settingsHint")
-        scan_cloud_hint.setWordWrap(True)
+        cloud_hint = QLabel("推荐用百度网盘客户端的同步空间，或夸克网盘的下载目录，把音乐文件同步/下载到本地后由 HushPlayer 自动扫描。这样最稳定，也不需要登录网盘 API。")
+        cloud_hint.setObjectName("settingsHint")
+        cloud_hint.setWordWrap(True)
+        layout.addWidget(cloud_hint)
 
-        scan_layout.addWidget(scan_title)
-        scan_layout.addWidget(scan_hint)
-        scan_layout.addWidget(self.music_scan_folder_list)
-        scan_layout.addLayout(scan_button_row)
-        scan_layout.addWidget(self.auto_scan_checkbox)
-        scan_layout.addLayout(import_mode_row)
-        scan_layout.addWidget(scan_cloud_hint)
-        cache_card = QFrame()
-        cache_card.setObjectName("settingsCard")
-        cache_layout = QVBoxLayout(cache_card)
-        cache_layout.setContentsMargins(16, 16, 16, 16)
-        cache_layout.setSpacing(12)
+    def _init_cache_page(self, settings: dict) -> None:
+        """Initialize cache settings page"""
+        layout = QVBoxLayout(self.page_cache)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(18)
 
-        cache_title = QLabel("缓存")
-        cache_title.setObjectName("settingsCardTitle")
+        # Metadata cache section
+        metadata_title = QLabel("元数据缓存")
+        metadata_title.setObjectName("settingsSectionTitle")
+        layout.addWidget(metadata_title)
 
-        cache_hint = QLabel("如果之前某些歌封面或歌词搜不到，清理失败缓存后可以右键歌曲重新搜索。")
-        cache_hint.setObjectName("settingsHint")
-        cache_hint.setWordWrap(True)
+        metadata_hint = QLabel("如果之前某些歌封面或歌词搜不到，清理失败缓存后可以右键歌曲重新搜索。")
+        metadata_hint.setObjectName("settingsHint")
+        metadata_hint.setWordWrap(True)
+        layout.addWidget(metadata_hint)
 
         clear_missing_btn = QPushButton("清理封面 / 歌词失败缓存")
         clear_missing_btn.setObjectName("settingsSecondaryButton")
         clear_missing_btn.clicked.connect(self.clear_missing_cache)
+        layout.addWidget(clear_missing_btn)
 
-        audio_cache_title = QLabel("音频缓存")
-        audio_cache_title.setObjectName("settingsCardTitle")
+        layout.addSpacing(24)
+
+        # Audio cache section
+        audio_title = QLabel("音频缓存")
+        audio_title.setObjectName("settingsSectionTitle")
+        layout.addWidget(audio_title)
 
         self.audio_cache_summary_label = QLabel()
         self.audio_cache_summary_label.setObjectName("settingsHint")
         self.audio_cache_summary_label.setWordWrap(True)
+        layout.addWidget(self.audio_cache_summary_label)
 
         self.audio_cache_path_label = QLabel()
         self.audio_cache_path_label.setObjectName("settingsHint")
         self.audio_cache_path_label.setWordWrap(True)
-        self.audio_cache_path_label.setSizePolicy(
-            QSizePolicy.Policy.Ignored,
-            QSizePolicy.Policy.Preferred,
-        )
+        self.audio_cache_path_label.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
         self.audio_cache_path_label.setMinimumWidth(0)
-        self.audio_cache_path_label.setTextInteractionFlags(
-            Qt.TextInteractionFlag.TextSelectableByMouse
-        )
+        self.audio_cache_path_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        layout.addWidget(self.audio_cache_path_label)
 
-        audio_cache_button_row = QHBoxLayout()
-        audio_cache_button_row.setContentsMargins(0, 0, 0, 0)
-        audio_cache_button_row.setSpacing(10)
+        # Cache buttons
+        cache_btn_row = QHBoxLayout()
+        cache_btn_row.setSpacing(10)
 
-        open_audio_cache_btn = QPushButton("打开缓存目录")
-        open_audio_cache_btn.setObjectName("settingsSecondaryButton")
-        open_audio_cache_btn.clicked.connect(self.open_audio_cache_directory)
+        open_cache_btn = QPushButton("打开缓存目录")
+        open_cache_btn.setObjectName("settingsSecondaryButton")
+        open_cache_btn.clicked.connect(self.open_audio_cache_directory)
 
-        clear_incomplete_audio_cache_btn = QPushButton("清理未完成缓存")
-        clear_incomplete_audio_cache_btn.setObjectName("settingsSecondaryButton")
-        clear_incomplete_audio_cache_btn.clicked.connect(
-            self.clear_incomplete_audio_cache
-        )
+        clear_incomplete_btn = QPushButton("清理未完成缓存")
+        clear_incomplete_btn.setObjectName("settingsSecondaryButton")
+        clear_incomplete_btn.clicked.connect(self.clear_incomplete_audio_cache)
 
-        clear_all_audio_cache_btn = QPushButton("清理全部音频缓存")
-        clear_all_audio_cache_btn.setObjectName("settingsSecondaryButton")
-        clear_all_audio_cache_btn.clicked.connect(self.clear_all_audio_cache)
+        clear_all_btn = QPushButton("清理全部音频缓存")
+        clear_all_btn.setObjectName("settingsSecondaryButton")
+        clear_all_btn.clicked.connect(self.clear_all_audio_cache)
 
-        audio_cache_button_row.addWidget(open_audio_cache_btn)
-        audio_cache_button_row.addWidget(clear_incomplete_audio_cache_btn)
-        audio_cache_button_row.addWidget(clear_all_audio_cache_btn)
-        audio_cache_button_row.addStretch()
+        cache_btn_row.addWidget(open_cache_btn)
+        cache_btn_row.addWidget(clear_incomplete_btn)
+        cache_btn_row.addWidget(clear_all_btn)
+        cache_btn_row.addStretch()
+        layout.addLayout(cache_btn_row)
 
-        cache_layout.addWidget(cache_title)
-        cache_layout.addWidget(cache_hint)
-        cache_layout.addWidget(clear_missing_btn)
-        cache_layout.addSpacing(4)
-        cache_layout.addWidget(audio_cache_title)
-        cache_layout.addWidget(self.audio_cache_summary_label)
-        cache_layout.addWidget(self.audio_cache_path_label)
-        cache_layout.addLayout(audio_cache_button_row)
+    def _init_updates_page(self, settings: dict) -> None:
+        """Initialize updates settings page"""
+        layout = QVBoxLayout(self.page_updates)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(18)
 
-        update_card = QFrame()
-        update_card.setObjectName("settingsCard")
-        update_layout = QVBoxLayout(update_card)
-        update_layout.setContentsMargins(16, 16, 16, 16)
-        update_layout.setSpacing(12)
+        section_title = QLabel("应用更新")
+        section_title.setObjectName("settingsSectionTitle")
+        layout.addWidget(section_title)
 
-        update_title = QLabel("应用更新")
-        update_title.setObjectName("settingsCardTitle")
-        update_version = QLabel(f"当前版本：{APP_VERSION}")
-        update_version.setObjectName("settingsHint")
+        version_label = QLabel(f"当前版本：{APP_VERSION}")
+        version_label.setObjectName("settingsHint")
+        layout.addWidget(version_label)
+
         self.auto_update_checkbox = QCheckBox("启动后自动检查更新")
-        self.auto_update_checkbox.setChecked(
-            bool(settings.get("auto_check_updates_on_startup", False))
-        )
+        self.auto_update_checkbox.setChecked(bool(settings.get("auto_check_updates_on_startup", False)))
+        layout.addWidget(self.auto_update_checkbox)
 
-        update_delay_row = QHBoxLayout()
-        update_delay_row.setContentsMargins(0, 0, 0, 0)
-        update_delay_row.setSpacing(12)
-        update_delay_row.addWidget(QLabel("启动后延迟"))
+        # Update delay
+        delay_row = QHBoxLayout()
+        delay_row.setSpacing(12)
+        delay_row.addWidget(QLabel("启动后延迟"))
         self.update_delay_combo = QComboBox()
-        for seconds, label in (
-            (5, "5 秒"),
-            (15, "15 秒"),
-            (30, "30 秒"),
-            (60, "1 分钟"),
-        ):
+        for seconds, label in ((5, "5 秒"), (15, "15 秒"), (30, "30 秒"), (60, "1 分钟")):
             self.update_delay_combo.addItem(label, seconds)
-        configured_delay = normalize_update_check_delay_seconds(
-            settings.get("update_check_delay_seconds", 15)
-        )
+        configured_delay = normalize_update_check_delay_seconds(settings.get("update_check_delay_seconds", 15))
         delay_index = self.update_delay_combo.findData(configured_delay)
         if delay_index < 0:
             self.update_delay_combo.addItem(f"{configured_delay} 秒", configured_delay)
             delay_index = self.update_delay_combo.count() - 1
         self.update_delay_combo.setCurrentIndex(delay_index)
-        update_delay_row.addWidget(self.update_delay_combo)
-        update_delay_row.addStretch(1)
+        delay_row.addWidget(self.update_delay_combo)
+        delay_row.addStretch(1)
+        layout.addLayout(delay_row)
 
         self.check_update_button = QPushButton("检查更新")
         self.check_update_button.setObjectName("settingsSecondaryButton")
-        self.update_service = getattr(self.main_window, "update_service", None)
-        if self.update_service is None:
-            update_card.hide()
-        else:
-            self.check_update_button.clicked.connect(
-                lambda: self.main_window.check_for_updates(manual=True)
-            )
-            self.check_update_button.setEnabled(
-                not self.update_service.is_checking
-                and not self.update_service.is_downloading
-            )
-            self.update_service.checkStarted.connect(self.on_update_check_started)
-            self.update_service.checkCompleted.connect(self.on_update_check_completed)
+        self.check_update_button.clicked.connect(lambda: self.main_window.check_for_updates(manual=True))
+        layout.addWidget(self.check_update_button)
 
-        update_layout.addWidget(update_title)
-        update_layout.addWidget(update_version)
-        update_layout.addWidget(self.auto_update_checkbox)
-        update_layout.addLayout(update_delay_row)
-        update_layout.addWidget(self.check_update_button)
+    def _init_about_page(self) -> None:
+        """Initialize about page"""
+        layout = QVBoxLayout(self.page_about)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(18)
 
-        self.main_window.online_audio_cache.statisticsChanged.connect(
-            self.refresh_audio_cache_status
-        )
-        self.refresh_audio_cache_status()
+        app_name = QLabel("HushPlayer")
+        app_name.setObjectName("settingsSectionTitle")
+        layout.addWidget(app_name)
 
-        self.settings_content_layout.addWidget(appearance_card)
-        self.settings_content_layout.addWidget(playback_card)
-        self.settings_content_layout.addWidget(immersive_card)
-        self.settings_content_layout.addWidget(floating_card)
-        self.settings_content_layout.addWidget(scan_card)
-        self.settings_content_layout.addWidget(cache_card)
-        self.settings_content_layout.addWidget(update_card)
-        self.settings_content_layout.addStretch(1)
+        version = QLabel(f"版本 {APP_VERSION}")
+        version.setObjectName("settingsHint")
+        layout.addWidget(version)
 
-        button_row = QHBoxLayout()
-        button_row.setContentsMargins(0, 4, 0, 0)
-        button_row.setSpacing(12)
-
-        save_btn = QPushButton("保存设置")
-        save_btn.setObjectName("settingsPrimaryButton")
-        save_btn.clicked.connect(self.save_settings)
-
-        cancel_btn = QPushButton("取消")
-        cancel_btn.setObjectName("settingsSecondaryButton")
-        cancel_btn.clicked.connect(self.reject)
-
-        button_row.addStretch(1)
-        button_row.addWidget(cancel_btn)
-        button_row.addWidget(save_btn)
-
-        layout.addLayout(button_row)
+        description = QLabel("轻量级本地音乐播放器，支持沉浸歌词、桌面歌词和网盘音乐文件夹同步。")
+        description.setObjectName("settingsHint")
+        description.setWordWrap(True)
+        layout.addWidget(description)
 
         self._settings_wheel_passthrough_controls = (
             self.alpha_slider,
