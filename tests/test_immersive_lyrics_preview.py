@@ -40,7 +40,10 @@ class ImmersiveLyricsPreviewTests(unittest.TestCase):
         self.app.processEvents()
 
     def test_preview_is_independent_from_formal_shell_and_adapters(self) -> None:
-        self.assertNotIn("app.ui_v2.shell.main_window", sys.modules)
+        preview_module = sys.modules[ImmersiveLyricsPreview.__module__]
+        self.assertNotIn("MainWindow", preview_module.__dict__)
+        self.assertNotIn("ContentRouter", preview_module.__dict__)
+        self.assertNotIn("PlaybackAdapter", preview_module.__dict__)
         self.assertFalse(hasattr(self.window, "lyrics_adapter"))
         self.assertFalse(hasattr(self.window, "playback_adapter"))
         self.assertIsNotNone(self.window.background)

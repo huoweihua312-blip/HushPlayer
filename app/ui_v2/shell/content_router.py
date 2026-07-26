@@ -13,6 +13,7 @@ from app.ui_v2.adapters.lyrics_adapter import LyricsAdapter
 from app.ui_v2.adapters.navigation_adapter import NavigationAdapter
 from app.ui_v2.adapters.online_adapter import OnlineAdapter
 from app.ui_v2.adapters.online_source_adapter import OnlineSourceAdapter
+from app.ui_v2.adapters.playback_adapter import PlaybackAdapter
 from app.ui_v2.adapters.playlist_adapter import PlaylistAdapter, PlaylistTrackAdapter
 from app.ui_v2.adapters.recent_adapter import RecentAdapter
 from app.ui_v2.pages.album_detail_page import AlbumDetailPage
@@ -21,6 +22,7 @@ from app.ui_v2.pages.artist_detail_page import ArtistDetailPage
 from app.ui_v2.pages.artists_page import ArtistsPage
 from app.ui_v2.pages.favorites_page import FavoritesPage
 from app.ui_v2.pages.library_page import LibraryPage
+from app.ui_v2.pages.immersive_lyrics_page import ImmersiveLyricsPage
 from app.ui_v2.pages.lyrics_page import LyricsPage
 from app.ui_v2.pages.online_search_page import OnlineSearchPage
 from app.ui_v2.pages.online_source_page import OnlineSourcePage
@@ -74,6 +76,8 @@ class ContentRouter(QStackedWidget):
     track_play_requested = Signal(object, str)
     queue_requested = Signal(object, bool)
     online_play_requested = Signal(object)
+    immersive_fullscreen_requested = Signal(bool)
+    immersive_transparency_requested = Signal(bool)
 
     ROUTE_METADATA = {
         "online_search": ("在线搜索", "search"),
@@ -89,6 +93,7 @@ class ContentRouter(QStackedWidget):
         playlists: PlaylistAdapter,
         online: OnlineAdapter,
         lyrics: LyricsAdapter,
+        playback: PlaybackAdapter,
         theme: Theme,
         parent: QWidget | None = None,
     ) -> None:
@@ -99,6 +104,7 @@ class ContentRouter(QStackedWidget):
         self._playlists = playlists
         self._online_adapter = online
         self._lyrics_adapter = lyrics
+        self._playback_adapter = playback
         self._online_sources = OnlineSourceAdapter(online, self)
         self._pages: dict[str, QWidget] = {"library": library_page}
         self._favorites_adapter = FavoritesAdapter(collection, self)
@@ -130,6 +136,8 @@ class ContentRouter(QStackedWidget):
             return self._cached_page("online_sources", self._create_online_source_page)
         if route_id == "lyrics":
             return self._cached_page("lyrics", self._create_lyrics_page)
+        if route_id == "immersive_lyrics":
+            return self._cached_page("immersive_lyrics", self._create_immersive_lyrics_page)
         if route_id.startswith("playlist:"):
             page = self._cached_page("playlist", self._create_playlist_page)
             page.set_playlist(route_id.removeprefix("playlist:"))
@@ -231,6 +239,18 @@ class ContentRouter(QStackedWidget):
     def _create_lyrics_page(self) -> LyricsPage:
         page = LyricsPage(self._lyrics_adapter, self._theme, self)
         page.source_requested.connect(lambda: self._navigation.set_route("online_sources"))
+        page.immersive_requested.connect(lambda: self._navigation.set_route("immersive_lyrics"))
+        return page
+
+    def _create_immersive_lyrics_page(self) -> ImmersiveLyricsPage:
+        page = ImmersiveLyricsPage(
+            self._lyrics_adapter, self._playback_adapter, self._theme, self
+        )
+        page.immersive_exit_requested.connect(
+            lambda: self._navigation.set_route("lyrics")
+        )
+        page.fullscreen_requested.connect(self.immersive_fullscreen_requested)
+        page.transparency_mode_changed.connect(self.immersive_transparency_requested)
         return page
 
     def _create_coming_soon(self, route_id: str) -> ComingSoonPage:

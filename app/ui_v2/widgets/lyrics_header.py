@@ -14,6 +14,7 @@ class LyricsHeader(QFrame):
     translation_requested = Signal()
     romanization_requested = Signal()
     font_scale_requested = Signal(float)
+    immersive_requested = Signal()
 
     def __init__(self, theme: Theme, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -30,10 +31,14 @@ class LyricsHeader(QFrame):
         self.smaller_button.setText("A-")
         self.larger_button = QToolButton(self)
         self.larger_button.setText("A+")
+        self.immersive_button = QToolButton(self)
+        self.immersive_button.setText("沉浸")
+        self.immersive_button.setToolTip("进入沉浸模式")
         self.translation_button.clicked.connect(self.translation_requested)
         self.romanization_button.clicked.connect(self.romanization_requested)
         self.smaller_button.clicked.connect(lambda: self.font_scale_requested.emit(-0.1))
         self.larger_button.clicked.connect(lambda: self.font_scale_requested.emit(0.1))
+        self.immersive_button.clicked.connect(self.immersive_requested)
         text = QVBoxLayout()
         text.setContentsMargins(0, 0, 0, 0)
         text.setSpacing(3)
@@ -43,7 +48,7 @@ class LyricsHeader(QFrame):
         controls = QHBoxLayout()
         controls.setContentsMargins(0, 0, 0, 0)
         controls.setSpacing(4)
-        for button in (self.translation_button, self.romanization_button, self.smaller_button, self.larger_button):
+        for button in (self.translation_button, self.romanization_button, self.smaller_button, self.larger_button, self.immersive_button):
             controls.addWidget(button)
         layout = QVBoxLayout(self)
         layout.setContentsMargins(14, 14, 14, 14)
@@ -76,7 +81,7 @@ class LyricsHeader(QFrame):
         self.title_label.setStyleSheet(f"font-size: {theme.fonts.section_title}px; font-weight: 600; color: {theme.colors.primary_text};")
         self.artist_label.setStyleSheet(f"color: {theme.colors.secondary_text};")
         self.source_label.setStyleSheet(f"font-size: {theme.fonts.caption}px; color: {theme.colors.subtle_text};")
-        for button in (self.translation_button, self.romanization_button, self.smaller_button, self.larger_button):
+        for button in (self.translation_button, self.romanization_button, self.smaller_button, self.larger_button, self.immersive_button):
             button.setCheckable(button in (self.translation_button, self.romanization_button))
             button.setStyleSheet(
                 f"QToolButton {{ min-height: {theme.metrics.control_height}px; padding: 0 {theme.metrics.spacing_sm}px; border: 0; "

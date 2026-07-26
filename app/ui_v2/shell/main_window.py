@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from PySide6.QtCore import QRect, Qt
 from PySide6.QtWidgets import QHBoxLayout, QMainWindow, QVBoxLayout, QWidget
 
 from app.ui_v2.adapters.library_adapter import LibraryAdapter
@@ -26,6 +27,13 @@ class MainWindow(QMainWindow):
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self._theme = get_theme("dark")
+        self._immersive_shell_active = False
+        self._immersive_normal_geometry: QRect | None = None
+        self._immersive_transparency_enabled = False
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
+        self._immersive_transparency_supported = self.testAttribute(
+            Qt.WidgetAttribute.WA_TranslucentBackground
+        )
         self.library_collection = LibraryCollectionAdapter(create_mock_tracks(1000), self)
         self.playlist_adapter = PlaylistAdapter(self.library_collection, self)
         self.online_adapter = OnlineAdapter(
@@ -45,6 +53,7 @@ class MainWindow(QMainWindow):
             self.playlist_adapter,
             self.online_adapter,
             self.lyrics_adapter,
+            self.playback_adapter,
             self._theme,
             self,
         )
@@ -62,7 +71,7 @@ class MainWindow(QMainWindow):
 
     def set_theme(self, mode: str) -> None:
         self._theme = get_theme(mode)
-        self.root.setStyleSheet(build_stylesheet(self._theme))
+        self._apply_root_stylesheet()
         self.library_page.set_theme(self._theme)
         self.sidebar.set_theme(self._theme)
         self.router.set_theme(self._theme)
@@ -79,16 +88,16 @@ class MainWindow(QMainWindow):
     def _build_shell(self) -> None:
         self.root = QWidget(self)
         self.root.setObjectName("uiV2Root")
-        body = QWidget(self.root)
-        body_layout = QHBoxLayout(body)
-        body_layout.setContentsMargins(0, 0, 0, 0)
-        body_layout.setSpacing(0)
-        body_layout.addWidget(self.sidebar)
-        body_layout.addWidget(self.router, 1)
+        self.body = QWidget(self.root)
+        self._body_layout = QHBoxLayout(self.body)
+        self._body_layout.setContentsMargins(0, 0, 0, 0)
+        self._body_layout.setSpacing(0)
+        self._body_layout.addWidget(self.sidebar)
+        self._body_layout.addWidget(self.router, 1)
         root_layout = QVBoxLayout(self.root)
         root_layout.setContentsMargins(0, 0, 0, 0)
         root_layout.setSpacing(0)
-        root_layout.addWidget(body, 1)
+        root_layout.addWidget(self.body, 1)
         root_layout.addWidget(self.player_bar)
         self.setCentralWidget(self.root)
 
@@ -97,6 +106,13 @@ class MainWindow(QMainWindow):
         self.router.track_play_requested.connect(self._play_tracks)
         self.router.queue_requested.connect(self._play_queue)
         self.router.online_play_requested.connect(self._play_online_track)
+        self.router.immersive_fullscreen_requested.connect(
+            self.set_immersive_fullscreen
+        )
+        self.router.immersive_transparency_requested.connect(
+            self.set_immersive_transparency
+        )
+        self.navigation_adapter.route_changed.connect(self._sync_immersive_shell)
         self.playback_adapter.track_changed.connect(self._on_playback_track_changed)
         self.playback_adapter.track_changed.connect(self.lyrics_adapter.set_track)
         self.playback_adapter.position_changed.connect(self.lyrics_adapter.set_position)
@@ -105,6 +121,46 @@ class MainWindow(QMainWindow):
         self.library_collection.track_updated.connect(self.playback_adapter.update_track)
         self.library_collection.favorite_changed.connect(self._sync_favorite_from_library)
         self.playback_adapter.favorite_changed.connect(self._sync_favorite_from_player)
+        self._sync_immersive_shell(self.navigation_adapter.route)
+
+    def set_immersive_fullscreen(self, enabled: bool) -> None:
+        enabled = bool(enabled)
+        page = self.router._pages.get("immersive_lyrics")
+        if enabled:
+            if not self.isFullScreen():
+                self._immersive_normal_geometry = QRect(self.geometry())
+                self.showFullScreen()
+            if page is not None:
+                page.set_host_fullscreen(True)
+            return
+        if self.isFullScreen():
+            self.showNormal()
+            if self._immersive_normal_geometry is not None:
+                self.setGeometry(self._immersive_normal_geometry)
+        if page is not None:
+            page.set_host_fullscreen(False)
+
+    def set_immersive_transparency(self, enabled: bool) -> None:
+        self._immersive_transparency_enabled = bool(enabled) and self._immersive_shell_active
+        self._apply_root_stylesheet()
+
+    def _sync_immersive_shell(self, route_id: str) -> None:
+        immersive = route_id == "immersive_lyrics"
+        if immersive == self._immersive_shell_active:
+            return
+        self._immersive_shell_active = immersive
+        self.sidebar.setVisible(not immersive)
+        self.player_bar.setVisible(not immersive)
+        if not immersive:
+            self.set_immersive_fullscreen(False)
+            self._immersive_transparency_enabled = False
+        self._apply_root_stylesheet()
+
+    def _apply_root_stylesheet(self) -> None:
+        stylesheet = build_stylesheet(self._theme)
+        if self._immersive_transparency_enabled and self._immersive_transparency_supported:
+            stylesheet += "\nQWidget#uiV2Root { background: transparent; }\n"
+        self.root.setStyleSheet(stylesheet)
 
     def _play_tracks(self, tracks, track_id: str) -> None:
         available = tuple(track for track in tracks if not track.is_missing)

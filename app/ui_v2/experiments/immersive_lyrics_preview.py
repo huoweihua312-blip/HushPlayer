@@ -8,6 +8,7 @@ artwork, track information, or controls.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 from PySide6.QtCore import (
     QEasingCurve,
@@ -16,6 +17,7 @@ from PySide6.QtCore import (
     QPoint,
     QPropertyAnimation,
     QRect,
+    QSignalBlocker,
     QSize,
     Qt,
     QTimer,
@@ -52,8 +54,14 @@ from PySide6.QtWidgets import (
 
 from app.ui_v2.theme.icons import icon
 from app.ui_v2.theme.tokens import Theme, get_theme
+from app.ui_v2.models.lyric_line import LyricLine
+from app.ui_v2.models.lyrics_document import LyricsDocument
+from app.ui_v2.models.track import Track, format_duration
 from app.ui_v2.widgets.elided_label import ElidedLabel
 from app.ui_v2.widgets.playback_button import PlaybackButton
+
+if TYPE_CHECKING:
+    from app.ui_v2.adapters.playback_adapter import PlaybackAdapter
 
 
 @dataclass(frozen=True, slots=True)
@@ -124,6 +132,13 @@ def _blend(first: QColor, second: QColor, ratio: float) -> QColor:
 
 def artwork_for_key(key: str) -> MockArtwork:
     return next((item for item in MOCK_ARTWORKS if item.key == key), MOCK_ARTWORKS[0])
+
+
+def artwork_for_track(track: Track | None) -> MockArtwork:
+    """Choose one deterministic mock artwork without reading a real cover file."""
+    if track is None:
+        return MOCK_ARTWORKS[0]
+    return MOCK_ARTWORKS[sum(ord(character) for character in track.id) % len(MOCK_ARTWORKS)]
 
 
 def artwork_palette(artwork: MockArtwork, theme: Theme) -> tuple[QColor, QColor, QColor, QColor]:
@@ -411,6 +426,21 @@ class PreviewTrackInfo(QWidget):
         self.artist_label.set_full_text("HushPlayer Studio · Visual Draft")
         self.source_label.set_full_text(artwork.label)
 
+    def set_track(self, track: Track | None, document: LyricsDocument | None) -> None:
+        """Refresh only text and mock-artwork identity for a shared V2 track."""
+        self.set_artwork(artwork_for_track(track))
+        if track is None:
+            self.title_label.set_full_text("未选择歌曲")
+            self.artist_label.set_full_text("请选择一首歌曲开始播放")
+            self.source_label.set_full_text("歌词来源: --")
+            self.detail_label.setText("Mock visual / --:--")
+            return
+        self.title_label.set_full_text(document.title if document is not None else track.title)
+        self.artist_label.set_full_text(document.artist if document is not None else track.artist)
+        source = document.source_type if document is not None else track.source_name
+        self.source_label.set_full_text(source or track.album)
+        self.detail_label.setText(f"{track.album} / {format_duration(track.duration_ms)}")
+
     def set_cover_scale(self, value: int) -> None:
         self._cover_scale = max(70, min(130, int(value)))
 
@@ -450,7 +480,9 @@ class PreviewLyricsCanvas(QWidget):
         self._language = "中文"
         self._show_translation = True
         self._show_romanization = True
+        self._document: LyricsDocument | None = None
         self._current_index = 3
+        self._active_segment_index = 1
         self._segment_progress = 0.58
         self._responsive_scale = 1.0
         self._global_scale = 100
@@ -479,6 +511,10 @@ class PreviewLyricsCanvas(QWidget):
     @property
     def text_alpha(self) -> int:
         return 255
+
+    @property
+    def document(self) -> LyricsDocument | None:
+        return self._document
 
     @property
     def active_font_size(self) -> int:
@@ -556,6 +592,37 @@ class PreviewLyricsCanvas(QWidget):
         self._artwork = artwork
         self.update()
 
+    def set_document(self, document: LyricsDocument | None) -> None:
+        if document is self._document:
+            return
+        self._document = document
+        self._current_index = -1
+        self._active_segment_index = -1
+        self._segment_progress = 0.0
+        self.update()
+
+    def set_active_line(self, line: LyricLine | None) -> None:
+        if line is None or self._document is None:
+            next_index = -1
+        else:
+            next_index = next(
+                (index for index, item in enumerate(self._document.lines) if item.id == line.id),
+                -1,
+            )
+        if next_index != self._current_index:
+            self._current_index = next_index
+            self._active_segment_index = -1
+            self._segment_progress = 0.0
+            self.update()
+
+    def set_active_segment(self, line: LyricLine, segment_index: int, progress: float) -> None:
+        if self._document is None:
+            return
+        self.set_active_line(line)
+        self._active_segment_index = max(-1, int(segment_index))
+        self._segment_progress = max(0.0, min(1.0, float(progress)))
+        self.update()
+
     def set_language(self, language: str) -> None:
         self._language = "英文" if language == "英文" else "中文"
         self.update()
@@ -574,14 +641,14 @@ class PreviewLyricsCanvas(QWidget):
     def paintEvent(self, event) -> None:  # noqa: N802
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.TextAntialiasing)
-        lines = ENGLISH_LINES if self._language == "英文" else CHINESE_LINES
+        indexed_lines = self._visible_lines()
         _first, _second, _third, accent = artwork_palette(self._artwork, self._theme)
         max_width = min(self._max_line_width, max(260, self.width() - 40))
         x = max(20, (self.width() - max_width) // 2)
         y = max(30, round(38 * self._responsive_scale))
         active_size, inactive_size, translation_size, romanization_size = self.effective_font_sizes
         spacing_scale = self._responsive_scale * self._global_scale / 100
-        for index, line in enumerate(lines):
+        for index, line in indexed_lines:
             distance = index - self._current_index
             active = distance == 0
             main_font = QFont(self.font())
@@ -616,13 +683,37 @@ class PreviewLyricsCanvas(QWidget):
                 y += sub_metrics.height() + max(3, round(4 * spacing_scale))
             y += max(8, round(14 * spacing_scale))
 
-    def _draw_segmented_line(self, painter: QPainter, line: PreviewLine, rect: QRect, font: QFont, accent: QColor) -> None:
+    def _visible_lines(self) -> tuple[tuple[int, PreviewLine | LyricLine], ...]:
+        if self._document is None:
+            lines = ENGLISH_LINES if self._language == "英文" else CHINESE_LINES
+            return tuple(enumerate(lines))
+        if not self._document.lines:
+            return ()
+        current = self._current_index if self._current_index >= 0 else 0
+        start = max(0, current - 3)
+        end = min(len(self._document.lines), current + 4)
+        return tuple((index, self._document.lines[index]) for index in range(start, end))
+
+    def _draw_segmented_line(self, painter: QPainter, line: PreviewLine | LyricLine, rect: QRect, font: QFont, accent: QColor) -> None:
         self._draw_text(painter, rect, line.text, font, _color(self._theme.colors.primary_text, 255))
-        separator = " " if self._language == "英文" else ""
-        visible = separator.join(line.segments[:2])
-        if len(line.segments) > 2:
-            count = max(1, round(len(line.segments[2]) * self._segment_progress))
-            visible += separator + line.segments[2][:count]
+        if isinstance(line, PreviewLine):
+            separator = " " if self._language == "英文" else ""
+            visible = separator.join(line.segments[:2])
+            if len(line.segments) > 2:
+                count = max(1, round(len(line.segments[2]) * self._segment_progress))
+                visible += separator + line.segments[2][:count]
+        else:
+            if self._active_segment_index < 0:
+                return
+            completed = "".join(segment.text for segment in line.segments[: self._active_segment_index])
+            active_segment = line.segments[self._active_segment_index] if self._active_segment_index < len(line.segments) else None
+            if active_segment is None:
+                visible = completed
+            else:
+                count = max(0, round(len(active_segment.text) * self._segment_progress))
+                visible = completed + active_segment.text[:count]
+        if not visible:
+            return
         prefix_width = QFontMetrics(font).horizontalAdvance(visible) + 3
         accent_rect = QRect(rect.x(), rect.y(), min(prefix_width, rect.width()), rect.height())
         self._draw_text(painter, accent_rect, visible, font, _color(accent.name(), 255))
@@ -679,6 +770,15 @@ class PreviewLyricsView(QScrollArea):
     def set_artwork(self, artwork: MockArtwork) -> None:
         self.canvas.set_artwork(artwork)
 
+    def set_document(self, document: LyricsDocument | None) -> None:
+        self.canvas.set_document(document)
+
+    def set_active_line(self, line: LyricLine | None) -> None:
+        self.canvas.set_active_line(line)
+
+    def set_active_segment(self, line: LyricLine, segment_index: int, progress: float) -> None:
+        self.canvas.set_active_segment(line, segment_index, progress)
+
     def set_language(self, language: str) -> None:
         self.canvas.set_language(language)
 
@@ -691,11 +791,15 @@ class PreviewLyricsView(QScrollArea):
 
 class PreviewControls(QFrame):
     more_requested = Signal()
+    back_requested = Signal()
+    interaction_changed = Signal(bool)
 
     def __init__(self, theme: Theme, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self._theme = theme
         self._playing = True
+        self._adapter: PlaybackAdapter | None = None
+        self._seeking = False
         self._surface_opacity = 35
         self.setObjectName("floatingControls")
         self.back_button = QToolButton(self)
@@ -716,7 +820,17 @@ class PreviewControls(QFrame):
         self.more_button = QToolButton(self)
         self.more_button.setToolTip("打开沉浸歌词设置")
         self.more_button.setIcon(icon("settings", theme))
+        self.back_button.clicked.connect(self.back_requested)
+        self.previous_button.clicked.connect(self._play_previous)
         self.play_button.clicked.connect(self._toggle_play)
+        self.next_button.clicked.connect(self._play_next)
+        self.progress_slider.sliderPressed.connect(self._begin_interaction)
+        self.progress_slider.sliderReleased.connect(self._finish_seek)
+        self.progress_slider.sliderMoved.connect(self._preview_seek)
+        self.volume_slider.sliderPressed.connect(self._begin_interaction)
+        self.volume_slider.sliderReleased.connect(self._end_interaction)
+        self.volume_slider.valueChanged.connect(self._set_volume)
+        self.volume_button.clicked.connect(self._toggle_mute)
         self.more_button.clicked.connect(self.more_requested)
         layout = QHBoxLayout(self)
         layout.setContentsMargins(14, 9, 14, 9)
@@ -767,6 +881,28 @@ class PreviewControls(QFrame):
         self._surface_opacity = max(0, min(100, int(value)))
         self.set_theme(self._theme)
 
+    def bind_playback(self, adapter: PlaybackAdapter) -> None:
+        """Render one shared PlaybackAdapter without retaining a second state."""
+        if adapter is self._adapter:
+            return
+        self._adapter = adapter
+        adapter.track_changed.connect(self._on_track_changed)
+        adapter.playing_changed.connect(self.set_playing)
+        adapter.position_changed.connect(self._on_position_changed)
+        adapter.duration_changed.connect(self._on_duration_changed)
+        adapter.volume_changed.connect(self._on_volume_changed)
+        state = adapter.state
+        self._on_track_changed(state.current_track)
+        self.set_playing(state.is_playing)
+        self._on_duration_changed(state.duration_ms)
+        self._on_position_changed(state.position_ms)
+        self._on_volume_changed(state.volume)
+
+    def set_playing(self, playing: bool) -> None:
+        self._playing = bool(playing)
+        self.play_button.set_icon_name("pause" if self._playing else "play")
+        self.play_button.setToolTip("暂停" if self._playing else "播放")
+
     def set_compact(self, compact: bool) -> None:
         self.volume_slider.setVisible(not compact)
         self.current_label.setVisible(not compact)
@@ -774,9 +910,70 @@ class PreviewControls(QFrame):
         self.back_button.setText("")
 
     def _toggle_play(self) -> None:
+        if self._adapter is not None:
+            self._adapter.toggle_playback()
+            return
         self._playing = not self._playing
-        self.play_button.set_icon_name("pause" if self._playing else "play")
-        self.play_button.setToolTip("暂停预览" if self._playing else "播放预览")
+        self.set_playing(self._playing)
+
+    def _play_previous(self) -> None:
+        if self._adapter is not None:
+            self._adapter.play_previous()
+
+    def _play_next(self) -> None:
+        if self._adapter is not None:
+            self._adapter.play_next()
+
+    def _begin_interaction(self) -> None:
+        self._seeking = True
+        self.interaction_changed.emit(True)
+
+    def _end_interaction(self) -> None:
+        self._seeking = False
+        self.interaction_changed.emit(False)
+
+    def _preview_seek(self, position_ms: int) -> None:
+        self.current_label.setText(format_duration(position_ms))
+
+    def _finish_seek(self) -> None:
+        if self._adapter is not None:
+            self._adapter.seek(self.progress_slider.value())
+        self._end_interaction()
+
+    def _set_volume(self, value: int) -> None:
+        if self._adapter is not None:
+            self._adapter.set_volume(value)
+
+    def _toggle_mute(self) -> None:
+        if self._adapter is not None:
+            self._adapter.set_volume(0 if self._adapter.state.volume else 70)
+
+    def _on_track_changed(self, track: Track | None) -> None:
+        enabled = track is not None
+        for control in (self.previous_button, self.play_button, self.next_button, self.progress_slider):
+            control.setEnabled(enabled)
+
+    def _on_duration_changed(self, duration_ms: int | None) -> None:
+        duration = max(0, int(duration_ms or 0))
+        blocker = QSignalBlocker(self.progress_slider)
+        self.progress_slider.setRange(0, duration)
+        del blocker
+        self.total_label.setText(format_duration(duration_ms))
+        self.progress_slider.setEnabled(self._adapter is not None and duration > 0)
+
+    def _on_position_changed(self, position_ms: int) -> None:
+        if self._seeking:
+            return
+        blocker = QSignalBlocker(self.progress_slider)
+        self.progress_slider.setValue(max(0, int(position_ms)))
+        del blocker
+        self.current_label.setText(format_duration(position_ms))
+
+    def _on_volume_changed(self, value: int) -> None:
+        blocker = QSignalBlocker(self.volume_slider)
+        self.volume_slider.setValue(max(0, min(100, int(value))))
+        del blocker
+        self.volume_button.set_icon_name("volume_mute" if value == 0 else "volume")
 
 
 class SettingsPanel(QFrame):
@@ -801,6 +998,7 @@ class SettingsPanel(QFrame):
     lyrics_width_changed = Signal(int)
     auto_hide_changed = Signal(bool)
     fullscreen_requested = Signal(bool)
+    immersive_exit_requested = Signal()
     reset_lyric_sizes_requested = Signal()
     reset_all_requested = Signal()
 
@@ -875,6 +1073,10 @@ class SettingsPanel(QFrame):
         self.lyrics_width_slider = self._add_slider("歌词最大宽度", 420, 920, 780, "px")
         self.auto_hide_check = self._add_check("自动隐藏控制层", True)
         self.fullscreen_check = self._add_check("全屏", False)
+        self.exit_immersive_button = QToolButton(self)
+        self.exit_immersive_button.setText("退出沉浸模式")
+        self.exit_immersive_button.setToolTip("返回普通歌词")
+        self._body_layout.addWidget(self.exit_immersive_button)
         self._body_layout.addStretch(1)
         self.scroll.setWidget(body)
         layout = QVBoxLayout(self)
@@ -902,6 +1104,7 @@ class SettingsPanel(QFrame):
         self.lyrics_width_slider.valueChanged.connect(self.lyrics_width_changed)
         self.auto_hide_check.toggled.connect(self.auto_hide_changed)
         self.fullscreen_check.toggled.connect(self.fullscreen_requested)
+        self.exit_immersive_button.clicked.connect(self.immersive_exit_requested)
         self.advanced_sizes_toggle.toggled.connect(self._set_advanced_sizes_visible)
         self.reset_lyric_sizes_button.clicked.connect(self.reset_lyric_sizes_requested)
         self.reset_all_button.clicked.connect(self.reset_all_requested)
@@ -1104,8 +1307,15 @@ class SettingsPanel(QFrame):
 class ImmersiveLyricsPreview(QWidget):
     """Isolated visual-review window with persistent, separately composited layers."""
 
-    def __init__(self, parent: QWidget | None = None) -> None:
+    fullscreen_requested = Signal(bool)
+    immersive_exit_requested = Signal()
+    transparency_mode_changed = Signal(bool)
+
+    def __init__(self, parent: QWidget | None = None, *, standalone: bool = True) -> None:
         super().__init__(parent)
+        self._standalone = bool(standalone)
+        self._host_fullscreen = False
+        self._controls_interacting = False
         self._theme = get_theme("dark")
         self._artwork = MOCK_ARTWORKS[0]
         self._language = "中文"
@@ -1126,12 +1336,13 @@ class ImmersiveLyricsPreview(QWidget):
         self.setMinimumSize(780, 520)
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         self.setMouseTracking(True)
-        # Keep native transparency capability stable for this widget's lifetime.
-        # Switching it after show() can make Qt recreate the native window on Windows.
-        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
-        self.setAttribute(Qt.WidgetAttribute.WA_NoSystemBackground, True)
-        self.setWindowFlag(Qt.WindowType.FramelessWindowHint, True)
-        self._transparency_supported = self.testAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+        if self._standalone:
+            # Keep native transparency capability stable for this widget's lifetime.
+            # Switching it after show() can make Qt recreate the native window on Windows.
+            self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
+            self.setAttribute(Qt.WidgetAttribute.WA_NoSystemBackground, True)
+            self.setWindowFlag(Qt.WindowType.FramelessWindowHint, True)
+            self._transparency_supported = self.testAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         self.background = BackgroundLayer(self._theme, self)
         self.readability_overlay = ReadabilityOverlay(self._theme, self)
         self.lyric_protection = LyricsReadabilityProtection(self._theme, self)
@@ -1157,6 +1368,8 @@ class ImmersiveLyricsPreview(QWidget):
         self._controls_hide_timer.setInterval(2200)
         self._controls_hide_timer.timeout.connect(self._hide_controls_preview)
         self.controls.more_requested.connect(self.toggle_settings_panel)
+        self.controls.back_requested.connect(self._request_immersive_exit)
+        self.controls.interaction_changed.connect(self._set_controls_interacting)
         self.settings_panel = SettingsPanel(self._theme, self)
         self.settings_panel.hide()
         self._connect_settings_panel()
@@ -1179,7 +1392,7 @@ class ImmersiveLyricsPreview(QWidget):
 
     @property
     def is_fullscreen(self) -> bool:
-        return self.isFullScreen()
+        return self.isFullScreen() if self._standalone else self._host_fullscreen
 
     @property
     def normal_geometry(self) -> QRect | None:
@@ -1288,6 +1501,7 @@ class ImmersiveLyricsPreview(QWidget):
         self.background.set_mode(value)
         self._apply_root_surface()
         self._refresh_settings_panel()
+        self.transparency_mode_changed.emit(value == "transparent")
 
     def set_background_opacity(self, value: int) -> None:
         self._background_opacity = max(0, min(100, int(value)))
@@ -1375,6 +1589,30 @@ class ImmersiveLyricsPreview(QWidget):
         self.wake_controls()
         self._refresh_settings_panel()
 
+    def set_track(self, track: Track | None, document: LyricsDocument | None) -> None:
+        """Update visual metadata from the formal V2 lyric document."""
+        artwork = artwork_for_track(track)
+        self._artwork = artwork
+        self.background.set_artwork(artwork)
+        self.track_info.set_track(track, document)
+        self.lyrics_view.set_artwork(artwork)
+        self.lyrics_view.set_document(document)
+
+    def bind_playback(self, adapter: PlaybackAdapter) -> None:
+        self.controls.bind_playback(adapter)
+        adapter.playing_changed.connect(self._on_playing_changed)
+
+    def set_host_fullscreen(self, fullscreen: bool) -> None:
+        self._host_fullscreen = bool(fullscreen)
+        self._refresh_settings_panel()
+
+    def set_active(self, active: bool) -> None:
+        if active:
+            self.wake_controls()
+        else:
+            self._controls_hide_timer.stop()
+            self._fade_controls_to(1.0)
+
     def set_artwork_key(self, key: str) -> None:
         self._artwork = artwork_for_key(key)
         self.background.set_artwork(self._artwork)
@@ -1397,7 +1635,10 @@ class ImmersiveLyricsPreview(QWidget):
         self._refresh_settings_panel()
 
     def enter_fullscreen(self) -> None:
-        if self.isFullScreen():
+        if self.is_fullscreen:
+            return
+        if not self._standalone:
+            self.fullscreen_requested.emit(True)
             return
         self._normal_geometry = QRect(self.geometry())
         self.showFullScreen()
@@ -1405,7 +1646,10 @@ class ImmersiveLyricsPreview(QWidget):
         self._refresh_settings_panel()
 
     def exit_fullscreen(self) -> None:
-        if not self.isFullScreen():
+        if not self.is_fullscreen:
+            return
+        if not self._standalone:
+            self.fullscreen_requested.emit(False)
             return
         self.showNormal()
         if self._normal_geometry is not None:
@@ -1414,7 +1658,7 @@ class ImmersiveLyricsPreview(QWidget):
         self._refresh_settings_panel()
 
     def toggle_fullscreen(self) -> None:
-        self.exit_fullscreen() if self.isFullScreen() else self.enter_fullscreen()
+        self.exit_fullscreen() if self.is_fullscreen else self.enter_fullscreen()
 
     def show_settings_panel(self) -> None:
         self.settings_panel.show()
@@ -1432,15 +1676,32 @@ class ImmersiveLyricsPreview(QWidget):
     def wake_controls(self) -> None:
         self._controls_hide_timer.stop()
         self._fade_controls_to(1.0)
-        if self._auto_hide_controls and not self.settings_panel.isVisible():
+        if self._auto_hide_controls and not self.settings_panel.isVisible() and not self._controls_interacting:
             self._controls_hide_timer.start()
 
     def hide_controls_preview(self) -> None:
         self._hide_controls_preview()
 
     def _hide_controls_preview(self) -> None:
-        if self._auto_hide_controls and not self.settings_panel.isVisible():
+        if self._auto_hide_controls and not self.settings_panel.isVisible() and not self._controls_interacting:
             self._fade_controls_to(0.06)
+
+    def _set_controls_interacting(self, interacting: bool) -> None:
+        self._controls_interacting = bool(interacting)
+        if self._controls_interacting:
+            self.wake_controls()
+        elif self._auto_hide_controls and not self.settings_panel.isVisible():
+            self._controls_hide_timer.start()
+
+    def _on_playing_changed(self, playing: bool) -> None:
+        if not playing:
+            self.wake_controls()
+
+    def _request_immersive_exit(self) -> None:
+        if self._standalone:
+            self.close()
+        else:
+            self.immersive_exit_requested.emit()
 
     def _fade_controls_to(self, target: float) -> None:
         if abs(self._controls_effect.opacity() - target) < 0.01:
@@ -1459,6 +1720,10 @@ class ImmersiveLyricsPreview(QWidget):
         self._apply_responsive_layout()
         self._refresh_content_layer()
         QTimer.singleShot(30, self._refresh_content_layer)
+
+    def hideEvent(self, event) -> None:  # noqa: N802
+        self._controls_hide_timer.stop()
+        super().hideEvent(event)
 
     def keyPressEvent(self, event) -> None:  # noqa: N802
         key = event.key()
@@ -1490,8 +1755,10 @@ class ImmersiveLyricsPreview(QWidget):
             return
         if self.settings_panel.isVisible():
             self.hide_settings_panel()
-        elif self.isFullScreen():
+        elif self.is_fullscreen:
             self.exit_fullscreen()
+        elif not self._standalone:
+            self.immersive_exit_requested.emit()
 
     def _set_transparent_window(self, enabled: bool) -> bool:
         # Compatibility hook for callers from earlier preview revisions.  Window
@@ -1591,13 +1858,14 @@ class ImmersiveLyricsPreview(QWidget):
         panel.lyrics_width_changed.connect(self.set_lyrics_max_width)
         panel.auto_hide_changed.connect(self.set_auto_hide_controls)
         panel.fullscreen_requested.connect(self._set_fullscreen_checked)
+        panel.immersive_exit_requested.connect(self._request_immersive_exit)
         panel.reset_lyric_sizes_requested.connect(self.reset_lyric_sizes)
         panel.reset_all_requested.connect(self.reset_all_immersive_settings)
 
     def _set_fullscreen_checked(self, enabled: bool) -> None:
-        if enabled and not self.isFullScreen():
+        if enabled and not self.is_fullscreen:
             self.enter_fullscreen()
-        elif not enabled and self.isFullScreen():
+        elif not enabled and self.is_fullscreen:
             self.exit_fullscreen()
 
     def _refresh_settings_panel(self) -> None:

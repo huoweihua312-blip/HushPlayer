@@ -20,6 +20,7 @@ class LyricsPage(QWidget):
     """Keeps its document, options, scroll position, and rows while cached by the router."""
 
     source_requested = Signal()
+    immersive_requested = Signal()
 
     def __init__(self, adapter: LyricsAdapter, theme: Theme, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -52,6 +53,7 @@ class LyricsPage(QWidget):
         self.header.translation_requested.connect(adapter.toggle_translation)
         self.header.romanization_requested.connect(adapter.toggle_romanization)
         self.header.font_scale_requested.connect(self._adjust_font_scale)
+        self.header.immersive_requested.connect(self.immersive_requested)
         self.timeline.seek_requested.connect(adapter.request_seek)
         self.lyrics_view.seek_requested.connect(adapter.seek_to_line)
         self.state_view.retry_requested.connect(adapter.retry)
