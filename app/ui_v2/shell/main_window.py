@@ -6,6 +6,7 @@ from PySide6.QtWidgets import QHBoxLayout, QMainWindow, QVBoxLayout, QWidget
 
 from app.ui_v2.adapters.library_adapter import LibraryAdapter
 from app.ui_v2.adapters.library_collection import LibraryCollectionAdapter
+from app.ui_v2.adapters.lyrics_adapter import LyricsAdapter
 from app.ui_v2.adapters.navigation_adapter import NavigationAdapter
 from app.ui_v2.adapters.online_adapter import OnlineAdapter
 from app.ui_v2.adapters.playback_adapter import PlaybackAdapter
@@ -33,6 +34,7 @@ class MainWindow(QMainWindow):
         self.library_adapter = LibraryAdapter(collection=self.library_collection, parent=self)
         self.navigation_adapter = NavigationAdapter(self.playlist_adapter, self)
         self.playback_adapter = PlaybackAdapter(self)
+        self.lyrics_adapter = LyricsAdapter(self)
         self.playback_adapter.set_queue(self.library_collection.tracks())
         self.library_page = LibraryPage(self.library_adapter, self._theme, self)
         self.sidebar = NavigationSidebar(self.navigation_adapter, self._theme, self)
@@ -42,6 +44,7 @@ class MainWindow(QMainWindow):
             self.library_collection,
             self.playlist_adapter,
             self.online_adapter,
+            self.lyrics_adapter,
             self._theme,
             self,
         )
@@ -95,6 +98,10 @@ class MainWindow(QMainWindow):
         self.router.queue_requested.connect(self._play_queue)
         self.router.online_play_requested.connect(self._play_online_track)
         self.playback_adapter.track_changed.connect(self._on_playback_track_changed)
+        self.playback_adapter.track_changed.connect(self.lyrics_adapter.set_track)
+        self.playback_adapter.position_changed.connect(self.lyrics_adapter.set_position)
+        self.lyrics_adapter.seek_requested.connect(self.playback_adapter.seek)
+        self.player_bar.mock_action_requested.connect(self._on_player_bar_action)
         self.library_collection.track_updated.connect(self.playback_adapter.update_track)
         self.library_collection.favorite_changed.connect(self._sync_favorite_from_library)
         self.playback_adapter.favorite_changed.connect(self._sync_favorite_from_player)
@@ -135,3 +142,7 @@ class MainWindow(QMainWindow):
         current = self.playback_adapter.state.current_track
         if current is not None:
             self.library_collection.set_favorite(current.id, favorite)
+
+    def _on_player_bar_action(self, action: str) -> None:
+        if action == "lyrics":
+            self.navigation_adapter.set_route("lyrics")

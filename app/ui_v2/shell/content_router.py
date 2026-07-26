@@ -9,6 +9,7 @@ from app.ui_v2.adapters.albums_adapter import AlbumsAdapter
 from app.ui_v2.adapters.artists_adapter import ArtistsAdapter
 from app.ui_v2.adapters.favorites_adapter import FavoritesAdapter
 from app.ui_v2.adapters.library_collection import LibraryCollectionAdapter
+from app.ui_v2.adapters.lyrics_adapter import LyricsAdapter
 from app.ui_v2.adapters.navigation_adapter import NavigationAdapter
 from app.ui_v2.adapters.online_adapter import OnlineAdapter
 from app.ui_v2.adapters.online_source_adapter import OnlineSourceAdapter
@@ -20,6 +21,7 @@ from app.ui_v2.pages.artist_detail_page import ArtistDetailPage
 from app.ui_v2.pages.artists_page import ArtistsPage
 from app.ui_v2.pages.favorites_page import FavoritesPage
 from app.ui_v2.pages.library_page import LibraryPage
+from app.ui_v2.pages.lyrics_page import LyricsPage
 from app.ui_v2.pages.online_search_page import OnlineSearchPage
 from app.ui_v2.pages.online_source_page import OnlineSourcePage
 from app.ui_v2.pages.playlist_page import PlaylistPage
@@ -86,6 +88,7 @@ class ContentRouter(QStackedWidget):
         collection: LibraryCollectionAdapter,
         playlists: PlaylistAdapter,
         online: OnlineAdapter,
+        lyrics: LyricsAdapter,
         theme: Theme,
         parent: QWidget | None = None,
     ) -> None:
@@ -95,6 +98,7 @@ class ContentRouter(QStackedWidget):
         self._collection = collection
         self._playlists = playlists
         self._online_adapter = online
+        self._lyrics_adapter = lyrics
         self._online_sources = OnlineSourceAdapter(online, self)
         self._pages: dict[str, QWidget] = {"library": library_page}
         self._favorites_adapter = FavoritesAdapter(collection, self)
@@ -124,6 +128,8 @@ class ContentRouter(QStackedWidget):
             return self._cached_page("online_search", self._create_online_search_page)
         if route_id == "online_sources":
             return self._cached_page("online_sources", self._create_online_source_page)
+        if route_id == "lyrics":
+            return self._cached_page("lyrics", self._create_lyrics_page)
         if route_id.startswith("playlist:"):
             page = self._cached_page("playlist", self._create_playlist_page)
             page.set_playlist(route_id.removeprefix("playlist:"))
@@ -220,6 +226,11 @@ class ContentRouter(QStackedWidget):
     def _create_online_source_page(self) -> OnlineSourcePage:
         page = OnlineSourcePage(self._online_sources, self._theme, self)
         page.back_requested.connect(lambda: self._navigation.set_route("online_search"))
+        return page
+
+    def _create_lyrics_page(self) -> LyricsPage:
+        page = LyricsPage(self._lyrics_adapter, self._theme, self)
+        page.source_requested.connect(lambda: self._navigation.set_route("online_sources"))
         return page
 
     def _create_coming_soon(self, route_id: str) -> ComingSoonPage:
