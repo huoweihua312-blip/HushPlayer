@@ -40,7 +40,7 @@ class NavigationSidebar(QFrame):
         self._section_labels: list[QLabel] = []
         self.setObjectName("navigationSidebar")
         self.brand_label = QLabel("HushPlayer", self)
-        self.brand_label.setToolTip("HushPlayer UI V2")
+        self.brand_label.setToolTip("HushPlayer")
         self.scroll_area = QScrollArea(self)
         self.scroll_area.setObjectName("navigationScrollArea")
         self.scroll_area.setWidgetResizable(True)
@@ -163,7 +163,7 @@ class NavigationSidebar(QFrame):
         self.playlist_layout.setSpacing(4)
         self.content_layout.addWidget(self.playlist_container)
         self.new_playlist_button = QToolButton(self.content)
-        self.new_playlist_button.setToolTip("新建 mock 歌单")
+        self.new_playlist_button.setToolTip("新建歌单")
         self.new_playlist_button.clicked.connect(self._create_playlist_from_ui)
         self.content_layout.addWidget(self.new_playlist_button)
         self.content_layout.addStretch(1)
@@ -251,7 +251,7 @@ class NavigationSidebar(QFrame):
             )
             if playlist is not None:
                 title, accepted = QInputDialog.getText(
-                    self, "重命名 mock 歌单", "歌单名称", text=playlist.name
+                    self, "重命名歌单", "歌单名称", text=playlist.name
                 )
                 if accepted:
                     self.adapter.rename_playlist(playlist_id, title)

@@ -12,15 +12,16 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from PySide6.QtCore import QEvent
-from PySide6.QtGui import QColor, QPalette
-from PySide6.QtWidgets import QApplication
+from PySide6.QtCore import QPoint, QPointF, Qt
+from PySide6.QtGui import QWheelEvent
+from PySide6.QtWidgets import QApplication, QSlider
 
 from app.ui_v2.adapters.lyrics_adapter import LyricsAdapter
 from app.ui_v2.mock.track_factory import create_mock_tracks
 from app.ui_v2.models.track_table_model import TrackColumn
 from app.ui_v2.pages.lyrics_page import LyricsPage
 from app.ui_v2.shell.main_window import MainWindow
+from app.ui_v2.widgets.lyrics_canvas_v2 import LyricsCanvasV2, ResponsiveLyricsMetrics
 
 
 class LyricsAdapterTests(unittest.TestCase):
@@ -91,6 +92,7 @@ class LyricsPageTests(unittest.TestCase):
     def setUp(self) -> None:
         self.window = MainWindow()
         self.window.playback_adapter._timer_enabled = False
+        self.window.resize(1200, 800)
         self.window.show()
         self.app.processEvents()
 
@@ -116,14 +118,29 @@ class LyricsPageTests(unittest.TestCase):
         self.assertIsInstance(page, LyricsPage)
         return page
 
-    def test_route_reuse_playback_sync_and_line_seek(self) -> None:
+    def test_v4_ordinary_structure_is_one_column_without_duplicate_player(self) -> None:
+        page = self._lyrics_page()
+        self.assertEqual(page.lyric_column_count, 1)
+        self.assertIsInstance(page.lyrics_view, LyricsCanvasV2)
+        self.assertIs(page.toolbar.parentWidget(), page._content_container)
+        self.assertIs(page.content.parentWidget(), page._content_container)
+        self.assertFalse(page.has_in_page_playback_controls)
+        self.assertFalse(hasattr(page, "timeline"))
+        self.assertFalse(hasattr(page, "side"))
+        self.assertEqual(len(page.findChildren(QSlider)), 0)
+        self.assertTrue(self.window.player_bar.isVisible())
+        self.assertEqual(
+            [button.text() for button in (page.toolbar.translation_button, page.toolbar.romanization_button, page.toolbar.more_button, page.toolbar.immersive_button)],
+            ["翻译", "罗马音", "更多", "沉浸"],
+        )
+
+    def test_route_reuse_playback_sync_and_canvas_seek(self) -> None:
         page = self._lyrics_page()
         self.assertEqual(page.adapter.state.phase, "idle")
         self._play_library_track()
         self.assertEqual(page.adapter.state.phase, "ready")
         self.window.playback_adapter.advance_for_test(3_000)
         self.assertEqual(page.adapter.active_line.start_ms, 2_400)
-        self.assertEqual(page.timeline.slider.value(), 3_000)
         self.window.playback_adapter.seek(5_000)
         self.assertEqual(page.adapter.active_line.start_ms, 4_800)
         line = page.adapter.document.lines[8]
@@ -140,11 +157,16 @@ class LyricsPageTests(unittest.TestCase):
         self._play_library_track()
         page = self._lyrics_page()
         document = page.adapter.document
-        row_ids = tuple(page.lyrics_view._items)
-        page.lyrics_view.eventFilter(page.lyrics_view.scroll_area.viewport(), QEvent(QEvent.Type.Wheel))
+        canvas_id = id(page.lyrics_view)
+        event = QWheelEvent(
+            QPointF(80, 80), QPointF(80, 80), QPoint(), QPoint(0, -120),
+            Qt.MouseButton.NoButton, Qt.KeyboardModifier.NoModifier,
+            Qt.ScrollPhase.ScrollUpdate, False,
+        )
+        page.lyrics_view.wheelEvent(event)
         self.assertTrue(page.lyrics_view.browsing)
         self.assertTrue(page.lyrics_view.return_button.isVisible())
-        self.assertIs(page.lyrics_view.return_button.parent(), page.lyrics_view.scroll_area.viewport())
+        self.assertIs(page.lyrics_view.return_button.parent(), page.lyrics_view)
         page.lyrics_view.return_to_current()
         self.assertFalse(page.lyrics_view.browsing)
         self.assertFalse(page.lyrics_view.return_button.isVisible())
@@ -155,34 +177,116 @@ class LyricsPageTests(unittest.TestCase):
             self.window.resize(width, height)
             self.app.processEvents()
             self.assertIs(page.adapter.document, document)
-            self.assertEqual(tuple(page.lyrics_view._items), row_ids)
-            self.assertFalse(page.lyrics_view.scroll_area.horizontalScrollBar().isVisible())
+            self.assertEqual(id(page.lyrics_view), canvas_id)
+            self.assertLessEqual(page._content_container.maximumWidth(), 1020)
+            self.assertLessEqual(page.lyrics_view.maximumWidth(), 980)
 
-    def test_lyrics_view_surface_backgrounds_and_segment_color_roles(self) -> None:
+    def test_distance_hierarchy_segments_and_light_readability(self) -> None:
         self._play_library_track()
         page = self._lyrics_page()
         self.window.playback_adapter.seek(3_000)
-        active = page.lyrics_view._items[page.adapter.active_line.id]
-        inactive = next(item for item_id, item in page.lyrics_view._items.items() if item_id != active.line.id)
+        self.app.processEvents()
+        self.assertFalse(page.lyrics_view.paints_line_background)
+        self.assertGreater(page.lyrics_view.inactive_alpha_for_distance(1), page.lyrics_view.inactive_alpha_for_distance(2))
+        self.assertGreater(page.lyrics_view.inactive_alpha_for_distance(2), page.lyrics_view.inactive_alpha_for_distance(4))
+        self.assertGreater(page.lyrics_view.inactive_scale_for_distance(1), page.lyrics_view.inactive_scale_for_distance(3))
         for mode in ("dark", "light"):
             self.window.set_theme(mode)
-            expected = QColor(self.window.theme.colors.content_background).name().lower()
-            for surface in (
-                page.lyrics_view,
-                page.lyrics_view.scroll_area,
-                page.lyrics_view.scroll_area.viewport(),
-                page.lyrics_view.content,
-            ):
-                self.assertEqual(surface.palette().color(QPalette.ColorRole.Window).name().lower(), expected)
-                self.assertEqual(surface.palette().color(QPalette.ColorRole.Base).name().lower(), expected)
-            active_roles = active.color_roles()
-            inactive_roles = inactive.color_roles()
-            self.assertEqual(active_roles["background"], self.window.theme.colors.content_background)
-            self.assertEqual(active_roles["played_segment"], self.window.theme.colors.accent)
-            self.assertEqual(active_roles["active_unplayed"], self.window.theme.colors.secondary_text)
-            self.assertEqual(inactive_roles["inactive_line"], self.window.theme.colors.subtle_text)
-            self.assertGreaterEqual(_contrast_ratio(inactive_roles["inactive_line"], active_roles["background"]), 3.0)
-            self.assertGreaterEqual(_contrast_ratio(active_roles["active_unplayed"], active_roles["background"]), 3.0)
+            self.app.processEvents()
+            self.assertEqual(page.lyrics_view.document, page.adapter.document)
+            self.assertGreaterEqual(page.lyrics_view.inactive_alpha_for_distance(4), 80)
+            self.assertGreater(page.lyrics_view._active_segment_index, -1)
+
+    def test_ordinary_responsive_metrics_scale_continuously_without_rebuild(self) -> None:
+        self._play_library_track()
+        page = self._lyrics_page()
+        canvas = page.lyrics_view
+        canvas_id = id(canvas)
+        metrics_by_size = []
+        for width, height in ((900, 600), (1200, 800), (1600, 900), (1920, 1080), (2048, 1113)):
+            self.window.resize(width, height)
+            self.app.processEvents()
+            page.set_responsive_reference_width(width, height)
+            metrics = canvas.responsive_metrics
+            self.assertIsNotNone(metrics)
+            metrics_by_size.append(metrics)
+            self.assertEqual(id(canvas), canvas_id)
+            self.assertLessEqual(metrics.active_font_size, 64)
+            self.assertLessEqual(metrics.normal_font_size, 40)
+            self.assertLessEqual(metrics.lyrics_max_width, 980)
+        self.assertEqual(
+            [metric.active_font_size for metric in metrics_by_size],
+            sorted(metric.active_font_size for metric in metrics_by_size),
+        )
+        self.assertEqual(
+            [metric.normal_font_size for metric in metrics_by_size],
+            sorted(metric.normal_font_size for metric in metrics_by_size),
+        )
+        self.assertGreater(metrics_by_size[-1].line_spacing, metrics_by_size[0].line_spacing)
+        self.assertGreater(metrics_by_size[-1].section_spacing, metrics_by_size[0].section_spacing)
+
+    def test_ordinary_user_scale_and_subtitle_metrics_are_composed(self) -> None:
+        self._play_library_track()
+        page = self._lyrics_page()
+        canvas = page.lyrics_view
+        sizes: dict[int, tuple[int, int, int, int]] = {}
+        for scale in (75, 100, 125, 160):
+            canvas.set_global_scale(scale)
+            page.set_responsive_reference_width(1600, 900)
+            sizes[scale] = canvas.effective_font_sizes
+        self.assertLess(sizes[75][0], sizes[100][0])
+        self.assertLess(sizes[100][0], sizes[125][0])
+        self.assertLessEqual(sizes[125][0], sizes[160][0])
+        self.assertLess(sizes[75][1], sizes[100][1])
+        self.assertLess(sizes[100][1], sizes[125][1])
+        expected = ResponsiveLyricsMetrics.for_viewport(
+            1600,
+            900,
+            canvas.devicePixelRatioF(),
+            100,
+            translation_visible=True,
+            romanization_visible=False,
+        )
+        self.assertEqual(
+            sizes[100],
+            (
+                expected.active_font_size,
+                expected.normal_font_size,
+                expected.translation_font_size,
+                expected.romanization_font_size,
+            ),
+        )
+        canvas.set_global_scale(100)
+        page.set_responsive_reference_width(1600, 900)
+        before = canvas.responsive_metrics.section_spacing
+        page.adapter.toggle_romanization()
+        self.app.processEvents()
+        self.assertGreaterEqual(canvas.responsive_metrics.section_spacing, before)
+
+    def test_ordinary_active_line_stays_in_the_effective_viewport_band(self) -> None:
+        self._play_library_track()
+        page = self._lyrics_page()
+        self.window.playback_adapter.seek(12_000)
+        self.app.processEvents()
+        canvas = page.lyrics_view
+        for width, height in ((900, 600), (1200, 800), (1600, 900), (1920, 1080), (2048, 1113)):
+            self.window.resize(width, height)
+            self.app.processEvents()
+            canvas.repaint()
+            self.app.processEvents()
+            active = page.adapter.active_line
+            self.assertIsNotNone(active)
+            metrics = canvas.responsive_metrics
+            self.assertIsNotNone(metrics)
+            rect = canvas._line_rects[active.id]
+            target = metrics.top_safe_area + round(
+                (canvas.height() - metrics.top_safe_area - metrics.bottom_safe_area) * 0.45
+            )
+            self.assertLessEqual(
+                abs(rect.center().y() - target),
+                max(8, metrics.active_font_size // 2),
+                f"{width}x{height}: center={rect.center().y()} target={target} canvas={canvas.size()}",
+            )
 
     def test_state_view_and_legacy_imports(self) -> None:
         page = self._lyrics_page()
@@ -197,16 +301,6 @@ class LyricsPageTests(unittest.TestCase):
         legacy_window = importlib.import_module("app.ui.main_window")
         self.assertTrue(callable(legacy_main.main))
         self.assertTrue(hasattr(legacy_window, "MainWindow"))
-
-
-def _contrast_ratio(foreground: str, background: str) -> float:
-    def luminance(value: str) -> float:
-        channels = [int(value[index : index + 2], 16) / 255 for index in (1, 3, 5)]
-        linear = [channel / 12.92 if channel <= 0.04045 else ((channel + 0.055) / 1.055) ** 2.4 for channel in channels]
-        return 0.2126 * linear[0] + 0.7152 * linear[1] + 0.0722 * linear[2]
-
-    high, low = sorted((luminance(foreground), luminance(background)), reverse=True)
-    return (high + 0.05) / (low + 0.05)
 
 
 if __name__ == "__main__":

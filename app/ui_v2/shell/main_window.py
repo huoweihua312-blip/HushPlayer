@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
-from PySide6.QtCore import QRect, Qt
-from PySide6.QtWidgets import QHBoxLayout, QMainWindow, QVBoxLayout, QWidget
+from enum import Enum
+
+from PySide6.QtCore import QRect, Qt, QTimer
+from PySide6.QtGui import QColor, QGuiApplication, QPalette
+from PySide6.QtWidgets import QApplication, QHBoxLayout, QMainWindow, QVBoxLayout, QWidget
 
 from app.ui_v2.adapters.library_adapter import LibraryAdapter
 from app.ui_v2.adapters.library_collection import LibraryCollectionAdapter
@@ -12,13 +15,21 @@ from app.ui_v2.adapters.navigation_adapter import NavigationAdapter
 from app.ui_v2.adapters.online_adapter import OnlineAdapter
 from app.ui_v2.adapters.playback_adapter import PlaybackAdapter
 from app.ui_v2.adapters.playlist_adapter import PlaylistAdapter
+from app.ui_v2.adapters.settings_adapter import SettingsAdapter
 from app.ui_v2.mock.track_factory import create_mock_tracks
 from app.ui_v2.pages.library_page import LibraryPage
+from app.ui_v2.models.immersive_lyrics_options import ImmersiveLyricsOptions
 from app.ui_v2.shell.content_router import ContentRouter
 from app.ui_v2.shell.navigation_sidebar import NavigationSidebar
 from app.ui_v2.shell.player_bar import PlayerBar
 from app.ui_v2.theme.styles import build_stylesheet
 from app.ui_v2.theme.tokens import Theme, get_theme
+
+
+class ShellPresentationMode(str, Enum):
+    NORMAL = "normal"
+    IMMERSIVE = "immersive"
+    IMMERSIVE_FULLSCREEN = "immersive_fullscreen"
 
 
 class MainWindow(QMainWindow):
@@ -30,6 +41,10 @@ class MainWindow(QMainWindow):
         self._immersive_shell_active = False
         self._immersive_normal_geometry: QRect | None = None
         self._immersive_transparency_enabled = False
+        self._presentation_mode = ShellPresentationMode.NORMAL
+        self._normal_window_flags = self.windowFlags()
+        self._transparent_frame_active = False
+        self._transparent_normal_geometry: QRect | None = None
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
         self._immersive_transparency_supported = self.testAttribute(
             Qt.WidgetAttribute.WA_TranslucentBackground
@@ -43,6 +58,10 @@ class MainWindow(QMainWindow):
         self.navigation_adapter = NavigationAdapter(self.playlist_adapter, self)
         self.playback_adapter = PlaybackAdapter(self)
         self.lyrics_adapter = LyricsAdapter(self)
+        self.immersive_lyrics_options = ImmersiveLyricsOptions(theme=self._theme.mode)
+        self.settings_adapter = SettingsAdapter(
+            self.lyrics_adapter, self.immersive_lyrics_options, self
+        )
         self.playback_adapter.set_queue(self.library_collection.tracks())
         self.library_page = LibraryPage(self.library_adapter, self._theme, self)
         self.sidebar = NavigationSidebar(self.navigation_adapter, self._theme, self)
@@ -54,13 +73,15 @@ class MainWindow(QMainWindow):
             self.online_adapter,
             self.lyrics_adapter,
             self.playback_adapter,
+            self.settings_adapter,
+            self.immersive_lyrics_options,
             self._theme,
             self,
         )
         self.player_bar = PlayerBar(self.playback_adapter, self._theme, self)
         self._build_shell()
         self._connect_state()
-        self.setWindowTitle("HushPlayer UI V2")
+        self.setWindowTitle("HushPlayer")
         self.setMinimumSize(860, 560)
         self.resize(1200, 760)
         self.set_theme(self._theme.mode)
@@ -68,6 +89,25 @@ class MainWindow(QMainWindow):
     @property
     def theme(self) -> Theme:
         return self._theme
+
+    @property
+    def presentation_mode(self) -> ShellPresentationMode:
+        return self._presentation_mode
+
+    @property
+    def transparency_debug_state(self) -> dict[str, object]:
+        return {
+            "main_window_id": id(self),
+            "top_level_count": len([widget for widget in QApplication.topLevelWidgets() if isinstance(widget, MainWindow)]),
+            "main_translucent": self.testAttribute(Qt.WidgetAttribute.WA_TranslucentBackground),
+            "central_auto_fill": self.root.autoFillBackground(),
+            "root_window_alpha": self.root.palette().color(QPalette.ColorRole.Window).alpha(),
+            "body_window_alpha": self.body.palette().color(QPalette.ColorRole.Window).alpha(),
+            "content_window_alpha": self.content_container.palette().color(QPalette.ColorRole.Window).alpha(),
+            "background_mode": getattr(self.router._pages.get("immersive_lyrics"), "background_mode", "artwork"),
+            "background_opacity": getattr(self.router._pages.get("immersive_lyrics"), "background_opacity_percent", 100),
+            "window_flags": int(self.windowFlags()),
+        }
 
     def set_theme(self, mode: str) -> None:
         self._theme = get_theme(mode)
@@ -89,17 +129,41 @@ class MainWindow(QMainWindow):
         self.root = QWidget(self)
         self.root.setObjectName("uiV2Root")
         self.body = QWidget(self.root)
+        self.body.setObjectName("uiV2Body")
         self._body_layout = QHBoxLayout(self.body)
         self._body_layout.setContentsMargins(0, 0, 0, 0)
         self._body_layout.setSpacing(0)
-        self._body_layout.addWidget(self.sidebar)
-        self._body_layout.addWidget(self.router, 1)
-        root_layout = QVBoxLayout(self.root)
-        root_layout.setContentsMargins(0, 0, 0, 0)
-        root_layout.setSpacing(0)
-        root_layout.addWidget(self.body, 1)
-        root_layout.addWidget(self.player_bar)
+        self.sidebar_container = QWidget(self.body)
+        self.sidebar_container.setObjectName("uiV2SidebarContainer")
+        sidebar_layout = QVBoxLayout(self.sidebar_container)
+        sidebar_layout.setContentsMargins(0, 0, 0, 0)
+        sidebar_layout.setSpacing(0)
+        sidebar_layout.addWidget(self.sidebar)
+        self.content_container = QWidget(self.body)
+        self.content_container.setObjectName("uiV2ContentContainer")
+        content_layout = QVBoxLayout(self.content_container)
+        content_layout.setContentsMargins(0, 0, 0, 0)
+        content_layout.setSpacing(0)
+        self.router.setObjectName("uiV2ContentRouter")
+        content_layout.addWidget(self.router)
+        self._body_layout.addWidget(self.sidebar_container)
+        self._body_layout.addWidget(self.content_container, 1)
+        self.player_bar_container = QWidget(self.root)
+        self.player_bar_container.setObjectName("uiV2PlayerBarContainer")
+        player_layout = QVBoxLayout(self.player_bar_container)
+        player_layout.setContentsMargins(0, 0, 0, 0)
+        player_layout.setSpacing(0)
+        player_layout.addWidget(self.player_bar)
+        self._root_layout = QVBoxLayout(self.root)
+        self._root_layout.setContentsMargins(0, 0, 0, 0)
+        self._root_layout.setSpacing(0)
+        self._root_layout.addWidget(self.body, 1)
+        self._root_layout.addWidget(self.player_bar_container)
         self.setCentralWidget(self.root)
+        self._shell_surface_states = tuple(
+            (widget, QPalette(widget.palette()), widget.autoFillBackground())
+            for widget in (self.root, self.body, self.content_container, self.router)
+        )
 
     def _connect_state(self) -> None:
         self.library_page.theme_changed.connect(self.set_theme)
@@ -111,6 +175,13 @@ class MainWindow(QMainWindow):
         )
         self.router.immersive_transparency_requested.connect(
             self.set_immersive_transparency
+        )
+        self.settings_adapter.theme_preview_changed.connect(self.set_theme)
+        self.settings_adapter.immersive_preview_changed.connect(
+            self.router.apply_immersive_options
+        )
+        self.settings_adapter.motion_preview_changed.connect(
+            self.router.set_reduce_motion_preview
         )
         self.navigation_adapter.route_changed.connect(self._sync_immersive_shell)
         self.playback_adapter.track_changed.connect(self._on_playback_track_changed)
@@ -130,6 +201,7 @@ class MainWindow(QMainWindow):
             if not self.isFullScreen():
                 self._immersive_normal_geometry = QRect(self.geometry())
                 self.showFullScreen()
+            self._set_presentation_mode(ShellPresentationMode.IMMERSIVE_FULLSCREEN)
             if page is not None:
                 page.set_host_fullscreen(True)
             return
@@ -139,9 +211,12 @@ class MainWindow(QMainWindow):
                 self.setGeometry(self._immersive_normal_geometry)
         if page is not None:
             page.set_host_fullscreen(False)
+        if self._immersive_shell_active:
+            self._set_presentation_mode(ShellPresentationMode.IMMERSIVE)
 
     def set_immersive_transparency(self, enabled: bool) -> None:
         self._immersive_transparency_enabled = bool(enabled) and self._immersive_shell_active
+        self._set_shell_transparency(self._immersive_transparency_enabled)
         self._apply_root_stylesheet()
 
     def _sync_immersive_shell(self, route_id: str) -> None:
@@ -149,17 +224,103 @@ class MainWindow(QMainWindow):
         if immersive == self._immersive_shell_active:
             return
         self._immersive_shell_active = immersive
-        self.sidebar.setVisible(not immersive)
-        self.player_bar.setVisible(not immersive)
-        if not immersive:
+        if immersive:
+            page = self.router._pages.get("immersive_lyrics")
+            self._immersive_transparency_enabled = bool(
+                page is not None and getattr(page, "background_mode", "artwork") == "transparent"
+            )
+            self._set_presentation_mode(ShellPresentationMode.IMMERSIVE)
+        else:
             self.set_immersive_fullscreen(False)
             self._immersive_transparency_enabled = False
+            self._set_presentation_mode(ShellPresentationMode.NORMAL)
+        self._set_shell_transparency(self._immersive_transparency_enabled)
         self._apply_root_stylesheet()
+
+    def _set_presentation_mode(self, mode: ShellPresentationMode) -> None:
+        self._presentation_mode = mode
+        immersive = mode is not ShellPresentationMode.NORMAL
+        self.sidebar.setVisible(not immersive)
+        self.sidebar_container.setVisible(not immersive)
+        self.player_bar.setVisible(not immersive)
+        self.player_bar_container.setVisible(not immersive)
+        if immersive:
+            self.sidebar_container.setMinimumWidth(0)
+            self.sidebar_container.setMaximumWidth(0)
+            self._body_layout.setStretch(0, 0)
+            self._body_layout.setSpacing(0)
+            self._root_layout.setContentsMargins(0, 0, 0, 0)
+        else:
+            self.sidebar_container.setMinimumWidth(0)
+            self.sidebar_container.setMaximumWidth(16_777_215)
+            self._body_layout.setStretch(0, 0)
+            self._body_layout.setStretch(1, 1)
+            self._body_layout.setSpacing(0)
+            self._root_layout.setContentsMargins(0, 0, 0, 0)
+        self.body.updateGeometry()
+        self.root.updateGeometry()
+
+    def _set_shell_transparency(self, enabled: bool) -> None:
+        for widget, normal_palette, normal_auto_fill in self._shell_surface_states:
+            if enabled:
+                transparent_palette = QPalette(widget.palette())
+                transparent = QColor(0, 0, 0, 0)
+                transparent_palette.setColor(QPalette.ColorRole.Window, transparent)
+                transparent_palette.setColor(QPalette.ColorRole.Base, transparent)
+                widget.setPalette(transparent_palette)
+                widget.setAutoFillBackground(False)
+                widget.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
+            else:
+                widget.setPalette(normal_palette)
+                widget.setAutoFillBackground(normal_auto_fill)
+                widget.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, False)
+        self._set_transparent_window_frame(enabled and self._immersive_transparency_supported)
+
+    def _set_transparent_window_frame(self, enabled: bool) -> None:
+        # The offscreen/minimal plugins have no native frame and forcibly place
+        # top-level widgets at (0, 0).  Keep the same window instance there;
+        # Windows uses the frameless transition below for real per-pixel alpha.
+        if QGuiApplication.platformName().lower() in {"offscreen", "minimal"}:
+            self._transparent_frame_active = False
+            return
+        if bool(enabled) == self._transparent_frame_active:
+            return
+        if enabled:
+            self._transparent_normal_geometry = QRect(self.geometry())
+        geometry = QRect(self._transparent_normal_geometry or self.geometry())
+        fullscreen = self.isFullScreen()
+        was_visible = self.isVisible()
+        flags = self._normal_window_flags | Qt.WindowType.FramelessWindowHint if enabled else self._normal_window_flags
+        self.setWindowFlags(flags)
+        self._transparent_frame_active = bool(enabled)
+        if fullscreen:
+            self.showFullScreen()
+        elif was_visible:
+            self.show()
+            self.setGeometry(geometry)
+            self.raise_()
+            self.activateWindow()
+            QTimer.singleShot(
+                0,
+                lambda saved=QRect(geometry): self._restore_transparent_frame_geometry(saved),
+            )
+        if not enabled:
+            self._transparent_normal_geometry = None
+
+    def _restore_transparent_frame_geometry(self, geometry: QRect) -> None:
+        """Finalize a same-window native frame transition after Qt recreates its handle."""
+        if not self.isFullScreen():
+            self.setGeometry(geometry)
+            self.raise_()
+            self.activateWindow()
 
     def _apply_root_stylesheet(self) -> None:
         stylesheet = build_stylesheet(self._theme)
         if self._immersive_transparency_enabled and self._immersive_transparency_supported:
-            stylesheet += "\nQWidget#uiV2Root { background: transparent; }\n"
+            stylesheet += (
+                "\nQWidget#uiV2Root, QWidget#uiV2Body, QWidget#uiV2ContentContainer, "
+                "QStackedWidget#uiV2ContentRouter { background: transparent; }\n"
+            )
         self.root.setStyleSheet(stylesheet)
 
     def _play_tracks(self, tracks, track_id: str) -> None:

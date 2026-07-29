@@ -56,6 +56,7 @@ class LyricLineItem(QWidget):
         self._segment_index = segment_index
         self._segment_progress = progress
         if changed:
+            self.updateGeometry()
             self.update()
 
     def heightForWidth(self, width: int) -> int:  # noqa: N802
@@ -88,19 +89,19 @@ class LyricLineItem(QWidget):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.TextAntialiasing)
         rect = self.rect().adjusted(12, 8, -12, -8)
-        if self._active:
-            highlight = QColor(self._theme.colors.playing_background)
-            highlight.setAlpha(110)
-            painter.fillRect(self.rect().adjusted(4, 2, -4, -2), highlight)
         main_color = QColor(
-            self._theme.colors.secondary_text if self._active else self._theme.colors.subtle_text
+            self._theme.colors.primary_text if self._active else self._theme.colors.secondary_text
         )
         if self.line.is_instrumental:
-            main_color = QColor(self._theme.colors.subtle_text)
+            main_color = QColor(self._theme.colors.secondary_text)
         y = rect.top()
         main_rect = rect
         main_height = self._text_height(self.line.text, self._main_font(), rect.width())
         main_rect.setHeight(main_height)
+        if self._active:
+            # A short marker is deliberately local to the first text line; it is
+            # not a row selection surface and never spans the lyric width.
+            painter.fillRect(rect.left() - 7, rect.top() + 4, 3, min(20, max(8, main_height - 8)), QColor(self._theme.colors.accent))
         self._draw_wrapped(painter, main_rect, self.line.text, self._main_font(), main_color)
         if self._active and self.line.segments:
             prefix = self._highlight_prefix()
@@ -143,15 +144,17 @@ class LyricLineItem(QWidget):
         """Expose the four painted colors for focused visual-regression tests."""
         return {
             "background": self._theme.colors.content_background,
+            "row_background": "transparent",
             "played_segment": self._theme.colors.accent,
-            "active_unplayed": self._theme.colors.secondary_text,
-            "inactive_line": self._theme.colors.subtle_text,
+            "active_unplayed": self._theme.colors.primary_text,
+            "inactive_line": self._theme.colors.secondary_text,
             "secondary_text": self._theme.colors.secondary_text if self._active else self._theme.colors.subtle_text,
         }
 
     def _main_font(self) -> QFont:
         font = QFont(self.font())
-        font.setPointSizeF(self._theme.fonts.body * self._font_scale)
+        emphasis = 1.16 if self._active else 1.0
+        font.setPointSizeF(self._theme.fonts.body * self._font_scale * emphasis)
         font.setWeight(QFont.Weight.DemiBold if self._active else QFont.Weight.Normal)
         return font
 

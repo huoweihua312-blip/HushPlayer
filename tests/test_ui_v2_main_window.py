@@ -17,6 +17,7 @@ from PySide6.QtWidgets import QApplication
 
 from app.ui_v2.models.track import format_duration
 from app.ui_v2.models.track_table_model import TrackColumn
+from app.ui_v2.pages.settings_page import SettingsPage
 from app.ui_v2.shell.content_router import ComingSoonPage
 from app.ui_v2.shell.main_window import MainWindow
 
@@ -172,6 +173,8 @@ class UiV2MainWindowTests(unittest.TestCase):
                 self.assertIs(self.window.router.currentWidget(), self.window.library_page)
             elif route_id in {"liked", "recent", "artists", "albums", "online_search", "lyrics"}:
                 self.assertNotIsInstance(self.window.router.currentWidget(), ComingSoonPage)
+            elif route_id == "settings":
+                self.assertIsInstance(self.window.router.currentWidget(), SettingsPage)
             else:
                 self.assertIsInstance(self.window.router.currentWidget(), ComingSoonPage)
 

@@ -39,6 +39,9 @@ IconName = Literal[
     "queue",
     "volume",
     "volume_mute",
+    "chevron_down",
+    "chevron_up",
+    "chevron_right",
 ]
 IconState = Literal["normal", "hover", "selected", "disabled"]
 
@@ -220,6 +223,21 @@ def _paint_shape(painter: QPainter, name: IconName, rect: QRectF, color: QColor)
         painter.drawLine(rect.left() + rect.width() * 0.82, rect.top() + rect.height() * direction, rect.left() + rect.width() * 0.82, rect.top() + rect.height() * opposite)
         painter.drawLine(rect.left() + rect.width() * 0.7, rect.top() + rect.height() * (direction - 0.12 if descending else direction + 0.12), rect.left() + rect.width() * 0.82, rect.top() + rect.height() * direction)
         painter.drawLine(rect.left() + rect.width() * 0.94, rect.top() + rect.height() * (direction - 0.12 if descending else direction + 0.12), rect.left() + rect.width() * 0.82, rect.top() + rect.height() * direction)
+    elif name in ("chevron_down", "chevron_up", "chevron_right"):
+        path = QPainterPath()
+        if name == "chevron_down":
+            path.moveTo(rect.left() + rect.width() * 0.22, rect.top() + rect.height() * 0.36)
+            path.lineTo(rect.center().x(), rect.top() + rect.height() * 0.64)
+            path.lineTo(rect.right() - rect.width() * 0.22, rect.top() + rect.height() * 0.36)
+        elif name == "chevron_up":
+            path.moveTo(rect.left() + rect.width() * 0.22, rect.top() + rect.height() * 0.64)
+            path.lineTo(rect.center().x(), rect.top() + rect.height() * 0.36)
+            path.lineTo(rect.right() - rect.width() * 0.22, rect.top() + rect.height() * 0.64)
+        else:
+            path.moveTo(rect.left() + rect.width() * 0.36, rect.top() + rect.height() * 0.22)
+            path.lineTo(rect.left() + rect.width() * 0.64, rect.center().y())
+            path.lineTo(rect.left() + rect.width() * 0.36, rect.bottom() - rect.height() * 0.22)
+        painter.drawPath(path)
     painter.restore()
 
 
