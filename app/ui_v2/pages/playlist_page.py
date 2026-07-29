@@ -28,6 +28,9 @@ class PlaylistPage(TrackListPage):
         layout.replaceWidget(self.header, self.playlist_header)
         self.header.hide()
         self.header = self.playlist_header
+        self.toolbar.hide()
+        self.playlist_header.play_requested.connect(lambda: self._request_queue(False))
+        self.playlist_header.shuffle_requested.connect(lambda: self._request_queue(True))
         self.playlist_header.rename_requested.connect(self._rename_playlist)
         self.playlist_header.delete_requested.connect(self._delete_playlist)
         self.playlist_header.add_requested.connect(self._add_first_available_track)
@@ -35,6 +38,7 @@ class PlaylistPage(TrackListPage):
         playlists.playlist_changed.connect(self._on_playlist_changed)
         self.empty_state.set_state("empty", "这个 mock 歌单还没有歌曲。")
         self.set_theme(theme)
+        self._on_tracks_reset(adapter.tracks())
 
     @property
     def playlist_id(self) -> str:
@@ -42,13 +46,17 @@ class PlaylistPage(TrackListPage):
 
     def set_playlist(self, playlist_id: str) -> None:
         self.adapter.set_playlist(playlist_id)
-        self.playlist_header.set_playlist(self.playlists.playlist_for_id(playlist_id))
+        self.playlist_header.set_playlist(
+            self.playlists.playlist_for_id(playlist_id), self.adapter.tracks()
+        )
 
     def _on_tracks_reset(self, tracks) -> None:
         if not hasattr(self, "playlist_header"):
             super()._on_tracks_reset(tracks)
             return
-        self.playlist_header.set_playlist(self.playlists.playlist_for_id(self.playlist_id))
+        self.playlist_header.set_playlist(
+            self.playlists.playlist_for_id(self.playlist_id), tracks
+        )
         self.toolbar.setEnabled(bool(tracks))
         if not tracks:
             self.current_view_state = "empty"
@@ -59,7 +67,9 @@ class PlaylistPage(TrackListPage):
 
     def _on_playlist_changed(self, playlist_id: str) -> None:
         if playlist_id == self.playlist_id:
-            self.playlist_header.set_playlist(self.playlists.playlist_for_id(playlist_id))
+            self.playlist_header.set_playlist(
+                self.playlists.playlist_for_id(playlist_id), self.adapter.tracks()
+            )
 
     def _rename_playlist(self) -> None:
         playlist = self.playlists.playlist_for_id(self.playlist_id)

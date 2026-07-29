@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import os
+
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import QMenu, QStackedLayout, QToolButton, QVBoxLayout, QWidget
 
@@ -29,6 +31,12 @@ class LibraryPage(QWidget):
         self.adapter = adapter
         self._theme = theme or get_theme("dark")
         self.current_view_state = "content"
+        self._developer_mode = os.environ.get("HUSHPLAYER_UI_V2_DEVELOPER", "").strip().lower() in {
+            "1",
+            "true",
+            "yes",
+            "on",
+        }
         self.setObjectName("libraryPage")
         self.header = PageHeader("全部歌曲", self)
         self.header.title_label.setMinimumWidth(76)
@@ -48,7 +56,8 @@ class LibraryPage(QWidget):
         self.state_toggle.setMenu(self._state_menu)
         self.header.trailing_layout.addWidget(self.search_box)
         self.header.trailing_layout.addWidget(self.theme_toggle)
-        self.header.trailing_layout.addWidget(self.state_toggle)
+        if self._developer_mode:
+            self.header.trailing_layout.addWidget(self.state_toggle)
         self.track_table = TrackTable(adapter, self._theme, self)
         self.empty_state = EmptyState(self)
         self.view_host = QWidget(self)
@@ -59,7 +68,7 @@ class LibraryPage(QWidget):
         layout = QVBoxLayout(self)
         m = self._theme.metrics
         layout.setContentsMargins(m.page_margin, m.spacing_lg, m.page_margin, m.page_margin)
-        layout.setSpacing(m.spacing_md)
+        layout.setSpacing(m.spacing_lg)
         layout.addWidget(self.header)
         layout.addWidget(self.view_host, 1)
         self.search_box.text_changed.connect(self.adapter.set_query)
@@ -131,7 +140,7 @@ class LibraryPage(QWidget):
         self.search_box.setMinimumWidth(180 if narrow else 220)
         self.search_box.setMaximumWidth(220 if narrow else 320)
         self.theme_toggle.setVisible(not narrow)
-        self.state_toggle.setText("开发" if narrow else "状态")
-        self.state_toggle.setToolTip(
-            "切换主题和预览页面状态" if narrow else "预览页面状态"
-        )
+        self.state_toggle.setVisible(self._developer_mode)
+        if self._developer_mode:
+            self.state_toggle.setText("开发")
+            self.state_toggle.setToolTip("切换主题和预览页面状态")

@@ -70,6 +70,13 @@ class TrackHeaderView(QHeaderView):
             accent = QColor(colors.accent)
             accent.setAlpha(170)
             painter.fillRect(rect.left() + 8, rect.bottom() - 1, max(0, rect.width() - 16), 2, accent)
+        if logical_index == int(TrackColumn.FAVORITE):
+            # The first column is intentionally the existing favorite action,
+            # not an ambiguous ellipsized text heading or a second cover column.
+            icon_rect = QRectF(rect.center().x() - 8, rect.center().y() - 8, 16, 16)
+            paint_icon(painter, "favorite", icon_rect, self._theme, "normal")
+            painter.restore()
+            return
         label = self.model().headerData(
             logical_index,
             Qt.Orientation.Horizontal,

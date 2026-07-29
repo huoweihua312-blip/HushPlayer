@@ -32,6 +32,7 @@ from app.ui_v2.pages.playlist_page import PlaylistPage
 from app.ui_v2.pages.recent_page import RecentPage
 from app.ui_v2.shell.main_window import MainWindow
 from app.ui_v2.theme.tokens import get_theme
+from app.ui_v2.widgets.track_collection_hero import TrackCollectionHero
 
 
 class UiV2LibraryFamilyAdapterTests(unittest.TestCase):
@@ -172,6 +173,9 @@ class UiV2LibraryFamilyPageTests(unittest.TestCase):
     def test_favorites_page_player_sync_and_state_preservation(self) -> None:
         page = self._route_page("liked")
         self.assertIsInstance(page, FavoritesPage)
+        self.assertIsInstance(page.collection_hero, TrackCollectionHero)
+        self.assertFalse(page.toolbar.isVisible())
+        self.assertIs(page.collection_hero.parentWidget(), page)
         model = page.track_table.model
         page.search_box.set_text("Paper Moon")
         page.adapter.set_sort(TrackColumn.TITLE, Qt.SortOrder.AscendingOrder)
@@ -240,6 +244,8 @@ class UiV2LibraryFamilyPageTests(unittest.TestCase):
         self.app.processEvents()
         album_detail = self.window.router.currentWidget()
         self.assertIsInstance(album_detail, AlbumDetailPage)
+        self.assertIsInstance(album_detail.collection_hero, TrackCollectionHero)
+        self.assertFalse(album_detail.toolbar.isVisible())
         self._play_from_page(album_detail)
         self.window.navigation_adapter.set_route(f"album_detail:{album_id}")
         self.app.processEvents()
@@ -265,13 +271,14 @@ class UiV2LibraryFamilyPageTests(unittest.TestCase):
                 library_model.index(playing_row, 0), PLAYING_ROLE
             )
         )
-        liked.toolbar.play_all_button.click()
+        self.assertIsInstance(liked.collection_hero, TrackCollectionHero)
+        liked.collection_hero.play_button.click()
         self.app.processEvents()
         self.assertEqual(
             [item.id for item in self.window.playback_adapter._queue],
             [item.id for item in liked.adapter.tracks() if not item.is_missing],
         )
-        liked.toolbar.shuffle_button.click()
+        liked.collection_hero.shuffle_button.click()
         self.app.processEvents()
         self.assertTrue(self.window.playback_adapter.state.shuffle_enabled)
         library_model_identity = library_model
