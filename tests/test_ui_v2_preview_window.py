@@ -51,7 +51,7 @@ class UiV2PreviewWindowTests(unittest.TestCase):
         )
         self.assertGreaterEqual(window.library_page.search_box.width(), 180)
         self.assertFalse(window.library_page.theme_toggle.isVisible())
-        self.assertEqual(window.library_page.state_toggle.text(), "开发")
+        self.assertFalse(window.library_page.state_toggle.isVisible())
         self.assertTrue(window.library_page.header.title_label.isVisible())
         self.assertTrue(window.library_page.header.count_label.isVisible())
         for width, height, expected_profile in ((1100, 700, "standard"), (1400, 850, "wide")):
@@ -64,7 +64,7 @@ class UiV2PreviewWindowTests(unittest.TestCase):
             self.assertGreater(table.viewport().height(), 0)
             self.assertGreater(window.library_page.search_box.width(), 150)
         self.assertTrue(window.library_page.theme_toggle.isVisible())
-        self.assertEqual(window.library_page.state_toggle.text(), "状态")
+        self.assertFalse(window.library_page.state_toggle.isVisible())
         self.assertGreaterEqual(table.columnWidth(int(TrackColumn.SOURCE)), 140)
         self.assertGreaterEqual(table.columnWidth(int(TrackColumn.ALBUM)), 240)
         window.close()
