@@ -19,6 +19,7 @@ from app.core.app_paths import AppPaths
 from app.core.version import APP_USER_AGENT, APP_VERSION
 from app.services.app_update_service import AppUpdateService, UpdateManifest
 from app.services.lyrics_cache import LyricsCache
+from app.services.library_repository import LibraryRepository, LibrarySnapshot
 from app.services.lyrics_timing import (
     LYRICS_TIMING_OFFSETS_KEY,
     effective_lyrics_position_ms as calculate_effective_lyrics_position_ms,
@@ -4861,6 +4862,11 @@ class MainWindow(QMainWindow):
         self.playlists_file = data_dir / "playlists.json"
         self.remote_tracks_file = data_dir / "remote_tracks.json"
         self.stats_file = data_dir / "stats.json"
+        self.library_repository = LibraryRepository(
+            self.library_file,
+            self.playlists_file,
+            self.stats_file,
+        )
         self.cover_cache_dir = self.paths.cache_dir / "covers"
         self.lyrics_cache_dir = self.paths.cache_dir / "lyrics"
         self.lyrics_bindings_file = data_dir / "lyrics_bindings.json"
@@ -4974,8 +4980,16 @@ class MainWindow(QMainWindow):
             self.cover_cache_dir / "online",
             self,
         )
-        self.playlists = self.measure_startup_step("歌单与收藏 JSON", self.load_playlists)
-        self.song_stats = self.measure_startup_step("播放统计 JSON", self.load_song_stats)
+        self.library_snapshot = self.measure_startup_step(
+            "音乐库、歌单与播放统计 JSON",
+            self.library_repository.load_snapshot,
+        )
+        self.playlists = self.library_snapshot.playlists.playlists
+        self.playlists_load_error = self.library_snapshot.playlists.load_error
+        self.playlists_migration_pending = (
+            self.library_snapshot.playlists.migration_pending
+        )
+        self.song_stats = self.library_snapshot.song_stats
         self.lyrics_bindings = self.measure_startup_step("歌词绑定 JSON", self.load_lyrics_bindings)
         self.playback_session = self.measure_startup_step("上次播放会话 JSON", self.load_playback_session)
         self.play_queue = self.measure_startup_step("播放队列 JSON", self.load_play_queue)
@@ -5214,7 +5228,8 @@ class MainWindow(QMainWindow):
         print(f"[perf] 样式初始化：{(time.perf_counter() - style_started_at) * 1000:.1f} ms")
         library_started_at = time.perf_counter()
         valid_library_count, song_list_is_local_only = self.load_music_library(
-            refresh_view=False
+            refresh_view=False,
+            snapshot=self.library_snapshot,
         )
         self.sync_remote_song_items(
             refresh_view=False,
@@ -12490,25 +12505,29 @@ class MainWindow(QMainWindow):
     def load_music_library(
         self,
         refresh_view: bool = True,
+        snapshot: LibrarySnapshot | None = None,
     ) -> tuple[int, bool]:
         self.invalidate_local_song_match_index()
         print("正在读取音乐库：", self.library_file)
 
-        if not self.library_file.exists():
+        if snapshot is None:
+            snapshot = getattr(self, "library_snapshot", None)
+        if not isinstance(snapshot, LibrarySnapshot):
+            snapshot = self.library_repository.load_snapshot()
+        self.library_snapshot = snapshot
+        records = snapshot.library
+
+        if records.status == "missing":
             print("没有找到已保存的音乐库，显示空状态。")
             self.add_demo_songs(refresh_view=refresh_view)
             return 0, True
 
-        try:
-            with self.library_file.open("r", encoding="utf-8") as file:
-                songs = json.load(file)
-
-        except Exception as error:
-            print("读取音乐库失败：", error)
+        if records.status == "error":
+            print("读取音乐库失败：", records.error)
             self.add_demo_songs(refresh_view=refresh_view)
             return 0, True
 
-        if not songs:
+        if records.status == "empty":
             print("音乐库为空，显示空状态。")
             self.add_demo_songs(refresh_view=refresh_view)
             return 0, True
@@ -12516,40 +12535,13 @@ class MainWindow(QMainWindow):
         previous_signal_state = self.song_list.blockSignals(True)
         self.song_list.setUpdatesEnabled(False)
         valid_count = 0
-        song_list_is_local_only = True
+        song_list_is_local_only = records.song_list_is_local_only
 
         try:
             self.song_identity_to_item = {}
             self.song_list.clear()
 
-            for song in songs:
-                path = song.get("path", "")
-
-                if not path:
-                    continue
-
-                if not Path(path).exists():
-                    print("歌曲文件不存在，已跳过：", path)
-                    continue
-
-                title = song.get("title", "未知歌曲")
-                artist = song.get("artist", "未知艺术家")
-                album = song.get("album", "未知专辑")
-                added_at = int(song.get("added_at", 0) or 0)
-                song_data = dict(song)
-                song_data.update(
-                    {
-                        "title": title,
-                        "artist": artist,
-                        "album": album,
-                        "path": str(Path(path).resolve()),
-                        "added_at": added_at,
-                        "demo": False,
-                    }
-                )
-                if song_data.get("recordKind") == "remote":
-                    song_list_is_local_only = False
-
+            for song_data in records.tracks:
                 item = self.create_song_list_item(song_data)
                 self.song_list.addItem(item)
                 valid_count += 1
@@ -14080,67 +14072,16 @@ class MainWindow(QMainWindow):
 
     def load_playlists(self) -> dict:
         self.playlist_membership_snapshots = {}
-        self.playlists_migration_pending = False
-        default_playlists = {
-            "liked": {
-                "name": "我喜欢",
-                "songs": [],
-                "remoteSongs": [],
-                "members": [],
-                "membershipVersion": PlaylistMembership.VERSION,
-                "fixed": True,
-            }
-        }
-
-        if not self.playlists_file.exists():
-            self.playlists_load_error = ""
-            return default_playlists
-
-        try:
-            with self.playlists_file.open("r", encoding="utf-8") as file:
-                playlists = json.load(file)
-
-            if not isinstance(playlists, dict):
-                raise ValueError("歌单文件根节点不是对象")
-
-            if "liked" not in playlists:
-                playlists["liked"] = default_playlists["liked"]
-
-            if not isinstance(playlists["liked"], dict):
-                playlists["liked"] = default_playlists["liked"]
-
-            playlists["liked"].setdefault("name", "我喜欢")
-            playlists["liked"].setdefault("songs", [])
-            playlists["liked"].setdefault("remoteSongs", [])
-            playlists["liked"]["fixed"] = True
-
-            if not isinstance(playlists["liked"]["songs"], list):
-                playlists["liked"]["songs"] = []
-
-            for playlist in playlists.values():
-                if not isinstance(playlist, dict):
-                    continue
-                playlist.setdefault("remoteSongs", [])
-                if not isinstance(playlist["remoteSongs"], list):
-                    playlist["remoteSongs"] = []
-
-            try:
-                anchor_ms = int(self.playlists_file.stat().st_mtime * 1000)
-            except OSError:
-                anchor_ms = int(time.time() * 1000)
-            self.playlists_migration_pending = PlaylistMembership.normalize_document(
-                playlists,
-                self.normalize_song_path,
-                anchor_ms=anchor_ms,
-            )
-
-            self.playlists_load_error = ""
-            return playlists
-
-        except Exception as error:
-            self.playlists_load_error = f"读取歌单失败，已禁止覆盖原文件：{error}"
+        snapshot = getattr(self, "library_snapshot", None)
+        if not isinstance(snapshot, LibrarySnapshot):
+            snapshot = self.library_repository.load_snapshot()
+            self.library_snapshot = snapshot
+        records = snapshot.playlists
+        self.playlists_migration_pending = records.migration_pending
+        self.playlists_load_error = records.load_error
+        if self.playlists_load_error:
             print(self.playlists_load_error)
-            return default_playlists
+        return records.playlists
 
     def save_playlists(self) -> bool:
         if getattr(self, "playlists_load_error", ""):
@@ -14193,13 +14134,7 @@ class MainWindow(QMainWindow):
             )
 
     def normalize_song_path(self, path: str | None) -> str:
-        if not path:
-            return ""
-
-        try:
-            return str(Path(path).resolve())
-        except Exception:
-            return str(path)
+        return LibraryRepository.normalize_song_path(path)
 
     def get_liked_song_paths(self) -> list[str]:
         liked_playlist = self.playlists.setdefault(
@@ -14405,38 +14340,11 @@ class MainWindow(QMainWindow):
         self.toggle_liked_media_item({"path": target_path})
 
     def load_song_stats(self) -> dict:
-        if not self.stats_file.exists():
-            return {}
-
-        try:
-            with self.stats_file.open("r", encoding="utf-8") as file:
-                raw_stats = json.load(file)
-
-            if not isinstance(raw_stats, dict):
-                return {}
-
-            cleaned_stats = {}
-
-            for path, stats in raw_stats.items():
-                if not isinstance(stats, dict):
-                    continue
-
-                normalized_path = self.normalize_song_path(path)
-
-                if not normalized_path:
-                    continue
-
-                cleaned_stats[normalized_path] = {
-                    "play_count": max(0, int(stats.get("play_count", 0))),
-                    "total_listen_time": max(0, int(stats.get("total_listen_time", 0))),
-                    "last_played": max(0, int(stats.get("last_played", 0))),
-                }
-
-            return cleaned_stats
-
-        except Exception as error:
-            print("读取播放统计失败：", error)
-            return {}
+        snapshot = getattr(self, "library_snapshot", None)
+        if not isinstance(snapshot, LibrarySnapshot):
+            snapshot = self.library_repository.load_snapshot()
+            self.library_snapshot = snapshot
+        return snapshot.song_stats
 
     def save_song_stats(self) -> None:
         self.stats_file.parent.mkdir(parents=True, exist_ok=True)
