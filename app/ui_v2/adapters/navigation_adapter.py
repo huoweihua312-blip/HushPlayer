@@ -32,6 +32,8 @@ class NavigationAdapter(QObject):
         self,
         playlists: PlaylistAdapter | None = None,
         parent: QObject | None = None,
+        *,
+        include_online: bool = True,
     ) -> None:
         super().__init__(parent)
         self._owned_playlists = playlists is None
@@ -40,6 +42,7 @@ class NavigationAdapter(QObject):
         )
         self._route = "library"
         self._current_playlist_id = ""
+        self._include_online = bool(include_online)
         self.playlist_adapter.playlists_changed.connect(self._on_playlists_changed)
 
     @property
@@ -51,7 +54,9 @@ class NavigationAdapter(QObject):
         return self._current_playlist_id
 
     def items(self) -> tuple[NavigationItem, ...]:
-        return self.MAIN_ITEMS
+        if self._include_online:
+            return self.MAIN_ITEMS
+        return tuple(item for item in self.MAIN_ITEMS if item.route_id != "online_search")
 
     def playlists(self) -> tuple[Playlist, ...]:
         return self.playlist_adapter.playlists()

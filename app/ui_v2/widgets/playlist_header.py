@@ -40,6 +40,10 @@ class PlaylistHeader(TrackCollectionHero):
         delete_action.triggered.connect(self.delete_requested)
         self.more_requested.connect(self._show_more_menu)
 
+    def set_read_only(self, value: bool) -> None:
+        self.more_button.setVisible(not bool(value))
+        self.more_button.setEnabled(not bool(value))
+
     def set_playlist(
         self, playlist: Playlist | None, tracks: Iterable[Track] = ()
     ) -> None:

@@ -21,7 +21,13 @@ class LibraryCollectionAdapter(QObject):
     playing_track_changed = Signal(str)
     recent_changed = Signal()
 
-    def __init__(self, tracks: Iterable[Track] = (), parent: QObject | None = None) -> None:
+    def __init__(
+        self,
+        tracks: Iterable[Track] = (),
+        parent: QObject | None = None,
+        *,
+        read_only: bool = False,
+    ) -> None:
         super().__init__(parent)
         self._tracks: list[Track] = []
         self._track_by_id: dict[str, Track] = {}
@@ -29,7 +35,12 @@ class LibraryCollectionAdapter(QObject):
         self._recent: dict[str, RecentPlay] = {}
         self._playing_track_id = ""
         self._clock = datetime(2026, 1, 1, 12, 0)
+        self._read_only = bool(read_only)
         self.set_tracks(tracks, emit=False)
+
+    @property
+    def read_only(self) -> bool:
+        return self._read_only
 
     def tracks(self) -> tuple[Track, ...]:
         return tuple(self._tracks)
@@ -50,16 +61,33 @@ class LibraryCollectionAdapter(QObject):
     def set_tracks(self, tracks: Iterable[Track], *, emit: bool = True) -> None:
         self._tracks = list(tracks)
         self._track_by_id = {track.id: track for track in self._tracks}
-        self._favorite_at = {
-            track.id: track.added_at + timedelta(days=1)
-            for track in self._tracks
-            if track.is_favorite
-        }
-        self._recent = {
-            track_id: entry
-            for track_id, entry in self._recent.items()
-            if track_id in self._track_by_id
-        }
+        if self._read_only:
+            self._favorite_at = {
+                track.id: track.favorite_added_at or track.added_at
+                for track in self._tracks
+                if track.is_favorite
+            }
+            self._recent = {
+                track.id: RecentPlay(
+                    track_id=track.id,
+                    last_played_at=track.last_played_at,
+                    play_count=max(0, int(track.play_count)),
+                    last_position_ms=0,
+                )
+                for track in self._tracks
+                if track.last_played_at is not None
+            }
+        else:
+            self._favorite_at = {
+                track.id: track.added_at + timedelta(days=1)
+                for track in self._tracks
+                if track.is_favorite
+            }
+            self._recent = {
+                track_id: entry
+                for track_id, entry in self._recent.items()
+                if track_id in self._track_by_id
+            }
         if self._playing_track_id not in self._track_by_id:
             self._playing_track_id = ""
         self._clock = max(
@@ -69,10 +97,12 @@ class LibraryCollectionAdapter(QObject):
         if emit:
             self.tracks_changed.emit()
 
-    def set_favorite(self, track_id: str, value: bool) -> None:
+    def set_favorite(self, track_id: str, value: bool) -> bool:
+        if self._read_only:
+            return False
         track = self.track_for_id(track_id)
         if track is None or track.is_favorite == bool(value):
-            return
+            return False
         updated = replace(track, is_favorite=bool(value))
         index = next(index for index, item in enumerate(self._tracks) if item.id == track.id)
         self._tracks[index] = updated
@@ -83,10 +113,13 @@ class LibraryCollectionAdapter(QObject):
             self._favorite_at.pop(updated.id, None)
         self.track_updated.emit(updated)
         self.favorite_changed.emit(updated.id, updated.is_favorite)
+        return True
 
     def upsert_track(self, track: Track) -> Track:
         """Add or replace one UI-only Track without rebuilding the shared collection."""
         existing = self._track_by_id.get(track.id)
+        if self._read_only:
+            return existing or track
         if existing is None:
             self._tracks.append(track)
             self._track_by_id[track.id] = track
@@ -117,6 +150,8 @@ class LibraryCollectionAdapter(QObject):
         return self._playing_track_id
 
     def record_play(self, track_id: str, position_ms: int = 0) -> None:
+        if self._read_only:
+            return
         if track_id not in self._track_by_id:
             return
         previous = self._recent.get(track_id)
@@ -140,6 +175,8 @@ class LibraryCollectionAdapter(QObject):
         return self._recent.get(track_id)
 
     def clear_recent(self) -> None:
+        if self._read_only:
+            return
         if not self._recent:
             return
         self._recent.clear()

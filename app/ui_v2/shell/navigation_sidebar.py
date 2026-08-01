@@ -138,7 +138,8 @@ class NavigationSidebar(QFrame):
         self._refresh_add_button()
 
     def create_mock_playlist(self, name: str = "") -> str:
-        return self.adapter.create_playlist(name).id
+        playlist = self.adapter.create_playlist(name)
+        return playlist.id if playlist is not None else ""
 
     def rename_mock_playlist(self, playlist_id: str, name: str) -> bool:
         return self.adapter.rename_playlist(playlist_id, name)
@@ -210,6 +211,9 @@ class NavigationSidebar(QFrame):
             item.set_selected(route_id == f"playlist:{playlist_id}")
 
     def _refresh_add_button(self) -> None:
+        read_only = self.adapter.playlist_adapter.read_only
+        self.new_playlist_button.setVisible(not read_only)
+        self.new_playlist_button.setEnabled(not read_only)
         self.new_playlist_button.setIcon(icon("add", self._theme))
         self.new_playlist_button.setIconSize(QSize(self._theme.metrics.icon_md, self._theme.metrics.icon_md))
         self.new_playlist_button.setStyleSheet(
@@ -237,9 +241,13 @@ class NavigationSidebar(QFrame):
         widget.update()
 
     def _create_playlist_from_ui(self) -> None:
+        if self.adapter.playlist_adapter.read_only:
+            return
         self.adapter.create_playlist()
 
     def _show_playlist_menu(self, playlist_id: str, global_position) -> None:
+        if self.adapter.playlist_adapter.read_only:
+            return
         menu = QMenu(self)
         rename_action = menu.addAction("重命名歌单")
         delete_action = menu.addAction("删除歌单")

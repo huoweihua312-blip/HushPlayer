@@ -193,6 +193,8 @@ class OnlineAdapter(QObject):
         self.history_changed.emit(self.history())
 
     def request_play(self, track_id: str) -> bool:
+        if self.collection.read_only:
+            return False
         track = self._track_for_id(track_id)
         if track is None or track.availability != "available":
             return False
@@ -202,6 +204,8 @@ class OnlineAdapter(QObject):
         return True
 
     def toggle_favorite(self, track_id: str) -> None:
+        if self.collection.read_only:
+            return
         track = self._track_for_id(track_id)
         if track is None:
             return
@@ -210,6 +214,8 @@ class OnlineAdapter(QObject):
         self.collection.set_favorite(unified.id, desired)
 
     def request_download(self, track_id: str) -> bool:
+        if self.collection.read_only:
+            return False
         track = self._track_for_id(track_id)
         source = self._source_for_id(track.source_id) if track else None
         if track is None or source is None or not source.supports_download:
@@ -219,6 +225,8 @@ class OnlineAdapter(QObject):
         return True
 
     def request_add_to_playlist(self, track_id: str, playlist_id: str) -> bool:
+        if self.collection.read_only:
+            return False
         track = self._track_for_id(track_id)
         if track is None or self.playlists.playlist_for_id(playlist_id) is None:
             return False

@@ -219,7 +219,8 @@ class OnlineResultTable(QTableView):
     def mouseReleaseEvent(self, event) -> None:  # noqa: N802
         index = self.indexAt(event.position().toPoint())
         if event.button() == Qt.MouseButton.LeftButton and index.isValid() and index.column() == int(OnlineColumn.FAVORITE):
-            self.adapter.toggle_favorite(self.model.track_at(index.row()).id)
+            if not self.adapter.collection.read_only:
+                self.adapter.toggle_favorite(self.model.track_at(index.row()).id)
             event.accept()
             return
         super().mouseReleaseEvent(event)
@@ -230,20 +231,23 @@ class OnlineResultTable(QTableView):
             return None
         menu = QMenu(self)
         play = menu.addAction(icon("play", self._theme), "播放")
-        play.setEnabled(track.availability == "available")
+        play.setEnabled(
+            track.availability == "available" and not self.adapter.collection.read_only
+        )
         play.triggered.connect(lambda: self.adapter.request_play(track.id))
-        favorite = menu.addAction(icon("favorite", self._theme), "取消收藏" if track.is_favorite else "收藏")
-        favorite.triggered.connect(lambda: self.adapter.toggle_favorite(track.id))
-        add_menu = menu.addMenu(icon("add", self._theme), "添加到歌单")
-        for playlist in self.playlists.playlists():
-            action = add_menu.addAction(playlist.name)
-            action.triggered.connect(
-                lambda checked=False, playlist_id=playlist.id: self.adapter.request_add_to_playlist(track.id, playlist_id)
-            )
-        download = menu.addAction(icon("local", self._theme), "下载")
-        source = next((item for item in self.adapter.sources() if item.id == track.source_id), None)
-        download.setEnabled(bool(source and source.supports_download and track.availability == "available"))
-        download.triggered.connect(lambda: self.adapter.request_download(track.id))
+        if not self.adapter.collection.read_only:
+            favorite = menu.addAction(icon("favorite", self._theme), "取消收藏" if track.is_favorite else "收藏")
+            favorite.triggered.connect(lambda: self.adapter.toggle_favorite(track.id))
+            add_menu = menu.addMenu(icon("add", self._theme), "添加到歌单")
+            for playlist in self.playlists.playlists():
+                action = add_menu.addAction(playlist.name)
+                action.triggered.connect(
+                    lambda checked=False, playlist_id=playlist.id: self.adapter.request_add_to_playlist(track.id, playlist_id)
+                )
+            download = menu.addAction(icon("local", self._theme), "下载")
+            source = next((item for item in self.adapter.sources() if item.id == track.source_id), None)
+            download.setEnabled(bool(source and source.supports_download and track.availability == "available"))
+            download.triggered.connect(lambda: self.adapter.request_download(track.id))
         info = menu.addAction(icon("library", self._theme), "查看歌曲信息")
         info.setEnabled(True)
         source_action = menu.addAction(icon("online", self._theme), "查看来源")
@@ -252,7 +256,7 @@ class OnlineResultTable(QTableView):
 
     def _on_double_clicked(self, index: QModelIndex) -> None:
         track = self.model.track_at(index.row())
-        if track is not None:
+        if track is not None and not self.adapter.collection.read_only:
             self.adapter.request_play(track.id)
 
     def _show_context_menu(self, position) -> None:

@@ -22,6 +22,7 @@ class RecentPage(TrackListPage):
         self.clear_button = QToolButton(self)
         self.clear_button.setText("清空记录")
         self.clear_button.clicked.connect(adapter.clear)
+        self.clear_button.setVisible(not adapter.collection.read_only)
         self.header.trailing_layout.insertWidget(0, self.range_box)
         self.header.trailing_layout.insertWidget(1, self.clear_button)
         self.empty_state.set_state("empty", "播放一首歌曲后，记录会显示在这里。")

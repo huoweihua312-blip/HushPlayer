@@ -15,6 +15,10 @@ from app.ui_v2.adapters.navigation_adapter import NavigationAdapter
 from app.ui_v2.adapters.online_adapter import OnlineAdapter
 from app.ui_v2.adapters.playback_adapter import PlaybackAdapter
 from app.ui_v2.adapters.playlist_adapter import PlaylistAdapter
+from app.ui_v2.adapters.real_library_adapter import (
+    RealLibraryAdapter,
+    ui_v2_data_mode,
+)
 from app.ui_v2.adapters.settings_adapter import SettingsAdapter
 from app.ui_v2.mock.track_factory import create_mock_tracks
 from app.ui_v2.pages.library_page import LibraryPage
@@ -33,7 +37,7 @@ class ShellPresentationMode(str, Enum):
 
 
 class MainWindow(QMainWindow):
-    """Composes cached V2 pages around shared mock music-library state."""
+    """Composes cached V2 pages around one mock or read-only library source."""
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -49,13 +53,28 @@ class MainWindow(QMainWindow):
         self._immersive_transparency_supported = self.testAttribute(
             Qt.WidgetAttribute.WA_TranslucentBackground
         )
-        self.library_collection = LibraryCollectionAdapter(create_mock_tracks(1000), self)
-        self.playlist_adapter = PlaylistAdapter(self.library_collection, self)
+        self.data_mode = ui_v2_data_mode()
+        is_real_library = self.data_mode == "real"
+        self.library_collection = LibraryCollectionAdapter(
+            () if is_real_library else create_mock_tracks(1000),
+            self,
+            read_only=is_real_library,
+        )
+        self.playlist_adapter = PlaylistAdapter(
+            self.library_collection,
+            self,
+            seed_mock=not is_real_library,
+            read_only=is_real_library,
+        )
         self.online_adapter = OnlineAdapter(
             self.library_collection, self.playlist_adapter, self
         )
         self.library_adapter = LibraryAdapter(collection=self.library_collection, parent=self)
-        self.navigation_adapter = NavigationAdapter(self.playlist_adapter, self)
+        self.navigation_adapter = NavigationAdapter(
+            self.playlist_adapter,
+            self,
+            include_online=not is_real_library,
+        )
         self.playback_adapter = PlaybackAdapter(self)
         self.lyrics_adapter = LyricsAdapter(self)
         self.immersive_lyrics_options = ImmersiveLyricsOptions(theme=self._theme.mode)
@@ -79,12 +98,28 @@ class MainWindow(QMainWindow):
             self,
         )
         self.player_bar = PlayerBar(self.playback_adapter, self._theme, self)
+        self.player_bar.set_read_only(is_real_library)
+        self.real_library_adapter = (
+            RealLibraryAdapter(
+                self.library_collection,
+                self.playlist_adapter,
+                self,
+            )
+            if is_real_library
+            else None
+        )
         self._build_shell()
         self._connect_state()
         self.setWindowTitle("HushPlayer")
         self.setMinimumSize(860, 560)
         self.resize(1200, 760)
         self.set_theme(self._theme.mode)
+        if self.real_library_adapter is not None:
+            self.real_library_adapter.state_changed.connect(self._on_real_library_state)
+            self.library_page.empty_state.action_requested.connect(
+                self.real_library_adapter.refresh
+            )
+            self.real_library_adapter.load()
 
     @property
     def theme(self) -> Theme:
@@ -124,6 +159,11 @@ class MainWindow(QMainWindow):
         self.player_bar.set_compact(compact)
         self.library_page.track_table.set_responsive_reference_width(self.width())
         self.router.set_responsive_reference_width(self.width())
+
+    def closeEvent(self, event) -> None:  # noqa: N802
+        if self.real_library_adapter is not None:
+            self.real_library_adapter.shutdown()
+        super().closeEvent(event)
 
     def _build_shell(self) -> None:
         self.root = QWidget(self)
@@ -356,9 +396,26 @@ class MainWindow(QMainWindow):
             self.playback_adapter.set_current_favorite(favorite)
 
     def _sync_favorite_from_player(self, favorite: bool) -> None:
+        if self.library_collection.read_only:
+            return
         current = self.playback_adapter.state.current_track
         if current is not None:
             self.library_collection.set_favorite(current.id, favorite)
+
+    def _on_real_library_state(self, state: str, detail: str) -> None:
+        if state == "loading":
+            self.library_page.empty_state.set_action("")
+            self.library_page.set_view_state("loading", detail)
+            return
+        if state == "error":
+            self.library_page.empty_state.set_action("重试")
+            self.library_page.set_view_state("error", detail)
+            return
+        self.library_page.empty_state.set_action("")
+        self.library_page.set_view_state(
+            "content" if state == "loaded" else "empty",
+            detail,
+        )
 
     def _on_player_bar_action(self, action: str) -> None:
         if action == "lyrics":

@@ -178,7 +178,11 @@ class TrackTable(QTableView):
             and index.column() == int(TrackColumn.FAVORITE)
         ):
             track = self.model.track_at(index.row())
-            if track is not None and not track.is_missing:
+            if (
+                track is not None
+                and not track.is_missing
+                and not self.adapter.collection.read_only
+            ):
                 next_value = not track.is_favorite
                 self.adapter.toggle_favorite(track.id)
                 self.favorite_toggled.emit(track.id, next_value)
@@ -228,12 +232,15 @@ class TrackTable(QTableView):
         play_action = menu.addAction("播放")
         play_action.setEnabled(not track.is_missing)
         play_action.triggered.connect(lambda: self._request_play(track))
-        favorite_action = menu.addAction("取消收藏" if track.is_favorite else "添加到我喜欢")
-        favorite_action.setEnabled(not track.is_missing)
-        favorite_action.triggered.connect(lambda: self._toggle_from_menu(track))
-        playlist_action = menu.addAction("添加到歌单")
-        playlist_action.triggered.connect(lambda: self.mock_action_requested.emit("add_to_playlist", track.id))
-        if self._playlist_remove_callback is not None:
+        if not self.adapter.collection.read_only:
+            favorite_action = menu.addAction("取消收藏" if track.is_favorite else "添加到我喜欢")
+            favorite_action.setEnabled(not track.is_missing)
+            favorite_action.triggered.connect(lambda: self._toggle_from_menu(track))
+            playlist_action = menu.addAction("添加到歌单")
+            playlist_action.triggered.connect(
+                lambda: self.mock_action_requested.emit("add_to_playlist", track.id)
+            )
+        if self._playlist_remove_callback is not None and not self.adapter.collection.read_only:
             remove_action = menu.addAction("从当前歌单移除")
             remove_action.triggered.connect(
                 lambda: self._playlist_remove_callback(track.id)
@@ -260,6 +267,8 @@ class TrackTable(QTableView):
         self.play_requested.emit(track.id)
 
     def _toggle_from_menu(self, track: Track) -> None:
+        if self.adapter.collection.read_only:
+            return
         self.adapter.toggle_favorite(track.id)
         self.favorite_toggled.emit(track.id, not track.is_favorite)
 

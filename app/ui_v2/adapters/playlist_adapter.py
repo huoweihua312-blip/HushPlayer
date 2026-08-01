@@ -21,12 +21,24 @@ class PlaylistAdapter(QObject):
     playlists_changed = Signal(object)
     playlist_changed = Signal(str)
 
-    def __init__(self, collection: LibraryCollectionAdapter, parent: QObject | None = None) -> None:
+    def __init__(
+        self,
+        collection: LibraryCollectionAdapter,
+        parent: QObject | None = None,
+        *,
+        seed_mock: bool = True,
+        read_only: bool = False,
+    ) -> None:
         super().__init__(parent)
         self.collection = collection
+        self._read_only = bool(read_only)
         self._clock = datetime(2026, 2, 1, 9, 0)
         self._next_playlist_number = 1
-        self._playlists = self._create_initial_playlists()
+        self._playlists = self._create_initial_playlists() if seed_mock else []
+
+    @property
+    def read_only(self) -> bool:
+        return self._read_only
 
     def playlists(self) -> tuple[Playlist, ...]:
         return tuple(self._playlists)
@@ -34,7 +46,9 @@ class PlaylistAdapter(QObject):
     def playlist_for_id(self, playlist_id: str) -> Playlist | None:
         return next((item for item in self._playlists if item.id == playlist_id), None)
 
-    def create_playlist(self, name: str = "", description: str = "") -> Playlist:
+    def create_playlist(self, name: str = "", description: str = "") -> Playlist | None:
+        if self._read_only:
+            return None
         title = str(name or "").strip() or f"新建歌单 {self._next_playlist_number}"
         playlist = Playlist(
             id=f"playlist-custom-{self._next_playlist_number}",
@@ -48,6 +62,8 @@ class PlaylistAdapter(QObject):
         return playlist
 
     def rename_playlist(self, playlist_id: str, name: str) -> bool:
+        if self._read_only:
+            return False
         title = str(name or "").strip()
         if not title:
             return False
@@ -60,6 +76,8 @@ class PlaylistAdapter(QObject):
         return True
 
     def delete_playlist(self, playlist_id: str) -> bool:
+        if self._read_only:
+            return False
         index = self._playlist_index(playlist_id)
         if index is None:
             return False
@@ -69,6 +87,8 @@ class PlaylistAdapter(QObject):
         return True
 
     def add_tracks(self, playlist_id: str, track_ids: Iterable[str]) -> int:
+        if self._read_only:
+            return 0
         index = self._playlist_index(playlist_id)
         if index is None:
             return 0
@@ -90,6 +110,8 @@ class PlaylistAdapter(QObject):
         return len(new_ids)
 
     def remove_track(self, playlist_id: str, track_id: str) -> bool:
+        if self._read_only:
+            return False
         index = self._playlist_index(playlist_id)
         if index is None:
             return False
@@ -105,9 +127,15 @@ class PlaylistAdapter(QObject):
         playlist = self.playlist_for_id(playlist_id)
         if playlist is None:
             return ()
-        return self.collection.tracks_for_ids(
-            entry.track_id for entry in reversed(playlist.entries)
-        )
+        entries = playlist.entries if self._read_only else reversed(playlist.entries)
+        return self.collection.tracks_for_ids(entry.track_id for entry in entries)
+
+    def set_playlists(self, playlists: Iterable[Playlist], *, read_only: bool = True) -> None:
+        """Replace presentation data from a read-only external snapshot."""
+
+        self._playlists = list(playlists)
+        self._read_only = bool(read_only)
+        self.playlists_changed.emit(self.playlists())
 
     def added_at(self, playlist_id: str, track_id: str) -> datetime | None:
         playlist = self.playlist_for_id(playlist_id)
@@ -172,6 +200,7 @@ class PlaylistTrackAdapter(TrackListAdapter):
     ) -> None:
         self.playlists = playlists
         self._playlist_id = ""
+        self._preserve_source_order = playlists.read_only
         super().__init__(
             collection,
             parent,
@@ -180,6 +209,7 @@ class PlaylistTrackAdapter(TrackListAdapter):
             sort_order=Qt.SortOrder.DescendingOrder,
         )
         playlists.playlist_changed.connect(self._on_playlist_changed)
+        playlists.playlists_changed.connect(self._on_playlists_changed)
 
     @property
     def playlist_id(self) -> str:
@@ -200,6 +230,25 @@ class PlaylistTrackAdapter(TrackListAdapter):
             return self.playlists.added_at(self._playlist_id, track.id) or track.added_at
         return super()._sort_value(track, column)
 
+    def _rebuild_visible_tracks(self, emit: bool = True) -> None:
+        if (
+            self._preserve_source_order
+            and self._sort_column == TrackColumn.ADDED_AT
+            and self._sort_order == Qt.SortOrder.DescendingOrder
+        ):
+            self._visible_tracks = [
+                track
+                for track in self.playlists.tracks_for_playlist(self._playlist_id)
+                if self._matches(track)
+            ]
+            if emit:
+                self.tracks_reset.emit(tuple(self._visible_tracks))
+            return
+        super()._rebuild_visible_tracks(emit)
+
     def _on_playlist_changed(self, playlist_id: str) -> None:
         if playlist_id == self._playlist_id:
             self._rebuild_visible_tracks()
+
+    def _on_playlists_changed(self, _playlists) -> None:
+        self._rebuild_visible_tracks()

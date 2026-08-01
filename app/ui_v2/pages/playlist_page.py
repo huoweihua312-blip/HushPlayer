@@ -34,7 +34,10 @@ class PlaylistPage(TrackListPage):
         self.playlist_header.rename_requested.connect(self._rename_playlist)
         self.playlist_header.delete_requested.connect(self._delete_playlist)
         self.playlist_header.add_requested.connect(self._add_first_available_track)
-        self.track_table.set_playlist_context(self._remove_track_from_current_playlist)
+        self.playlist_header.set_read_only(playlists.read_only)
+        self.track_table.set_playlist_context(
+            None if playlists.read_only else self._remove_track_from_current_playlist
+        )
         playlists.playlist_changed.connect(self._on_playlist_changed)
         self.empty_state.set_state("empty", "这个 mock 歌单还没有歌曲。")
         self.set_theme(theme)
@@ -72,6 +75,8 @@ class PlaylistPage(TrackListPage):
             )
 
     def _rename_playlist(self) -> None:
+        if self.playlists.read_only:
+            return
         playlist = self.playlists.playlist_for_id(self.playlist_id)
         if playlist is None:
             return
@@ -80,11 +85,15 @@ class PlaylistPage(TrackListPage):
             self.playlists.rename_playlist(playlist.id, title)
 
     def _delete_playlist(self) -> None:
+        if self.playlists.read_only:
+            return
         playlist_id = self.playlist_id
         if playlist_id and self.playlists.delete_playlist(playlist_id):
             self.playlist_deleted.emit(playlist_id)
 
     def _add_first_available_track(self) -> None:
+        if self.playlists.read_only:
+            return
         playlist = self.playlists.playlist_for_id(self.playlist_id)
         if playlist is None:
             return
@@ -100,4 +109,6 @@ class PlaylistPage(TrackListPage):
             self.playlists.add_tracks(playlist.id, (next_track.id,))
 
     def _remove_track_from_current_playlist(self, track_id: str) -> None:
+        if self.playlists.read_only:
+            return
         self.playlists.remove_track(self.playlist_id, track_id)

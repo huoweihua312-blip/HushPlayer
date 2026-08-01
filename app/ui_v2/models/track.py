@@ -22,6 +22,19 @@ class Track:
     is_loading: bool
     artwork_path: str | None
     stable_identity: str
+    favorite_added_at: datetime | None = None
+    play_count: int = 0
+    last_played_at: datetime | None = None
+    artwork_key: str = ""
+    availability: str = "available"
+    local_path: str = ""
+    remote_identity: str = ""
+
+    @property
+    def stable_id(self) -> str:
+        """The repository-backed stable identity exposed to V2 consumers."""
+
+        return self.stable_identity or self.id
 
     @property
     def is_online(self) -> bool:

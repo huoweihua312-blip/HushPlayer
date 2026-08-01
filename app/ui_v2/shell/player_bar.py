@@ -23,7 +23,7 @@ from app.ui_v2.widgets.playback_button import PlaybackButton
 
 
 class PlayerBar(QFrame):
-    """A stable-height transport surface driven by one mock playback adapter."""
+    """A stable-height transport surface driven by the V2 playback adapter."""
 
     mock_action_requested = Signal(str)
 
@@ -38,6 +38,7 @@ class PlayerBar(QFrame):
         self._theme = theme
         self._seeking = False
         self._compact = False
+        self._read_only = False
         self.setObjectName("playerBar")
         self.setMinimumHeight(116)
         self.setMaximumHeight(116)
@@ -82,6 +83,13 @@ class PlayerBar(QFrame):
         self.left_section.setMaximumWidth(250 if compact else 320)
         self.right_section.setMinimumWidth(124 if compact else 214)
         self.right_section.setMaximumWidth(160 if compact else 260)
+
+    def set_read_only(self, read_only: bool) -> None:
+        """Hide persistence-affecting actions for a read-only library snapshot."""
+
+        self._read_only = bool(read_only)
+        self.favorite_button.setVisible(not self._read_only)
+        self.favorite_button.setEnabled(not self._read_only)
 
     def _build_layout(self) -> None:
         self.artwork = ArtworkThumbnail(self._theme, self)
@@ -290,7 +298,9 @@ class PlayerBar(QFrame):
             self.lyrics_button,
             self.queue_button,
         ):
-            button.setEnabled(enabled)
+            button.setEnabled(enabled and not (
+                self._read_only and button is self.favorite_button
+            ))
         self.progress_slider.setEnabled(
             enabled and (self.adapter.state.duration_ms or 0) > 0
         )
