@@ -3,16 +3,18 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-import math
+from pathlib import Path
 from typing import Literal
 
-from PySide6.QtCore import QRectF, QSize, Qt
-from PySide6.QtGui import QColor, QIcon, QPainter, QPainterPath, QPen, QPixmap
+from PySide6.QtCore import QByteArray, QRectF, QSize, Qt
+from PySide6.QtGui import QColor, QGuiApplication, QIcon, QPainter, QPainterPath, QPen, QPixmap
+from PySide6.QtSvg import QSvgRenderer
 
 from app.ui_v2.theme.tokens import Theme
 
 
 IconName = Literal[
+    "brand",
     "favorite",
     "favorite_filled",
     "playing",
@@ -27,23 +29,36 @@ IconName = Literal[
     "artist",
     "album",
     "playlist",
+    "playlist_more",
     "add",
     "lyrics",
     "settings",
+    "settings_light",
     "shuffle",
     "previous",
     "play",
     "pause",
     "next",
     "repeat",
+    "repeat_one",
     "queue",
     "volume",
     "volume_mute",
     "chevron_down",
     "chevron_up",
     "chevron_right",
+    "back",
+    "forward",
+    "browse",
+    "more",
+    "notification",
+    "user",
+    "window_minimize",
+    "window_maximize",
+    "window_restore",
+    "window_close",
 ]
-IconState = Literal["normal", "hover", "selected", "disabled"]
+IconState = Literal["normal", "hover", "selected", "disabled", "inverse"]
 
 
 @dataclass(frozen=True, slots=True)
@@ -52,16 +67,224 @@ class IconPalette:
     hover: QColor
     selected: QColor
     disabled: QColor
+    inverse: QColor
 
 
 def palette_for(theme: Theme) -> IconPalette:
     c = theme.colors
     return IconPalette(
-        normal=QColor(c.secondary_text),
-        hover=QColor(c.primary_text),
-        selected=QColor(c.accent),
+        normal=QColor(c.icon_default),
+        hover=QColor(c.icon_hover),
+        selected=QColor(c.icon_active),
         disabled=QColor(c.disabled_text),
+        inverse=QColor(c.app_background),
     )
+
+
+_ICON_ASSET_DIR = Path(__file__).resolve().parent.parent / "assets" / "icons"
+_FLUENT_PLAYER_ASSET_DIR = _ICON_ASSET_DIR / "fluent_player"
+FLUENT_PLAYER_ASSETS: dict[str, str] = {
+    "favorite": "heart_20_regular.svg",
+    "favorite_filled": "heart_20_filled.svg",
+    "shuffle": "arrow_shuffle_20_regular.svg",
+    "previous": "previous_frame_20_filled.svg",
+    "play": "play_24_filled.svg",
+    "pause": "pause_24_filled.svg",
+    "next": "next_frame_20_filled.svg",
+    "repeat": "arrow_repeat_all_20_regular.svg",
+    "repeat_one": "arrow_repeat_1_24_regular.svg",
+    "queue": "document_queue_24_regular.svg",
+    "lyrics": "subtitles_20_regular.svg",
+    "volume": "speaker_2_20_regular.svg",
+    "volume_mute": "speaker_mute_20_regular.svg",
+    "more": "more_horizontal_20_regular.svg",
+}
+_SVG_ASSET_NAMES: dict[str, str] = {
+    "brand": "brand",
+    "library": "library",
+    "browse": "browse",
+    "favorite": "favorite",
+    "favorite_filled": "favorite",
+    "playlist_more": "more-playlists",
+    "settings": "settings",
+    "settings_light": "settings-light",
+    "back": "back",
+    "forward": "forward",
+    "search": "search",
+    "notification": "notification",
+    "user": "profile",
+    "shuffle": "shuffle",
+    "previous": "previous",
+    "play": "play",
+    "pause": "pause",
+    "next": "next",
+    "repeat": "repeat-all",
+    "repeat_one": "repeat-one",
+    "queue": "queue",
+    "lyrics": "lyrics",
+    "volume": "volume",
+    "volume_mute": "volume",
+    "more": "more",
+}
+_SVG_SOURCE_CACHE: dict[str, bytes] = {}
+_SVG_PIXMAP_CACHE: dict[tuple[str, int, int, float, float], QPixmap] = {}
+_FLUENT_PLAYER_PIXMAP_CACHE: dict[tuple[str, int, int, float, float], QPixmap] = {}
+
+# Approved paths retain their 24px viewBox and designed breathing room. These
+# factors compensate only for differing optical weight inside that canvas.
+ICON_OPTICAL_SCALE: dict[str, float] = {
+    "brand": 1.08,
+    "library": 1.10,
+    "browse": 1.05,
+    "favorite": 1.04,
+    "favorite_filled": 1.04,
+    "playlist_more": 1.08,
+    "settings": 1.04,
+    "settings_light": 1.04,
+    "back": 1.05,
+    "forward": 1.05,
+    "search": 1.04,
+    "notification": 1.04,
+    "user": 1.04,
+    "shuffle": 1.08,
+    "previous": 1.04,
+    "play": 1.03,
+    "pause": 1.03,
+    "next": 1.04,
+    "repeat": 1.08,
+    "repeat_one": 1.08,
+    "queue": 1.08,
+    "lyrics": 1.08,
+    "volume": 1.05,
+    "volume_mute": 1.05,
+    "more": 1.03,
+}
+
+
+def clear_svg_icon_cache() -> None:
+    """Discard colored SVG pixmaps after a display DPR changes."""
+
+    _SVG_PIXMAP_CACHE.clear()
+    _FLUENT_PLAYER_PIXMAP_CACHE.clear()
+
+
+def _device_pixel_ratio() -> float:
+    app = QGuiApplication.instance()
+    screen = app.primaryScreen() if app is not None else None
+    return round(float(screen.devicePixelRatio()) if screen is not None else 1.0, 3)
+
+
+def optical_scale_for(name: str) -> float:
+    """Return the centre-preserving visual scale for one approved glyph."""
+
+    return round(float(ICON_OPTICAL_SCALE.get(name, 1.0)), 3)
+
+
+def _svg_source(name: str, color: QColor) -> bytes:
+    asset_name = _SVG_ASSET_NAMES[name]
+    source = _SVG_SOURCE_CACHE.get(asset_name)
+    if source is None:
+        source = (_ICON_ASSET_DIR / f"{asset_name}.svg").read_bytes()
+        _SVG_SOURCE_CACHE[asset_name] = source
+    if name == "favorite_filled":
+        source = source.replace(b'fill="none"', b'fill="currentColor"', 1)
+    return source.replace(b"currentColor", color.name().encode("ascii"))
+
+
+def _svg_pixmap(
+    name: str,
+    size: int,
+    color: QColor,
+    dpr: float | None = None,
+    optical_scale: float | None = None,
+) -> QPixmap:
+    """Render one approved SVG once per icon ID, size, color, and device scale."""
+
+    if name not in _SVG_ASSET_NAMES:
+        return QPixmap()
+    dpr = _device_pixel_ratio() if dpr is None else round(float(dpr), 3)
+    render_scale = optical_scale_for(name) if optical_scale is None else round(float(optical_scale), 3)
+    key = (name, max(1, int(size)), color.rgba(), dpr, render_scale)
+    cached = _SVG_PIXMAP_CACHE.get(key)
+    if cached is not None:
+        return cached
+    physical_size = max(1, round(size * dpr))
+    pixmap = QPixmap(physical_size, physical_size)
+    pixmap.fill(Qt.GlobalColor.transparent)
+    renderer = QSvgRenderer(QByteArray(_svg_source(name, color)))
+    if renderer.isValid():
+        painter = QPainter(pixmap)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        render_size = physical_size * render_scale
+        inset = (physical_size - render_size) / 2
+        renderer.render(painter, QRectF(inset, inset, render_size, render_size))
+        painter.end()
+    pixmap.setDevicePixelRatio(dpr)
+    _SVG_PIXMAP_CACHE[key] = pixmap
+    return pixmap
+
+
+def _fluent_player_source(filename: str, color: QColor) -> bytes:
+    """Load one vendored Fluent path and apply its semantic color at runtime."""
+
+    source = (_FLUENT_PLAYER_ASSET_DIR / filename).read_bytes()
+    # The package leaves the path fill implicit.  Keep the vendored SVGs
+    # untouched and inject the current token only in the renderer input.
+    return source.replace(
+        b"<path ",
+        b'<path fill="' + color.name().encode("ascii") + b'" ',
+        1,
+    )
+
+
+def _fluent_player_pixmap(
+    name: str,
+    size: int,
+    color: QColor,
+    dpr: float | None = None,
+) -> QPixmap:
+    """Render one fixed Fluent PlayerBar glyph into a centered canvas."""
+
+    filename = FLUENT_PLAYER_ASSETS.get(name)
+    if filename is None:
+        return QPixmap()
+    dpr = _device_pixel_ratio() if dpr is None else round(float(dpr), 3)
+    offset_x = 0.5 if name == "play" else 0.0
+    key = (filename, max(1, int(size)), color.rgba(), dpr, offset_x)
+    cached = _FLUENT_PLAYER_PIXMAP_CACHE.get(key)
+    if cached is not None:
+        return cached
+    physical_size = max(1, round(size * dpr))
+    pixmap = QPixmap(physical_size, physical_size)
+    pixmap.fill(Qt.GlobalColor.transparent)
+    renderer = QSvgRenderer(QByteArray(_fluent_player_source(filename, color)))
+    if renderer.isValid():
+        painter = QPainter(pixmap)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        renderer.render(
+            painter,
+            QRectF(offset_x * dpr, 0, physical_size, physical_size),
+        )
+        painter.end()
+    pixmap.setDevicePixelRatio(dpr)
+    _FLUENT_PLAYER_PIXMAP_CACHE[key] = pixmap
+    return pixmap
+
+
+def fluent_icon(name: str, theme: Theme, state: IconState = "normal", size: int = 18) -> QIcon:
+    """Return a local Fluent glyph for the formal PlayerBar only."""
+
+    if name not in FLUENT_PLAYER_ASSETS:
+        return QIcon()
+    palette = palette_for(theme)
+    color = (
+        QColor(theme.colors.danger)
+        if name == "favorite_filled" and state == "selected"
+        else getattr(palette, state)
+    )
+    result = QIcon()
+    result.addPixmap(_fluent_player_pixmap(name, size, color))
+    return result
 
 
 def _heart_path(rect: QRectF) -> QPainterPath:
@@ -117,11 +340,45 @@ def _paint_shape(painter: QPainter, name: IconName, rect: QRectF, color: QColor)
     elif name == "search":
         painter.drawEllipse(rect.adjusted(rect.width() * 0.1, rect.height() * 0.1, -rect.width() * 0.38, -rect.height() * 0.38))
         painter.drawLine(rect.left() + rect.width() * 0.59, rect.top() + rect.height() * 0.59, rect.left() + rect.width() * 0.86, rect.top() + rect.height() * 0.86)
+    elif name in ("back", "forward"):
+        left = name == "back"
+        start = rect.left() + rect.width() * (0.64 if left else 0.36)
+        end = rect.left() + rect.width() * (0.36 if left else 0.64)
+        painter.drawLine(start, rect.top() + rect.height() * 0.22, end, rect.center().y())
+        painter.drawLine(end, rect.center().y(), start, rect.bottom() - rect.height() * 0.22)
+    elif name == "browse":
+        side = rect.width() * 0.28
+        radius = max(1.0, rect.width() * 0.05)
+        for x_ratio in (0.13, 0.59):
+            for y_ratio in (0.13, 0.59):
+                painter.drawRoundedRect(
+                    QRectF(rect.left() + rect.width() * x_ratio, rect.top() + rect.height() * y_ratio, side, side),
+                    radius,
+                    radius,
+                )
     elif name == "library":
-        for row in range(3):
-            y = rect.top() + rect.height() * (0.22 + row * 0.28)
-            painter.drawLine(rect.left() + rect.width() * 0.18, y, rect.left() + rect.width() * 0.82, y)
-            painter.drawPoint(rect.left() + rect.width() * 0.08, y)
+        # Paired book spines read as a library at small navigation sizes;
+        # unlike a menu glyph, the silhouette remains distinct from playlist.
+        left_book = QRectF(
+            rect.left() + rect.width() * 0.12,
+            rect.top() + rect.height() * 0.18,
+            rect.width() * 0.32,
+            rect.height() * 0.64,
+        )
+        right_book = QRectF(
+            rect.left() + rect.width() * 0.5,
+            rect.top() + rect.height() * 0.13,
+            rect.width() * 0.3,
+            rect.height() * 0.69,
+        )
+        painter.drawRoundedRect(left_book, rect.width() * 0.04, rect.width() * 0.04)
+        painter.drawRoundedRect(right_book, rect.width() * 0.04, rect.width() * 0.04)
+        painter.drawLine(
+            right_book.left() + right_book.width() * 0.27,
+            right_book.top() + right_book.height() * 0.12,
+            right_book.left() + right_book.width() * 0.27,
+            right_book.bottom() - right_book.height() * 0.12,
+        )
     elif name == "recent":
         painter.drawEllipse(rect.adjusted(rect.width() * 0.13, rect.height() * 0.13, -rect.width() * 0.13, -rect.height() * 0.13))
         painter.drawLine(rect.center().x(), rect.center().y(), rect.center().x(), rect.top() + rect.height() * 0.3)
@@ -132,11 +389,43 @@ def _paint_shape(painter: QPainter, name: IconName, rect: QRectF, color: QColor)
     elif name == "album":
         painter.drawEllipse(rect.adjusted(rect.width() * 0.1, rect.height() * 0.1, -rect.width() * 0.1, -rect.height() * 0.1))
         painter.drawEllipse(rect.adjusted(rect.width() * 0.41, rect.height() * 0.41, -rect.width() * 0.41, -rect.height() * 0.41))
-    elif name == "playlist":
-        for row, width in enumerate((0.62, 0.62, 0.42)):
-            y = rect.top() + rect.height() * (0.24 + row * 0.25)
-            painter.drawLine(rect.left() + rect.width() * 0.11, y, rect.left() + rect.width() * (0.11 + width), y)
-        painter.drawEllipse(QRectF(rect.left() + rect.width() * 0.66, rect.top() + rect.height() * 0.58, rect.width() * 0.16, rect.height() * 0.16))
+    elif name in ("playlist", "playlist_more"):
+        # A playlist has both rows and a musical note, avoiding a generic
+        # three-line menu silhouette.  "更多歌单" adds an unambiguous chevron.
+        for row, width in enumerate((0.42, 0.34)):
+            y = rect.top() + rect.height() * (0.28 + row * 0.2)
+            painter.drawLine(
+                rect.left() + rect.width() * 0.1,
+                y,
+                rect.left() + rect.width() * (0.1 + width),
+                y,
+            )
+        note_x = rect.left() + rect.width() * 0.68
+        note_top = rect.top() + rect.height() * 0.18
+        note_bottom = rect.top() + rect.height() * 0.7
+        painter.drawLine(note_x, note_top, note_x, note_bottom)
+        painter.drawLine(note_x, note_top, rect.left() + rect.width() * 0.88, rect.top() + rect.height() * 0.25)
+        painter.drawEllipse(
+            QRectF(
+                rect.left() + rect.width() * 0.53,
+                rect.top() + rect.height() * 0.62,
+                rect.width() * 0.2,
+                rect.height() * 0.18,
+            )
+        )
+        if name == "playlist_more":
+            painter.drawLine(
+                rect.left() + rect.width() * 0.14,
+                rect.top() + rect.height() * 0.73,
+                rect.left() + rect.width() * 0.28,
+                rect.top() + rect.height() * 0.87,
+            )
+            painter.drawLine(
+                rect.left() + rect.width() * 0.28,
+                rect.top() + rect.height() * 0.87,
+                rect.left() + rect.width() * 0.42,
+                rect.top() + rect.height() * 0.73,
+            )
     elif name == "add":
         painter.drawLine(rect.left() + rect.width() * 0.5, rect.top() + rect.height() * 0.18, rect.left() + rect.width() * 0.5, rect.top() + rect.height() * 0.82)
         painter.drawLine(rect.left() + rect.width() * 0.18, rect.top() + rect.height() * 0.5, rect.left() + rect.width() * 0.82, rect.top() + rect.height() * 0.5)
@@ -147,25 +436,85 @@ def _paint_shape(painter: QPainter, name: IconName, rect: QRectF, color: QColor)
             y = rect.top() + rect.height() * (0.33 + row * 0.18)
             painter.drawLine(rect.left() + rect.width() * 0.29, y, rect.left() + rect.width() * (0.29 + width), y)
     elif name == "settings":
-        painter.drawEllipse(rect.adjusted(rect.width() * 0.18, rect.height() * 0.18, -rect.width() * 0.18, -rect.height() * 0.18))
-        painter.drawEllipse(rect.adjusted(rect.width() * 0.4, rect.height() * 0.4, -rect.width() * 0.4, -rect.height() * 0.4))
+        # Short, squared teeth and a double ring give this a true gear form
+        # instead of the sunburst produced by free-standing radial strokes.
+        tooth_width = rect.width() * 0.13
+        tooth_height = rect.height() * 0.22
         for angle in range(0, 360, 45):
-            radians = angle * 3.14159265 / 180
-            dx = rect.width() * 0.38
-            dy = rect.height() * 0.38
-            painter.drawLine(
-                rect.center().x() + math.cos(radians) * dx * 0.75,
-                rect.center().y() + math.sin(radians) * dy * 0.75,
-                rect.center().x() + math.cos(radians) * dx,
-                rect.center().y() + math.sin(radians) * dy,
+            painter.save()
+            painter.translate(rect.center())
+            painter.rotate(angle)
+            painter.drawRoundedRect(
+                QRectF(-tooth_width / 2, -rect.height() * 0.48, tooth_width, tooth_height),
+                tooth_width * 0.18,
+                tooth_width * 0.18,
             )
+            painter.restore()
+        painter.drawEllipse(
+            rect.adjusted(
+                rect.width() * 0.22,
+                rect.height() * 0.22,
+                -rect.width() * 0.22,
+                -rect.height() * 0.22,
+            )
+        )
+        painter.drawEllipse(
+            rect.adjusted(
+                rect.width() * 0.42,
+                rect.height() * 0.42,
+                -rect.width() * 0.42,
+                -rect.height() * 0.42,
+            )
+        )
+    elif name == "notification":
+        bell = QRectF(
+            rect.left() + rect.width() * 0.22,
+            rect.top() + rect.height() * 0.16,
+            rect.width() * 0.56,
+            rect.height() * 0.62,
+        )
+        painter.drawArc(bell, 22 * 16, 136 * 16)
+        painter.drawLine(bell.left(), bell.center().y(), bell.left(), bell.bottom())
+        painter.drawLine(bell.right(), bell.center().y(), bell.right(), bell.bottom())
+        painter.drawLine(rect.left() + rect.width() * 0.16, bell.bottom(), rect.right() - rect.width() * 0.16, bell.bottom())
+        painter.drawPoint(rect.center().x(), rect.bottom() - rect.height() * 0.08)
+    elif name == "user":
+        painter.drawEllipse(QRectF(rect.left() + rect.width() * 0.36, rect.top() + rect.height() * 0.14, rect.width() * 0.28, rect.height() * 0.28))
+        painter.drawArc(QRectF(rect.left() + rect.width() * 0.18, rect.top() + rect.height() * 0.42, rect.width() * 0.64, rect.height() * 0.48), 22 * 16, 136 * 16)
+    elif name == "more":
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(color)
+        radius = max(1.0, rect.width() * 0.095)
+        for ratio in (0.25, 0.5, 0.75):
+            painter.drawEllipse(QRectF(rect.left() + rect.width() * ratio - radius, rect.center().y() - radius, radius * 2, radius * 2))
+    elif name == "window_minimize":
+        painter.drawLine(rect.left() + rect.width() * 0.22, rect.top() + rect.height() * 0.7, rect.right() - rect.width() * 0.22, rect.top() + rect.height() * 0.7)
+    elif name == "window_maximize":
+        painter.drawRect(rect.adjusted(rect.width() * 0.22, rect.height() * 0.22, -rect.width() * 0.22, -rect.height() * 0.22))
+    elif name == "window_restore":
+        rear = rect.adjusted(rect.width() * 0.17, rect.height() * 0.17, -rect.width() * 0.35, -rect.height() * 0.35)
+        front = rect.adjusted(rect.width() * 0.35, rect.height() * 0.35, -rect.width() * 0.17, -rect.height() * 0.17)
+        painter.drawRect(rear)
+        painter.drawRect(front)
+    elif name == "window_close":
+        painter.drawLine(rect.left() + rect.width() * 0.25, rect.top() + rect.height() * 0.25, rect.right() - rect.width() * 0.25, rect.bottom() - rect.height() * 0.25)
+        painter.drawLine(rect.right() - rect.width() * 0.25, rect.top() + rect.height() * 0.25, rect.left() + rect.width() * 0.25, rect.bottom() - rect.height() * 0.25)
     elif name == "shuffle":
-        painter.drawLine(rect.left() + rect.width() * 0.1, rect.top() + rect.height() * 0.28, rect.left() + rect.width() * 0.42, rect.top() + rect.height() * 0.28)
-        painter.drawLine(rect.left() + rect.width() * 0.42, rect.top() + rect.height() * 0.28, rect.left() + rect.width() * 0.78, rect.top() + rect.height() * 0.72)
-        painter.drawLine(rect.left() + rect.width() * 0.1, rect.top() + rect.height() * 0.72, rect.left() + rect.width() * 0.42, rect.top() + rect.height() * 0.72)
-        painter.drawLine(rect.left() + rect.width() * 0.42, rect.top() + rect.height() * 0.72, rect.left() + rect.width() * 0.58, rect.top() + rect.height() * 0.52)
-        painter.drawLine(rect.left() + rect.width() * 0.7, rect.top() + rect.height() * 0.58, rect.left() + rect.width() * 0.84, rect.top() + rect.height() * 0.72)
-        painter.drawLine(rect.left() + rect.width() * 0.84, rect.top() + rect.height() * 0.72, rect.left() + rect.width() * 0.7, rect.top() + rect.height() * 0.86)
+        # Two input paths cross and terminate in their own arrow heads.  This
+        # deliberately avoids the single-turn arrow silhouette of a jump icon.
+        left = rect.left() + rect.width() * 0.1
+        join = rect.left() + rect.width() * 0.4
+        right = rect.left() + rect.width() * 0.84
+        top = rect.top() + rect.height() * 0.27
+        bottom = rect.top() + rect.height() * 0.73
+        painter.drawLine(left, top, join, top)
+        painter.drawLine(join, top, right, bottom)
+        painter.drawLine(right, bottom, right - rect.width() * 0.15, bottom - rect.height() * 0.16)
+        painter.drawLine(right, bottom, right - rect.width() * 0.15, bottom + rect.height() * 0.16)
+        painter.drawLine(left, bottom, join, bottom)
+        painter.drawLine(join, bottom, right, top)
+        painter.drawLine(right, top, right - rect.width() * 0.15, top - rect.height() * 0.16)
+        painter.drawLine(right, top, right - rect.width() * 0.15, top + rect.height() * 0.16)
     elif name in ("previous", "next", "play"):
         path = QPainterPath()
         if name == "play":
@@ -189,10 +538,26 @@ def _paint_shape(painter: QPainter, name: IconName, rect: QRectF, color: QColor)
         painter.setBrush(color)
         painter.drawRoundedRect(QRectF(rect.left() + rect.width() * 0.25, rect.top() + rect.height() * 0.18, rect.width() * 0.17, rect.height() * 0.64), 2, 2)
         painter.drawRoundedRect(QRectF(rect.left() + rect.width() * 0.58, rect.top() + rect.height() * 0.18, rect.width() * 0.17, rect.height() * 0.64), 2, 2)
-    elif name == "repeat":
-        painter.drawArc(rect.adjusted(rect.width() * 0.14, rect.height() * 0.2, -rect.width() * 0.14, -rect.height() * 0.2), 35 * 16, 250 * 16)
-        painter.drawLine(rect.right() - rect.width() * 0.2, rect.top() + rect.height() * 0.22, rect.right() - rect.width() * 0.2, rect.top() + rect.height() * 0.42)
-        painter.drawLine(rect.right() - rect.width() * 0.2, rect.top() + rect.height() * 0.22, rect.right() - rect.width() * 0.38, rect.top() + rect.height() * 0.3)
+    elif name in ("repeat", "repeat_one"):
+        # The canonical list-repeat mark is two connected horizontal arrows,
+        # not a letter-like circular arc.
+        left = rect.left() + rect.width() * 0.12
+        right = rect.left() + rect.width() * 0.88
+        top = rect.top() + rect.height() * 0.31
+        bottom = rect.top() + rect.height() * 0.69
+        painter.drawLine(left, top, right - rect.width() * 0.14, top)
+        painter.drawLine(right - rect.width() * 0.14, top, right, rect.center().y())
+        painter.drawLine(right, rect.center().y(), right - rect.width() * 0.14, bottom)
+        painter.drawLine(right, bottom, left + rect.width() * 0.14, bottom)
+        painter.drawLine(left + rect.width() * 0.14, bottom, left, rect.center().y())
+        painter.drawLine(left, rect.center().y(), left + rect.width() * 0.14, top)
+        if name == "repeat_one":
+            one_pen = QPen(color, max(1.05, rect.width() * 0.072))
+            one_pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+            painter.setPen(one_pen)
+            one_x = rect.center().x()
+            painter.drawLine(one_x, rect.top() + rect.height() * 0.39, one_x, rect.top() + rect.height() * 0.61)
+            painter.drawLine(one_x, rect.top() + rect.height() * 0.39, one_x - rect.width() * 0.06, rect.top() + rect.height() * 0.45)
     elif name == "queue":
         for row, width in enumerate((0.68, 0.5, 0.62)):
             y = rect.top() + rect.height() * (0.24 + row * 0.26)
@@ -244,13 +609,25 @@ def _paint_shape(painter: QPainter, name: IconName, rect: QRectF, color: QColor)
 def paint_icon(painter: QPainter, name: IconName, rect: QRectF, theme: Theme, state: IconState = "normal") -> None:
     """Paint an icon directly, selecting the color from its semantic state."""
     colors = palette_for(theme)
-    _paint_shape(painter, name, rect, getattr(colors, state))
+    color = getattr(colors, state)
+    if name in _SVG_ASSET_NAMES:
+        size = max(1, round(max(rect.width(), rect.height())))
+        pixmap = _svg_pixmap(name, size, color)
+        if not pixmap.isNull():
+            painter.drawPixmap(rect.toRect(), pixmap)
+            return
+    _paint_shape(painter, name, rect, color)
 
 
 def icon(name: IconName, theme: Theme, state: IconState = "normal") -> QIcon:
     """Build a multi-size QIcon so toolbar controls remain crisp on high DPI."""
     result = QIcon()
-    for size in (16, 20, 24, 32, 48):
+    if name in _SVG_ASSET_NAMES:
+        color = getattr(palette_for(theme), state)
+        for size in (15, 16, 17, 18, 19, 20, 24, 32, 48):
+            result.addPixmap(_svg_pixmap(name, size, color))
+        return result
+    for size in (15, 16, 17, 18, 19, 20, 24, 32, 48):
         pixmap = QPixmap(QSize(size, size))
         pixmap.fill(Qt.GlobalColor.transparent)
         painter = QPainter(pixmap)

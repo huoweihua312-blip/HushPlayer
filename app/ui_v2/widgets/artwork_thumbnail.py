@@ -2,20 +2,23 @@
 
 from __future__ import annotations
 
-from PySide6.QtCore import QSize
+from PySide6.QtCore import QRectF, Qt
+from PySide6.QtGui import QColor, QPainter, QPen, QPixmap
 from PySide6.QtWidgets import QLabel, QWidget
 
 from app.ui_v2.models.track import Track
-from app.ui_v2.theme.icons import icon
 from app.ui_v2.theme.tokens import Theme
+from app.ui_v2.widgets.placeholder_cover import cover_pixmap
+from app.ui_v2.widgets.track_display import display_track_text
 
 
 class ArtworkThumbnail(QLabel):
-    def __init__(self, theme: Theme, parent: QWidget | None = None) -> None:
+    def __init__(self, theme: Theme, parent: QWidget | None = None, *, size: int = 48) -> None:
         super().__init__(parent)
         self._theme = theme
         self._track: Track | None = None
-        self.setFixedSize(56, 56)
+        self._size = max(32, int(size))
+        self.setFixedSize(self._size, self._size)
         self.setScaledContents(False)
         self.set_theme(theme)
         self.set_track(None)
@@ -23,24 +26,43 @@ class ArtworkThumbnail(QLabel):
     def set_theme(self, theme: Theme) -> None:
         self._theme = theme
         self.setStyleSheet(
-            f"background: {theme.colors.elevated_background}; "
-            f"border: 1px solid {theme.colors.border}; "
-            f"border-radius: {theme.metrics.radius_md}px;"
+            f"background: {theme.colors.surface_secondary}; "
+            f"border: 0; "
+            f"border-radius: 5px;"
         )
         self._refresh_artwork()
 
     def set_track(self, track: Track | None) -> None:
         self._track = track
-        self.setToolTip(track.album if track is not None else "没有正在播放的歌曲")
+        self.setToolTip(
+            display_track_text(track)[2] if track is not None else "没有正在播放的歌曲"
+        )
         self._refresh_artwork()
 
     def _refresh_artwork(self) -> None:
-        icon_name = (
-            "missing"
-            if self._track is None
-            else "online"
-            if self._track.is_online
-            else "local"
-        )
-        state = "disabled" if self._track is None else "selected"
-        self.setPixmap(icon(icon_name, self._theme, state).pixmap(QSize(26, 26)))
+        if self._track is None:
+            self.setPixmap(self._empty_pixmap())
+            return
+        self.setPixmap(cover_pixmap(self._track.stable_id, self._size, self._size))
+
+    def _empty_pixmap(self) -> QPixmap:
+        """A deliberately quiet, but visible, no-track artwork surface."""
+
+        pixmap = QPixmap(self._size, self._size)
+        pixmap.fill(Qt.GlobalColor.transparent)
+        painter = QPainter(pixmap)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        painter.setPen(QPen(QColor(self._theme.colors.border_strong), 1))
+        painter.setBrush(QColor(self._theme.colors.surface_selected))
+        inset = 0.5
+        extent = self._size - 1
+        radius = max(5, self._size // 9)
+        painter.drawRoundedRect(QRectF(inset, inset, extent, extent), radius, radius)
+        painter.setPen(QPen(QColor(self._theme.colors.text_tertiary), 1.25))
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+        ring = self._size * 0.27
+        painter.drawEllipse(QRectF(self._size * 0.27, self._size * 0.27, ring * 2, ring * 2))
+        dot = max(3, self._size // 12)
+        painter.drawEllipse(QRectF(self._size * 0.46, self._size * 0.46, dot, dot))
+        painter.end()
+        return pixmap

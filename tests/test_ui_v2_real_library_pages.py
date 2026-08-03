@@ -244,6 +244,23 @@ class RealLibraryPageTests(unittest.TestCase):
         self.assertEqual(self.window.playlist_adapter.add_tracks("commute", (first.id,)), 0)
         self.assertFalse(self.window.playlist_adapter.remove_track("commute", first.id))
 
+    def test_real_browse_uses_read_only_local_sections_without_playback_writes(self) -> None:
+        browse = self.window.router.browse_page
+        self.assertEqual(
+            set(browse.sections), {"recent_added", "recommended", "recent_played"}
+        )
+        visible_cards = [
+            card
+            for section in browse.sections.values()
+            for card in section.cards
+            if not card.isHidden()
+        ]
+        self.assertTrue(visible_cards)
+        self.assertTrue(all(not card.play_button.isEnabled() for card in visible_cards))
+        visible_cards[0].play_button.click()
+        self.app.processEvents()
+        self.assertIsNone(self.window.playback_adapter.state.current_track)
+
     def test_real_window_does_not_change_any_isolated_user_document(self) -> None:
         self.window.router.page_for_route("liked")
         self.window.router.page_for_route("recent")
@@ -276,8 +293,14 @@ class RealLibraryPageTests(unittest.TestCase):
         self.assertEqual(self.window.data_mode, "mock")
         self.assertIsNone(self.window.real_library_adapter)
         self.assertEqual(len(self.window.library_collection.tracks()), 1000)
-        self.assertIn("online_search", self.window.sidebar._items)
-        self.assertFalse(self.window.sidebar.new_playlist_button.isHidden())
+        # Low-frequency routes remain available to the router but are not
+        # permanently surfaced in the approved compact sidebar.
+        self.assertIn(
+            "online_search",
+            tuple(item.route_id for item in self.window.navigation_adapter.items()),
+        )
+        self.assertNotIn("online_search", self.window.sidebar._items)
+        self.assertTrue(self.window.sidebar.new_playlist_button.isHidden())
 
 
 if __name__ == "__main__":

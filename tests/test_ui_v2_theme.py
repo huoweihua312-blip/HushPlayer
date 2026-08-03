@@ -26,6 +26,12 @@ class UiV2ThemeTests(unittest.TestCase):
 
     def test_light_and_dark_have_complete_distinct_color_tokens(self) -> None:
         required = {
+            "app_background", "window_background", "content_background", "sidebar_background",
+            "titlebar_background", "playerbar_background", "surface_primary", "surface_secondary",
+            "surface_elevated", "surface_hover", "surface_selected", "surface_pressed",
+            "divider", "text_primary", "text_secondary", "text_tertiary", "text_disabled",
+            "icon_default", "icon_hover", "icon_active", "progress_track", "progress_fill",
+            "focus_ring", "shadow", "overlay",
             "window_background", "navigation_background", "content_background",
             "elevated_background", "player_background", "input_background",
             "primary_text", "secondary_text", "subtle_text", "disabled_text",
@@ -38,6 +44,8 @@ class UiV2ThemeTests(unittest.TestCase):
         dark = get_theme("dark")
         self.assertNotEqual(light.colors.window_background, dark.colors.window_background)
         self.assertNotEqual(light.colors.primary_text, dark.colors.primary_text)
+        self.assertNotEqual(light.colors.icon_default, light.colors.text_disabled)
+        self.assertNotEqual(dark.colors.icon_default, dark.colors.text_disabled)
 
     def test_metrics_fonts_styles_and_icons_are_complete(self) -> None:
         self.assertTrue({"spacing_xs", "spacing_xl", "radius_lg", "page_margin", "control_height", "icon_lg"}.issubset(ThemeMetrics.__dataclass_fields__))

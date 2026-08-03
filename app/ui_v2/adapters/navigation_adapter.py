@@ -18,13 +18,14 @@ class NavigationAdapter(QObject):
     current_playlist_changed = Signal(str)
 
     MAIN_ITEMS = (
-        NavigationItem("library", "全部歌曲", "library", "主要导航"),
-        NavigationItem("liked", "我喜欢", "favorite", "主要导航"),
-        NavigationItem("recent", "最近播放", "recent", "主要导航"),
-        NavigationItem("artists", "歌手", "artist", "音乐库"),
-        NavigationItem("albums", "专辑", "album", "音乐库"),
-        NavigationItem("online_search", "在线搜索", "search", "在线"),
-        NavigationItem("lyrics", "歌词", "lyrics", "其他"),
+        NavigationItem("library", "音乐库", "library", "音乐库"),
+        NavigationItem("browse", "浏览", "browse", "音乐库"),
+        NavigationItem("liked", "我喜欢", "favorite", "歌单"),
+        NavigationItem("recent", "最近播放", "recent", "低频"),
+        NavigationItem("artists", "歌手", "artist", "低频"),
+        NavigationItem("albums", "专辑", "album", "低频"),
+        NavigationItem("online_search", "在线搜索", "search", "低频"),
+        NavigationItem("lyrics", "歌词", "lyrics", "低频"),
         NavigationItem("settings", "设置", "settings", "其他"),
     )
 
@@ -40,7 +41,7 @@ class NavigationAdapter(QObject):
         self.playlist_adapter = playlists or PlaylistAdapter(
             LibraryCollectionAdapter(), self
         )
-        self._route = "library"
+        self._route = "browse"
         self._current_playlist_id = ""
         self._include_online = bool(include_online)
         self.playlist_adapter.playlists_changed.connect(self._on_playlists_changed)

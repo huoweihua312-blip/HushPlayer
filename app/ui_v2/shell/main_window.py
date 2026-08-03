@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from enum import Enum
 
-from PySide6.QtCore import QRect, Qt, QTimer
-from PySide6.QtGui import QColor, QGuiApplication, QPalette
+from PySide6.QtCore import QEvent, QPoint, QRect, Qt, QTimer
+from PySide6.QtGui import QColor, QGuiApplication, QMouseEvent, QPalette
 from PySide6.QtWidgets import QApplication, QHBoxLayout, QMainWindow, QVBoxLayout, QWidget
 
 from app.ui_v2.adapters.library_adapter import LibraryAdapter
@@ -26,6 +26,7 @@ from app.ui_v2.models.immersive_lyrics_options import ImmersiveLyricsOptions
 from app.ui_v2.shell.content_router import ContentRouter
 from app.ui_v2.shell.navigation_sidebar import NavigationSidebar
 from app.ui_v2.shell.player_bar import PlayerBar
+from app.ui_v2.widgets.custom_title_bar import CustomTitleBar
 from app.ui_v2.theme.styles import build_stylesheet
 from app.ui_v2.theme.tokens import Theme, get_theme
 
@@ -41,6 +42,7 @@ class MainWindow(QMainWindow):
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
+        self.setWindowFlags(self.windowFlags() | Qt.WindowType.FramelessWindowHint)
         self._theme = get_theme("dark")
         self._immersive_shell_active = False
         self._immersive_normal_geometry: QRect | None = None
@@ -49,6 +51,9 @@ class MainWindow(QMainWindow):
         self._normal_window_flags = self.windowFlags()
         self._transparent_frame_active = False
         self._transparent_normal_geometry: QRect | None = None
+        self._resize_edges = Qt.Edge(0)
+        self._resize_origin = QPoint()
+        self._resize_geometry = QRect()
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
         self._immersive_transparency_supported = self.testAttribute(
             Qt.WidgetAttribute.WA_TranslucentBackground
@@ -109,10 +114,11 @@ class MainWindow(QMainWindow):
             else None
         )
         self._build_shell()
+        QApplication.instance().installEventFilter(self)
         self._connect_state()
-        self.setWindowTitle("HushPlayer")
-        self.setMinimumSize(860, 560)
-        self.resize(1200, 760)
+        self.setWindowTitle("HushPlayer UI V2")
+        self.setMinimumSize(900, 600)
+        self.resize(1200, 800)
         self.set_theme(self._theme.mode)
         if self.real_library_adapter is not None:
             self.real_library_adapter.state_changed.connect(self._on_real_library_state)
@@ -147,27 +153,101 @@ class MainWindow(QMainWindow):
     def set_theme(self, mode: str) -> None:
         self._theme = get_theme(mode)
         self._apply_root_stylesheet()
+        self.title_bar.set_theme(self._theme)
         self.library_page.set_theme(self._theme)
         self.sidebar.set_theme(self._theme)
         self.router.set_theme(self._theme)
         self.player_bar.set_theme(self._theme)
+        self.router.set_content_safe_bottom(
+            self._theme.metrics.player_bar_height + self._theme.metrics.content_safe_bottom
+        )
 
     def resizeEvent(self, event) -> None:  # noqa: N802
         super().resizeEvent(event)
-        compact = self.width() < 1100
+        compact = self.width() <= 960
         self.sidebar.set_compact(compact)
         self.player_bar.set_compact(compact)
+        self.title_bar.set_compact(compact)
         self.library_page.track_table.set_responsive_reference_width(self.width())
         self.router.set_responsive_reference_width(self.width())
 
     def closeEvent(self, event) -> None:  # noqa: N802
+        QApplication.instance().removeEventFilter(self)
         if self.real_library_adapter is not None:
             self.real_library_adapter.shutdown()
         super().closeEvent(event)
 
+    def eventFilter(self, watched, event) -> bool:  # noqa: N802
+        """Provide native-feeling edge resizing for the frameless approved shell."""
+
+        if not isinstance(event, QMouseEvent) or self.isMaximized() or self.isFullScreen():
+            return super().eventFilter(watched, event)
+        if not isinstance(watched, QWidget) or watched.window() is not self:
+            return super().eventFilter(watched, event)
+        if event.type() == QEvent.Type.MouseButtonPress and event.button() == Qt.MouseButton.LeftButton:
+            edges = self._resize_edges_for(event.globalPosition().toPoint())
+            if edges:
+                self._resize_edges = edges
+                self._resize_origin = event.globalPosition().toPoint()
+                self._resize_geometry = QRect(self.geometry())
+                event.accept()
+                return True
+        elif event.type() == QEvent.Type.MouseMove:
+            if self._resize_edges:
+                self._resize_from_pointer(event.globalPosition().toPoint())
+                event.accept()
+                return True
+            self.setCursor(self._cursor_for_edges(self._resize_edges_for(event.globalPosition().toPoint())))
+        elif event.type() == QEvent.Type.MouseButtonRelease and self._resize_edges:
+            self._resize_edges = Qt.Edge(0)
+            self.unsetCursor()
+            event.accept()
+            return True
+        return super().eventFilter(watched, event)
+
+    def _resize_edges_for(self, global_position: QPoint) -> Qt.Edge:
+        frame = self.frameGeometry()
+        margin = 6
+        edges = Qt.Edge(0)
+        if abs(global_position.x() - frame.left()) <= margin:
+            edges |= Qt.Edge.LeftEdge
+        elif abs(global_position.x() - frame.right()) <= margin:
+            edges |= Qt.Edge.RightEdge
+        if abs(global_position.y() - frame.top()) <= margin:
+            edges |= Qt.Edge.TopEdge
+        elif abs(global_position.y() - frame.bottom()) <= margin:
+            edges |= Qt.Edge.BottomEdge
+        return edges
+
+    @staticmethod
+    def _cursor_for_edges(edges: Qt.Edge) -> Qt.CursorShape:
+        if edges in (Qt.Edge.LeftEdge, Qt.Edge.RightEdge):
+            return Qt.CursorShape.SizeHorCursor
+        if edges in (Qt.Edge.TopEdge, Qt.Edge.BottomEdge):
+            return Qt.CursorShape.SizeVerCursor
+        if edges in (Qt.Edge.LeftEdge | Qt.Edge.TopEdge, Qt.Edge.RightEdge | Qt.Edge.BottomEdge):
+            return Qt.CursorShape.SizeFDiagCursor
+        if edges:
+            return Qt.CursorShape.SizeBDiagCursor
+        return Qt.CursorShape.ArrowCursor
+
+    def _resize_from_pointer(self, global_position: QPoint) -> None:
+        delta = global_position - self._resize_origin
+        geometry = QRect(self._resize_geometry)
+        if self._resize_edges & Qt.Edge.LeftEdge:
+            geometry.setLeft(min(geometry.right() - self.minimumWidth() + 1, geometry.left() + delta.x()))
+        if self._resize_edges & Qt.Edge.RightEdge:
+            geometry.setRight(max(geometry.left() + self.minimumWidth() - 1, geometry.right() + delta.x()))
+        if self._resize_edges & Qt.Edge.TopEdge:
+            geometry.setTop(min(geometry.bottom() - self.minimumHeight() + 1, geometry.top() + delta.y()))
+        if self._resize_edges & Qt.Edge.BottomEdge:
+            geometry.setBottom(max(geometry.top() + self.minimumHeight() - 1, geometry.bottom() + delta.y()))
+        self.setGeometry(geometry)
+
     def _build_shell(self) -> None:
         self.root = QWidget(self)
         self.root.setObjectName("uiV2Root")
+        self.title_bar = CustomTitleBar(self._theme, self.root)
         self.body = QWidget(self.root)
         self.body.setObjectName("uiV2Body")
         self._body_layout = QHBoxLayout(self.body)
@@ -197,9 +277,13 @@ class MainWindow(QMainWindow):
         self._root_layout = QVBoxLayout(self.root)
         self._root_layout.setContentsMargins(0, 0, 0, 0)
         self._root_layout.setSpacing(0)
+        self._root_layout.addWidget(self.title_bar)
         self._root_layout.addWidget(self.body, 1)
         self._root_layout.addWidget(self.player_bar_container)
         self.setCentralWidget(self.root)
+        self.router.set_content_safe_bottom(
+            self._theme.metrics.player_bar_height + self._theme.metrics.content_safe_bottom
+        )
         self._shell_surface_states = tuple(
             (widget, QPalette(widget.palette()), widget.autoFillBackground())
             for widget in (self.root, self.body, self.content_container, self.router)
@@ -207,6 +291,9 @@ class MainWindow(QMainWindow):
 
     def _connect_state(self) -> None:
         self.library_page.theme_changed.connect(self.set_theme)
+        self.title_bar.settings_requested.connect(
+            lambda: self.navigation_adapter.set_route("settings")
+        )
         self.router.track_play_requested.connect(self._play_tracks)
         self.router.queue_requested.connect(self._play_queue)
         self.router.online_play_requested.connect(self._play_online_track)
@@ -280,6 +367,7 @@ class MainWindow(QMainWindow):
     def _set_presentation_mode(self, mode: ShellPresentationMode) -> None:
         self._presentation_mode = mode
         immersive = mode is not ShellPresentationMode.NORMAL
+        self.title_bar.setVisible(not immersive)
         self.sidebar.setVisible(not immersive)
         self.sidebar_container.setVisible(not immersive)
         self.player_bar.setVisible(not immersive)

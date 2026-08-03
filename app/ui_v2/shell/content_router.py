@@ -21,6 +21,7 @@ from app.ui_v2.pages.album_detail_page import AlbumDetailPage
 from app.ui_v2.pages.albums_page import AlbumsPage
 from app.ui_v2.pages.artist_detail_page import ArtistDetailPage
 from app.ui_v2.pages.artists_page import ArtistsPage
+from app.ui_v2.pages.browse_page import BrowsePage
 from app.ui_v2.pages.favorites_page import FavoritesPage
 from app.ui_v2.pages.library_page import LibraryPage
 from app.ui_v2.pages.immersive_lyrics_page import ImmersiveLyricsPage
@@ -114,14 +115,21 @@ class ContentRouter(QStackedWidget):
         self._immersive_options = immersive_options
         self._settings_preview_transition = False
         self._immersive_return_route = "lyrics"
+        self._content_safe_bottom = 0
         self._online_sources = OnlineSourceAdapter(online, self)
-        self._pages: dict[str, QWidget] = {"library": library_page}
+        self.browse_page = BrowsePage(collection, theme, self)
+        self._pages: dict[str, QWidget] = {
+            "browse": self.browse_page,
+            "library": library_page,
+        }
         self._favorites_adapter = FavoritesAdapter(collection, self)
         self._recent_adapter = RecentAdapter(collection, self)
         self._playlist_tracks = PlaylistTrackAdapter(collection, playlists, self)
         self._artists_adapter = ArtistsAdapter(collection, self)
         self._albums_adapter = AlbumsAdapter(collection, self)
+        self.addWidget(self.browse_page)
         self.addWidget(library_page)
+        self.browse_page.track_play_requested.connect(self.track_play_requested)
         library_page.track_table.play_requested.connect(
             lambda track_id: self.track_play_requested.emit(
                 library_page.adapter.tracks(), track_id
@@ -163,6 +171,8 @@ class ContentRouter(QStackedWidget):
             return page
         if route_id == "library":
             return self._pages["library"]
+        if route_id == "browse":
+            return self._pages["browse"]
         return self._cached_page(route_id, lambda: self._create_coming_soon(route_id))
 
     def show_route(self, route_id: str) -> None:
@@ -189,6 +199,18 @@ class ContentRouter(QStackedWidget):
         for page in dict.fromkeys(self._pages.values()):
             if hasattr(page, "set_responsive_reference_width"):
                 page.set_responsive_reference_width(width)
+
+    @property
+    def content_safe_bottom(self) -> int:
+        return self._content_safe_bottom
+
+    def set_content_safe_bottom(self, height: int) -> None:
+        """Apply one shared safe-area contract to normal scrollable page roots."""
+
+        self._content_safe_bottom = max(0, int(height))
+        for page in dict.fromkeys(self._pages.values()):
+            if hasattr(page, "set_content_safe_bottom"):
+                page.set_content_safe_bottom(self._content_safe_bottom)
 
     def set_playing_track(self, track_id: str) -> None:
         self._online_adapter.set_playing_track(track_id)

@@ -1,0 +1,4 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 118 118">
+  <defs><filter id="n"><feTurbulence type="fractalNoise" baseFrequency=".18" numOctaves="4"/><feColorMatrix values=".2 0 0 0 .1  0 .6 0 0 .22  0 0 .7 0 .35  0 0 0 .45 0"/></filter></defs>
+  <rect width="118" height="118" rx="10" fill="#243d58"/><rect width="118" height="118" rx="10" filter="url(#n)"/><path d="M16 91c20-37 34-43 52-23 12 14 19 5 34-10" fill="none" stroke="#f0ca75" stroke-width="7" stroke-linecap="round"/><path d="M19 25h80" stroke="#c9e1df" stroke-width="2" opacity=".75"/><path d="M21 42h36M21 53h25M21 64h42" stroke="#f0eee9" stroke-width="3" stroke-linecap="round" opacity=".85"/>
+</svg>

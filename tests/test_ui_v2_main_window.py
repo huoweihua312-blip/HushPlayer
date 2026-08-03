@@ -58,6 +58,10 @@ class UiV2MainWindowTests(unittest.TestCase):
         self.assertIs(self.window.router.currentWidget(), library)
         self.assertEqual(self.window.router.cached_page_count, len(self.window.navigation_adapter.items()))
 
+    def test_browse_is_the_default_cached_page(self) -> None:
+        self.assertEqual(self.window.navigation_adapter.route, "browse")
+        self.assertIs(self.window.router.currentWidget(), self.window.router.browse_page)
+
     def test_library_page_state_survives_route_switching(self) -> None:
         page = self.window.library_page
         model = page.track_table.model
@@ -111,6 +115,8 @@ class UiV2MainWindowTests(unittest.TestCase):
         self.assertEqual(self.window.playback_adapter.state.is_favorite, original)
 
     def test_responsive_modes_keep_navigation_and_model_instances(self) -> None:
+        self.window.navigation_adapter.set_route("library")
+        self.app.processEvents()
         table = self.window.library_page.track_table
         model = table.model
         navigation_item_count = self.window.sidebar.item_count
@@ -130,7 +136,7 @@ class UiV2MainWindowTests(unittest.TestCase):
             self.assertEqual(self.window.sidebar.item_count, navigation_item_count)
             self.assertFalse(table.horizontalScrollBar().isVisible())
             self.assertLessEqual(table.horizontalHeader().length(), table.viewport().width())
-            self.assertEqual(self.window.player_bar.height(), 116)
+            self.assertEqual(self.window.player_bar.height(), 102)
 
     def test_sidebar_surfaces_follow_dark_and_light_theme_tokens(self) -> None:
         sidebar = self.window.sidebar
@@ -141,7 +147,7 @@ class UiV2MainWindowTests(unittest.TestCase):
             sidebar.content,
             sidebar.playlist_container,
         )
-        light_navigation = "#e5eaf1"
+        light_navigation = "#e4e4e2"
         for mode in ("dark", "light"):
             self.window.set_theme(mode)
             expected = self.window.theme.colors.navigation_background
@@ -161,7 +167,7 @@ class UiV2MainWindowTests(unittest.TestCase):
 
     def test_all_navigation_entries_are_clickable_and_route_to_cached_pages(self) -> None:
         sidebar = self.window.sidebar
-        long_playlist_name = "一个用于验证提示文本的超长 Mock 歌单名称"
+        long_playlist_name = "一个用于验证提示文本的超长自定义歌单名称"
         long_playlist_id = sidebar.create_mock_playlist(long_playlist_name)
         self.app.processEvents()
         for route_id, item in sidebar._items.items():
@@ -169,9 +175,11 @@ class UiV2MainWindowTests(unittest.TestCase):
             item.click()
             self.app.processEvents()
             self.assertEqual(self.window.navigation_adapter.route, route_id)
-            if route_id == "library":
+            if route_id == "browse":
+                self.assertIs(self.window.router.currentWidget(), self.window.router.browse_page)
+            elif route_id == "library":
                 self.assertIs(self.window.router.currentWidget(), self.window.library_page)
-            elif route_id in {"liked", "recent", "artists", "albums", "online_search", "lyrics"}:
+            elif route_id == "liked":
                 self.assertNotIsInstance(self.window.router.currentWidget(), ComingSoonPage)
             elif route_id == "settings":
                 self.assertIsInstance(self.window.router.currentWidget(), SettingsPage)
@@ -202,6 +210,7 @@ class UiV2MainWindowTests(unittest.TestCase):
             player_bar.repeat_button,
             player_bar.lyrics_button,
             player_bar.queue_button,
+            player_bar.more_button,
         ):
             self.assertFalse(button.isEnabled(), button.toolTip())
         self.assertFalse(player_bar.progress_slider.isEnabled())
@@ -220,6 +229,7 @@ class UiV2MainWindowTests(unittest.TestCase):
             player_bar.repeat_button,
             player_bar.lyrics_button,
             player_bar.queue_button,
+            player_bar.more_button,
         ):
             self.assertTrue(button.isEnabled(), button.toolTip())
         self.assertTrue(player_bar.progress_slider.isEnabled())
