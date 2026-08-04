@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import QSize, Qt, Signal
 from PySide6.QtWidgets import QButtonGroup, QFrame, QToolButton, QVBoxLayout, QWidget
 
 from app.ui_v2.models.settings_category import SETTINGS_CATEGORIES
-from app.ui_v2.theme.icons import icon
+from app.ui_v2.theme.icons import fluent_settings_icon
 from app.ui_v2.theme.tokens import Theme
 
 
@@ -42,6 +42,7 @@ class SettingsSidebar(QFrame):
         button = self._buttons.get(category)
         if button is not None:
             button.setChecked(True)
+            self._refresh_icons()
 
     def set_compact(self, compact: bool) -> None:
         compact = bool(compact)
@@ -52,19 +53,28 @@ class SettingsSidebar(QFrame):
 
     def set_theme(self, theme: Theme) -> None:
         self._theme = theme
-        self.setMinimumWidth(56 if self._compact else 176)
-        self.setMaximumWidth(56 if self._compact else 176)
+        # Settings keeps the category labels readable even at 900px.  The
+        # compact state narrows the rail, but never switches to icon-only
+        # navigation or hides the formal category names.
+        width = 156 if self._compact else 196
+        self.setMinimumWidth(width)
+        self.setMaximumWidth(width)
         self.setStyleSheet(f"SettingsSidebar {{ background: {theme.colors.navigation_background}; border-right: 1px solid {theme.colors.border}; }}")
+        self._refresh_icons()
         for category in SETTINGS_CATEGORIES:
             button = self._buttons[category.key]
-            button.setIcon(icon(category.icon_name, theme))
-            button.setToolButtonStyle(
-                Qt.ToolButtonStyle.ToolButtonIconOnly
-                if self._compact
-                else Qt.ToolButtonStyle.ToolButtonTextBesideIcon
-            )
+            button.setIconSize(QSize(18, 18))
+            button.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
             button.setStyleSheet(
-                f"QToolButton {{ min-height: {theme.metrics.control_height}px; text-align: left; padding: 0 10px; border: 0; border-radius: {theme.metrics.radius_sm}px; color: {theme.colors.secondary_text}; }} "
+                f"QToolButton {{ min-height: {theme.metrics.control_height}px; max-width: {width - 16}px; text-align: left; padding: 0 8px; border: 0; border-radius: {theme.metrics.radius_sm}px; color: {theme.colors.secondary_text}; }} "
                 f"QToolButton:hover {{ background: {theme.colors.hover_background}; color: {theme.colors.primary_text}; }} "
                 f"QToolButton:checked {{ background: {theme.colors.selected_background}; color: {theme.colors.primary_text}; font-weight: 600; }}"
             )
+
+    def _refresh_icons(self) -> None:
+        """Refresh only glyph color; category files and icon size stay stable."""
+
+        for category in SETTINGS_CATEGORIES:
+            button = self._buttons[category.key]
+            state = "selected" if button.isChecked() else "normal"
+            button.setIcon(fluent_settings_icon(category.icon_name, self._theme, state, 18))

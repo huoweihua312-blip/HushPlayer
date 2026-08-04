@@ -15,15 +15,14 @@ class SettingsCategory:
 
 
 SETTINGS_CATEGORIES: tuple[SettingsCategory, ...] = (
-    SettingsCategory("general", "常规", "settings"),
-    SettingsCategory("appearance", "外观", "library"),
-    SettingsCategory("playback", "播放", "play"),
+    SettingsCategory("general", "常规", "general"),
+    SettingsCategory("appearance", "外观", "appearance"),
+    SettingsCategory("playback", "播放", "playback"),
     SettingsCategory("lyrics", "歌词", "lyrics"),
-    SettingsCategory("immersive", "沉浸歌词", "playing"),
     SettingsCategory("library", "音乐库", "library"),
-    SettingsCategory("cache", "缓存", "local"),
-    SettingsCategory("updates", "更新", "recent"),
-    SettingsCategory("about", "关于", "artist"),
+    SettingsCategory("cache", "缓存", "cache"),
+    SettingsCategory("updates", "更新", "updates"),
+    SettingsCategory("about", "关于", "about"),
 )
 
 

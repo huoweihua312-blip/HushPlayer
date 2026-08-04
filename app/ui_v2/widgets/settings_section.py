@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from PySide6.QtWidgets import QLabel, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QLayout, QLabel, QVBoxLayout, QWidget
 
 from app.ui_v2.theme.tokens import Theme
 
@@ -31,6 +31,12 @@ class SettingsSection(QWidget):
 
     def add_row(self, row: QWidget) -> None:
         self.rows_layout.addWidget(row)
+
+    def add_widget(self, widget: QWidget) -> None:
+        self.rows_layout.addWidget(widget)
+
+    def add_layout(self, layout: QLayout) -> None:
+        self.rows_layout.addLayout(layout)
 
     def set_theme(self, theme: Theme) -> None:
         self._theme = theme

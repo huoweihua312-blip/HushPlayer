@@ -20,7 +20,6 @@ from app.ui_v2.adapters.online_source_adapter import OnlineSourceAdapter
 from app.ui_v2.adapters.playback_adapter import PlaybackAdapter
 from app.ui_v2.adapters.playlist_adapter import PlaylistAdapter, PlaylistTrackAdapter
 from app.ui_v2.adapters.recent_adapter import RecentAdapter
-from app.ui_v2.adapters.settings_adapter import SettingsAdapter
 from app.ui_v2.pages.album_detail_page import AlbumDetailPage
 from app.ui_v2.pages.albums_page import AlbumsPage
 from app.ui_v2.pages.artist_page import ArtistPage
@@ -34,7 +33,6 @@ from app.ui_v2.pages.online_search_page import OnlineSearchPage
 from app.ui_v2.pages.online_source_page import OnlineSourcePage
 from app.ui_v2.pages.playlist_page import PlaylistPage
 from app.ui_v2.pages.recent_page import RecentPage
-from app.ui_v2.pages.settings_page import SettingsPage
 from app.ui_v2.pages.track_list_page import TrackListPage
 from app.ui_v2.theme.icons import icon
 from app.ui_v2.theme.tokens import Theme
@@ -90,7 +88,6 @@ class ContentRouter(QStackedWidget):
     ROUTE_METADATA = {
         "online_search": ("在线搜索", "search"),
         "lyrics": ("歌词", "lyrics"),
-        "settings": ("设置", "settings"),
     }
 
     def __init__(
@@ -102,7 +99,6 @@ class ContentRouter(QStackedWidget):
         online: OnlineAdapter,
         lyrics: LyricsAdapter,
         playback: PlaybackAdapter,
-        settings: SettingsAdapter,
         immersive_options: ImmersiveLyricsOptions,
         theme: Theme,
         parent: QWidget | None = None,
@@ -115,9 +111,7 @@ class ContentRouter(QStackedWidget):
         self._online_adapter = online
         self._lyrics_adapter = lyrics
         self._playback_adapter = playback
-        self._settings_adapter = settings
         self._immersive_options = immersive_options
-        self._settings_preview_transition = False
         self._immersive_return_route = "lyrics"
         self._content_safe_bottom = 0
         self._online_sources = OnlineSourceAdapter(online, self)
@@ -166,7 +160,10 @@ class ContentRouter(QStackedWidget):
         if route_id == "lyrics":
             return self._cached_page("lyrics", self._create_lyrics_page)
         if route_id == "settings":
-            return self._cached_page("settings", self._create_settings_page)
+            # Settings is a shell overlay, not a content route.  Keep the
+            # current page visible for compatibility with callers that still
+            # try to resolve the legacy route id.
+            return self.currentWidget() or self._pages["browse"]
         if route_id == "immersive_lyrics":
             return self._cached_page("immersive_lyrics", self._create_immersive_lyrics_page)
         if route_id.startswith("playlist:"):
@@ -188,17 +185,8 @@ class ContentRouter(QStackedWidget):
         return self._cached_page(route_id, lambda: self._create_coming_soon(route_id))
 
     def show_route(self, route_id: str) -> None:
-        settings_page = self._pages.get("settings")
-        if (
-            settings_page is not None
-            and self.currentWidget() is settings_page
-            and route_id != "settings"
-            and self._settings_adapter.is_dirty()
-            and not self._settings_preview_transition
-        ):
-            settings_page.request_leave(route_id)
+        if route_id == "settings":
             return
-        self._settings_preview_transition = False
         self.setCurrentWidget(self.page_for_route(route_id))
 
     def set_theme(self, theme: Theme) -> None:
@@ -329,12 +317,6 @@ class ContentRouter(QStackedWidget):
         page.immersive_requested.connect(lambda: self._navigation.set_route("immersive_lyrics"))
         return page
 
-    def _create_settings_page(self) -> SettingsPage:
-        page = SettingsPage(self._settings_adapter, self._theme, self)
-        page.immersive_preview_requested.connect(self.open_immersive_from_settings)
-        page.leave_resolved.connect(self._resolve_settings_leave)
-        return page
-
     def _create_immersive_lyrics_page(self) -> ImmersiveLyricsPage:
         page = ImmersiveLyricsPage(
             self._lyrics_adapter,
@@ -346,7 +328,6 @@ class ContentRouter(QStackedWidget):
         page.immersive_exit_requested.connect(self._return_from_immersive)
         page.fullscreen_requested.connect(self.immersive_fullscreen_requested)
         page.transparency_mode_changed.connect(self.immersive_transparency_requested)
-        page.options_changed.connect(self._settings_adapter.sync_immersive_options)
         # The page may have been created while transparent mode was already
         # selected in Settings.  Its constructor cannot emit to this router yet.
         page.transparency_mode_changed.emit(page.background_mode == "transparent")
@@ -362,21 +343,9 @@ class ContentRouter(QStackedWidget):
         if isinstance(page, ImmersiveLyricsPage):
             page.set_reduce_motion(enabled)
 
-    def open_immersive_from_settings(self) -> None:
-        self._immersive_return_route = "settings"
-        self._settings_preview_transition = True
-        self._navigation.set_route("immersive_lyrics")
-
     def _return_from_immersive(self) -> None:
         self._navigation.set_route(self._immersive_return_route)
         self._immersive_return_route = "lyrics"
-
-    def _resolve_settings_leave(self, route_id: str, decision: str) -> None:
-        if decision == "cancel":
-            self._navigation.set_route("settings")
-            return
-        self._settings_preview_transition = False
-        self.setCurrentWidget(self.page_for_route(route_id))
 
     def _create_coming_soon(self, route_id: str) -> ComingSoonPage:
         title, icon_name = self.ROUTE_METADATA.get(route_id, ("页面", "library"))

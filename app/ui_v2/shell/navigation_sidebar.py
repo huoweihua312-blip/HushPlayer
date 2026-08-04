@@ -34,6 +34,7 @@ class NavigationSidebar(QFrame):
     """Persistent 220px navigation rail with one contained playlist scroller."""
 
     more_playlists_requested = Signal()
+    settings_requested = Signal()
 
     def __init__(
         self,
@@ -209,7 +210,10 @@ class NavigationSidebar(QFrame):
         value = next(item for item in self.adapter.items() if item.route_id == route_id)
         item = NavigationItem(value, self._theme, layout.parentWidget())
         item.setFixedHeight(height)
-        item.route_requested.connect(self.adapter.set_route)
+        if route_id == "settings":
+            item.route_requested.connect(lambda _route_id: self.settings_requested.emit())
+        else:
+            item.route_requested.connect(self.adapter.set_route)
         item.context_requested.connect(self._show_playlist_menu)
         self._items[route_id] = item
         layout.addWidget(item)

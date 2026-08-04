@@ -3,11 +3,15 @@
 from __future__ import annotations
 
 from enum import Enum
+import os
+from pathlib import Path
+import tempfile
 
 from PySide6.QtCore import QEvent, QPoint, QRect, Qt, QTimer
 from PySide6.QtGui import QColor, QGuiApplication, QMouseEvent, QPalette
 from PySide6.QtWidgets import QApplication, QHBoxLayout, QMainWindow, QVBoxLayout, QWidget
 
+from app.core.app_paths import AppPaths
 from app.ui_v2.adapters.library_adapter import LibraryAdapter
 from app.ui_v2.adapters.library_collection import LibraryCollectionAdapter
 from app.ui_v2.adapters.lyrics_adapter import LyricsAdapter
@@ -19,7 +23,7 @@ from app.ui_v2.adapters.real_library_adapter import (
     RealLibraryAdapter,
     ui_v2_data_mode,
 )
-from app.ui_v2.adapters.settings_adapter import SettingsAdapter
+from app.ui_v2.adapters.legacy_settings_bridge import LegacySettingsBridge
 from app.ui_v2.mock.track_factory import create_mock_tracks
 from app.ui_v2.pages.all_songs_page import AllSongsPage
 from app.ui_v2.models.immersive_lyrics_options import ImmersiveLyricsOptions
@@ -27,6 +31,7 @@ from app.ui_v2.shell.content_router import ContentRouter
 from app.ui_v2.shell.navigation_sidebar import NavigationSidebar
 from app.ui_v2.shell.player_bar import PlayerBar
 from app.ui_v2.widgets.custom_title_bar import CustomTitleBar
+from app.ui_v2.widgets.settings_overlay import SettingsOverlay
 from app.ui_v2.theme.styles import build_stylesheet
 from app.ui_v2.theme.tokens import Theme, get_theme
 
@@ -43,7 +48,29 @@ class MainWindow(QMainWindow):
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.setWindowFlags(self.windowFlags() | Qt.WindowType.FramelessWindowHint)
-        self._theme = get_theme("dark")
+        self.data_mode = ui_v2_data_mode()
+        settings_override = os.environ.get("HUSHPLAYER_UI_V2_SETTINGS_PATH", "").strip()
+        if settings_override:
+            settings_path = Path(settings_override)
+        elif self.data_mode != "real":
+            settings_path = (
+                Path(tempfile.gettempdir())
+                / "HushPlayer-ui-v2"
+                / f"settings-{os.getpid()}.json"
+            )
+        else:
+            settings_path = AppPaths.resolve().data_dir / "settings.json"
+        self.settings_bridge = LegacySettingsBridge(
+            settings_path=settings_path,
+            apply_callback=self._apply_settings_snapshot,
+            parent=self,
+        )
+        self._settings_snapshot = self.settings_bridge.read_snapshot()
+        appearance_mode = str(
+            self.settings_bridge.value(self._settings_snapshot, "appearance_mode")
+            or "dark"
+        )
+        self._theme = get_theme("light" if appearance_mode == "light" else "dark")
         self._immersive_shell_active = False
         self._immersive_normal_geometry: QRect | None = None
         self._immersive_transparency_enabled = False
@@ -58,7 +85,6 @@ class MainWindow(QMainWindow):
         self._immersive_transparency_supported = self.testAttribute(
             Qt.WidgetAttribute.WA_TranslucentBackground
         )
-        self.data_mode = ui_v2_data_mode()
         is_real_library = self.data_mode == "real"
         self.library_collection = LibraryCollectionAdapter(
             () if is_real_library else create_mock_tracks(1000),
@@ -83,8 +109,9 @@ class MainWindow(QMainWindow):
         self.playback_adapter = PlaybackAdapter(self)
         self.lyrics_adapter = LyricsAdapter(self)
         self.immersive_lyrics_options = ImmersiveLyricsOptions(theme=self._theme.mode)
-        self.settings_adapter = SettingsAdapter(
-            self.lyrics_adapter, self.immersive_lyrics_options, self
+        self._apply_settings_values(self._settings_snapshot.to_dict())
+        self.playback_adapter.set_volume(
+            int(self.settings_bridge.value(self._settings_snapshot, "volume") or 65)
         )
         self.playback_adapter.set_queue(self.library_collection.tracks())
         self.library_page = AllSongsPage(self.library_adapter, self._theme, self)
@@ -97,7 +124,6 @@ class MainWindow(QMainWindow):
             self.online_adapter,
             self.lyrics_adapter,
             self.playback_adapter,
-            self.settings_adapter,
             self.immersive_lyrics_options,
             self._theme,
             self,
@@ -114,6 +140,7 @@ class MainWindow(QMainWindow):
             else None
         )
         self._build_shell()
+        self.settings_overlay: SettingsOverlay | None = None
         QApplication.instance().installEventFilter(self)
         self._connect_state()
         self.setWindowTitle("HushPlayer UI V2")
@@ -151,13 +178,15 @@ class MainWindow(QMainWindow):
         }
 
     def set_theme(self, mode: str) -> None:
-        self._theme = get_theme(mode)
+        self._theme = get_theme("light" if mode == "light" else "dark")
         self._apply_root_stylesheet()
         self.title_bar.set_theme(self._theme)
         self.library_page.set_theme(self._theme)
         self.sidebar.set_theme(self._theme)
         self.router.set_theme(self._theme)
         self.player_bar.set_theme(self._theme)
+        if self.settings_overlay is not None:
+            self.settings_overlay.set_theme(self._theme)
         self.router.set_content_safe_bottom(
             self._theme.metrics.player_bar_height + self._theme.metrics.content_safe_bottom
         )
@@ -170,9 +199,14 @@ class MainWindow(QMainWindow):
         self.title_bar.set_compact(compact)
         self.library_page.track_table.set_responsive_reference_width(self.width())
         self.router.set_responsive_reference_width(self.width())
+        if self.settings_overlay is not None:
+            self.settings_overlay.set_responsive_reference_width(self.width())
+            self.settings_overlay.sync_geometry(self.body.rect())
 
     def closeEvent(self, event) -> None:  # noqa: N802
         QApplication.instance().removeEventFilter(self)
+        if self.settings_overlay is not None and self.settings_overlay.isVisible():
+            self.settings_overlay.cancel_and_close()
         if self.real_library_adapter is not None:
             self.real_library_adapter.shutdown()
         super().closeEvent(event)
@@ -292,9 +326,8 @@ class MainWindow(QMainWindow):
     def _connect_state(self) -> None:
         self.library_page.theme_changed.connect(self.set_theme)
         self.title_bar.search_text_changed.connect(self.router.set_global_query)
-        self.title_bar.settings_requested.connect(
-            lambda: self.navigation_adapter.set_route("settings")
-        )
+        self.title_bar.settings_requested.connect(self.open_settings_overlay)
+        self.sidebar.settings_requested.connect(self.open_settings_overlay)
         self.router.track_play_requested.connect(self._play_tracks)
         self.router.queue_requested.connect(self._play_queue)
         self.router.online_play_requested.connect(self._play_online_track)
@@ -303,13 +336,6 @@ class MainWindow(QMainWindow):
         )
         self.router.immersive_transparency_requested.connect(
             self.set_immersive_transparency
-        )
-        self.settings_adapter.theme_preview_changed.connect(self.set_theme)
-        self.settings_adapter.immersive_preview_changed.connect(
-            self.router.apply_immersive_options
-        )
-        self.settings_adapter.motion_preview_changed.connect(
-            self.router.set_reduce_motion_preview
         )
         self.navigation_adapter.route_changed.connect(self._sync_immersive_shell)
         self.playback_adapter.track_changed.connect(self._on_playback_track_changed)
@@ -321,6 +347,59 @@ class MainWindow(QMainWindow):
         self.library_collection.favorite_changed.connect(self._sync_favorite_from_library)
         self.playback_adapter.favorite_changed.connect(self._sync_favorite_from_player)
         self._sync_immersive_shell(self.navigation_adapter.route)
+
+    def open_settings_overlay(self) -> None:
+        """Show the one cached Settings surface without changing the route."""
+
+        if self._presentation_mode is not ShellPresentationMode.NORMAL:
+            return
+        if self.settings_overlay is None:
+            self.settings_overlay = SettingsOverlay(
+                self.settings_bridge,
+                self._theme,
+                preview_callback=self._apply_settings_snapshot,
+                parent=self.body,
+            )
+        elif self.settings_overlay.isVisible():
+            self.settings_overlay.raise_()
+            return
+        self.settings_overlay.open()
+
+    def _apply_settings_values(self, values: dict[str, object]) -> None:
+        """Apply persisted settings to the small set of V2 runtime models."""
+
+        appearance = str(values.get("appearance_mode", "dark"))
+        self.immersive_lyrics_options.theme = "light" if appearance == "light" else "dark"
+        background = {
+            "cover": "artwork",
+            "default": "solid",
+            "translucent": "transparent",
+            "custom": "artwork",
+        }.get(str(values.get("immersive_background_mode", "cover")), "artwork")
+        self.immersive_lyrics_options.background_mode = background
+        self.immersive_lyrics_options.controls_auto_hide = bool(
+            values.get("immersive_auto_hide_ui", True)
+        )
+        try:
+            self.immersive_lyrics_options.global_font_scale = max(
+                75, min(160, int(values.get("immersive_lyrics_font_scale", 100)))
+            )
+        except (TypeError, ValueError):
+            self.immersive_lyrics_options.global_font_scale = 100
+
+    def _apply_settings_snapshot(self, values: dict[str, object]) -> None:
+        """Preview or apply a Settings snapshot without creating another shell."""
+
+        self._apply_settings_values(values)
+        try:
+            self.playback_adapter.set_volume(int(values.get("volume", 65) or 65))
+        except (TypeError, ValueError):
+            self.playback_adapter.set_volume(65)
+        mode = str(values.get("appearance_mode", "dark"))
+        self.set_theme("light" if mode == "light" else "dark")
+        page = self.router._pages.get("immersive_lyrics")
+        if page is not None and hasattr(page, "apply_options"):
+            page.apply_options(self.immersive_lyrics_options)
 
     def set_immersive_fullscreen(self, enabled: bool) -> None:
         enabled = bool(enabled)

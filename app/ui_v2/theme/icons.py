@@ -83,6 +83,7 @@ def palette_for(theme: Theme) -> IconPalette:
 
 _ICON_ASSET_DIR = Path(__file__).resolve().parent.parent / "assets" / "icons"
 _FLUENT_PLAYER_ASSET_DIR = _ICON_ASSET_DIR / "fluent_player"
+_FLUENT_SETTINGS_ASSET_DIR = _ICON_ASSET_DIR / "fluent_settings"
 FLUENT_PLAYER_ASSETS: dict[str, str] = {
     "favorite": "heart_20_regular.svg",
     "favorite_filled": "heart_20_filled.svg",
@@ -98,6 +99,17 @@ FLUENT_PLAYER_ASSETS: dict[str, str] = {
     "volume": "speaker_2_20_regular.svg",
     "volume_mute": "speaker_mute_20_regular.svg",
     "more": "more_horizontal_20_regular.svg",
+}
+FLUENT_SETTINGS_ASSETS: dict[str, str] = {
+    "general": "settings_20_regular.svg",
+    "appearance": "paint_brush_20_regular.svg",
+    "playback": "play_circle_20_regular.svg",
+    "lyrics": "subtitles_20_regular.svg",
+    "library": "library_20_regular.svg",
+    "cache": "database_20_regular.svg",
+    "updates": "arrow_sync_20_regular.svg",
+    "about": "info_20_regular.svg",
+    "dismiss": "dismiss_20_regular.svg",
 }
 _SVG_ASSET_NAMES: dict[str, str] = {
     "brand": "brand",
@@ -129,6 +141,7 @@ _SVG_ASSET_NAMES: dict[str, str] = {
 _SVG_SOURCE_CACHE: dict[str, bytes] = {}
 _SVG_PIXMAP_CACHE: dict[tuple[str, int, int, float, float], QPixmap] = {}
 _FLUENT_PLAYER_PIXMAP_CACHE: dict[tuple[str, int, int, float, float], QPixmap] = {}
+_FLUENT_SETTINGS_PIXMAP_CACHE: dict[tuple[str, int, int, float], QPixmap] = {}
 
 # Approved paths retain their 24px viewBox and designed breathing room. These
 # factors compensate only for differing optical weight inside that canvas.
@@ -166,6 +179,7 @@ def clear_svg_icon_cache() -> None:
 
     _SVG_PIXMAP_CACHE.clear()
     _FLUENT_PLAYER_PIXMAP_CACHE.clear()
+    _FLUENT_SETTINGS_PIXMAP_CACHE.clear()
 
 
 def _device_pixel_ratio() -> float:
@@ -237,6 +251,47 @@ def _fluent_player_source(filename: str, color: QColor) -> bytes:
     )
 
 
+def _fluent_settings_source(filename: str, color: QColor) -> bytes:
+    """Load one vendored Settings glyph and apply the current theme color."""
+
+    source = (_FLUENT_SETTINGS_ASSET_DIR / filename).read_bytes()
+    return source.replace(
+        b"<path ",
+        b'<path fill="' + color.name().encode("ascii") + b'" ',
+        1,
+    )
+
+
+def _fluent_settings_pixmap(
+    name: str,
+    size: int,
+    color: QColor,
+    dpr: float | None = None,
+) -> QPixmap:
+    """Render one Settings glyph into a centered, DPI-aware canvas."""
+
+    filename = FLUENT_SETTINGS_ASSETS.get(name)
+    if filename is None:
+        return QPixmap()
+    dpr = _device_pixel_ratio() if dpr is None else round(float(dpr), 3)
+    key = (filename, max(1, int(size)), color.rgba(), dpr)
+    cached = _FLUENT_SETTINGS_PIXMAP_CACHE.get(key)
+    if cached is not None:
+        return cached
+    physical_size = max(1, round(size * dpr))
+    pixmap = QPixmap(physical_size, physical_size)
+    pixmap.fill(Qt.GlobalColor.transparent)
+    renderer = QSvgRenderer(QByteArray(_fluent_settings_source(filename, color)))
+    if renderer.isValid():
+        painter = QPainter(pixmap)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        renderer.render(painter, QRectF(0, 0, physical_size, physical_size))
+        painter.end()
+    pixmap.setDevicePixelRatio(dpr)
+    _FLUENT_SETTINGS_PIXMAP_CACHE[key] = pixmap
+    return pixmap
+
+
 def _fluent_player_pixmap(
     name: str,
     size: int,
@@ -284,6 +339,52 @@ def fluent_icon(name: str, theme: Theme, state: IconState = "normal", size: int 
     )
     result = QIcon()
     result.addPixmap(_fluent_player_pixmap(name, size, color))
+    return result
+
+
+def fluent_settings_icon(
+    name: str,
+    theme: Theme,
+    state: IconState = "normal",
+    size: int = 18,
+) -> QIcon:
+    """Return a vendored Fluent glyph used only by the Settings overlay."""
+
+    if name not in FLUENT_SETTINGS_ASSETS:
+        return QIcon()
+    palette = palette_for(theme)
+    color = getattr(palette, state)
+    result = QIcon()
+    result.addPixmap(_fluent_settings_pixmap(name, size, color))
+    return result
+
+
+def fluent_settings_interactive_icon(
+    name: str,
+    theme: Theme,
+    size: int = 18,
+) -> QIcon:
+    """Return a Settings glyph with neutral normal/hover/disabled states."""
+
+    if name not in FLUENT_SETTINGS_ASSETS:
+        return QIcon()
+    palette = palette_for(theme)
+    result = QIcon()
+    result.addPixmap(
+        _fluent_settings_pixmap(name, size, palette.normal),
+        QIcon.Mode.Normal,
+        QIcon.State.Off,
+    )
+    result.addPixmap(
+        _fluent_settings_pixmap(name, size, palette.hover),
+        QIcon.Mode.Active,
+        QIcon.State.Off,
+    )
+    result.addPixmap(
+        _fluent_settings_pixmap(name, size, palette.disabled),
+        QIcon.Mode.Disabled,
+        QIcon.State.Off,
+    )
     return result
 
 

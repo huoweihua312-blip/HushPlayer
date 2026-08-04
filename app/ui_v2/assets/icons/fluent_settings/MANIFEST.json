@@ -1,0 +1,54 @@
+{
+  "package": "@fluentui/svg-icons",
+  "version": "1.1.334",
+  "style": "regular",
+  "source_viewbox": "20x20",
+  "render_size_px": 18,
+  "assets": [
+    {
+      "feature": "general",
+      "filename": "settings_20_regular.svg",
+      "variant": "regular"
+    },
+    {
+      "feature": "appearance",
+      "filename": "paint_brush_20_regular.svg",
+      "variant": "regular"
+    },
+    {
+      "feature": "playback",
+      "filename": "play_circle_20_regular.svg",
+      "variant": "regular"
+    },
+    {
+      "feature": "lyrics",
+      "filename": "subtitles_20_regular.svg",
+      "variant": "regular"
+    },
+    {
+      "feature": "library",
+      "filename": "library_20_regular.svg",
+      "variant": "regular"
+    },
+    {
+      "feature": "cache",
+      "filename": "database_20_regular.svg",
+      "variant": "regular"
+    },
+    {
+      "feature": "updates",
+      "filename": "arrow_sync_20_regular.svg",
+      "variant": "regular"
+    },
+    {
+      "feature": "about",
+      "filename": "info_20_regular.svg",
+      "variant": "regular"
+    },
+    {
+      "feature": "dismiss",
+      "filename": "dismiss_20_regular.svg",
+      "variant": "regular"
+    }
+  ]
+}

@@ -17,7 +17,6 @@ from PySide6.QtWidgets import QApplication
 
 from app.ui_v2.models.track import format_duration
 from app.ui_v2.models.track_table_model import TrackColumn
-from app.ui_v2.pages.settings_page import SettingsPage
 from app.ui_v2.shell.content_router import ComingSoonPage
 from app.ui_v2.shell.main_window import MainWindow
 
@@ -48,6 +47,8 @@ class UiV2MainWindowTests(unittest.TestCase):
     def test_main_window_constructs_and_reuses_all_route_pages(self) -> None:
         library = self.window.library_page
         for item in self.window.navigation_adapter.items():
+            if item.route_id == "settings":
+                continue
             self.window.navigation_adapter.set_route(item.route_id)
             self.app.processEvents()
             first_page = self.window.router.currentWidget()
@@ -56,7 +57,10 @@ class UiV2MainWindowTests(unittest.TestCase):
             self.assertIs(self.window.router.currentWidget(), first_page)
         self.window.navigation_adapter.set_route("library")
         self.assertIs(self.window.router.currentWidget(), library)
-        self.assertEqual(self.window.router.cached_page_count, len(self.window.navigation_adapter.items()))
+        self.assertEqual(
+            self.window.router.cached_page_count,
+            len(self.window.navigation_adapter.items()) - 1,
+        )
 
     def test_browse_is_the_default_cached_page(self) -> None:
         self.assertEqual(self.window.navigation_adapter.route, "browse")
@@ -73,7 +77,7 @@ class UiV2MainWindowTests(unittest.TestCase):
             row for row, track in enumerate(model.tracks()) if not track.is_missing
         )
         page.track_table.selectRow(selected_row)
-        self.window.navigation_adapter.set_route("settings")
+        self.window.open_settings_overlay()
         self.window.navigation_adapter.set_route("library")
         self.app.processEvents()
         self.assertIs(page.track_table.model, model)
@@ -174,8 +178,15 @@ class UiV2MainWindowTests(unittest.TestCase):
         self.app.processEvents()
         for route_id, item in sidebar._items.items():
             self.assertTrue(item.isEnabled(), route_id)
+            before_route = self.window.navigation_adapter.route
             item.click()
             self.app.processEvents()
+            if route_id == "settings":
+                self.assertEqual(self.window.navigation_adapter.route, before_route)
+                self.assertTrue(self.window.settings_overlay.isVisible())
+                self.window.settings_overlay.cancel_and_close()
+                self.app.processEvents()
+                continue
             self.assertEqual(self.window.navigation_adapter.route, route_id)
             if route_id == "browse":
                 self.assertIs(self.window.router.currentWidget(), self.window.router.browse_page)
@@ -183,8 +194,6 @@ class UiV2MainWindowTests(unittest.TestCase):
                 self.assertIs(self.window.router.currentWidget(), self.window.library_page)
             elif route_id == "liked":
                 self.assertNotIsInstance(self.window.router.currentWidget(), ComingSoonPage)
-            elif route_id == "settings":
-                self.assertIsInstance(self.window.router.currentWidget(), SettingsPage)
             else:
                 self.assertIsInstance(self.window.router.currentWidget(), ComingSoonPage)
 

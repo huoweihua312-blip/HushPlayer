@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import json
 import os
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -11,104 +13,77 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from PySide6.QtCore import Qt
-from PySide6.QtGui import QPalette
-from PySide6.QtTest import QTest
-from PySide6.QtWidgets import QApplication, QPushButton
+from PySide6.QtCore import QSize
+from PySide6.QtWidgets import QApplication
 
-from app.ui_v2.adapters.lyrics_adapter import LyricsAdapter
-from app.ui_v2.adapters.settings_adapter import SettingsAdapter
-from app.ui_v2.models.immersive_lyrics_options import ImmersiveLyricsOptions
-from app.ui_v2.pages.immersive_lyrics_page import ImmersiveLyricsPage
-from app.ui_v2.pages.settings_page import SettingsPage
+from app.core.version import APP_NAME, APP_VERSION
+from app.ui_v2.adapters.legacy_settings_bridge import (
+    DEFAULT_SETTINGS,
+    LegacySettingsBridge,
+    SettingsBridgeError,
+)
+from app.ui_v2.models.settings_category import SETTINGS_CATEGORIES
+from app.ui_v2.models.settings_edit_session import SettingsEditSession
+from app.ui_v2.models.settings_snapshot import SettingsSnapshot
 from app.ui_v2.shell.main_window import MainWindow
+from app.ui_v2.theme.icons import FLUENT_SETTINGS_ASSETS
 
 
-class SettingsStateAdapterTests(unittest.TestCase):
-    def setUp(self) -> None:
-        self.lyrics = LyricsAdapter()
-        self.options = ImmersiveLyricsOptions()
-        self.adapter = SettingsAdapter(self.lyrics, self.options)
+class SettingsContractTests(unittest.TestCase):
+    def test_snapshot_and_edit_session_do_not_write_until_save(self) -> None:
+        original = SettingsSnapshot.from_mapping(
+            {**DEFAULT_SETTINGS, "unknown_legacy_key": {"keep": True}}
+        )
+        session = SettingsEditSession.open(original)
+        session.set("appearance_mode", "light")
+        self.assertTrue(session.is_dirty)
+        self.assertEqual(original.get("appearance_mode"), "dark")
+        self.assertTrue(session.get("unknown_legacy_key")["keep"])
+        restored = session.cancel()
+        self.assertEqual(restored.get("appearance_mode"), "dark")
+        self.assertFalse(session.is_dirty)
 
-    def test_defaults_draft_dirty_save_cancel_and_validation(self) -> None:
-        persisted = self.adapter.state()
-        self.assertFalse(self.adapter.is_dirty())
-        self.adapter.set_value("general.restore_last_session", False)
-        self.assertTrue(self.adapter.is_dirty())
-        self.assertIn("general.restore_last_session", self.adapter.dirty_fields())
-        self.assertTrue(persisted.general.restore_last_session)
-        self.adapter.cancel()
-        self.assertFalse(self.adapter.is_dirty())
-        self.assertTrue(self.adapter.get_value("general.restore_last_session"))
-        self.adapter.set_value("playback.crossfade_enabled", True)
-        self.adapter.set_value("playback.crossfade_seconds", 18)
-        valid, errors = self.adapter.validate()
-        self.assertFalse(valid)
-        self.assertIn("playback.crossfade_seconds", errors)
-        self.assertFalse(self.adapter.save())
-        self.adapter.set_value("playback.crossfade_seconds", 5)
-        self.assertTrue(self.adapter.save())
-        self.assertFalse(self.adapter.is_dirty())
-        self.assertEqual(self.adapter.state().playback.crossfade_seconds, 5)
+    def test_bridge_uses_one_path_and_preserves_unknown_keys(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "settings.json"
+            path.write_text(
+                json.dumps({"appearance_mode": "dark", "legacy_flag": 7}),
+                encoding="utf-8",
+            )
+            applied: list[dict[str, object]] = []
+            bridge = LegacySettingsBridge(path, apply_callback=applied.append)
+            snapshot = bridge.read_snapshot()
+            saved = bridge.save_snapshot(snapshot.with_updates({"appearance_mode": "light"}))
+            document = json.loads(path.read_text(encoding="utf-8"))
+            self.assertEqual(saved.get("appearance_mode"), "light")
+            self.assertEqual(document["legacy_flag"], 7)
+            self.assertEqual(len(applied), 1)
+            self.assertEqual(path.parent.joinpath("settings.json"), bridge.settings_path)
+            self.assertEqual(list(path.parent.glob("*.json")), [path])
 
-    def test_category_and_all_defaults_do_not_persist_until_save(self) -> None:
-        self.adapter.set_value("appearance.theme_mode", "light")
-        self.adapter.set_value("playback.default_volume", 42)
-        self.assertTrue(self.adapter.save())
-        self.adapter.restore_category_defaults("appearance")
-        self.assertEqual(self.adapter.get_value("appearance.theme_mode"), "dark")
-        self.assertEqual(self.adapter.get_value("playback.default_volume"), 42)
-        self.assertTrue(self.adapter.is_dirty())
-        self.adapter.restore_defaults()
-        self.assertEqual(self.adapter.get_value("playback.default_volume"), 70)
-        self.assertTrue(self.adapter.is_dirty())
-        self.adapter.cancel()
-        self.assertEqual(self.adapter.get_value("playback.default_volume"), 42)
-        self.assertFalse(self.adapter.is_dirty())
-        self.adapter.restore_category_defaults("about")
-        self.assertFalse(self.adapter.is_dirty())
-
-    def test_lyrics_preview_and_immersive_options_are_shared_in_memory(self) -> None:
-        self.adapter.set_value("lyrics.show_translation", False)
-        self.adapter.set_value("lyrics.show_romanization", True)
-        self.adapter.set_value("lyrics.lyrics_font_scale", 1.25)
-        self.adapter.set_value("lyrics.lyrics_offset_ms", -180)
-        self.assertFalse(self.lyrics.display_options["translation"])
-        self.assertTrue(self.lyrics.display_options["romanization"])
-        self.assertEqual(self.lyrics.display_options["font_scale"], 1.25)
-        self.adapter.set_value("immersive.global_font_scale", 125)
-        self.adapter.set_value("immersive.active_font_size", 58)
-        self.assertIs(self.options, self.adapter._immersive_options)
-        self.assertEqual(self.options.global_font_scale, 125)
-        self.assertEqual(self.options.active_font_size, 58)
-        self.adapter.cancel()
-        self.assertEqual(self.options.global_font_scale, 100)
-        self.assertEqual(self.options.active_font_size, 46)
-
-    def test_search_mock_folders_cache_and_update_scenarios(self) -> None:
-        self.assertTrue(any(item.path == "appearance.theme_mode" for item in self.adapter.search("theme")))
-        self.assertTrue(any(item.path == "lyrics.show_translation" for item in self.adapter.search("歌词")))
-        self.assertTrue(self.adapter.add_mock_folder("E:\\Music\\Preview"))
-        self.assertFalse(self.adapter.add_mock_folder("E:\\Music\\Preview"))
-        self.assertTrue(self.adapter.remove_mock_folder("E:\\Music\\Preview"))
-        before = self.adapter.cache_stats()
-        self.adapter.clear_mock_incomplete_cache()
-        self.assertEqual(self.adapter.cache_stats()["incomplete"], 0)
-        self.adapter.refresh_mock_cache_stats()
-        self.assertGreaterEqual(self.adapter.cache_stats()["total"], before["artwork"])
-        phases = [self.adapter.check_mock_updates()["phase"] for _ in range(3)]
-        self.assertEqual(phases, ["latest", "available", "failed"])
+    def test_bridge_save_failure_is_reported_without_second_file(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "settings.json"
+            bridge = LegacySettingsBridge(path)
+            snapshot = bridge.read_snapshot().with_updates({"floating_lyrics_width": 1})
+            with self.assertRaises(SettingsBridgeError):
+                bridge.save_snapshot(snapshot)
+            self.assertFalse(path.exists())
 
 
-class SettingsPageIntegrationTests(unittest.TestCase):
+class SettingsOverlayIntegrationTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
         cls.app = QApplication.instance() or QApplication([])
 
     def setUp(self) -> None:
+        self.tempdir = tempfile.TemporaryDirectory()
+        self.settings_path = Path(self.tempdir.name) / "settings.json"
+        self.previous_path = os.environ.get("HUSHPLAYER_UI_V2_SETTINGS_PATH")
+        os.environ["HUSHPLAYER_UI_V2_SETTINGS_PATH"] = str(self.settings_path)
         self.window = MainWindow()
         self.window.playback_adapter._timer_enabled = False
-        self.window.resize(1400, 850)
+        self.window.resize(1200, 800)
         self.window.show()
         self.app.processEvents()
 
@@ -116,144 +91,156 @@ class SettingsPageIntegrationTests(unittest.TestCase):
         self.window.close()
         self.window.deleteLater()
         self.app.processEvents()
+        if self.previous_path is None:
+            os.environ.pop("HUSHPLAYER_UI_V2_SETTINGS_PATH", None)
+        else:
+            os.environ["HUSHPLAYER_UI_V2_SETTINGS_PATH"] = self.previous_path
+        self.tempdir.cleanup()
 
-    def _settings_page(self) -> SettingsPage:
-        self.window.navigation_adapter.set_route("settings")
+    def open_overlay(self):
+        self.window.open_settings_overlay()
         self.app.processEvents()
-        page = self.window.router.currentWidget()
-        self.assertIsInstance(page, SettingsPage)
-        return page
+        return self.window.settings_overlay
 
-    def _immersive_page(self) -> ImmersiveLyricsPage:
-        self.window.navigation_adapter.set_route("immersive_lyrics")
+    def test_settings_categories_use_distinct_local_fluent_regular_assets(self) -> None:
+        overlay = self.open_overlay()
+        expected_assets = {
+            "general": "settings_20_regular.svg",
+            "appearance": "paint_brush_20_regular.svg",
+            "playback": "play_circle_20_regular.svg",
+            "lyrics": "subtitles_20_regular.svg",
+            "library": "library_20_regular.svg",
+            "cache": "database_20_regular.svg",
+            "updates": "arrow_sync_20_regular.svg",
+            "about": "info_20_regular.svg",
+        }
+        category_names = [item.icon_name for item in SETTINGS_CATEGORIES]
+        self.assertEqual(len(category_names), 8)
+        self.assertEqual(len(set(category_names)), 8)
+        self.assertEqual({name: FLUENT_SETTINGS_ASSETS[name] for name in category_names}, expected_assets)
+        self.assertEqual(FLUENT_SETTINGS_ASSETS["dismiss"], "dismiss_20_regular.svg")
+        self.assertTrue(all(name in FLUENT_SETTINGS_ASSETS for name in category_names))
+        self.assertTrue(all(FLUENT_SETTINGS_ASSETS[name].endswith("_20_regular.svg") for name in category_names))
+        asset_root = PROJECT_ROOT / "app" / "ui_v2" / "assets" / "icons" / "fluent_settings"
+        manifest = json.loads((asset_root / "MANIFEST.json").read_text(encoding="utf-8"))
+        self.assertEqual(manifest["version"], "1.1.334")
+        self.assertEqual(manifest["render_size_px"], 18)
+        self.assertTrue(all((asset_root / filename).is_file() for filename in FLUENT_SETTINGS_ASSETS.values()))
+        self.assertEqual(overlay.sidebar._buttons["general"].iconSize(), QSize(18, 18))
+        self.assertFalse(overlay.sidebar._buttons["general"].icon().isNull())
+
+    def test_settings_selected_state_keeps_icon_file_and_size_hint_stable(self) -> None:
+        overlay = self.open_overlay()
+        button = overlay.sidebar._buttons["general"]
+        before = (button.sizeHint(), button.iconSize())
+        overlay.set_category("about")
         self.app.processEvents()
-        page = self.window.router.currentWidget()
-        self.assertIsInstance(page, ImmersiveLyricsPage)
-        return page
+        after = (button.sizeHint(), button.iconSize())
+        self.assertEqual(before, after)
+        self.assertFalse(button.icon().isNull())
+        self.assertFalse(overlay.close_button.icon().isNull())
+        self.assertEqual(overlay.close_button.iconSize(), QSize(18, 18))
 
-    def test_nine_categories_route_reuse_and_responsive_draft_preservation(self) -> None:
-        page = self._settings_page()
-        self.assertEqual(tuple(page.sidebar._buttons), ("general", "appearance", "playback", "lyrics", "immersive", "library", "cache", "updates", "about"))
-        page.adapter.set_value("general.restore_last_session", False)
-        page.set_category("cache")
-        page.scroll.verticalScrollBar().setValue(18)
-        page_id = id(page)
-        for width, height in ((900, 600), (1100, 700), (1400, 850), (1600, 900)):
-            self.window.resize(width, height)
-            self.app.processEvents()
-            self.assertIs(self.window.router.currentWidget(), page)
-            self.assertEqual(id(page), page_id)
-            self.assertEqual(page.current_category, "cache")
-            self.assertFalse(page.scroll.horizontalScrollBar().isVisible())
-            self.assertEqual(page.sidebar._compact, width < 1100)
-        self.assertFalse(page.adapter.get_value("general.restore_last_session"))
-        page.set_category("about")
-        self.assertFalse(page.footer.category_defaults_button.isEnabled())
-
-    def test_category_sidebar_keeps_draft_while_switching_between_text_and_icon_modes(self) -> None:
-        page = self._settings_page()
-        page.adapter.set_value("playback.autoplay_on_start", True)
-        page_id = id(page)
-
-        self.window.resize(1200, 800)
+    def test_dismiss_hover_is_neutral_and_keeps_32px_geometry(self) -> None:
+        overlay = self.open_overlay()
+        button = overlay.close_button
+        before = (button.sizeHint(), button.iconSize())
+        stylesheet = button.styleSheet().lower().replace(" ", "")
+        self.assertIn("rgba(255,255,255,18)", stylesheet)
+        self.assertIn("rgba(255,255,255,28)", stylesheet)
+        self.assertNotIn(overlay._theme.colors.accent.lower(), stylesheet)
+        self.assertEqual(button.minimumSize(), QSize(32, 32))
+        self.assertEqual(button.maximumSize(), QSize(32, 32))
         self.app.processEvents()
-        self.assertFalse(page.sidebar._compact)
-        self.assertEqual(page.sidebar.minimumWidth(), 176)
-        for button in page.sidebar._buttons.values():
-            self.assertEqual(button.toolButtonStyle(), Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
-            self.assertTrue(button.text())
+        self.assertEqual(before, (button.sizeHint(), button.iconSize()))
 
-        page.set_category("playback")
+    def test_about_uses_formal_version_source_without_development_copy(self) -> None:
+        overlay = self.open_overlay()
+        overlay.set_category("about")
+        self.app.processEvents()
+        page = overlay._category_pages["about"]
+        visible_text = "\n".join(label.text() for label in page.findChildren(type(overlay.title_label)))
+        self.assertIn(APP_NAME, visible_text)
+        self.assertIn(APP_VERSION, visible_text)
+        for forbidden in ("HushPlayer UI V2", "设置 3A", "mock", "demo", "preview", "fixture"):
+            self.assertNotIn(forbidden.casefold(), visible_text.casefold())
+
+    def test_formal_eight_categories_and_settings_does_not_change_route(self) -> None:
+        overlay = self.open_overlay()
+        self.assertEqual(tuple(item.key for item in SETTINGS_CATEGORIES), (
+            "general", "appearance", "playback", "lyrics",
+            "library", "cache", "updates", "about",
+        ))
+        self.assertNotIn("immersive", overlay.sidebar._buttons)
+        self.assertEqual(self.window.navigation_adapter.route, "browse")
+        self.assertTrue(overlay.isVisible())
+        self.window.sidebar._items["settings"].click()
+        self.app.processEvents()
+        self.assertEqual(self.window.navigation_adapter.route, "browse")
+        self.assertTrue(overlay.isVisible())
+
+    def test_overlay_is_single_instance_and_resize_keeps_it(self) -> None:
+        overlay = self.open_overlay()
+        overlay_id = id(overlay)
         self.window.resize(900, 600)
         self.app.processEvents()
-        self.assertTrue(page.sidebar._compact)
-        self.assertEqual(page.sidebar.minimumWidth(), 56)
-        for button in page.sidebar._buttons.values():
-            self.assertEqual(button.toolButtonStyle(), Qt.ToolButtonStyle.ToolButtonIconOnly)
-            self.assertTrue(button.toolTip())
+        self.assertEqual(id(self.window.settings_overlay), overlay_id)
+        self.assertEqual(overlay.sidebar.minimumWidth(), 156)
+        self.window.resize(1600, 900)
+        self.app.processEvents()
+        overlay.close()
+        self.window.open_settings_overlay()
+        self.app.processEvents()
+        self.assertEqual(id(self.window.settings_overlay), overlay_id)
 
-        page.set_category("lyrics")
-        self.assertEqual(id(page), page_id)
-        self.assertTrue(page.adapter.get_value("playback.autoplay_on_start"))
+    def test_save_cancel_and_dirty_state_use_existing_settings_file(self) -> None:
+        overlay = self.open_overlay()
+        self.assertFalse(overlay.is_dirty)
+        control = overlay._controls["auto_scan_music_folders_on_startup"]
+        control.setChecked(not control.isChecked())
+        self.app.processEvents()
+        self.assertTrue(overlay.is_dirty)
+        self.assertTrue(overlay.footer.save_button.isEnabled())
+        overlay.cancel_and_close()
+        self.assertFalse(self.settings_path.exists())
+        overlay.open()
+        self.app.processEvents()
+        self.assertTrue(overlay._controls["auto_scan_music_folders_on_startup"].isChecked())
+        overlay._controls["auto_scan_music_folders_on_startup"].setChecked(False)
+        overlay.save_and_close()
+        self.app.processEvents()
+        document = json.loads(self.settings_path.read_text(encoding="utf-8"))
+        self.assertIs(document["auto_scan_music_folders_on_startup"], False)
+        self.assertFalse(overlay.isVisible())
 
-    def test_theme_preview_cancel_and_popup_palette_are_readable(self) -> None:
-        page = self._settings_page()
-        page.adapter.set_value("appearance.theme_mode", "light")
+    def test_theme_preview_cancel_restores_runtime_without_persisting(self) -> None:
+        overlay = self.open_overlay()
+        combo = overlay._controls["appearance_mode"]
+        combo.setCurrentIndex(combo.findData("light"))
         self.app.processEvents()
         self.assertEqual(self.window.theme.mode, "light")
-        theme_combo = page._controls["appearance.theme_mode"]
-        for mode in ("light", "dark"):
-            self.window.set_theme(mode)
-            self.app.processEvents()
-            view = theme_combo.view()
-            self.assertEqual(view.palette().color(QPalette.ColorRole.Base).alpha(), 255)
-            self.assertEqual(view.palette().color(QPalette.ColorRole.Window).alpha(), 255)
-            self.assertNotEqual(
-                view.palette().color(QPalette.ColorRole.Text).name(),
-                view.palette().color(QPalette.ColorRole.Base).name(),
-            )
-        page.adapter.cancel()
+        overlay.cancel_and_close()
         self.app.processEvents()
         self.assertEqual(self.window.theme.mode, "dark")
+        self.assertFalse(self.settings_path.exists())
 
-    def test_playback_dependencies_lyrics_preview_and_immersive_two_way_sync(self) -> None:
-        page = self._settings_page()
-        crossfade = page._controls["playback.crossfade_seconds"]
-        self.assertFalse(crossfade.isEnabled())
-        page.adapter.set_value("playback.crossfade_enabled", True)
-        self.assertTrue(crossfade.isEnabled())
-        page.adapter.set_value("lyrics.show_translation", False)
-        page.adapter.set_value("lyrics.show_romanization", True)
-        page.adapter.set_value("lyrics.lyrics_offset_ms", 420)
-        self.assertFalse(self.window.lyrics_adapter.display_options["translation"])
-        self.assertTrue(self.window.lyrics_adapter.display_options["romanization"])
-        page.adapter.set_value("immersive.global_font_scale", 125)
-        page.adapter.set_value("immersive.active_font_size", 58)
-        page.immersive_preview_requested.emit()
-        self.app.processEvents()
-        immersive = self.window.router.currentWidget()
-        self.assertIsInstance(immersive, ImmersiveLyricsPage)
-        self.assertIs(immersive.options, self.window.immersive_lyrics_options)
-        # V4 keeps the approved immersive hierarchy within its 54-64px readable range.
-        self.assertEqual(immersive.lyrics_view.canvas.effective_font_sizes[0], min(64, round(58 * 1.25)))
-        immersive.set_background_mode("gradient")
-        self.app.processEvents()
-        self.assertEqual(page.adapter.get_value("immersive.background_mode"), "gradient")
-        immersive.controls.back_button.click()
-        self.app.processEvents()
-        self.assertIs(self.window.router.currentWidget(), page)
+    def test_invalid_save_keeps_dirty_session(self) -> None:
+        overlay = self.open_overlay()
+        overlay._session.set("floating_lyrics_width", 1)
+        overlay._refresh_state()
+        self.assertFalse(overlay.footer.save_button.isEnabled())
+        overlay.save_and_close()
+        self.assertTrue(overlay.isVisible())
+        self.assertTrue(overlay.is_dirty)
 
-    def test_search_jump_empty_mock_actions_and_dirty_leave_confirmation(self) -> None:
-        page = self._settings_page()
-        page.search_box.input.setText("theme")
+    def test_actions_are_not_dirty_and_unavailable_services_are_disabled(self) -> None:
+        overlay = self.open_overlay()
+        overlay.set_category("cache")
         self.app.processEvents()
-        self.assertIs(page.content_stack.currentWidget(), page.search_page)
-        buttons = page.search_page.findChildren(QPushButton)
-        result_button = next(item for item in buttons if item.text().endswith("主题"))
-        result_button.click()
-        self.app.processEvents()
-        self.assertEqual(page.current_category, "appearance")
-        page.search_box.input.setText("not-a-setting")
-        self.app.processEvents()
-        self.assertTrue(page.search_empty.isVisible())
-        page.adapter.add_mock_folder("E:\\Music\\Temporary")
-        self.assertTrue(any(page.folder_list.item(row).text() == "E:\\Music\\Temporary" for row in range(page.folder_list.count())))
-        page.adapter.clear_mock_incomplete_cache()
-        self.assertIn("未完成 0 MB", page.cache_stats_label.text())
-        page.adapter.set_value("general.restore_last_session", False)
-        self.window.navigation_adapter.set_route("library")
-        self.app.processEvents()
-        self.assertIs(self.window.router.currentWidget(), page)
-        self.assertTrue(page.confirmation_bar.isVisible())
-        page.confirm_cancel.click()
-        self.app.processEvents()
-        self.assertEqual(self.window.navigation_adapter.route, "settings")
-        self.window.navigation_adapter.set_route("library")
-        self.app.processEvents()
-        page.confirm_secondary.click()
-        self.app.processEvents()
-        self.assertEqual(self.window.navigation_adapter.route, "library")
-        self.assertIs(self.window.router.currentWidget(), self.window.library_page)
+        self.assertFalse(overlay.is_dirty)
+        self.assertTrue(all(not button.isEnabled() for button in overlay.findChildren(type(overlay.footer.save_button)) if button.text() in {
+            "清理封面 / 歌词失败缓存", "打开音频缓存目录", "清理未完成音频缓存", "清理全部音频缓存"
+        }))
 
 
 if __name__ == "__main__":
