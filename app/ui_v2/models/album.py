@@ -12,3 +12,4 @@ class Album:
     artist: str
     track_ids: tuple[str, ...]
     total_duration_ms: int
+    year: int | str | None = None

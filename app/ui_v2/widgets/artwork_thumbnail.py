@@ -39,6 +39,13 @@ class ArtworkThumbnail(QLabel):
         )
         self._refresh_artwork()
 
+    def set_display_size(self, size: int) -> None:
+        """Resize this presentation surface without replacing its Track."""
+
+        self._size = max(32, int(size))
+        self.setFixedSize(self._size, self._size)
+        self._refresh_artwork()
+
     def _refresh_artwork(self) -> None:
         if self._track is None:
             self.setPixmap(self._empty_pixmap())

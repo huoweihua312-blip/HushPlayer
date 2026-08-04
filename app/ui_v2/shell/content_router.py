@@ -6,7 +6,11 @@ from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import QLabel, QStackedWidget, QVBoxLayout, QWidget
 
 from app.ui_v2.adapters.albums_adapter import AlbumsAdapter
-from app.ui_v2.adapters.artists_adapter import ArtistsAdapter
+from app.ui_v2.adapters.artists_adapter import (
+    ArtistsAdapter,
+    artist_identity,
+    normalize_artist,
+)
 from app.ui_v2.adapters.favorites_adapter import FavoritesAdapter
 from app.ui_v2.adapters.library_collection import LibraryCollectionAdapter
 from app.ui_v2.adapters.lyrics_adapter import LyricsAdapter
@@ -19,7 +23,7 @@ from app.ui_v2.adapters.recent_adapter import RecentAdapter
 from app.ui_v2.adapters.settings_adapter import SettingsAdapter
 from app.ui_v2.pages.album_detail_page import AlbumDetailPage
 from app.ui_v2.pages.albums_page import AlbumsPage
-from app.ui_v2.pages.artist_detail_page import ArtistDetailPage
+from app.ui_v2.pages.artist_page import ArtistPage
 from app.ui_v2.pages.artists_page import ArtistsPage
 from app.ui_v2.pages.browse_page import BrowsePage
 from app.ui_v2.pages.favorites_page import FavoritesPage
@@ -281,10 +285,25 @@ class ContentRouter(QStackedWidget):
         )
         return page
 
-    def _create_artist_detail_page(self) -> ArtistDetailPage:
-        page = ArtistDetailPage(self._collection, self._artists_adapter, self._theme, self)
+    def _create_artist_detail_page(self) -> ArtistPage:
+        page = ArtistPage(
+            self._collection,
+            self._artists_adapter,
+            self._albums_adapter,
+            self._theme,
+            self,
+        )
         page.back_button.clicked.connect(lambda: self._navigation.set_route("artists"))
+        page.artist_requested.connect(self._open_artist_by_name)
+        page.album_requested.connect(
+            lambda album_id: self._navigation.set_route(f"album_detail:{album_id}")
+        )
         return self._wire_track_page(page)
+
+    def _open_artist_by_name(self, name: str) -> None:
+        artist_id = artist_identity(normalize_artist(name))
+        if self._artists_adapter.artist_for_id(artist_id) is not None:
+            self._navigation.set_route(f"artist_detail:{artist_id}")
 
     def _create_album_detail_page(self) -> AlbumDetailPage:
         page = AlbumDetailPage(self._collection, self._albums_adapter, self._theme, self)

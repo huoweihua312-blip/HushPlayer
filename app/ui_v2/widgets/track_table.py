@@ -126,6 +126,7 @@ class TrackTable(QTableView):
     play_requested = Signal(str)
     favorite_toggled = Signal(str, bool)
     mock_action_requested = Signal(str, str)
+    artist_requested = Signal(str)
 
     def __init__(self, adapter: LibraryAdapter, theme: Theme, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -136,7 +137,9 @@ class TrackTable(QTableView):
         self._hovered_row = -1
         self._column_profile = "narrow"
         self._responsive_reference_width: int | None = None
+        self._visible_row_limit: int | None = None
         self._playlist_remove_callback: Callable[[str], None] | None = None
+        self._artist_navigation_enabled = False
         self._playback_enabled = True
         self.setObjectName("trackTable")
         self.header = TrackHeaderView(theme, self)
@@ -169,6 +172,7 @@ class TrackTable(QTableView):
         self.adapter.tracks_reset.connect(self.model.set_tracks)
         self.adapter.track_updated.connect(self.model.update_track)
         self.adapter.playing_track_changed.connect(self.model.set_playing_track)
+        self.model.modelReset.connect(self._apply_visible_row_limit)
         self._apply_column_widths()
         self._apply_scrollbar_style()
 
@@ -247,11 +251,35 @@ class TrackTable(QTableView):
         self._responsive_reference_width = reference
         self._apply_column_widths()
 
+    def set_visible_row_limit(self, limit: int | None) -> None:
+        """Limit displayed rows without changing the shared model or adapter."""
+
+        normalized = None if limit is None else max(0, int(limit))
+        if normalized == self._visible_row_limit:
+            self._apply_visible_row_limit()
+            return
+        self._visible_row_limit = normalized
+        self._apply_visible_row_limit()
+
+    @property
+    def visible_row_limit(self) -> int | None:
+        return self._visible_row_limit
+
+    def _apply_visible_row_limit(self) -> None:
+        limit = self._visible_row_limit
+        for row in range(self.model.rowCount()):
+            self.setRowHidden(row, limit is not None and row >= limit)
+
     def is_row_hovered(self, row: int) -> bool:
         return row >= 0 and row == self._hovered_row
 
     def set_playlist_context(self, remove_callback: Callable[[str], None] | None) -> None:
         self._playlist_remove_callback = remove_callback
+
+    def set_artist_navigation_enabled(self, enabled: bool) -> None:
+        """Opt in to the non-visual Artist route action for detail surfaces."""
+
+        self._artist_navigation_enabled = bool(enabled)
 
     def set_playback_enabled(self, enabled: bool) -> None:
         """Gate play actions when a read-only source has no real playback yet."""
@@ -290,6 +318,9 @@ class TrackTable(QTableView):
             )
         info_action = menu.addAction("查看歌曲信息")
         info_action.triggered.connect(lambda: self.mock_action_requested.emit("show_info", track.id))
+        if self._artist_navigation_enabled and track.artist.strip():
+            artist_action = menu.addAction("查看艺人")
+            artist_action.triggered.connect(lambda: self.artist_requested.emit(track.artist))
         return menu
 
     def _show_context_menu(self, position) -> None:
