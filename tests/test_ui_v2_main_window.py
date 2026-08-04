@@ -65,7 +65,9 @@ class UiV2MainWindowTests(unittest.TestCase):
     def test_library_page_state_survives_route_switching(self) -> None:
         page = self.window.library_page
         model = page.track_table.model
-        page.search_box.set_text("Paper Moon")
+        self.window.navigation_adapter.set_route("library")
+        self.app.processEvents()
+        self.window.title_bar.search_input.setText("Paper Moon")
         self.app.processEvents()
         selected_row = next(
             row for row, track in enumerate(model.tracks()) if not track.is_missing

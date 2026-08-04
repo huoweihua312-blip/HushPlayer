@@ -21,7 +21,7 @@ from app.ui_v2.adapters.real_library_adapter import (
 )
 from app.ui_v2.adapters.settings_adapter import SettingsAdapter
 from app.ui_v2.mock.track_factory import create_mock_tracks
-from app.ui_v2.pages.library_page import LibraryPage
+from app.ui_v2.pages.all_songs_page import AllSongsPage
 from app.ui_v2.models.immersive_lyrics_options import ImmersiveLyricsOptions
 from app.ui_v2.shell.content_router import ContentRouter
 from app.ui_v2.shell.navigation_sidebar import NavigationSidebar
@@ -87,7 +87,7 @@ class MainWindow(QMainWindow):
             self.lyrics_adapter, self.immersive_lyrics_options, self
         )
         self.playback_adapter.set_queue(self.library_collection.tracks())
-        self.library_page = LibraryPage(self.library_adapter, self._theme, self)
+        self.library_page = AllSongsPage(self.library_adapter, self._theme, self)
         self.sidebar = NavigationSidebar(self.navigation_adapter, self._theme, self)
         self.router = ContentRouter(
             self.library_page,
@@ -291,6 +291,7 @@ class MainWindow(QMainWindow):
 
     def _connect_state(self) -> None:
         self.library_page.theme_changed.connect(self.set_theme)
+        self.title_bar.search_text_changed.connect(self.router.set_global_query)
         self.title_bar.settings_requested.connect(
             lambda: self.navigation_adapter.set_route("settings")
         )

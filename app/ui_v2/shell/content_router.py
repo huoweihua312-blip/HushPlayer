@@ -135,6 +135,14 @@ class ContentRouter(QStackedWidget):
                 library_page.adapter.tracks(), track_id
             )
         )
+        if hasattr(library_page, "play_requested"):
+            library_page.play_requested.connect(
+                lambda: self.queue_requested.emit(library_page.adapter.tracks(), False)
+            )
+        if hasattr(library_page, "shuffle_requested"):
+            library_page.shuffle_requested.connect(
+                lambda: self.queue_requested.emit(library_page.adapter.tracks(), True)
+            )
         navigation.route_changed.connect(self.show_route)
         self.show_route(navigation.route)
 
@@ -215,6 +223,15 @@ class ContentRouter(QStackedWidget):
     def set_playing_track(self, track_id: str) -> None:
         self._online_adapter.set_playing_track(track_id)
 
+    def set_global_query(self, text: str) -> None:
+        """Forward the shell search to the active track-backed page."""
+
+        page = self.currentWidget()
+        adapter = getattr(page, "adapter", None)
+        setter = getattr(adapter, "set_query", None)
+        if callable(setter):
+            setter(text)
+
     @property
     def cached_page_count(self) -> int:
         return len(self._pages)
@@ -224,6 +241,10 @@ class ContentRouter(QStackedWidget):
             page = factory()
             self._pages[key] = page
             self.addWidget(page)
+            if hasattr(page, "set_content_safe_bottom"):
+                page.set_content_safe_bottom(self._content_safe_bottom)
+            if hasattr(page, "set_responsive_reference_width") and self.width() > 0:
+                page.set_responsive_reference_width(self.width())
         return self._pages[key]
 
     def _wire_track_page(self, page: TrackListPage) -> TrackListPage:
@@ -241,6 +262,9 @@ class ContentRouter(QStackedWidget):
     def _create_playlist_page(self) -> PlaylistPage:
         page = PlaylistPage(self._playlist_tracks, self._playlists, self._theme, self)
         page.playlist_deleted.connect(lambda _playlist_id: self._navigation.set_route("library"))
+        page.playlist_requested.connect(
+            lambda playlist_id: self._navigation.set_route(f"playlist:{playlist_id}")
+        )
         return self._wire_track_page(page)
 
     def _create_artists_page(self) -> ArtistsPage:

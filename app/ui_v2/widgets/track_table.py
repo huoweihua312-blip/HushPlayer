@@ -40,6 +40,14 @@ class TrackHeaderView(QHeaderView):
         self._theme = theme
         self.viewport().update()
 
+    def is_sorted_section(self, logical_index: int) -> bool:
+        """Return whether a visible data header should show a sort state."""
+
+        return (
+            int(logical_index) == self.sortIndicatorSection()
+            and int(logical_index) != int(TrackColumn.MORE)
+        )
+
     def mouseMoveEvent(self, event) -> None:  # noqa: N802
         self._set_hovered_section(self.logicalIndexAt(event.position().toPoint()))
         super().mouseMoveEvent(event)
@@ -52,8 +60,7 @@ class TrackHeaderView(QHeaderView):
         if not rect.isValid():
             return
         colors = self._theme.colors
-        sorted_section = self.sortIndicatorSection()
-        is_sorted = logical_index == sorted_section
+        is_sorted = self.is_sorted_section(logical_index)
         is_hovered = logical_index == self._hovered_section
         background = (
             colors.hover_background
@@ -64,17 +71,18 @@ class TrackHeaderView(QHeaderView):
         )
         painter.save()
         painter.fillRect(rect, QColor(background))
-        painter.setPen(QPen(QColor(colors.border_strong), 1))
+        painter.setPen(QPen(QColor(colors.divider), 1))
         painter.drawLine(rect.bottomLeft(), rect.bottomRight())
         if is_sorted:
             accent = QColor(colors.accent)
             accent.setAlpha(170)
             painter.fillRect(rect.left() + 8, rect.bottom() - 1, max(0, rect.width() - 16), 2, accent)
         if logical_index == int(TrackColumn.FAVORITE):
-            # The first column is intentionally the existing favorite action,
-            # not an ambiguous ellipsized text heading or a second cover column.
             icon_rect = QRectF(rect.center().x() - 8, rect.center().y() - 8, 16, 16)
             paint_icon(painter, "favorite", icon_rect, self._theme, "normal")
+            painter.restore()
+            return
+        if logical_index == int(TrackColumn.MORE):
             painter.restore()
             return
         label = self.model().headerData(
@@ -129,6 +137,7 @@ class TrackTable(QTableView):
         self._column_profile = "narrow"
         self._responsive_reference_width: int | None = None
         self._playlist_remove_callback: Callable[[str], None] | None = None
+        self._playback_enabled = True
         self.setObjectName("trackTable")
         self.header = TrackHeaderView(theme, self)
         self.setHorizontalHeader(self.header)
@@ -155,16 +164,32 @@ class TrackTable(QTableView):
         header.sectionClicked.connect(self._on_header_clicked)
         self.verticalHeader().hide()
         self.verticalHeader().setDefaultSectionSize(48)
+        self.verticalHeader().setMinimumSectionSize(48)
+        self.header.setFixedHeight(36)
         self.adapter.tracks_reset.connect(self.model.set_tracks)
         self.adapter.track_updated.connect(self.model.update_track)
         self.adapter.playing_track_changed.connect(self.model.set_playing_track)
         self._apply_column_widths()
+        self._apply_scrollbar_style()
 
     def set_theme(self, theme: Theme) -> None:
         self._theme = theme
         self.delegate.set_theme(theme)
         self.header.set_theme(theme)
+        self._apply_scrollbar_style()
         self.viewport().update()
+
+    def _apply_scrollbar_style(self) -> None:
+        c = self._theme.colors
+        self.setStyleSheet(
+            f"QTableView#trackTable QScrollBar:vertical {{ width: 6px; background: transparent; "
+            f"margin: 2px 0; border: 0; }}"
+            f"QTableView#trackTable QScrollBar::handle:vertical {{ min-height: 24px; border-radius: 3px; "
+            f"background: {c.border_strong}; }}"
+            f"QTableView#trackTable QScrollBar::handle:vertical:hover {{ background: {c.secondary_text}; }}"
+            f"QTableView#trackTable QScrollBar::add-line:vertical, QTableView#trackTable QScrollBar::sub-line:vertical {{ height: 0; }}"
+            f"QTableView#trackTable QScrollBar::add-page:vertical, QTableView#trackTable QScrollBar::sub-page:vertical {{ background: transparent; }}"
+        )
 
     def resizeEvent(self, event) -> None:  # noqa: N802
         super().resizeEvent(event)
@@ -186,6 +211,17 @@ class TrackTable(QTableView):
                 next_value = not track.is_favorite
                 self.adapter.toggle_favorite(track.id)
                 self.favorite_toggled.emit(track.id, next_value)
+                event.accept()
+                return
+        if (
+            event.button() == Qt.MouseButton.LeftButton
+            and index.isValid()
+            and index.column() == int(TrackColumn.MORE)
+        ):
+            menu = self.build_context_menu(index)
+            if menu is not None:
+                menu.exec(self.viewport().mapToGlobal(event.position().toPoint()))
+                menu.deleteLater()
                 event.accept()
                 return
         super().mouseReleaseEvent(event)
@@ -217,6 +253,11 @@ class TrackTable(QTableView):
     def set_playlist_context(self, remove_callback: Callable[[str], None] | None) -> None:
         self._playlist_remove_callback = remove_callback
 
+    def set_playback_enabled(self, enabled: bool) -> None:
+        """Gate play actions when a read-only source has no real playback yet."""
+
+        self._playback_enabled = bool(enabled)
+
     def contextMenuEvent(self, event: QContextMenuEvent) -> None:  # noqa: N802
         index = self.indexAt(event.pos())
         menu = self.build_context_menu(index)
@@ -230,7 +271,9 @@ class TrackTable(QTableView):
             return None
         menu = QMenu(self)
         play_action = menu.addAction("播放")
-        play_action.setEnabled(not track.is_missing)
+        play_action.setEnabled(not track.is_missing and self._playback_enabled)
+        if not self._playback_enabled:
+            play_action.setToolTip("真实模式尚未接入播放")
         play_action.triggered.connect(lambda: self._request_play(track))
         if not self.adapter.collection.read_only:
             favorite_action = menu.addAction("取消收藏" if track.is_favorite else "添加到我喜欢")
@@ -263,6 +306,8 @@ class TrackTable(QTableView):
             self._request_play(track)
 
     def _request_play(self, track: Track) -> None:
+        if not self._playback_enabled:
+            return
         self.adapter.request_play(track.id)
         self.play_requested.emit(track.id)
 
@@ -273,6 +318,8 @@ class TrackTable(QTableView):
         self.favorite_toggled.emit(track.id, not track.is_favorite)
 
     def _on_header_clicked(self, section: int) -> None:
+        if section in {int(TrackColumn.STATUS), int(TrackColumn.MORE)}:
+            return
         order = self.horizontalHeader().sortIndicatorOrder()
         if self.adapter.sort_column == TrackColumn(section):
             order = (
@@ -297,8 +344,11 @@ class TrackTable(QTableView):
             else "wide"
         )
         self.setColumnHidden(
-            int(TrackColumn.ADDED_AT), self._column_profile == "narrow"
+            int(TrackColumn.FAVORITE),
+            self._column_profile == "narrow" or self.adapter.collection.read_only,
         )
+        self.setColumnHidden(int(TrackColumn.ALBUM), self._column_profile == "narrow")
+        self.setColumnHidden(int(TrackColumn.SOURCE), self._column_profile != "wide")
         if self._column_profile == "narrow":
             widths = self._narrow_column_widths(width)
         elif self._column_profile == "standard":
@@ -312,44 +362,46 @@ class TrackTable(QTableView):
 
     @staticmethod
     def _narrow_column_widths(width: int) -> dict[TrackColumn, int]:
-        favorite, duration, source = 38, 68, 36
-        remaining = max(320, width - favorite - duration - source)
-        artist = min(164, max(122, int(remaining * 0.27)))
-        album = min(132, max(96, int(remaining * 0.20)))
+        status, duration, more = 40, 68, 42
+        remaining = max(320, width - status - duration - more)
+        artist = min(150, max(120, int(remaining * 0.29)))
         return {
-            TrackColumn.FAVORITE: favorite,
-            TrackColumn.TITLE: max(150, remaining - artist - album),
+            TrackColumn.STATUS: status,
+            TrackColumn.TITLE: max(150, remaining - artist),
             TrackColumn.ARTIST: artist,
-            TrackColumn.ALBUM: album,
+            TrackColumn.ALBUM: 0,
             TrackColumn.DURATION: duration,
-            TrackColumn.SOURCE: source,
-            TrackColumn.ADDED_AT: 0,
+            TrackColumn.FAVORITE: 0,
+            TrackColumn.SOURCE: 0,
+            TrackColumn.MORE: more,
         }
 
     @staticmethod
     def _standard_column_widths(width: int) -> dict[TrackColumn, int]:
-        favorite, duration, artist, album, source, date = 40, 74, 140, 130, 92, 90
+        status, favorite, duration, artist, album, more = 40, 40, 74, 140, 130, 42
         return {
+            TrackColumn.STATUS: status,
             TrackColumn.FAVORITE: favorite,
-            TrackColumn.TITLE: max(120, width - favorite - duration - artist - album - source - date),
+            TrackColumn.TITLE: max(160, width - status - favorite - duration - artist - album - more),
             TrackColumn.ARTIST: artist,
             TrackColumn.ALBUM: album,
             TrackColumn.DURATION: duration,
-            TrackColumn.SOURCE: source,
-            TrackColumn.ADDED_AT: date,
+            TrackColumn.SOURCE: 0,
+            TrackColumn.MORE: more,
         }
 
     @staticmethod
     def _wide_column_widths(width: int) -> dict[TrackColumn, int]:
-        favorite, duration, artist, album, source, date = 40, 80, 200, 240, 140, 132
+        status, favorite, duration, artist, album, source, more = 40, 40, 80, 200, 240, 140, 44
         return {
+            TrackColumn.STATUS: status,
             TrackColumn.FAVORITE: favorite,
-            TrackColumn.TITLE: max(220, width - favorite - duration - artist - album - source - date),
+            TrackColumn.TITLE: max(220, width - status - favorite - duration - artist - album - source - more),
             TrackColumn.ARTIST: artist,
             TrackColumn.ALBUM: album,
             TrackColumn.DURATION: duration,
             TrackColumn.SOURCE: source,
-            TrackColumn.ADDED_AT: date,
+            TrackColumn.MORE: more,
         }
 
     def _set_hovered_row(self, row: int) -> None:

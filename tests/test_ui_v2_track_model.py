@@ -36,7 +36,7 @@ class UiV2TrackModelTests(unittest.TestCase):
 
     def test_model_has_1000_virtual_rows_and_complete_tooltips(self) -> None:
         self.assertEqual(self.model.rowCount(), 1000)
-        self.assertEqual(self.model.columnCount(), 7)
+        self.assertEqual(self.model.columnCount(), 8)
         row = self._first_available_row()
         title_index = self.model.index(row, int(TrackColumn.TITLE))
         title_tooltip = title_index.data(Qt.ItemDataRole.ToolTipRole)

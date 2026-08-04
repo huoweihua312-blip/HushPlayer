@@ -234,6 +234,7 @@ class RealLibraryPageTests(unittest.TestCase):
         )
         menu.deleteLater()
         self.assertTrue(self.window.player_bar.favorite_button.isHidden())
+        self.assertTrue(self.window.library_page.track_table.isColumnHidden(int(TrackColumn.FAVORITE)))
         self.assertTrue(self.window.sidebar.new_playlist_button.isHidden())
         self.assertNotIn("online_search", self.window.sidebar._items)
         first = self.window.library_collection.tracks()[0]
@@ -243,6 +244,9 @@ class RealLibraryPageTests(unittest.TestCase):
         self.assertFalse(self.window.playlist_adapter.delete_playlist("commute"))
         self.assertEqual(self.window.playlist_adapter.add_tracks("commute", (first.id,)), 0)
         self.assertFalse(self.window.playlist_adapter.remove_track("commute", first.id))
+        playlist_page = self.window.router.page_for_route("playlist:commute")
+        self.assertTrue(playlist_page.playlist_header.favorite_button.isHidden())
+        self.assertTrue(playlist_page.track_table.isColumnHidden(int(TrackColumn.FAVORITE)))
 
     def test_real_browse_uses_read_only_local_sections_without_playback_writes(self) -> None:
         browse = self.window.router.browse_page

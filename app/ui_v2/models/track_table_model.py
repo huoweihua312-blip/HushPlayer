@@ -11,13 +11,17 @@ from app.ui_v2.models.track import Track, format_duration
 
 
 class TrackColumn(IntEnum):
-    FAVORITE = 0
+    STATUS = 0
     TITLE = 1
     ARTIST = 2
     ALBUM = 3
     DURATION = 4
-    SOURCE = 5
-    ADDED_AT = 6
+    FAVORITE = 5
+    SOURCE = 6
+    MORE = 7
+    # Kept as a compatibility alias for the adapters' added-at sort key.
+    # The visible column is now the trailing More action column.
+    ADDED_AT = MORE
 
 
 TRACK_ROLE = int(Qt.ItemDataRole.UserRole) + 1
@@ -27,7 +31,7 @@ PLAYING_ROLE = TRACK_ROLE + 1
 class TrackTableModel(QAbstractTableModel):
     """Stores track references only; views never allocate one widget per row."""
 
-    HEADERS = ("收藏", "歌曲", "歌手", "专辑", "时长", "来源", "添加时间")
+    HEADERS = ("#", "歌曲", "歌手", "专辑", "时长", "收藏", "来源", "")
 
     def __init__(self, tracks: Iterable[Track] = (), parent=None) -> None:
         super().__init__(parent)
@@ -116,37 +120,55 @@ class TrackTableModel(QAbstractTableModel):
 
     @staticmethod
     def _display_value(track: Track, column: TrackColumn) -> str:
+        from app.ui_v2.widgets.track_display import display_track_text
+
+        title, artist, album = display_track_text(track)
         values = {
+            TrackColumn.STATUS: "",
             TrackColumn.FAVORITE: "",
-            TrackColumn.TITLE: track.title,
-            TrackColumn.ARTIST: track.artist,
-            TrackColumn.ALBUM: track.album,
+            TrackColumn.TITLE: title,
+            TrackColumn.ARTIST: artist,
+            TrackColumn.ALBUM: album,
             TrackColumn.DURATION: format_duration(track.duration_ms),
             TrackColumn.SOURCE: track.source_name,
-            TrackColumn.ADDED_AT: track.added_at.strftime("%Y-%m-%d"),
+            TrackColumn.MORE: "",
         }
         return values[column]
 
     @staticmethod
     def _tooltip_value(track: Track, column: TrackColumn) -> str:
+        from app.ui_v2.widgets.track_display import display_track_text
+
+        title, artist, album = display_track_text(track)
+        if column in {TrackColumn.STATUS, TrackColumn.MORE}:
+            return ""
         if column == TrackColumn.FAVORITE:
             return "取消收藏" if track.is_favorite else "添加到我喜欢"
         if column == TrackColumn.TITLE:
+            added = TrackTableModel._safe_date(track.added_at, "%Y-%m-%d %H:%M")
+            details = [
+                title,
+                f"歌手: {artist}",
+                f"专辑: {album}",
+                f"来源: {track.source_name}",
+            ]
+            if added:
+                details.append(f"添加时间: {added}")
             return "\n".join(
-                (
-                    track.title,
-                    f"歌手: {track.artist}",
-                    f"专辑: {track.album}",
-                    f"来源: {track.source_name}",
-                    f"添加时间: {track.added_at.strftime('%Y-%m-%d %H:%M')}",
-                )
+                details
             )
         if column == TrackColumn.SOURCE:
             return f"{track.source_name} ({'在线' if track.is_online else '本地'})"
         if column == TrackColumn.DURATION:
             return format_duration(track.duration_ms)
-        if column == TrackColumn.ADDED_AT:
-            return track.added_at.strftime("%Y-%m-%d %H:%M")
         if track.is_missing:
             return f"文件不可用: {TrackTableModel._display_value(track, column)}"
         return TrackTableModel._display_value(track, column)
+
+    @staticmethod
+    def _safe_date(value, pattern: str) -> str:
+        """Hide missing/Unix-epoch placeholders from user-visible metadata."""
+
+        if value is None or value.year <= 1970:
+            return ""
+        return value.strftime(pattern)

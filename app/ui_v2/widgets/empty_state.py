@@ -5,7 +5,7 @@ from __future__ import annotations
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import QLabel, QToolButton, QVBoxLayout, QWidget
 
-from app.ui_v2.theme.icons import missing
+from app.ui_v2.theme.icons import icon
 from app.ui_v2.theme.tokens import Theme
 
 
@@ -14,6 +14,7 @@ class EmptyState(QWidget):
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
+        self.empty_icon_name = "playlist"
         self.icon_label = QLabel(self)
         self.title_label = QLabel(self)
         self.detail_label = QLabel(self)
@@ -50,7 +51,8 @@ class EmptyState(QWidget):
         self.action_button.setVisible(bool(text))
 
     def set_theme(self, theme: Theme) -> None:
-        self.icon_label.setPixmap(missing(theme).pixmap(theme.metrics.icon_lg, theme.metrics.icon_lg))
+        self.icon_label.setPixmap(icon(self.empty_icon_name, theme, "normal").pixmap(32, 32))
+        self.icon_label.setObjectName("emptyStateIcon")
         self.title_label.setStyleSheet(
             f"font-size: {theme.fonts.section_title}px; font-weight: 600; color: {theme.colors.primary_text};"
         )

@@ -26,11 +26,15 @@ class LibraryPage(QWidget):
         adapter: LibraryAdapter,
         theme: Theme | None = None,
         parent: QWidget | None = None,
+        *,
+        include_page_search: bool = True,
+        include_preview_controls: bool = True,
     ) -> None:
         super().__init__(parent)
         self.adapter = adapter
         self._theme = theme or get_theme("dark")
         self.current_view_state = "content"
+        self._content_safe_bottom = 0
         self._developer_mode = os.environ.get("HUSHPLAYER_UI_V2_DEVELOPER", "").strip().lower() in {
             "1",
             "true",
@@ -41,23 +45,29 @@ class LibraryPage(QWidget):
         self.header = PageHeader("全部歌曲", self)
         self.header.title_label.setMinimumWidth(76)
         self.header.count_label.setMinimumWidth(64)
-        self.search_box = SearchBox(self)
-        self.search_box.setMinimumWidth(220)
-        self.theme_toggle = QToolButton(self)
-        self.theme_toggle.setObjectName("themeToggle")
-        self.theme_toggle.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextOnly)
-        self.theme_toggle.clicked.connect(self._toggle_theme)
-        self.state_toggle = QToolButton(self)
-        self.state_toggle.setObjectName("stateToggle")
-        self.state_toggle.setText("状态")
-        self.state_toggle.setToolTip("预览页面状态")
-        self.state_toggle.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
-        self._state_menu = self._build_state_menu()
-        self.state_toggle.setMenu(self._state_menu)
-        self.header.trailing_layout.addWidget(self.search_box)
-        self.header.trailing_layout.addWidget(self.theme_toggle)
-        if self._developer_mode:
-            self.header.trailing_layout.addWidget(self.state_toggle)
+        self.search_box = None
+        self.theme_toggle = None
+        self.state_toggle = None
+        self._state_menu = None
+        if include_page_search:
+            self.search_box = SearchBox(self)
+            self.search_box.setMinimumWidth(220)
+            self.header.trailing_layout.addWidget(self.search_box)
+        if include_preview_controls:
+            self.theme_toggle = QToolButton(self)
+            self.theme_toggle.setObjectName("themeToggle")
+            self.theme_toggle.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextOnly)
+            self.theme_toggle.clicked.connect(self._toggle_theme)
+            self.header.trailing_layout.addWidget(self.theme_toggle)
+            self.state_toggle = QToolButton(self)
+            self.state_toggle.setObjectName("stateToggle")
+            self.state_toggle.setText("状态")
+            self.state_toggle.setToolTip("预览页面状态")
+            self.state_toggle.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
+            self._state_menu = self._build_state_menu()
+            self.state_toggle.setMenu(self._state_menu)
+            if self._developer_mode:
+                self.header.trailing_layout.addWidget(self.state_toggle)
         self.track_table = TrackTable(adapter, self._theme, self)
         self.empty_state = EmptyState(self)
         self.view_host = QWidget(self)
@@ -71,10 +81,27 @@ class LibraryPage(QWidget):
         layout.setSpacing(m.spacing_lg)
         layout.addWidget(self.header)
         layout.addWidget(self.view_host, 1)
-        self.search_box.text_changed.connect(self.adapter.set_query)
+        if self.search_box is not None:
+            self.search_box.text_changed.connect(self.adapter.set_query)
         self.adapter.tracks_reset.connect(self._on_tracks_reset)
         self.set_theme(self._theme)
         self._on_tracks_reset(self.adapter.tracks())
+
+    def set_content_safe_bottom(self, height: int) -> None:
+        """Reserve the shared bottom-safe area above the global PlayerBar."""
+
+        self._content_safe_bottom = max(0, int(height))
+        self.view_stack.setContentsMargins(0, 0, 0, self._content_safe_bottom)
+
+    def set_responsive_reference_width(self, width: int) -> None:
+        """Resize the table without replacing its model or adapter."""
+
+        reference = int(width)
+        self.track_table.set_responsive_reference_width(reference)
+        narrow = reference < 950
+        if self.search_box is not None:
+            self.search_box.setMinimumWidth(180 if narrow else 220)
+            self.search_box.setMaximumWidth(220 if narrow else 320)
 
     @property
     def theme(self) -> Theme:
@@ -84,13 +111,15 @@ class LibraryPage(QWidget):
         self._theme = theme
         self.setStyleSheet(build_stylesheet(theme))
         self.header.set_theme(theme)
-        self.search_box.set_theme(theme)
+        if self.search_box is not None:
+            self.search_box.set_theme(theme)
         self.empty_state.set_theme(theme)
         self.track_table.set_theme(theme)
-        self.theme_toggle.setText("浅色" if theme.mode == "dark" else "深色")
-        self.theme_toggle.setToolTip(
-            "切换到浅色主题" if theme.mode == "dark" else "切换到深色主题"
-        )
+        if self.theme_toggle is not None:
+            self.theme_toggle.setText("浅色" if theme.mode == "dark" else "深色")
+            self.theme_toggle.setToolTip(
+                "切换到浅色主题" if theme.mode == "dark" else "切换到深色主题"
+            )
 
     def resizeEvent(self, event) -> None:  # noqa: N802
         super().resizeEvent(event)
@@ -137,10 +166,13 @@ class LibraryPage(QWidget):
 
     def _apply_preview_control_layout(self) -> None:
         narrow = self.width() < 980
-        self.search_box.setMinimumWidth(180 if narrow else 220)
-        self.search_box.setMaximumWidth(220 if narrow else 320)
-        self.theme_toggle.setVisible(not narrow)
-        self.state_toggle.setVisible(self._developer_mode)
-        if self._developer_mode:
+        if self.search_box is not None:
+            self.search_box.setMinimumWidth(180 if narrow else 220)
+            self.search_box.setMaximumWidth(220 if narrow else 320)
+        if self.theme_toggle is not None:
+            self.theme_toggle.setVisible(not narrow)
+        if self.state_toggle is not None:
+            self.state_toggle.setVisible(self._developer_mode)
+        if self.state_toggle is not None and self._developer_mode:
             self.state_toggle.setText("开发")
             self.state_toggle.setToolTip("切换主题和预览页面状态")

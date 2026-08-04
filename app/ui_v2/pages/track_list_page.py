@@ -33,6 +33,7 @@ class TrackListPage(QWidget):
         self.adapter = adapter
         self._theme = theme
         self.current_view_state = "content"
+        self._content_safe_bottom = 0
         self.setObjectName("trackListPage")
         self.header = PageHeader(title, self)
         self.search_box = SearchBox(self)
@@ -66,6 +67,12 @@ class TrackListPage(QWidget):
         adapter.tracks_reset.connect(self._on_tracks_reset)
         self.set_theme(theme)
         self._on_tracks_reset(adapter.tracks())
+
+    def set_content_safe_bottom(self, height: int) -> None:
+        """Reserve one shared bottom-safe area for the global PlayerBar."""
+
+        self._content_safe_bottom = max(0, int(height))
+        self.view_stack.setContentsMargins(0, 0, 0, self._content_safe_bottom)
 
     def set_theme(self, theme: Theme) -> None:
         self._theme = theme

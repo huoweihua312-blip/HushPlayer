@@ -43,12 +43,15 @@ class UiV2PreviewWindowTests(unittest.TestCase):
         self.app.processEvents()
         self.assertIs(table.model, model)
         self.assertEqual(table.column_profile, "narrow")
-        self.assertTrue(table.isColumnHidden(int(TrackColumn.ADDED_AT)))
+        # The final narrow profile keeps the trailing action column visible;
+        # it is rendered as the lightweight "more" affordance by the delegate.
+        self.assertFalse(table.isColumnHidden(int(TrackColumn.ADDED_AT)))
         self.assertLessEqual(table.columnWidth(int(TrackColumn.SOURCE)), 36)
         self.assertGreater(
             table.columnWidth(int(TrackColumn.TITLE)),
             table.columnWidth(int(TrackColumn.ALBUM)),
         )
+        self.assertIsNotNone(window.library_page.search_box)
         self.assertGreaterEqual(window.library_page.search_box.width(), 180)
         self.assertFalse(window.library_page.theme_toggle.isVisible())
         self.assertFalse(window.library_page.state_toggle.isVisible())
