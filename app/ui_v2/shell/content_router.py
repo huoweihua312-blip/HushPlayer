@@ -117,7 +117,15 @@ class ContentRouter(QStackedWidget):
         self._last_normal_route = navigation.route if not navigation.route.startswith("immersive") else "browse"
         self._content_safe_bottom = 0
         self._online_sources = OnlineSourceAdapter(online, self)
-        self.browse_page = BrowsePage(collection, theme, self)
+        self._playback_enabled = (
+            not collection.read_only or playback.has_real_backend
+        )
+        self.browse_page = BrowsePage(
+            collection,
+            theme,
+            self,
+            playback_enabled=self._playback_enabled,
+        )
         self._pages: dict[str, QWidget] = {
             "browse": self.browse_page,
             "library": library_page,
@@ -251,6 +259,8 @@ class ContentRouter(QStackedWidget):
         return self._pages[key]
 
     def _wire_track_page(self, page: TrackListPage) -> TrackListPage:
+        if hasattr(page, "set_playback_enabled"):
+            page.set_playback_enabled(self._playback_enabled)
         page.track_play_requested.connect(self.track_play_requested)
         page.queue_requested.connect(self.queue_requested)
         page.browse_library_requested.connect(lambda: self._navigation.set_route("library"))
@@ -291,6 +301,7 @@ class ContentRouter(QStackedWidget):
             self._albums_adapter,
             self._theme,
             self,
+            playback_enabled=self._playback_enabled,
         )
         page.back_button.clicked.connect(lambda: self._navigation.set_route("artists"))
         page.artist_requested.connect(self._open_artist_by_name)

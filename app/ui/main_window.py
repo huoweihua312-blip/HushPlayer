@@ -34,6 +34,7 @@ from app.services.online_lyrics_service import OnlineLyricsService
 from app.services.online_source_client import OnlineSourceClient
 from app.services.playlist_membership import PlaylistMembership
 from app.services.playback_queue import PlaybackQueue
+from app.services.production_playback_controller import ProductionPlaybackController
 from app.services.remote_track_store import RemoteTrackStore, RemoteTrackStoreError
 from app.services.source_registry import SourceRegistryManager
 from app.services.unified_search_service import UnifiedSearchService
@@ -5033,23 +5034,24 @@ class MainWindow(QMainWindow):
         print("歌词绑定保存位置：", self.lyrics_bindings_file)
 
         audio_started_at = time.perf_counter()
-        self.media_devices = QMediaDevices(self)
-        self.default_audio_output_sync_timer = QTimer(self)
-        self.default_audio_output_sync_timer.setSingleShot(True)
-        self.default_audio_output_sync_timer.setInterval(250)
-        self.default_audio_output_sync_timer.timeout.connect(
-            self.sync_default_audio_output
+        self.production_playback_controller = ProductionPlaybackController(
+            self,
+            queue=self.playback_queue,
+            volume=self.current_volume,
+            play_mode=self.play_mode,
+            # Legacy MainWindow keeps its mature mixed queue and online media
+            # completion handling.  The controller still owns the one Qt
+            # backend, but does not duplicate this legacy EndOfMedia path.
+            handle_end_of_media=False,
         )
-        self.media_devices.audioOutputsChanged.connect(
-            self.schedule_default_audio_output_sync
+        self.media_devices = self.production_playback_controller.media_devices
+        self.default_audio_output_sync_timer = (
+            self.production_playback_controller.default_audio_output_sync_timer
         )
+        self.audio_output = self.production_playback_controller.audio_output
+        self.media_player = self.production_playback_controller.media_player
         default_device = QMediaDevices.defaultAudioOutput()
         print("默认音频输出设备：", self.audio_device_name(default_device))
-
-        self.audio_output = QAudioOutput(default_device)
-        self.media_player = QMediaPlayer()
-        self.media_player.setAudioOutput(self.audio_output)
-        self.audio_output.setVolume(self.current_volume / 100)
         self.sync_default_audio_output()
         print(f"[perf] 音频初始化：{(time.perf_counter() - audio_started_at) * 1000:.1f} ms")
 
@@ -17836,6 +17838,9 @@ class MainWindow(QMainWindow):
             return
         player.stop()
         player.setSource(QUrl())
+        controller = getattr(self, "production_playback_controller", None)
+        if controller is not None:
+            controller.shutdown()
 
     def closeEvent(self, event) -> None:
         if not self.shutdown_music_scan_workers():

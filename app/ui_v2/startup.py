@@ -14,6 +14,7 @@ from PySide6.QtWidgets import QApplication
 
 from app.core.app_paths import AppPaths
 from app.services.library_repository import LibraryRepository
+from app.services.production_playback_controller import ProductionPlaybackController
 from app.services.remote_track_store import RemoteTrackStore
 from app.startup import UI_FLAVOR_V2, create_application_context
 from app.ui_v2.adapters.lyrics_adapter import LyricsAdapter
@@ -63,7 +64,10 @@ def build_ui_v2_runtime_services(
             data_dir / "stats.json",
         ),
         remote_tracks=RemoteTrackStore(data_dir / "remote_tracks.json"),
-        playback_adapter=playback_adapter or PlaybackAdapter(timer_enabled=False),
+        playback_adapter=playback_adapter or PlaybackAdapter(
+            timer_enabled=False,
+            controller=ProductionPlaybackController(),
+        ),
         lyrics_adapter=lyrics_adapter or LyricsAdapter(),
     )
 

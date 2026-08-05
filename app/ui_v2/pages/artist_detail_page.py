@@ -80,12 +80,15 @@ class ArtistDetailPage(QWidget):
         albums: AlbumsAdapter,
         theme: Theme,
         parent=None,
+        *,
+        playback_enabled: bool = True,
     ) -> None:
         super().__init__(parent)
         self.collection = collection
         self.artists = artists
         self.albums = albums
         self._theme = theme
+        self._playback_enabled = bool(playback_enabled)
         self._artist_id = ""
         self._artist: Artist | None = None
         self.artist_aggregate = ArtistAggregate(None, (), (), 0, 0, 0)
@@ -149,6 +152,7 @@ class ArtistDetailPage(QWidget):
             predicate=lambda track: track.id in self._popular_track_ids,
         )
         self.track_table = TrackTable(self.adapter, theme, self)
+        self.track_table.set_playback_enabled(self._playback_enabled)
         self.track_table.set_artist_navigation_enabled(True)
         self.track_table.artist_requested.connect(self.artist_requested)
         self.track_table.play_requested.connect(self._request_track)
@@ -369,10 +373,15 @@ class ArtistDetailPage(QWidget):
         self.popular_empty_state.set_theme(self._theme)
 
     def _apply_action_state(self, aggregate: ArtistAggregate) -> None:
-        enabled = bool(aggregate.track_count) and not self.collection.read_only
-        if not aggregate.track_count:
+        has_playable_track = any(
+            not track.is_missing
+            and not (self.collection.read_only and track.is_online)
+            for track in self.adapter.tracks()
+        )
+        enabled = has_playable_track and self._playback_enabled
+        if not has_playable_track:
             tooltip = "没有可播放的歌曲"
-        elif self.collection.read_only:
+        elif not self._playback_enabled:
             tooltip = "真实模式尚未接入播放"
         else:
             tooltip = ""

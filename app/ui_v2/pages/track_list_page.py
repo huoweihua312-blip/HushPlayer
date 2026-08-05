@@ -32,6 +32,7 @@ class TrackListPage(QWidget):
         super().__init__(parent)
         self.adapter = adapter
         self._theme = theme
+        self._playback_enabled = True
         self.current_view_state = "content"
         self._content_safe_bottom = 0
         self.setObjectName("trackListPage")
@@ -90,9 +91,19 @@ class TrackListPage(QWidget):
         self.toolbar.shuffle_button.setText("随机" if compact else "随机播放")
         self.toolbar.play_all_button.setText("播放" if compact else "播放全部")
 
+    def set_playback_enabled(self, enabled: bool) -> None:
+        self._playback_enabled = bool(enabled)
+        self.track_table.set_playback_enabled(self._playback_enabled)
+        self._on_tracks_reset(self.adapter.tracks())
+
     def _on_tracks_reset(self, tracks) -> None:
         self.header.set_count(len(tracks))
-        self.toolbar.setEnabled(bool(tracks))
+        has_playable_track = any(
+            not track.is_missing
+            and not (self.adapter.collection.read_only and track.is_online)
+            for track in tracks
+        )
+        self.toolbar.setEnabled(has_playable_track and self._playback_enabled)
         if not tracks:
             self.current_view_state = "empty"
             self.view_stack.setCurrentWidget(self.empty_state)

@@ -89,6 +89,7 @@ class PlayerBar(QFrame):
         self._seeking = False
         self._compact = False
         self._read_only = False
+        self._transport_available = False
         self.setObjectName("playerBar")
         self.setFixedHeight(theme.metrics.player_bar_height)
         self._build_layout()
@@ -141,10 +142,11 @@ class PlayerBar(QFrame):
         self.metadata.setFixedWidth(118 if compact else 154)
         self._constrain_side_inner_widths()
 
-    def set_read_only(self, read_only: bool) -> None:
-        """Hide the sole persistence-affecting player action in read-only mode."""
+    def set_read_only(self, read_only: bool, *, allow_playback: bool = False) -> None:
+        """Keep writes disabled while allowing a formal local playback backend."""
 
         self._read_only = bool(read_only)
+        self._transport_available = bool(allow_playback)
         self.favorite_button.setVisible(not self._read_only)
         self.favorite_button.setEnabled(not self._read_only)
         self._set_track_controls_enabled(self.adapter.state.current_track is not None)
@@ -403,6 +405,7 @@ class PlayerBar(QFrame):
         self.adapter.position_changed.connect(self._on_position_changed)
         self.adapter.duration_changed.connect(self._on_duration_changed)
         self.adapter.volume_changed.connect(self._on_volume_changed)
+        self.adapter.muted_changed.connect(self._on_muted_changed)
         self.adapter.favorite_changed.connect(self._on_favorite_changed)
         self.adapter.shuffle_changed.connect(self._on_shuffle_changed)
         self.adapter.repeat_mode_changed.connect(self._on_repeat_mode_changed)
@@ -414,6 +417,7 @@ class PlayerBar(QFrame):
         self._on_duration_changed(state.duration_ms)
         self._on_position_changed(state.position_ms)
         self._on_volume_changed(state.volume)
+        self._on_muted_changed(state.is_muted)
         self._on_favorite_changed(state.is_favorite)
         self._on_shuffle_changed(state.shuffle_enabled)
         self._on_repeat_mode_changed(state.repeat_mode)
@@ -457,7 +461,17 @@ class PlayerBar(QFrame):
         self.volume_slider.setValue(volume)
         del blocker
         self.volume_label.setText(f"{volume}%")
-        self.volume_button.set_icon_name("volume_mute" if volume == 0 else "volume")
+        self._refresh_volume_icon()
+
+    def _on_muted_changed(self, _muted: bool) -> None:
+        self._refresh_volume_icon()
+
+    def _refresh_volume_icon(self) -> None:
+        self.volume_button.set_icon_name(
+            "volume_mute"
+            if self.adapter.state.is_muted or self.adapter.state.volume == 0
+            else "volume"
+        )
 
     def _on_favorite_changed(self, is_favorite: bool) -> None:
         self.favorite_button.set_icon_name("favorite_filled" if is_favorite else "favorite")
@@ -483,7 +497,9 @@ class PlayerBar(QFrame):
         self.repeat_button.setToolTip(labels[self.adapter.state.repeat_mode])
 
     def _set_track_controls_enabled(self, enabled: bool) -> None:
-        transport_enabled = bool(enabled) and not self._read_only
+        transport_enabled = bool(enabled) and (
+            not self._read_only or self._transport_available
+        )
         for button in (
             self.shuffle_button,
             self.previous_button,
@@ -513,4 +529,4 @@ class PlayerBar(QFrame):
         self.adapter.seek(self.progress_slider.value())
 
     def _toggle_mute(self) -> None:
-        self.adapter.set_volume(0 if self.adapter.state.volume else 70)
+        self.adapter.set_muted(not self.adapter.state.is_muted)

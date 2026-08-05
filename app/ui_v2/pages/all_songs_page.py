@@ -45,8 +45,19 @@ class AllSongsPage(LibraryPage):
     def set_playback_enabled(self, enabled: bool) -> None:
         self.track_table.set_playback_enabled(bool(enabled))
         if hasattr(self, "collection_actions"):
-            self.collection_actions.play_button.setEnabled(bool(enabled) and bool(self.adapter.tracks()))
-            self.collection_actions.shuffle_button.setEnabled(bool(enabled) and bool(self.adapter.tracks()))
+            has_playable_track = any(
+                not track.is_missing
+                and not (
+                    self.adapter.collection.read_only and track.is_online
+                )
+                for track in self.adapter.tracks()
+            )
+            self.collection_actions.play_button.setEnabled(
+                bool(enabled) and has_playable_track
+            )
+            self.collection_actions.shuffle_button.setEnabled(
+                bool(enabled) and has_playable_track
+            )
             tip = "播放功能尚未接入真实模式" if not enabled else ""
             self.collection_actions.play_button.setToolTip(tip or "播放全部歌曲")
             self.collection_actions.shuffle_button.setToolTip(tip or "随机播放全部歌曲")

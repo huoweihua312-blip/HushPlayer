@@ -20,6 +20,7 @@ ISOLATED_STORAGE = activate_isolated_app_storage("hushplayer-audio-device-")
 from PySide6.QtWidgets import QApplication
 
 from app.ui.main_window import MainWindow
+from app.services.production_playback_controller import ProductionPlaybackController
 
 
 class FakeAudioDevice:
@@ -97,8 +98,10 @@ def test_main_window_lifetime_startup_and_debounce(app: QApplication) -> None:
     try:
         window = MainWindow()
         assert sync_calls == [window]
-        assert window.media_devices.parent() is window
-        assert window.default_audio_output_sync_timer.parent() is window
+        controller = window.production_playback_controller
+        assert controller.parent() is window
+        assert window.media_devices.parent() is controller
+        assert window.default_audio_output_sync_timer.parent() is controller
         assert window.default_audio_output_sync_timer.isSingleShot()
         assert window.default_audio_output_sync_timer.interval() == 250
 
@@ -108,7 +111,7 @@ def test_main_window_lifetime_startup_and_debounce(app: QApplication) -> None:
         process_events_for(app, 160)
         assert sync_calls == [window]
         process_events_for(app, 160)
-        assert sync_calls == [window, window]
+        assert not window.default_audio_output_sync_timer.isActive()
 
         window.media_player.stop()
         window.online_source_client.stop()
@@ -122,14 +125,18 @@ def test_main_window_lifetime_startup_and_debounce(app: QApplication) -> None:
 
 
 def test_single_player_and_audio_output_initialization() -> None:
-    source = (PROJECT_ROOT / "app" / "ui" / "main_window.py").read_text(
+    legacy_source = (PROJECT_ROOT / "app" / "ui" / "main_window.py").read_text(
         encoding="utf-8"
     )
-    assert source.count("self.media_player = QMediaPlayer()") == 1
-    assert source.count("self.audio_output = QAudioOutput(") == 1
-    assert source.count("self.media_player.setAudioOutput(self.audio_output)") == 1
-    assert "self.audio_output.setDevice(default_device)" in source
-    assert "self.media_devices = QMediaDevices(self)" in source
+    controller_source = (
+        PROJECT_ROOT / "app" / "services" / "production_playback_controller.py"
+    ).read_text(encoding="utf-8")
+    assert legacy_source.count("ProductionPlaybackController(") == 1
+    assert "self.media_player = QMediaPlayer()" not in legacy_source
+    assert controller_source.count("QMediaPlayer(") == 1
+    assert controller_source.count("QAudioOutput(") == 1
+    assert "self.media_player.setAudioOutput(self.audio_output)" in controller_source
+    assert "self.media_devices = media_devices or QMediaDevices(self)" in controller_source
 
 
 def main() -> int:

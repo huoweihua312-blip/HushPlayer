@@ -148,6 +148,9 @@ class MainWindow(QMainWindow):
         )
         self.playback_adapter.set_queue(self.library_collection.tracks())
         self.library_page = AllSongsPage(self.library_adapter, self._theme, self)
+        self.library_page.set_playback_enabled(
+            not is_real_library or self.playback_adapter.has_real_backend
+        )
         self.sidebar = NavigationSidebar(self.navigation_adapter, self._theme, self)
         self.router = ContentRouter(
             self.library_page,
@@ -162,7 +165,10 @@ class MainWindow(QMainWindow):
             self,
         )
         self.player_bar = PlayerBar(self.playback_adapter, self._theme, self)
-        self.player_bar.set_read_only(is_real_library)
+        self.player_bar.set_read_only(
+            is_real_library,
+            allow_playback=self.playback_adapter.has_real_backend,
+        )
         self.real_library_adapter = (
             RealLibraryAdapter(
                 self.library_collection,
@@ -184,6 +190,7 @@ class MainWindow(QMainWindow):
         self.set_theme(self._theme.mode)
         if self.real_library_adapter is not None:
             self.real_library_adapter.state_changed.connect(self._on_real_library_state)
+            self.real_library_adapter.data_loaded.connect(self._on_real_library_loaded)
             self.library_page.empty_state.action_requested.connect(
                 self.real_library_adapter.refresh
             )
@@ -250,6 +257,9 @@ class MainWindow(QMainWindow):
             self.settings_overlay.cancel_and_close()
         if self.real_library_adapter is not None:
             self.real_library_adapter.shutdown()
+        controller = self.playback_adapter.controller
+        if controller is not None:
+            controller.shutdown()
         super().closeEvent(event)
 
     def eventFilter(self, watched, event) -> bool:  # noqa: N802
@@ -382,6 +392,7 @@ class MainWindow(QMainWindow):
         self.playback_adapter.track_changed.connect(self._on_playback_track_changed)
         self.playback_adapter.track_changed.connect(self.lyrics_adapter.set_track)
         self.playback_adapter.position_changed.connect(self.lyrics_adapter.set_position)
+        self.lyrics_adapter.set_track(self.playback_adapter.state.current_track)
         self.lyrics_adapter.seek_requested.connect(self.playback_adapter.seek)
         self.player_bar.mock_action_requested.connect(self._on_player_bar_action)
         self.player_bar.track_open_requested.connect(self._open_now_playing)
@@ -597,6 +608,11 @@ class MainWindow(QMainWindow):
         self.playback_adapter.play_track(available[0].id)
 
     def _play_online_track(self, track) -> None:
+        if self.data_mode == "real" and getattr(track, "is_online", False):
+            self.playback_adapter.error_occurred.emit(
+                "Online playback is not available in this version."
+            )
+            return
         self.playback_adapter.set_queue((track,))
         self.playback_adapter.play_track(track.id)
 
@@ -632,6 +648,14 @@ class MainWindow(QMainWindow):
         self.library_page.set_view_state(
             "content" if state == "loaded" else "empty",
             detail,
+        )
+
+    def _on_real_library_loaded(self) -> None:
+        """Refresh the local playback projection after the read-only snapshot arrives."""
+
+        self.playback_adapter.set_queue(self.library_collection.tracks())
+        self.library_page.set_playback_enabled(
+            self.playback_adapter.has_real_backend
         )
 
     def _on_player_bar_action(self, action: str) -> None:

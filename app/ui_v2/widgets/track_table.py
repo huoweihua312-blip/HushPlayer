@@ -299,8 +299,17 @@ class TrackTable(QTableView):
             return None
         menu = QMenu(self)
         play_action = menu.addAction("播放")
-        play_action.setEnabled(not track.is_missing and self._playback_enabled)
-        if not self._playback_enabled:
+        is_unavailable_online = bool(
+            self.adapter.collection.read_only and track.is_online
+        )
+        play_action.setEnabled(
+            not track.is_missing
+            and self._playback_enabled
+            and not is_unavailable_online
+        )
+        if is_unavailable_online:
+            play_action.setToolTip("当前版本暂未接入在线播放")
+        elif not self._playback_enabled:
             play_action.setToolTip("真实模式尚未接入播放")
         play_action.triggered.connect(lambda: self._request_play(track))
         if not self.adapter.collection.read_only:
@@ -333,7 +342,11 @@ class TrackTable(QTableView):
 
     def _on_double_clicked(self, index: QModelIndex) -> None:
         track = self.model.track_at(index.row())
-        if track is not None and not track.is_missing:
+        if (
+            track is not None
+            and not track.is_missing
+            and not (self.adapter.collection.read_only and track.is_online)
+        ):
             self._request_play(track)
 
     def _request_play(self, track: Track) -> None:

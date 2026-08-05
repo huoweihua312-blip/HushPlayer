@@ -112,10 +112,13 @@ class BrowsePage(QWidget):
         collection: LibraryCollectionAdapter,
         theme: Theme,
         parent: QWidget | None = None,
+        *,
+        playback_enabled: bool = True,
     ) -> None:
         super().__init__(parent)
         self.collection = collection
         self._theme = theme
+        self._playback_enabled = bool(playback_enabled)
         self._reference_width = 1200
         self._content_safe_bottom = theme.metrics.player_bar_height + theme.metrics.content_safe_bottom
         self.setObjectName("browsePage")
@@ -201,7 +204,11 @@ class BrowsePage(QWidget):
 
     def refresh_cards(self) -> None:
         tracks = tuple(
-            track for track in self.collection.tracks() if not track.is_missing and not track.is_loading
+            track
+            for track in self.collection.tracks()
+            if not track.is_missing
+            and not track.is_loading
+            and not (self.collection.read_only and track.is_online)
         )
         maximum = self.target_card_count
         recent_added = self._take_distinct(
@@ -211,8 +218,8 @@ class BrowsePage(QWidget):
             sorted(tracks, key=lambda track: (self._recommendation_key(track), track.id)), maximum
         )
         recent_played = self._recent_tracks(tracks, maximum)
-        interactive = not self.collection.read_only
-        tooltip = "真实音乐库当前为只读预览" if not interactive else "播放"
+        interactive = self._playback_enabled
+        tooltip = "真实模式尚未接入播放" if not interactive else "播放"
         self.sections["recent_added"].set_tracks(
             recent_added, interactive=interactive, inactive_tooltip=tooltip
         )
@@ -258,6 +265,6 @@ class BrowsePage(QWidget):
         return hashlib.sha256(f"hushplayer:recent:{track.stable_id}".encode("utf-8")).digest()
 
     def _request_track_play(self, track: Track) -> None:
-        if self.collection.read_only:
+        if not self._playback_enabled:
             return
         self.track_play_requested.emit(self.collection.tracks(), track.id)

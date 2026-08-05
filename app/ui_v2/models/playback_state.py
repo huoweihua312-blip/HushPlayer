@@ -22,6 +22,7 @@ class PlaybackState:
     position_ms: int = 0
     duration_ms: int | None = None
     volume: int = 70
+    is_muted: bool = False
     is_favorite: bool = False
     shuffle_enabled: bool = False
     repeat_mode: RepeatMode = RepeatMode.ALL
