@@ -12,6 +12,8 @@ from PySide6.QtGui import QColor, QGuiApplication, QMouseEvent, QPalette
 from PySide6.QtWidgets import QApplication, QHBoxLayout, QMainWindow, QVBoxLayout, QWidget
 
 from app.core.app_paths import AppPaths
+from app.services.library_repository import LibraryRepository
+from app.services.remote_track_store import RemoteTrackStore
 from app.ui_v2.adapters.library_adapter import LibraryAdapter
 from app.ui_v2.adapters.library_collection import LibraryCollectionAdapter
 from app.ui_v2.adapters.lyrics_adapter import LyricsAdapter
@@ -42,26 +44,49 @@ class ShellPresentationMode(str, Enum):
     IMMERSIVE_FULLSCREEN = "immersive_fullscreen"
 
 
+def _resolve_data_mode(value: str | None) -> str:
+    if value is None:
+        return ui_v2_data_mode()
+    mode = str(value or "").strip().casefold()
+    if mode not in {"mock", "real"}:
+        raise ValueError(f"Unsupported UI V2 data mode: {value!r}")
+    return mode
+
+
 class MainWindow(QMainWindow):
     """Composes cached V2 pages around one mock or read-only library source."""
 
-    def __init__(self, parent: QWidget | None = None) -> None:
+    def __init__(
+        self,
+        parent: QWidget | None = None,
+        *,
+        data_mode: str | None = None,
+        settings_path: Path | str | None = None,
+        repository: LibraryRepository | None = None,
+        remote_tracks: RemoteTrackStore | None = None,
+        playback_adapter: PlaybackAdapter | None = None,
+        lyrics_adapter: LyricsAdapter | None = None,
+        force_dark_theme: bool = False,
+    ) -> None:
         super().__init__(parent)
         self.setWindowFlags(self.windowFlags() | Qt.WindowType.FramelessWindowHint)
-        self.data_mode = ui_v2_data_mode()
+        self.data_mode = _resolve_data_mode(data_mode)
+        self._force_dark_theme = bool(force_dark_theme)
         settings_override = os.environ.get("HUSHPLAYER_UI_V2_SETTINGS_PATH", "").strip()
-        if settings_override:
-            settings_path = Path(settings_override)
+        if settings_path is not None:
+            resolved_settings_path = Path(settings_path)
+        elif settings_override:
+            resolved_settings_path = Path(settings_override)
         elif self.data_mode != "real":
-            settings_path = (
+            resolved_settings_path = (
                 Path(tempfile.gettempdir())
                 / "HushPlayer-ui-v2"
                 / f"settings-{os.getpid()}.json"
             )
         else:
-            settings_path = AppPaths.resolve().data_dir / "settings.json"
+            resolved_settings_path = AppPaths.resolve().data_dir / "settings.json"
         self.settings_bridge = LegacySettingsBridge(
-            settings_path=settings_path,
+            settings_path=resolved_settings_path,
             apply_callback=self._apply_settings_snapshot,
             parent=self,
         )
@@ -70,7 +95,11 @@ class MainWindow(QMainWindow):
             self.settings_bridge.value(self._settings_snapshot, "appearance_mode")
             or "dark"
         )
-        self._theme = get_theme("light" if appearance_mode == "light" else "dark")
+        self._theme = get_theme(
+            "dark"
+            if self._force_dark_theme or appearance_mode != "light"
+            else "light"
+        )
         self._immersive_shell_active = False
         self._immersive_normal_geometry: QRect | None = None
         self._immersive_transparency_enabled = False
@@ -106,8 +135,12 @@ class MainWindow(QMainWindow):
             self,
             include_online=not is_real_library,
         )
-        self.playback_adapter = PlaybackAdapter(self)
-        self.lyrics_adapter = LyricsAdapter(self)
+        self.playback_adapter = playback_adapter or PlaybackAdapter(self)
+        if playback_adapter is not None and playback_adapter.parent() is None:
+            playback_adapter.setParent(self)
+        self.lyrics_adapter = lyrics_adapter or LyricsAdapter(self)
+        if lyrics_adapter is not None and lyrics_adapter.parent() is None:
+            lyrics_adapter.setParent(self)
         self.immersive_lyrics_options = ImmersiveLyricsOptions(theme=self._theme.mode)
         self._apply_settings_values(self._settings_snapshot.to_dict())
         self.playback_adapter.set_volume(
@@ -135,6 +168,8 @@ class MainWindow(QMainWindow):
                 self.library_collection,
                 self.playlist_adapter,
                 self,
+                repository=repository,
+                remote_tracks=remote_tracks,
             )
             if is_real_library
             else None
@@ -376,7 +411,10 @@ class MainWindow(QMainWindow):
         """Apply persisted settings to the small set of V2 runtime models."""
 
         appearance = str(values.get("appearance_mode", "dark"))
-        self.immersive_lyrics_options.theme = "light" if appearance == "light" else "dark"
+        resolved_appearance = "dark" if self._force_dark_theme else appearance
+        self.immersive_lyrics_options.theme = (
+            "light" if resolved_appearance == "light" else "dark"
+        )
         background = {
             "cover": "artwork",
             "default": "solid",
@@ -403,7 +441,9 @@ class MainWindow(QMainWindow):
         except (TypeError, ValueError):
             self.playback_adapter.set_volume(65)
         mode = str(values.get("appearance_mode", "dark"))
-        self.set_theme("light" if mode == "light" else "dark")
+        self.set_theme(
+            "dark" if self._force_dark_theme or mode != "light" else "light"
+        )
         page = self.router._pages.get("immersive_lyrics")
         if page is not None and hasattr(page, "apply_options"):
             page.apply_options(self.immersive_lyrics_options)
@@ -604,6 +644,4 @@ class MainWindow(QMainWindow):
                 page.show_queue_panel()
 
     def _open_now_playing(self) -> None:
-        if self.playback_adapter.state.current_track is None:
-            return
         self.navigation_adapter.set_route("immersive_now_playing")

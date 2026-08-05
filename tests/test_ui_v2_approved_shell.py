@@ -155,7 +155,7 @@ class ApprovedShellMigrationTests(unittest.TestCase):
             "library": QSize(18, 18),
             "browse": QSize(18, 18),
             "liked": QSize(18, 18),
-            "settings": QSize(17, 17),
+            "settings": QSize(18, 18),
         }
         for route_id, item in sidebar._items.items():
             self.assertEqual(item.height(), 42)

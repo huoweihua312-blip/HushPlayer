@@ -191,7 +191,13 @@ class SliderSpinControl(QWidget):
     def set_theme(self, theme: Theme) -> None:
         self._theme = theme
         self.slider.setStyleSheet(f"QSlider::groove:horizontal {{ height: 4px; border-radius: 2px; background: {theme.colors.border}; }} QSlider::sub-page:horizontal {{ background: {theme.colors.accent}; border-radius: 2px; }} QSlider::handle:horizontal {{ width: 14px; margin: -5px 0; border-radius: 7px; background: {theme.colors.accent}; }}")
-        self.spin.setStyleSheet(f"min-height: {theme.metrics.control_height - 4}px; min-width: 82px; padding: 0 6px; border: 1px solid {theme.colors.border}; border-radius: {theme.metrics.radius_sm}px; background: {theme.colors.input_background}; color: {theme.colors.primary_text};")
+        self.spin.setStyleSheet(
+            f"QSpinBox {{ min-height: {theme.metrics.control_height - 4}px; min-width: 82px; padding: 0 6px; border: 1px solid {theme.colors.border}; border-radius: {theme.metrics.radius_sm}px; background: {theme.colors.input_background}; color: {theme.colors.primary_text}; }} "
+            f"QSpinBox:hover {{ border-color: {theme.colors.border_strong}; }} "
+            f"QSpinBox:focus {{ border: 1px solid {theme.colors.accent}; }} "
+            "QSpinBox::up-button, QSpinBox::down-button { width: 0; border: 0; } "
+            "QSpinBox::up-arrow, QSpinBox::down-arrow { image: none; width: 0; height: 0; }"
+        )
 
 
 class SettingsControlFactory:

@@ -2,7 +2,51 @@
 
 from __future__ import annotations
 
+from PySide6.QtGui import QColor, QPalette
+
 from app.ui_v2.theme.tokens import Theme
+
+
+def build_application_palette(theme: Theme) -> QPalette:
+    """Build the V2 palette used by native Qt controls and popup surfaces."""
+
+    colors = theme.colors
+    palette = QPalette()
+    roles = {
+        QPalette.ColorRole.Window: colors.window_background,
+        QPalette.ColorRole.WindowText: colors.text_primary,
+        QPalette.ColorRole.Base: colors.input_background,
+        QPalette.ColorRole.AlternateBase: colors.surface_secondary,
+        QPalette.ColorRole.Text: colors.text_primary,
+        QPalette.ColorRole.Button: colors.surface_secondary,
+        QPalette.ColorRole.ButtonText: colors.text_secondary,
+        QPalette.ColorRole.Highlight: colors.accent,
+        QPalette.ColorRole.HighlightedText: colors.text_primary,
+        QPalette.ColorRole.ToolTipBase: colors.surface_elevated,
+        QPalette.ColorRole.ToolTipText: colors.text_primary,
+        QPalette.ColorRole.PlaceholderText: colors.text_tertiary,
+        QPalette.ColorRole.Link: colors.accent,
+    }
+    for role, value in roles.items():
+        palette.setColor(QPalette.ColorGroup.All, role, QColor(value))
+    for role in (
+        QPalette.ColorRole.WindowText,
+        QPalette.ColorRole.Text,
+        QPalette.ColorRole.ButtonText,
+        QPalette.ColorRole.PlaceholderText,
+    ):
+        palette.setColor(QPalette.ColorGroup.Disabled, role, QColor(colors.text_disabled))
+    palette.setColor(
+        QPalette.ColorGroup.Disabled,
+        QPalette.ColorRole.Button,
+        QColor(colors.surface_pressed),
+    )
+    palette.setColor(
+        QPalette.ColorGroup.Disabled,
+        QPalette.ColorRole.Base,
+        QColor(colors.window_background),
+    )
+    return palette
 
 
 def build_stylesheet(theme: Theme) -> str:

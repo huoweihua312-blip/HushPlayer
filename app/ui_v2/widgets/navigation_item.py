@@ -7,7 +7,7 @@ from PySide6.QtGui import QContextMenuEvent, QIcon
 from PySide6.QtWidgets import QSizePolicy, QToolButton, QWidget
 
 from app.ui_v2.models.navigation_item import NavigationItem as NavigationValue
-from app.ui_v2.theme.icons import icon
+from app.ui_v2.theme.icons import fluent_settings_interactive_icon, icon
 from app.ui_v2.theme.tokens import Theme
 
 
@@ -16,7 +16,7 @@ _NAVIGATION_ICON_SIZES = {
     "browse": 18,
     "favorite": 18,
     "playlist_more": 17,
-    "settings": 17,
+    "settings": 18,
 }
 
 
@@ -96,11 +96,12 @@ class NavigationItem(QToolButton):
     def _refresh_visuals(self) -> None:
         c = self._theme.colors
         icon_state = "selected" if self._selected else "normal"
-        self.setIcon(
-            self._custom_icon
-            if self._custom_icon is not None
-            else icon(self.item.icon_name, self._theme, icon_state)
-        )
+        if self._custom_icon is not None:
+            self.setIcon(self._custom_icon)
+        elif self.item.icon_name == "settings":
+            self.setIcon(fluent_settings_interactive_icon("general", self._theme, 18))
+        else:
+            self.setIcon(icon(self.item.icon_name, self._theme, icon_state))
         icon_size = 18 if self._custom_icon is not None else _NAVIGATION_ICON_SIZES.get(
             self.item.icon_name, 17
         )

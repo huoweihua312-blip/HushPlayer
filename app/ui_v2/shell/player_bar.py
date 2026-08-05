@@ -147,6 +147,7 @@ class PlayerBar(QFrame):
         self._read_only = bool(read_only)
         self.favorite_button.setVisible(not self._read_only)
         self.favorite_button.setEnabled(not self._read_only)
+        self._set_track_controls_enabled(self.adapter.state.current_track is not None)
 
     def _build_layout(self) -> None:
         # TrackRegion spans the entire bar and owns its own visual centre.
@@ -482,13 +483,24 @@ class PlayerBar(QFrame):
         self.repeat_button.setToolTip(labels[self.adapter.state.repeat_mode])
 
     def _set_track_controls_enabled(self, enabled: bool) -> None:
+        transport_enabled = bool(enabled) and not self._read_only
         for button in (
-            self.favorite_button, self.shuffle_button, self.previous_button,
-            self.play_button, self.next_button, self.repeat_button,
-            self.lyrics_button, self.queue_button, self.more_button,
+            self.shuffle_button,
+            self.previous_button,
+            self.play_button,
+            self.next_button,
+            self.repeat_button,
         ):
-            button.setEnabled(enabled and not (self._read_only and button is self.favorite_button))
-        self.progress_slider.setEnabled(enabled and (self.adapter.state.duration_ms or 0) > 0)
+            button.setEnabled(transport_enabled)
+        # Real read-only mode still needs to expose page entry points while no
+        # playback capability has been connected yet.
+        navigation_enabled = bool(enabled) or self._read_only
+        for button in (self.lyrics_button, self.queue_button, self.more_button):
+            button.setEnabled(navigation_enabled)
+        self.favorite_button.setEnabled(bool(enabled) and not self._read_only)
+        self.progress_slider.setEnabled(
+            transport_enabled and (self.adapter.state.duration_ms or 0) > 0
+        )
 
     def _on_seek_started(self) -> None:
         self._seeking = True
