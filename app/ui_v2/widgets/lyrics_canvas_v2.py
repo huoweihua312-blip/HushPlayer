@@ -12,6 +12,7 @@ from PySide6.QtWidgets import QToolButton, QWidget
 
 from app.ui_v2.models.lyric_line import LyricLine
 from app.ui_v2.models.lyrics_document import LyricsDocument
+from app.ui_v2.theme.icons import FLUENT_IMMERSIVE_ASSETS, fluent_immersive_interactive_icon
 from app.ui_v2.theme.tokens import Theme
 
 
@@ -19,6 +20,11 @@ def _with_alpha(value: str, alpha: int) -> QColor:
     color = QColor(value)
     color.setAlpha(max(0, min(255, alpha)))
     return color
+
+
+def _rgba(value: str, alpha: float) -> str:
+    color = QColor(value)
+    return f"rgba({color.red()}, {color.green()}, {color.blue()}, {alpha:.2f})"
 
 
 @dataclass(frozen=True, slots=True)
@@ -121,6 +127,11 @@ class LyricsCanvasV2(QWidget):
         self.return_button = QToolButton(self)
         self.return_button.setText("回到当前歌词")
         self.return_button.setObjectName("returnToCurrentLyrics")
+        self.return_button.setIconSize(QSize(18, 18))
+        self.return_button.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
+        self.return_button.setProperty("fluentIconFamily", "fluent_immersive")
+        self.return_button.setProperty("fluentIconName", "return_current")
+        self.return_button.setProperty("fluentIconFile", FLUENT_IMMERSIVE_ASSETS["return_current"])
         self.return_button.setVisible(False)
         self.return_button.clicked.connect(self.return_to_current)
         self.set_theme(theme)
@@ -208,10 +219,21 @@ class LyricsCanvasV2(QWidget):
 
     def set_theme(self, theme: Theme) -> None:
         self._theme = theme
+        self.return_button.setIcon(fluent_immersive_interactive_icon("return_current", theme, 18))
         self.return_button.setStyleSheet(
-            "QToolButton { border: 0; border-radius: 6px; padding: 6px 9px; "
-            f"background: {theme.colors.elevated_background}; color: {theme.colors.secondary_text}; }}"
-            f"QToolButton:hover {{ background: {theme.colors.hover_background}; color: {theme.colors.primary_text}; }}"
+            "QToolButton#returnToCurrentLyrics {"
+            "border: 1px solid transparent; border-radius: 11px; background: transparent; "
+            f"padding: 6px 14px; min-height: 36px; color: {_rgba(theme.colors.text_primary, 0.88)};"
+            "}"
+            "QToolButton#returnToCurrentLyrics:hover {"
+            f"background: {_rgba(theme.colors.text_primary, 0.08)}; border-color: transparent; color: {theme.colors.text_primary};"
+            "}"
+            "QToolButton#returnToCurrentLyrics:pressed {"
+            f"background: {_rgba(theme.colors.text_primary, 0.13)}; border-color: transparent;"
+            "}"
+            "QToolButton#returnToCurrentLyrics:focus {"
+            f"background: transparent; border: 1px solid {_rgba(theme.colors.focus_ring, 0.55)};"
+            "}"
         )
         self.update()
 

@@ -163,6 +163,12 @@ class MainWindow(QMainWindow):
         return self._presentation_mode
 
     @property
+    def immersive_shell(self):
+        """Return the one cached immersive shell, when it has been created."""
+
+        return self.router._pages.get("immersive_lyrics") if hasattr(self, "router") else None
+
+    @property
     def transparency_debug_state(self) -> dict[str, object]:
         return {
             "main_window_id": id(self),
@@ -343,6 +349,7 @@ class MainWindow(QMainWindow):
         self.playback_adapter.position_changed.connect(self.lyrics_adapter.set_position)
         self.lyrics_adapter.seek_requested.connect(self.playback_adapter.seek)
         self.player_bar.mock_action_requested.connect(self._on_player_bar_action)
+        self.player_bar.track_open_requested.connect(self._open_now_playing)
         self.library_collection.track_updated.connect(self.playback_adapter.update_track)
         self.library_collection.favorite_changed.connect(self._sync_favorite_from_library)
         self.playback_adapter.favorite_changed.connect(self._sync_favorite_from_player)
@@ -427,12 +434,14 @@ class MainWindow(QMainWindow):
         self._apply_root_stylesheet()
 
     def _sync_immersive_shell(self, route_id: str) -> None:
-        immersive = route_id == "immersive_lyrics"
+        immersive = route_id in {"immersive_lyrics", "immersive_now_playing"}
         if immersive == self._immersive_shell_active:
             return
         self._immersive_shell_active = immersive
         if immersive:
             page = self.router._pages.get("immersive_lyrics")
+            if page is not None and hasattr(page, "set_read_only"):
+                page.set_read_only(self.real_library_adapter is not None)
             self._immersive_transparency_enabled = bool(
                 page is not None and getattr(page, "background_mode", "artwork") == "transparent"
             )
@@ -587,4 +596,14 @@ class MainWindow(QMainWindow):
 
     def _on_player_bar_action(self, action: str) -> None:
         if action == "lyrics":
-            self.navigation_adapter.set_route("lyrics")
+            self.navigation_adapter.set_route("immersive_lyrics")
+        elif action == "queue":
+            self.navigation_adapter.set_route("immersive_now_playing")
+            page = self.router._pages.get("immersive_lyrics")
+            if page is not None and hasattr(page, "show_queue_panel"):
+                page.show_queue_panel()
+
+    def _open_now_playing(self) -> None:
+        if self.playback_adapter.state.current_track is None:
+            return
+        self.navigation_adapter.set_route("immersive_now_playing")

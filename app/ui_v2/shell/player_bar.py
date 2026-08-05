@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from PySide6.QtCore import QSignalBlocker, QRectF, Qt, Signal
+from PySide6.QtCore import QEvent, QSignalBlocker, QRectF, Qt, Signal
 from PySide6.QtGui import QColor, QPainter
 from PySide6.QtWidgets import (
     QFrame,
@@ -75,6 +75,7 @@ class PlayerBar(QFrame):
     """One stable 102px player with full-height side regions and a two-row centre."""
 
     mock_action_requested = Signal(str)
+    track_open_requested = Signal()
 
     def __init__(
         self,
@@ -375,6 +376,16 @@ class PlayerBar(QFrame):
             self.play_button, self.next_button, self.repeat_button,
             self.lyrics_button, self.queue_button, self.volume_button, self.more_button,
         )
+        for widget in (self.track_inner, self.artwork, self.title_label, self.artist_label, self.metadata):
+            widget.installEventFilter(self)
+            widget.setCursor(Qt.CursorShape.PointingHandCursor)
+
+    def eventFilter(self, watched, event) -> bool:  # noqa: N802
+        if watched in (self.track_inner, self.artwork, self.title_label, self.artist_label, self.metadata):
+            if event.type() == QEvent.Type.MouseButtonRelease and event.button() == Qt.MouseButton.LeftButton:
+                self.track_open_requested.emit()
+                return True
+        return super().eventFilter(watched, event)
 
     def _constrain_side_inner_widths(self) -> None:
         """Keep side content at its intrinsic width inside its grid column."""

@@ -4,9 +4,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from PySide6.QtCore import QEvent, QPoint, QRect, Qt, QTimer, Signal
+from PySide6.QtCore import QEvent, QPoint, QRect, QSize, Qt, QTimer, Signal
 from PySide6.QtGui import QAction
-from PySide6.QtWidgets import QBoxLayout, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QBoxLayout, QFrame, QHBoxLayout, QSlider, QStackedWidget, QToolButton, QVBoxLayout, QWidget
 
 from app.ui_v2.adapters.lyrics_adapter import LyricsAdapter
 from app.ui_v2.adapters.playback_adapter import PlaybackAdapter
@@ -18,7 +18,11 @@ from app.ui_v2.widgets.artwork_atmosphere import ArtworkAtmosphere, ReadabilityO
 from app.ui_v2.widgets.immersive_controls import ImmersiveControls
 from app.ui_v2.widgets.immersive_settings_panel import ImmersiveSettingsPanel
 from app.ui_v2.widgets.immersive_track_identity import ImmersiveTrackIdentity
+from app.ui_v2.widgets.immersive_queue_panel import ImmersiveQueuePanel
 from app.ui_v2.widgets.lyrics_canvas_v2 import LyricsCanvasV2
+from app.ui_v2.widgets.lyrics_state_view import LyricsStateView
+from app.ui_v2.pages.now_playing_page import NowPlayingPage
+from app.ui_v2.theme.icons import FLUENT_IMMERSIVE_ASSETS, fluent_immersive_interactive_icon, icon
 
 
 @dataclass(slots=True)
@@ -31,6 +35,35 @@ class _LyricProtection:
     is_row_bound: bool = False
 
 
+class _ImmersiveHeader(QFrame):
+    """Drag surface for the frameless host while normal chrome is hidden."""
+
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self._drag_origin: QPoint | None = None
+        self._window_origin: QPoint | None = None
+
+    def mousePressEvent(self, event) -> None:  # noqa: N802
+        if event.button() == Qt.MouseButton.LeftButton and not self.window().isMaximized():
+            self._drag_origin = event.globalPosition().toPoint()
+            self._window_origin = self.window().pos()
+            event.accept()
+            return
+        super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event) -> None:  # noqa: N802
+        if self._drag_origin is not None and self._window_origin is not None:
+            self.window().move(self._window_origin + event.globalPosition().toPoint() - self._drag_origin)
+            event.accept()
+            return
+        super().mouseMoveEvent(event)
+
+    def mouseReleaseEvent(self, event) -> None:  # noqa: N802
+        self._drag_origin = None
+        self._window_origin = None
+        super().mouseReleaseEvent(event)
+
+
 class ImmersiveLyricsPage(QWidget):
     """A cached V4 immersive surface, never a second top-level window."""
 
@@ -38,6 +71,7 @@ class ImmersiveLyricsPage(QWidget):
     immersive_exit_requested = Signal()
     transparency_mode_changed = Signal(bool)
     options_changed = Signal(object)
+    mode_changed = Signal(str)
 
     def __init__(
         self,
@@ -61,6 +95,7 @@ class ImmersiveLyricsPage(QWidget):
         self._applying_options = False
         self._control_surface_opacity = self.options.control_surface_opacity
         self._text_protection = self.options.text_protection_mode
+        self._mode = "lyrics"
         self.lyric_protection = _LyricProtection(
             self.options.lyrics_protection_enabled, self.options.protection_strength
         )
@@ -68,6 +103,7 @@ class ImmersiveLyricsPage(QWidget):
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         self.background = ArtworkAtmosphere(theme, self)
         self.readability_overlay = ReadabilityOverlay(theme, self)
+        self.header = self._build_header(theme)
         self.content = QWidget(self)
         self.content.setObjectName("immersiveLyricsContent")
         self.content.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
@@ -86,12 +122,25 @@ class ImmersiveLyricsPage(QWidget):
         self.canvas = LyricsCanvasV2(theme, self.content)
         self.canvas.set_mode("immersive")
         self.lyrics_view = self.canvas  # Public semantic alias: one visual surface, no scroll list.
+        self.lyrics_state_view = LyricsStateView(theme, self.content)
+        self.lyrics_state_view.hide()
+        self.lyrics_state_view.retry_requested.connect(self.lyrics_adapter.retry)
+        self.lyrics_state_view.source_button.hide()
         self._content_layout = QBoxLayout(QBoxLayout.Direction.LeftToRight, self.content)
         self._content_layout.setContentsMargins(0, 0, 0, 0)
         self._content_layout.setSpacing(54)
         self._content_layout.addWidget(self.identity_column, 36)
         self._content_layout.addWidget(self.canvas, 64)
+        self.content_stack = QStackedWidget(self)
+        self.content.setParent(self.content_stack)
+        self.content_stack.addWidget(self.content)
+        self.now_playing_page = NowPlayingPage(playback, theme, self.content_stack)
+        self.content_stack.addWidget(self.now_playing_page)
+        self.lyrics_page = self.content
+        self.now_playing = self.now_playing_page
         self.settings_panel = ImmersiveSettingsPanel(theme, self)
+        self.queue_panel = ImmersiveQueuePanel(playback, theme, self)
+        self.queue_panel.hide()
         self.settings_panel.hide()
         self._controls_hide_timer = QTimer(self)
         self._controls_hide_timer.setSingleShot(True)
@@ -101,9 +150,149 @@ class ImmersiveLyricsPage(QWidget):
         self._connect_adapters()
         self.apply_options()
         self._on_document_changed(lyrics.document)
+        self._on_state_changed(lyrics.state)
         self._on_active_line_changed(lyrics.active_line)
         self._on_display_options_changed(lyrics.display_options)
         self._apply_responsive_layout()
+
+    def _build_header(self, theme: Theme) -> QFrame:
+        header = _ImmersiveHeader(self)
+        header.setObjectName("immersiveHeader")
+        header.setFixedHeight(60)
+        layout = QHBoxLayout(header)
+        layout.setContentsMargins(14, 10, 14, 8)
+        layout.setSpacing(6)
+        self.header_back_button = self._header_button("back", "返回普通页面")
+        self.header_now_playing = self._header_mode_button("正在播放", "正在播放", "now_playing", 112)
+        self.header_lyrics = self._header_mode_button("歌词", "歌词", "lyrics", 82)
+        self.header_back_button.clicked.connect(self.immersive_exit_requested)
+        self.header_now_playing.clicked.connect(lambda: self.mode_changed.emit("now_playing"))
+        self.header_lyrics.clicked.connect(lambda: self.mode_changed.emit("lyrics"))
+        layout.addWidget(self.header_back_button)
+        layout.addStretch(1)
+        layout.addWidget(self.header_now_playing)
+        layout.addSpacing(24)
+        layout.addWidget(self.header_lyrics)
+        self._window_buttons: list[QToolButton] = []
+        for name, tip, callback in (
+            ("window_minimize", "最小化", lambda: self.window().showMinimized()),
+            ("window_maximize", "最大化", self._toggle_host_maximized),
+            ("window_close", "关闭", lambda: self.window().close()),
+        ):
+            button = self._header_button(name, tip)
+            button.clicked.connect(callback)
+            self._window_buttons.append(button)
+            layout.addWidget(button)
+        self.header = header
+        self._style_header(theme)
+        return header
+
+    def _header_button(self, name: str, tooltip: str) -> QToolButton:
+        button = QToolButton(self)
+        button.setIcon(icon(name, self._theme))
+        button.setIconSize(QSize(18, 18))
+        button.setFixedSize(36, 36)
+        button.setToolTip(tooltip)
+        button.setCursor(Qt.CursorShape.PointingHandCursor)
+        return button
+
+    def _header_mode_button(self, text: str, tooltip: str, icon_name: str, width: int) -> QToolButton:
+        button = QToolButton(self)
+        button.setObjectName("immersiveModeButton")
+        button.setText(text)
+        button.setIcon(fluent_immersive_interactive_icon(icon_name, self._theme, 18))
+        button.setIconSize(QSize(18, 18))
+        button.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
+        button.setCheckable(True)
+        button.setFixedSize(width, 36)
+        button.setToolTip(tooltip)
+        button.setProperty("fluentIconFamily", "fluent_immersive")
+        button.setProperty("fluentIconName", icon_name)
+        button.setProperty("fluentIconFile", FLUENT_IMMERSIVE_ASSETS[icon_name])
+        button.setCursor(Qt.CursorShape.PointingHandCursor)
+        return button
+
+    def _style_header(self, theme: Theme) -> None:
+        colors = theme.colors
+        self.header.setStyleSheet(
+            f"QFrame#immersiveHeader {{ background: transparent; }}"
+            f"QToolButton {{ border: 0; border-radius: 18px; background: transparent; }}"
+            f"QToolButton:hover {{ background: {colors.surface_hover}; }}"
+            f"QToolButton#immersiveModeButton {{ border: 0; border-bottom: 2px solid transparent; "
+            f"border-radius: 0px; background: transparent; padding: 0 0 3px 0; color: {colors.text_secondary}; }}"
+            f"QToolButton#immersiveModeButton:hover {{ background: transparent; color: {colors.text_primary}; }}"
+            f"QToolButton#immersiveModeButton:checked {{ background: transparent; color: {colors.text_primary}; "
+            f"border-bottom: 2px solid {colors.accent}; }}"
+            f"QToolButton#immersiveModeButton:pressed {{ background: transparent; }}"
+            f"QToolButton#immersiveModeButton:focus {{ background: transparent; border-bottom: 2px solid {colors.focus_ring}; }}"
+        )
+        for name, button in (("back", self.header_back_button), ("window_minimize", self._window_buttons[0]), ("window_maximize", self._window_buttons[1]), ("window_close", self._window_buttons[2])):
+            button.setIcon(icon(name, theme, "normal"))
+        self.header_now_playing.setIcon(fluent_immersive_interactive_icon("now_playing", theme, 18))
+        self.header_lyrics.setIcon(fluent_immersive_interactive_icon("lyrics", theme, 18))
+        self._sync_mode_buttons()
+
+    def _toggle_host_maximized(self) -> None:
+        window = self.window()
+        window.showNormal() if window.isMaximized() else window.showMaximized()
+
+    def set_mode(self, mode: str) -> None:
+        mode = "now_playing" if str(mode) in {"now_playing", "now-playing"} else "lyrics"
+        self._mode = mode
+        self._place_controls_for_mode()
+        self.content_stack.setCurrentWidget(self.now_playing_page if mode == "now_playing" else self.content)
+        self._sync_mode_buttons()
+        self._on_state_changed(self.lyrics_adapter.state)
+        self._apply_responsive_layout()
+
+    def _place_controls_for_mode(self) -> None:
+        """Keep one control panel, moving it between the two content layouts."""
+
+        if self._mode == "now_playing":
+            self._identity_layout.removeWidget(self.controls)
+            self.controls.setParent(self)
+            self.controls.show()
+            self.controls.raise_()
+            return
+        self.controls.setParent(self.identity_column)
+        if self._identity_layout.indexOf(self.controls) < 0:
+            self._identity_layout.insertWidget(2, self.controls)
+        self.controls.show()
+
+    @property
+    def mode(self) -> str:
+        return self._mode
+
+    def _sync_mode_buttons(self) -> None:
+        if not hasattr(self, "header_now_playing"):
+            return
+        self.header_now_playing.setChecked(self._mode == "now_playing")
+        self.header_lyrics.setChecked(self._mode == "lyrics")
+
+    def toggle_queue_panel(self) -> None:
+        if self.queue_panel.isVisible():
+            self.hide_queue_panel()
+        else:
+            self.show_queue_panel()
+
+    def show_queue_panel(self) -> None:
+        self.queue_panel.show()
+        self.queue_panel.raise_()
+        self._apply_responsive_layout()
+
+    def hide_queue_panel(self) -> None:
+        self.queue_panel.hide()
+        self._apply_responsive_layout()
+
+    @property
+    def queue_panel_visible(self) -> bool:
+        return self.queue_panel.isVisible()
+
+    @property
+    def queue_model(self):
+        """Compatibility view exposing the single adapter-owned queue."""
+
+        return self.playback_adapter
 
     @property
     def document(self) -> LyricsDocument | None:
@@ -147,8 +336,9 @@ class ImmersiveLyricsPage(QWidget):
 
     def _connect_components(self) -> None:
         self.controls.bind_playback(self.playback_adapter)
-        self.controls.back_button.clicked.connect(self.immersive_exit_requested)
         self.controls.more_button.clicked.connect(self.toggle_settings_panel)
+        self.controls.queue_requested.connect(self.show_queue_panel)
+        self.queue_panel.closed.connect(self.hide_queue_panel)
         self.controls.interaction_started.connect(self._begin_controls_interaction)
         self.controls.interaction_finished.connect(self._end_controls_interaction)
         self.canvas.seek_requested.connect(self.lyrics_adapter.seek_to_line)
@@ -164,6 +354,7 @@ class ImmersiveLyricsPage(QWidget):
 
     def _connect_adapters(self) -> None:
         self.lyrics_adapter.document_changed.connect(self._on_document_changed)
+        self.lyrics_adapter.state_changed.connect(self._on_state_changed)
         self.lyrics_adapter.active_line_changed.connect(self._on_active_line_changed)
         self.lyrics_adapter.active_segment_changed.connect(self._on_active_segment_changed)
         self.lyrics_adapter.display_options_changed.connect(self._on_display_options_changed)
@@ -171,11 +362,15 @@ class ImmersiveLyricsPage(QWidget):
 
     def set_theme(self, theme: Theme) -> None:
         self._theme = theme
+        self._style_header(theme)
         self.background.set_theme(theme)
         self.readability_overlay.set_theme(theme)
         self.identity.set_theme(theme)
         self.canvas.set_theme(theme)
+        self.lyrics_state_view.set_theme(theme)
         self.controls.set_theme(theme)
+        self.now_playing_page.set_theme(theme)
+        self.queue_panel.set_theme(theme)
         self.settings_panel.set_theme(theme)
         self.options.theme = theme.mode
         self._sync_options()
@@ -185,6 +380,9 @@ class ImmersiveLyricsPage(QWidget):
 
     def set_responsive_reference_width(self, width: int) -> None:
         self._apply_responsive_layout(width)
+
+    def set_read_only(self, read_only: bool) -> None:
+        self.now_playing_page.set_read_only(read_only)
 
     def set_translation_visible(self, visible: bool) -> None:
         if bool(self.lyrics_adapter.display_options["translation"]) != bool(visible):
@@ -330,6 +528,7 @@ class ImmersiveLyricsPage(QWidget):
         if not active:
             self._controls_hide_timer.stop()
             self.settings_panel.hide()
+            self.queue_panel.hide()
         else:
             self.wake_controls()
 
@@ -380,6 +579,15 @@ class ImmersiveLyricsPage(QWidget):
         self.canvas.set_document(document)
         self.identity.set_track(self.lyrics_adapter.track)
         self.background.set_track(self.lyrics_adapter.track)
+
+    def _on_state_changed(self, state) -> None:
+        ready = state.phase == "ready"
+        self.lyrics_state_view.set_state(state)
+        self.lyrics_state_view.source_button.hide()
+        self.canvas.setVisible(ready or self._mode == "now_playing")
+        self.lyrics_state_view.setVisible(not ready and self._mode == "lyrics")
+        if self.lyrics_state_view.isVisible():
+            self.lyrics_state_view.raise_()
 
     def _on_active_line_changed(self, line: LyricLine | None) -> None:
         self.canvas.set_active_line(line)
@@ -484,7 +692,7 @@ class ImmersiveLyricsPage(QWidget):
         panel_open = self.settings_panel.isVisible()
         panel_width = min(380, max(320, self.settings_panel.maximumWidth()))
         panel_gap = 30
-        top_margin = 26 if height > 500 else 14
+        top_margin = 72 if height > 500 else 58
         # Controls now live below the left identity block, so the lyric canvas
         # no longer reserves a bottom transport strip.
         content_height = max(220, height - top_margin * 2)
@@ -502,10 +710,10 @@ class ImmersiveLyricsPage(QWidget):
             )
             # Preserve the page and its children but avoid any hidden/cropped
             # lyric surface behind a compact settings sheet.
-            self.content.setGeometry(0, 0, 0, 0)
-            self.content.setVisible(False)
+            self.content_stack.setGeometry(0, 0, 0, 0)
+            self.content_stack.setVisible(False)
         else:
-            self.content.setVisible(True)
+            self.content_stack.setVisible(True)
             if panel_open:
                 content_area_left = margins
                 content_area_right = max(content_area_left + 480, width - panel_width - panel_gap)
@@ -527,7 +735,17 @@ class ImmersiveLyricsPage(QWidget):
                     panel_width,
                     min(max(300, height - 72), 620),
                 )
-            self.content.setGeometry(content_x, top_margin, content_width, content_height)
+            self.content_stack.setGeometry(content_x, top_margin, content_width, content_height)
+            self.content.setGeometry(self.content_stack.rect())
+        if self._mode == "now_playing":
+            control_width = min(820, max(320, width - 48))
+            control_height = max(126, self.controls.sizeHint().height())
+            self.controls.setGeometry(
+                max(24, (width - control_width) // 2),
+                max(72, height - control_height - 18),
+                control_width,
+                control_height,
+            )
         self._content_layout.setDirection(direction)
         self._content_layout.setSpacing(spacing)
         if compact:
@@ -538,18 +756,29 @@ class ImmersiveLyricsPage(QWidget):
             self._content_layout.setStretch(0, 36)
             self._content_layout.setStretch(1, 64)
         self._content_layout.activate()
-        layout_reference_width = self.content.width() if self.content.isVisible() else width
-        identity_width = self.identity_column.width() if self.content.isVisible() else layout_reference_width
+        self.lyrics_state_view.setGeometry(self.canvas.geometry())
+        self._on_state_changed(self.lyrics_adapter.state)
+        layout_reference_width = self.content_stack.width() if self.content_stack.isVisible() else width
+        identity_width = self.identity_column.width() if self.content_stack.isVisible() else layout_reference_width
         self.identity.apply_responsive_layout(identity_width, compact, self.options.artwork_size)
+        self.now_playing_page.set_responsive_reference_width(width, height)
         self.canvas.set_responsive_scale(canvas_scale)
-        if self.content.isVisible():
-            identity_allowance = 40 if compact else max(260, round(self.content.width() * 0.36))
+        if self.content_stack.isVisible() and self._mode == "lyrics":
+            identity_allowance = 40 if compact else max(260, round(self.content_stack.width() * 0.36))
             max_text_width = min(
                 760 if self._layout_band == "ultra" else self.options.lyrics_max_width,
-                max(360, self.content.width() - identity_allowance - spacing - 28),
+                max(360, self.content_stack.width() - identity_allowance - spacing - 28),
             )
             self.canvas.set_max_text_width(max_text_width)
         self.controls.set_compact(width < 900)
+        self.header.setGeometry(0, 0, width, 60 if height > 500 else 54)
+        self.header.raise_()
+        if self._mode == "now_playing":
+            self.controls.raise_()
+        if self.queue_panel.isVisible():
+            panel_width = min(390, max(300, round(width * 0.34)))
+            self.queue_panel.setGeometry(max(12, width - panel_width - 18), 70, panel_width, max(240, height - 88))
+            self.queue_panel.raise_()
         self._place_overlays(compact_sheet)
 
     def _place_overlays(self, compact_sheet: bool = False) -> None:
@@ -557,9 +786,9 @@ class ImmersiveLyricsPage(QWidget):
         self.background.lower()
         self.readability_overlay.setGeometry(self.rect())
         self.readability_overlay.raise_()
-        if self.content.isVisible():
-            self.readability_overlay.stackUnder(self.content)
-        if self.content.isVisible():
+        if self.content_stack.isVisible():
+            self.readability_overlay.stackUnder(self.content_stack)
+        if self.content_stack.isVisible() and self._mode == "lyrics":
             self._content_layout.activate()
             identity_origin = self.identity.mapTo(self, QPoint(0, 0))
             lyrics_origin = self.canvas.mapTo(self, QPoint(0, 0))
@@ -573,6 +802,9 @@ class ImmersiveLyricsPage(QWidget):
             self.readability_overlay.set_regions(QRect(), QRect(), self.controls.geometry())
         if self.settings_panel.isVisible():
             self.settings_panel.raise_()
+        self.header.raise_()
+        if self.queue_panel.isVisible():
+            self.queue_panel.raise_()
 
     def eventFilter(self, watched, event):  # noqa: N802
         if event.type() == QEvent.Type.MouseMove:
@@ -605,10 +837,27 @@ class ImmersiveLyricsPage(QWidget):
             self._handle_escape()
             event.accept()
             return
+        if event.key() == Qt.Key.Key_Space and not isinstance(self.focusWidget(), QSlider):
+            self.playback_adapter.toggle_playback()
+            event.accept()
+            return
+        if event.key() in (Qt.Key.Key_Left, Qt.Key.Key_Right):
+            delta = -5_000 if event.key() == Qt.Key.Key_Left else 5_000
+            state = self.playback_adapter.state
+            self.playback_adapter.seek(state.position_ms + delta)
+            event.accept()
+            return
+        if event.key() == Qt.Key.Key_L and not event.modifiers():
+            self.mode_changed.emit("lyrics" if self._mode == "now_playing" else "now_playing")
+            event.accept()
+            return
         super().keyPressEvent(event)
 
     def _handle_escape(self) -> None:
         if self.settings_panel.close_popup():
+            return
+        if self.queue_panel.isVisible():
+            self.hide_queue_panel()
             return
         if self.settings_panel.isVisible():
             self.hide_settings_panel()

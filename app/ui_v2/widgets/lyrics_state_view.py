@@ -40,11 +40,11 @@ class LyricsStateView(QWidget):
 
     def set_state(self, state: LyricsState) -> None:
         values = {
-            "idle": ("还没有正在播放的歌曲", state.message),
-            "loading": ("正在准备歌词", state.message),
-            "empty": ("当前歌曲没有歌词", state.message),
-            "failed": ("歌词暂不可用", state.message),
-            "instrumental": ("纯音乐", state.message),
+            "idle": ("还没有正在播放的歌曲", "选择一首歌曲开始播放。"),
+            "loading": ("正在加载歌词", "请稍候。"),
+            "empty": ("暂无歌词", "没有找到这首歌曲的歌词。"),
+            "failed": ("歌词加载失败", "暂时无法显示歌词，请稍后重试。"),
+            "instrumental": ("纯音乐", "这首歌曲没有人声歌词。"),
         }
         title, detail = values.get(state.phase, ("歌词", state.message))
         self.title_label.setText(title)

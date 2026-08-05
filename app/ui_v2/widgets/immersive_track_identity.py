@@ -11,6 +11,7 @@ from PySide6.QtWidgets import QBoxLayout, QLabel, QSizePolicy, QVBoxLayout, QWid
 from app.ui_v2.models.track import Track
 from app.ui_v2.theme.tokens import Theme
 from app.ui_v2.widgets.artwork_atmosphere import AbstractArtwork
+from app.ui_v2.widgets.track_display import display_track_text
 
 
 class ElidedTrackLabel(QLabel):
@@ -129,9 +130,10 @@ class ImmersiveTrackIdentity(QWidget):
 
     def set_track(self, track: Track | None) -> None:
         self.cover.set_track(track)
-        self.title_label.set_full_text(track.title if track else "未播放歌曲")
-        self.artist_label.set_full_text(track.artist if track else "")
-        self.album_label.set_full_text(track.album if track else "")
+        title, artist, album = display_track_text(track) if track else ("未播放歌曲", "", "")
+        self.title_label.set_full_text(title)
+        self.artist_label.set_full_text(artist)
+        self.album_label.set_full_text(album)
 
     def set_theme(self, theme: Theme) -> None:
         self._theme = theme

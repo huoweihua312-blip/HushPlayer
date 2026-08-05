@@ -22,6 +22,7 @@ class PlaybackAdapter(QObject):
     favorite_changed = Signal(bool)
     shuffle_changed = Signal(bool)
     repeat_mode_changed = Signal(object)
+    queue_changed = Signal(object)
 
     def __init__(
         self,
@@ -46,9 +47,16 @@ class PlaybackAdapter(QObject):
     def has_tracks(self) -> bool:
         return any(not track.is_missing for track in self._queue)
 
+    @property
+    def queue_tracks(self) -> tuple[Track, ...]:
+        """Read-only queue projection for presentation surfaces."""
+
+        return tuple(self._queue)
+
     def set_queue(self, tracks: Iterable[Track]) -> None:
         current_id = self._state.current_track.id if self._state.current_track else ""
         self._queue = list(tracks)
+        self.queue_changed.emit(self.queue_tracks)
         if current_id and not any(track.id == current_id for track in self._queue):
             self.clear()
             return

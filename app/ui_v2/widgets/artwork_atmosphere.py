@@ -109,8 +109,11 @@ class ArtworkAtmosphere(QWidget):
         self._theme = theme
         self._palette = ArtworkPalette()
         self._mode = "artwork"
-        self._opacity = 62
-        self._overlay_strength = 45
+        # Keep the artwork-derived field atmospheric rather than turning the
+        # whole shell into a saturated cover.  Foreground identity and lyrics
+        # remain the visual focus at the approved default.
+        self._opacity = 42
+        self._overlay_strength = 52
         self.setObjectName("immersiveArtworkAtmosphere")
         self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
 
@@ -165,15 +168,15 @@ class ArtworkAtmosphere(QWidget):
             base_left = "#111b28" if self._theme.mode == "dark" else "#e8f4f6"
             base_right = "#1c2b38" if self._theme.mode == "dark" else "#f5ece8"
             field = QLinearGradient(0, 0, self.width(), self.height())
-            field.setColorAt(0.0, _mix(base_left, colors[0], 0.68 if self._mode == "artwork" else 0.52))
-            field.setColorAt(0.53, _mix(base_right, colors[1], 0.55 if self._mode == "artwork" else 0.42))
-            field.setColorAt(1.0, _mix(base_left, colors[2], 0.48 if self._mode == "artwork" else 0.38))
+            field.setColorAt(0.0, _mix(base_left, colors[0], 0.40 if self._mode == "artwork" else 0.30))
+            field.setColorAt(0.53, _mix(base_right, colors[1], 0.34 if self._mode == "artwork" else 0.26))
+            field.setColorAt(1.0, _mix(base_left, colors[2], 0.30 if self._mode == "artwork" else 0.22))
             painter.fillRect(self.rect(), field)
         alpha_factor = self._opacity / 100
         for center, radius, color, alpha in (
-            (QPointF(self.width() * 0.14, self.height() * 0.19), self.width() * 0.48, colors[0], 136),
-            (QPointF(self.width() * 0.79, self.height() * 0.25), self.width() * 0.56, colors[1], 122),
-            (QPointF(self.width() * 0.55, self.height() * 0.93), self.width() * 0.54, colors[2], 102),
+            (QPointF(self.width() * 0.14, self.height() * 0.19), self.width() * 0.48, colors[0], 88),
+            (QPointF(self.width() * 0.79, self.height() * 0.25), self.width() * 0.56, colors[1], 78),
+            (QPointF(self.width() * 0.55, self.height() * 0.93), self.width() * 0.54, colors[2], 64),
         ):
             glow = QRadialGradient(center, radius)
             glow.setColorAt(0.0, _color(color, round(alpha * alpha_factor)))

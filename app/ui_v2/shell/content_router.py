@@ -28,6 +28,7 @@ from app.ui_v2.pages.browse_page import BrowsePage
 from app.ui_v2.pages.favorites_page import FavoritesPage
 from app.ui_v2.pages.library_page import LibraryPage
 from app.ui_v2.pages.immersive_lyrics_page import ImmersiveLyricsPage
+from app.ui_v2.shell.immersive_player_shell import ImmersivePlayerShell
 from app.ui_v2.pages.lyrics_page import LyricsPage
 from app.ui_v2.pages.online_search_page import OnlineSearchPage
 from app.ui_v2.pages.online_source_page import OnlineSourcePage
@@ -113,6 +114,7 @@ class ContentRouter(QStackedWidget):
         self._playback_adapter = playback
         self._immersive_options = immersive_options
         self._immersive_return_route = "lyrics"
+        self._last_normal_route = navigation.route if not navigation.route.startswith("immersive") else "browse"
         self._content_safe_bottom = 0
         self._online_sources = OnlineSourceAdapter(online, self)
         self.browse_page = BrowsePage(collection, theme, self)
@@ -164,7 +166,7 @@ class ContentRouter(QStackedWidget):
             # current page visible for compatibility with callers that still
             # try to resolve the legacy route id.
             return self.currentWidget() or self._pages["browse"]
-        if route_id == "immersive_lyrics":
+        if route_id in {"immersive_lyrics", "immersive_now_playing"}:
             return self._cached_page("immersive_lyrics", self._create_immersive_lyrics_page)
         if route_id.startswith("playlist:"):
             page = self._cached_page("playlist", self._create_playlist_page)
@@ -187,6 +189,15 @@ class ContentRouter(QStackedWidget):
     def show_route(self, route_id: str) -> None:
         if route_id == "settings":
             return
+        if route_id in {"immersive_lyrics", "immersive_now_playing"}:
+            if not self._last_normal_route.startswith("immersive"):
+                self._immersive_return_route = self._last_normal_route
+            page = self.page_for_route(route_id)
+            if hasattr(page, "set_mode"):
+                page.set_mode("now_playing" if route_id == "immersive_now_playing" else "lyrics")
+            self.setCurrentWidget(page)
+            return
+        self._last_normal_route = route_id
         self.setCurrentWidget(self.page_for_route(route_id))
 
     def set_theme(self, theme: Theme) -> None:
@@ -318,7 +329,7 @@ class ContentRouter(QStackedWidget):
         return page
 
     def _create_immersive_lyrics_page(self) -> ImmersiveLyricsPage:
-        page = ImmersiveLyricsPage(
+        page = ImmersivePlayerShell(
             self._lyrics_adapter,
             self._playback_adapter,
             self._theme,
@@ -328,10 +339,16 @@ class ContentRouter(QStackedWidget):
         page.immersive_exit_requested.connect(self._return_from_immersive)
         page.fullscreen_requested.connect(self.immersive_fullscreen_requested)
         page.transparency_mode_changed.connect(self.immersive_transparency_requested)
+        page.mode_changed.connect(self._switch_immersive_mode)
         # The page may have been created while transparent mode was already
         # selected in Settings.  Its constructor cannot emit to this router yet.
         page.transparency_mode_changed.emit(page.background_mode == "transparent")
         return page
+
+    def _switch_immersive_mode(self, mode: str) -> None:
+        self._navigation.set_route(
+            "immersive_now_playing" if str(mode) == "now_playing" else "immersive_lyrics"
+        )
 
     def apply_immersive_options(self, options: ImmersiveLyricsOptions) -> None:
         page = self._pages.get("immersive_lyrics")
