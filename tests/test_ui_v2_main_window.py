@@ -171,6 +171,38 @@ class UiV2MainWindowTests(unittest.TestCase):
             if mode == "dark":
                 self.assertNotIn(light_navigation, sidebar.styleSheet())
 
+    def test_top_bar_exposes_one_settings_entry_and_persists_theme_without_rebuilding_shell(self) -> None:
+        title_bar = self.window.title_bar
+        sidebar = self.window.sidebar
+        player_bar = self.window.player_bar
+        playback_adapter = self.window.playback_adapter
+        route = "library"
+        self.window.navigation_adapter.set_route(route)
+        self.app.processEvents()
+
+        self.assertEqual(title_bar.settings_button.accessibleName(), "设置")
+        self.assertEqual(title_bar.theme_button.accessibleName(), "主题切换")
+        self.assertEqual(title_bar.view_options_button.accessibleName(), "视图选项")
+        self.assertFalse(title_bar.view_options_button.isEnabled())
+        self.assertFalse(sidebar.settings_box.isVisible())
+        self.assertEqual(self.window.settings_shortcut.key().toString(), "Ctrl+,")
+
+        self.window.settings_shortcut.activated.emit()
+        self.app.processEvents()
+        self.assertTrue(self.window.settings_overlay.isVisible())
+        self.window.settings_overlay.cancel_and_close()
+
+        self.window.toggle_theme()
+        self.app.processEvents()
+        self.assertEqual(self.window.theme.mode, "light")
+        self.assertIs(self.window.player_bar, player_bar)
+        self.assertIs(self.window.playback_adapter, playback_adapter)
+        self.assertEqual(self.window.navigation_adapter.route, route)
+        self.assertEqual(
+            self.window.settings_bridge.value(self.window._settings_snapshot, "appearance_mode"),
+            "light",
+        )
+
     def test_all_navigation_entries_are_clickable_and_route_to_cached_pages(self) -> None:
         sidebar = self.window.sidebar
         long_playlist_name = "一个用于验证提示文本的超长自定义歌单名称"

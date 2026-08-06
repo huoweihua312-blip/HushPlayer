@@ -90,7 +90,6 @@ def create_ui_v2_main_window(
         return MainWindow(
             data_mode=UI_V2_DATA_MODE_MOCK,
             settings_path=isolated_settings,
-            force_dark_theme=True,
         )
 
     runtime = services or build_ui_v2_runtime_services()
@@ -103,7 +102,6 @@ def create_ui_v2_main_window(
         remote_tracks=runtime.remote_tracks,
         playback_adapter=runtime.playback_adapter,
         lyrics_adapter=runtime.lyrics_adapter,
-        force_dark_theme=True,
     )
 
 
@@ -132,9 +130,17 @@ def run_ui_v2_application(
 ) -> int:
     """Run UI V2 without maintaining a second QApplication flow."""
 
+    isolated_settings = None
+    if normalize_ui_v2_data_mode(data_mode) == UI_V2_DATA_MODE_MOCK:
+        isolated_settings = (
+            Path(os.environ.get("TEMP", tempfile.gettempdir()))
+            / "HushPlayer-ui-v2"
+            / f"mock-settings-{os.getpid()}.json"
+        )
     context = create_application_context(
         argv if argv is not None else sys.argv,
         ui_flavor=UI_FLAVOR_V2,
+        settings_path=str(isolated_settings) if isolated_settings is not None else None,
     )
     window = create_ui_v2_main_window(
         data_mode=data_mode,

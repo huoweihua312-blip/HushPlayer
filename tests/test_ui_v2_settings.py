@@ -148,7 +148,10 @@ class SettingsOverlayIntegrationTests(unittest.TestCase):
         stylesheet = button.styleSheet().lower().replace(" ", "")
         self.assertIn("rgba(255,255,255,18)", stylesheet)
         self.assertIn("rgba(255,255,255,28)", stylesheet)
-        self.assertNotIn(overlay._theme.colors.accent.lower(), stylesheet)
+        self.assertIn(
+            f"border:1pxsolid{overlay._theme.colors.focus_ring.lower()}",
+            stylesheet,
+        )
         self.assertEqual(button.minimumSize(), QSize(32, 32))
         self.assertEqual(button.maximumSize(), QSize(32, 32))
         self.app.processEvents()

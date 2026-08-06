@@ -5,7 +5,7 @@ from __future__ import annotations
 from PySide6.QtCore import QPoint, QSize, Qt, Signal
 from PySide6.QtWidgets import QFrame, QGridLayout, QHBoxLayout, QLineEdit, QToolButton, QWidget
 
-from app.ui_v2.theme.icons import icon
+from app.ui_v2.theme.icons import fluent_settings_interactive_icon, icon
 from app.ui_v2.theme.tokens import Theme
 
 
@@ -15,6 +15,8 @@ class CustomTitleBar(QFrame):
     back_requested = Signal()
     forward_requested = Signal()
     settings_requested = Signal()
+    theme_toggle_requested = Signal()
+    view_options_requested = Signal()
     search_text_changed = Signal(str)
 
     def __init__(self, theme: Theme, parent: QWidget | None = None) -> None:
@@ -47,14 +49,21 @@ class CustomTitleBar(QFrame):
         search_layout.addWidget(self.search_input, 1)
 
         self.settings_button = self._button("settings", "设置", self)
-        # Settings remains a compatibility signal for existing shell wiring,
-        # but the approved Browse chrome keeps the action in the sidebar.
-        self.settings_button.setVisible(False)
+        self.settings_button.setAccessibleName("设置")
+        self.theme_button = self._button("settings", "切换主题", self)
+        self.theme_button.setAccessibleName("主题切换")
+        self.view_options_button = self._button("more", "视图选项（暂不可用）", self)
+        self.view_options_button.setAccessibleName("视图选项")
+        self.view_options_button.setEnabled(False)
+        # Compatibility handles remain available for older shell tests and
+        # integrations, but are not part of the approved Q1 utility surface.
         self.notifications_button = self._button("notification", "通知", self)
+        self.notifications_button.setVisible(False)
         self.avatar_button = self._button("user", "用户", self)
+        self.avatar_button.setVisible(False)
         self.settings_button.clicked.connect(self.settings_requested)
-        self.avatar_button.setObjectName("titleBarAvatar")
-        self.avatar_button.setFixedSize(36, 36)
+        self.theme_button.clicked.connect(self.theme_toggle_requested)
+        self.view_options_button.clicked.connect(self.view_options_requested)
 
         self.minimize_button = self._button("window_minimize", "最小化", self, window_control=True)
         self.maximize_button = self._button("window_maximize", "最大化", self, window_control=True)
@@ -75,8 +84,10 @@ class CustomTitleBar(QFrame):
         utility_layout = QHBoxLayout(utility)
         utility_layout.setContentsMargins(0, 0, 0, 0)
         utility_layout.setSpacing(2)
-        utility_layout.addWidget(self.notifications_button)
-        utility_layout.addWidget(self.avatar_button)
+        utility_layout.setSpacing(4)
+        utility_layout.addWidget(self.settings_button)
+        utility_layout.addWidget(self.theme_button)
+        utility_layout.addWidget(self.view_options_button)
 
         window_controls = QWidget(self)
         controls_layout = QHBoxLayout(window_controls)
@@ -113,8 +124,7 @@ class CustomTitleBar(QFrame):
             f"QFrame#customTitleBar {{ background: {c.titlebar_background}; border: 0; border-bottom: 1px solid {c.divider}; }}"
             f"QToolButton#titleBarButton {{ border: 0; border-radius: 5px; background: transparent; color: {c.text_secondary}; }}"
             f"QToolButton#titleBarButton:hover {{ background: {c.surface_hover}; color: {c.text_primary}; }}"
-            f"QToolButton#titleBarAvatar {{ border: 0; border-radius: 8px; background: {c.surface_selected}; color: {c.text_secondary}; }}"
-            f"QToolButton#titleBarAvatar:hover {{ background: {c.surface_hover}; color: {c.text_primary}; }}"
+            f"QToolButton#titleBarButton:disabled {{ background: transparent; color: {c.text_disabled}; }}"
             f"QToolButton#titleBarWindowControl {{ border: 0; background: transparent; color: {c.text_secondary}; }}"
             f"QToolButton#titleBarWindowControl:hover {{ background: {c.surface_hover}; color: {c.text_primary}; }}"
             f"QToolButton#titleBarClose:hover {{ background: {c.danger}; color: {c.text_primary}; }}"
@@ -124,14 +134,22 @@ class CustomTitleBar(QFrame):
         )
         for button, name in (
             (self.back_button, "back"), (self.forward_button, "forward"),
-            (self.search_icon, "search"), (self.settings_button, "settings"),
-            (self.notifications_button, "notification"), (self.avatar_button, "user"),
+            (self.search_icon, "search"), (self.notifications_button, "notification"),
+            (self.avatar_button, "user"),
             (self.minimize_button, "window_minimize"),
             (self.maximize_button, "window_restore" if self._window().isMaximized() else "window_maximize"),
             (self.close_button, "window_close"),
         ):
             button.setIcon(icon(name, theme))
             button.setIconSize(QSize(self._icon_size(name), self._icon_size(name)))
+        self.settings_button.setIcon(fluent_settings_interactive_icon("general", theme, 18))
+        self.settings_button.setIconSize(QSize(18, 18))
+        self.theme_button.setIcon(fluent_settings_interactive_icon("appearance", theme, 18))
+        self.theme_button.setIconSize(QSize(18, 18))
+        self.view_options_button.setIcon(icon("more", theme))
+        self.view_options_button.setIconSize(QSize(18, 18))
+        target = "浅色模式" if theme.mode == "dark" else "深色模式"
+        self.theme_button.setToolTip(f"切换到{target}")
 
     def set_compact(self, compact: bool) -> None:
         compact = bool(compact)
@@ -184,7 +202,7 @@ class CustomTitleBar(QFrame):
 
     @staticmethod
     def _icon_size(icon_name: str) -> int:
-        if icon_name in {"settings", "notification", "user"}:
+        if icon_name in {"settings", "notification", "user", "more"}:
             return 17
         if icon_name in {"back", "forward", "search"}:
             return 16

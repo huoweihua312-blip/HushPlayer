@@ -6,7 +6,7 @@ from hashlib import sha256
 from pathlib import Path
 
 from PySide6.QtCore import QSize, Qt, Signal
-from PySide6.QtGui import QColor, QIcon, QPalette
+from PySide6.QtGui import QColor, QIcon, QPalette, QPixmap
 from PySide6.QtWidgets import (
     QFrame,
     QHBoxLayout,
@@ -28,6 +28,7 @@ from app.ui_v2.widgets.navigation_item import NavigationItem
 
 _PLAYLIST_COVER_DIR = Path(__file__).resolve().parent.parent / "assets" / "sidebar_playlist_covers"
 _PLAYLIST_COVERS = ("midnight", "daily", "coast")
+_QUIET_ORBIT_LOGO = Path(__file__).resolve().parent.parent / "assets" / "quiet-orbit-logo.svg"
 
 
 class NavigationSidebar(QFrame):
@@ -60,7 +61,7 @@ class NavigationSidebar(QFrame):
         brand_layout.setSpacing(11)
         self.brand_mark = QLabel(self.brand)
         self.brand_mark.setObjectName("navigationBrandMark")
-        self.brand_mark.setFixedSize(20, 20)
+        self.brand_mark.setFixedSize(40, 28)
         self.brand_label = QLabel("HushPlayer", self.brand)
         self.brand_label.setObjectName("navigationBrandLabel")
         self.brand_label.setToolTip("HushPlayer")
@@ -124,6 +125,9 @@ class NavigationSidebar(QFrame):
         settings_layout.setContentsMargins(18, 13, 14, 17)
         settings_layout.setSpacing(0)
         self._add_static_item("settings", settings_layout, 42)
+        # The top bar owns the one visible Settings entry in Quiet Orbit.  The
+        # hidden widget and signal remain for compatibility with V2 callers.
+        self.settings_box.setVisible(False)
 
         # This compatibility handle deliberately remains invisible. Real mode
         # cannot surface a write entry in the approved navigation shell.
@@ -168,7 +172,14 @@ class NavigationSidebar(QFrame):
             f"QLabel#navigationBrandMark {{ background: transparent; }}"
             f"QLabel#navigationBrandLabel {{ color: {c.text_primary}; font-size: 17px; font-weight: 600; }}"
         )
-        self.brand_mark.setPixmap(icon("brand", theme, "selected").pixmap(QSize(20, 20)))
+        logo = QPixmap(str(_QUIET_ORBIT_LOGO))
+        self.brand_mark.setPixmap(
+            logo.scaled(
+                self.brand_mark.size(),
+                Qt.AspectRatioMode.KeepAspectRatio,
+                Qt.TransformationMode.SmoothTransformation,
+            )
+        )
         for label in self._section_labels:
             label.setStyleSheet(
                 f"padding-left: 12px; color: {c.text_tertiary}; font-size: 12px; font-weight: 400;"
@@ -186,6 +197,12 @@ class NavigationSidebar(QFrame):
         self.setFixedWidth(
             self._theme.metrics.compact_sidebar_width if compact else self._theme.metrics.sidebar_width
         )
+        self.brand_label.setVisible(not compact)
+        self.library_caption.setVisible(not compact)
+        self.playlist_caption.setVisible(not compact)
+        self.brand.layout().setContentsMargins(18 if compact else 28, 0, 18 if compact else 16, 0)
+        self.primary_section.layout().setContentsMargins(12 if compact else 18, 0, 12 if compact else 14, 0)
+        self.playlist_section.layout().setContentsMargins(12 if compact else 18, 20, 12 if compact else 14, 0)
         for item in (*self._items.values(), *self._playlist_items.values()):
             item.set_compact(compact)
         self.more_playlists_button.set_compact(compact)

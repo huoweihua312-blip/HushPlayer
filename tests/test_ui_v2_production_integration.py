@@ -33,6 +33,7 @@ from app.ui_v2.startup import (
     build_ui_v2_runtime_services,
     create_ui_v2_main_window,
 )
+from app.ui_v2.theme.tokens import get_theme
 
 
 def _write_json(path: Path, value) -> None:
@@ -116,10 +117,10 @@ class StartupArgumentTests(unittest.TestCase):
         apply_ui_theme(self.app, "ui-v2")
         self.assertEqual(self.app.property("hushUiFlavor"), "ui-v2")
         self.assertEqual(self.app.property("hushUiV2ThemeMode"), "dark")
-        self.assertIn("#111214", self.app.styleSheet())
+        self.assertIn(get_theme("dark").colors.app_background, self.app.styleSheet())
         apply_ui_theme(self.app, "legacy")
         self.assertEqual(self.app.property("hushUiFlavor"), "legacy")
-        self.assertNotIn("#111214", self.app.styleSheet())
+        self.assertNotIn(get_theme("dark").colors.app_background, self.app.styleSheet())
 
     def test_ui_v2_startup_failure_returns_clear_error(self) -> None:
         stderr = io.StringIO()
@@ -254,7 +255,7 @@ class ProductionRuntimeTests(unittest.TestCase):
         self.assertTrue(self.window.playlist_adapter.read_only)
         self.assertEqual(self.window.settings_bridge.value(self.window._settings_snapshot, "volume"), 42)
 
-    def test_production_v2_stays_dark_when_persisted_appearance_is_light(self) -> None:
+    def test_production_v2_uses_persisted_light_appearance(self) -> None:
         self.window.close()
         self.app.processEvents()
         _write_json(self.settings_file, {"appearance_mode": "light", "volume": 42})
@@ -263,8 +264,8 @@ class ProductionRuntimeTests(unittest.TestCase):
             services=self.services,
             initialize_storage=False,
         )
-        self.assertEqual(self.window.theme.mode, "dark")
-        self.assertEqual(self.window.immersive_lyrics_options.theme, "dark")
+        self.assertEqual(self.window.theme.mode, "light")
+        self.assertEqual(self.window.immersive_lyrics_options.theme, "light")
 
     def test_real_read_only_player_keeps_navigation_entry_points_enabled(self) -> None:
         bar = self.window.player_bar

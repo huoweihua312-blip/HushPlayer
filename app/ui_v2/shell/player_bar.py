@@ -133,11 +133,8 @@ class PlayerBar(QFrame):
         if compact == self._compact:
             return
         self._compact = compact
-        self.more_button.setVisible(not compact)
-        self.lyrics_button.setVisible(not compact)
-        self.queue_button.setVisible(not compact)
-        self.shuffle_button.setVisible(not compact)
-        self.repeat_button.setVisible(not compact)
+        # The approved 900px shell keeps every transport and navigation action
+        # reachable. Only the fixed side widths and metadata width tighten.
         self.center_region.setFixedWidth(360 if compact else 500)
         self.metadata.setFixedWidth(118 if compact else 154)
         self._constrain_side_inner_widths()

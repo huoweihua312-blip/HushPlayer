@@ -8,7 +8,7 @@ from pathlib import Path
 import tempfile
 
 from PySide6.QtCore import QEvent, QPoint, QRect, Qt, QTimer
-from PySide6.QtGui import QColor, QGuiApplication, QMouseEvent, QPalette
+from PySide6.QtGui import QColor, QGuiApplication, QKeySequence, QMouseEvent, QPalette, QShortcut
 from PySide6.QtWidgets import QApplication, QHBoxLayout, QMainWindow, QVBoxLayout, QWidget
 
 from app.core.app_paths import AppPaths
@@ -29,12 +29,13 @@ from app.ui_v2.adapters.legacy_settings_bridge import LegacySettingsBridge
 from app.ui_v2.mock.track_factory import create_mock_tracks
 from app.ui_v2.pages.all_songs_page import AllSongsPage
 from app.ui_v2.models.immersive_lyrics_options import ImmersiveLyricsOptions
+from app.ui_v2.models.settings_snapshot import SettingsSnapshot
 from app.ui_v2.shell.content_router import ContentRouter
 from app.ui_v2.shell.navigation_sidebar import NavigationSidebar
 from app.ui_v2.shell.player_bar import PlayerBar
 from app.ui_v2.widgets.custom_title_bar import CustomTitleBar
 from app.ui_v2.widgets.settings_overlay import SettingsOverlay
-from app.ui_v2.theme.styles import build_stylesheet
+from app.ui_v2.theme.styles import build_application_palette, build_stylesheet
 from app.ui_v2.theme.tokens import Theme, get_theme
 
 
@@ -227,6 +228,12 @@ class MainWindow(QMainWindow):
 
     def set_theme(self, mode: str) -> None:
         self._theme = get_theme("light" if mode == "light" else "dark")
+        app = QApplication.instance()
+        if app is not None:
+            app.setPalette(build_application_palette(self._theme))
+            app.setStyleSheet(build_stylesheet(self._theme))
+            app.setProperty("hushUiFlavor", "ui-v2")
+            app.setProperty("hushUiV2ThemeMode", self._theme.mode)
         self._apply_root_stylesheet()
         self.title_bar.set_theme(self._theme)
         self.library_page.set_theme(self._theme)
@@ -238,6 +245,19 @@ class MainWindow(QMainWindow):
         self.router.set_content_safe_bottom(
             self._theme.metrics.player_bar_height + self._theme.metrics.content_safe_bottom
         )
+        if not self._immersive_transparency_enabled:
+            self._shell_surface_states = tuple(
+                (widget, QPalette(widget.palette()), widget.autoFillBackground())
+                for widget in (self.root, self.body, self.content_container, self.router)
+            )
+
+    def toggle_theme(self) -> None:
+        """Persist an explicit Light/Dark choice through the existing bridge."""
+
+        target = "light" if self._theme.mode == "dark" else "dark"
+        snapshot = self._settings_snapshot.with_updates({"appearance_mode": target})
+        saved = self.settings_bridge.save_snapshot(snapshot)
+        self._settings_snapshot = saved
 
     def resizeEvent(self, event) -> None:  # noqa: N802
         super().resizeEvent(event)
@@ -378,7 +398,10 @@ class MainWindow(QMainWindow):
         self.library_page.theme_changed.connect(self.set_theme)
         self.title_bar.search_text_changed.connect(self.router.set_global_query)
         self.title_bar.settings_requested.connect(self.open_settings_overlay)
+        self.title_bar.theme_toggle_requested.connect(self.toggle_theme)
         self.sidebar.settings_requested.connect(self.open_settings_overlay)
+        self.settings_shortcut = QShortcut(QKeySequence("Ctrl+,"), self)
+        self.settings_shortcut.activated.connect(self.open_settings_overlay)
         self.router.track_play_requested.connect(self._play_tracks)
         self.router.queue_requested.connect(self._play_queue)
         self.router.online_play_requested.connect(self._play_online_track)

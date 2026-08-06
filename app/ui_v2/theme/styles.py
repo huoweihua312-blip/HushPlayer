@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from PySide6.QtGui import QColor, QPalette
 
-from app.ui_v2.theme.tokens import Theme
+from app.ui_v2.theme.tokens import Theme, font_family_qss
 
 
 def build_application_palette(theme: Theme) -> QPalette:
@@ -20,7 +20,7 @@ def build_application_palette(theme: Theme) -> QPalette:
         QPalette.ColorRole.Text: colors.text_primary,
         QPalette.ColorRole.Button: colors.surface_secondary,
         QPalette.ColorRole.ButtonText: colors.text_secondary,
-        QPalette.ColorRole.Highlight: colors.accent,
+        QPalette.ColorRole.Highlight: colors.surface_selected,
         QPalette.ColorRole.HighlightedText: colors.text_primary,
         QPalette.ColorRole.ToolTipBase: colors.surface_elevated,
         QPalette.ColorRole.ToolTipText: colors.text_primary,
@@ -55,24 +55,54 @@ def build_stylesheet(theme: Theme) -> str:
     c = theme.colors
     m = theme.metrics
     return f"""
+        QWidget, QMenu, QToolTip {{
+            font-family: {font_family_qss()};
+        }}
         QWidget#uiV2Root {{
             background: {c.app_background};
             color: {c.text_primary};
-            font-family: "Segoe UI Variable", "Segoe UI";
         }}
         QWidget#uiV2Body, QWidget#uiV2ContentContainer,
         QStackedWidget#uiV2ContentRouter, QWidget#libraryPage {{
             background: {c.app_background};
         }}
-        QLineEdit#searchInput {{
+        QLineEdit#searchInput, QLineEdit#titleBarSearchInput {{
             min-height: {m.control_height}px;
             padding: 0 {m.spacing_md}px;
             border: 1px solid {c.divider};
             border-radius: {m.radius_md}px;
             background: {c.surface_secondary};
             color: {c.text_primary};
+            selection-background-color: {c.accent};
+            selection-color: {c.text_primary};
         }}
-        QLineEdit#searchInput:focus {{ border-color: {c.focus_ring}; selection-background-color: {c.accent}; }}
+        QLineEdit#searchInput:focus, QLineEdit#titleBarSearchInput:focus {{ border-color: {c.focus_ring}; }}
+        QToolButton:focus, QPushButton:focus, QComboBox:focus, QSlider:focus,
+        QLineEdit:focus {{ outline: 1px solid {c.focus_ring}; outline-offset: 1px; }}
+        QToolTip {{
+            padding: {m.spacing_xs}px {m.spacing_sm}px;
+            border: 1px solid {c.divider};
+            border-radius: {m.radius_sm}px;
+            background: {c.surface_elevated};
+            color: {c.text_primary};
+        }}
+        QComboBox {{
+            min-height: {m.control_height}px;
+            padding: 0 {m.spacing_md}px;
+            border: 1px solid {c.divider};
+            border-radius: {m.radius_md}px;
+            background: {c.input_background};
+            color: {c.text_primary};
+        }}
+        QComboBox:hover {{ border-color: {c.border_strong}; }}
+        QComboBox QAbstractItemView {{
+            padding: {m.spacing_xs}px;
+            border: 1px solid {c.divider};
+            background: {c.surface_elevated};
+            color: {c.text_primary};
+            selection-background-color: {c.surface_selected};
+            selection-color: {c.text_primary};
+        }}
         QTableView#trackTable {{
             border: 0;
             background: {c.app_background};
@@ -102,7 +132,7 @@ def build_stylesheet(theme: Theme) -> str:
         }}
         QScrollBar::handle:vertical:hover {{ background: {c.text_tertiary}; }}
         QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{ height: 0; }}
-        QMenu {{
+        QMenu, QDialog {{
             padding: {m.spacing_xs}px;
             border: 1px solid {c.divider};
             border-radius: {m.radius_sm}px;
@@ -110,5 +140,14 @@ def build_stylesheet(theme: Theme) -> str:
             color: {c.text_primary};
         }}
         QMenu::item {{ padding: {m.spacing_sm}px {m.spacing_lg}px; border-radius: {m.radius_sm}px; }}
-        QMenu::item:selected {{ background: {c.surface_hover}; }}
+        QMenu::item:selected {{ background: {c.surface_hover}; color: {c.text_primary}; }}
+        QScrollBar:horizontal {{
+            height: 8px;
+            border: 0;
+            background: transparent;
+            margin: 2px 4px;
+        }}
+        QScrollBar::handle:horizontal {{ min-width: 32px; border-radius: 4px; background: {c.divider}; }}
+        QScrollBar::handle:horizontal:hover {{ background: {c.text_tertiary}; }}
+        QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {{ width: 0; }}
     """

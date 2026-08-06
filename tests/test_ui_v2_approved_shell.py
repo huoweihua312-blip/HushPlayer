@@ -61,24 +61,27 @@ class ApprovedShellMigrationTests(unittest.TestCase):
         self.assertEqual(
             {button.toolTip() for button in (
                 title_bar.back_button, title_bar.forward_button, title_bar.settings_button,
-                title_bar.notifications_button, title_bar.avatar_button, title_bar.minimize_button,
+                title_bar.theme_button, title_bar.view_options_button, title_bar.minimize_button,
                 title_bar.maximize_button, title_bar.close_button,
             )},
-            {"返回", "前进", "设置", "通知", "用户", "最小化", "最大化", "关闭"},
+            {"返回", "前进", "设置", "切换到浅色模式", "视图选项（暂不可用）", "最小化", "最大化", "关闭"},
         )
         self.assertEqual(title_bar.back_button.iconSize(), QSize(16, 16))
         self.assertEqual(title_bar.forward_button.iconSize(), QSize(16, 16))
         self.assertEqual(title_bar.search_icon.iconSize(), QSize(16, 16))
         for button in (
             title_bar.settings_button,
-            title_bar.notifications_button,
-            title_bar.avatar_button,
+            title_bar.theme_button,
+            title_bar.view_options_button,
         ):
-            self.assertEqual(button.iconSize(), QSize(17, 17))
+            self.assertEqual(button.iconSize(), QSize(18, 18))
+        self.assertFalse(title_bar.notifications_button.isVisible())
+        self.assertFalse(title_bar.avatar_button.isVisible())
         sidebar = self.window.sidebar
         self.assertEqual(sidebar.width(), 220)
         self.assertEqual(sidebar.brand_label.text(), "HushPlayer")
         self.assertEqual(set(sidebar._items), {"library", "browse", "liked", "settings"})
+        self.assertFalse(sidebar.settings_box.isVisible())
         self.assertNotIn("online_search", sidebar._items)
 
     def test_browse_sections_cover_cards_and_stable_cover_mapping(self) -> None:
@@ -116,11 +119,14 @@ class ApprovedShellMigrationTests(unittest.TestCase):
         self.assertEqual(item.toolTip(), full_name)
         self.assertEqual(item._full_title, full_name)
         self.assertIn("…", item.text())
-        for width in (900, 1200):
-            self.window.resize(width, 600 if width == 900 else 800)
+        for width, compact in ((900, True), (1200, False)):
+            self.window.resize(width, 600 if compact else 800)
             self.app.processEvents()
             self.assertEqual(item.toolTip(), full_name)
-            self.assertIn("…", item.text())
+            if compact:
+                self.assertEqual(item.text(), "")
+            else:
+                self.assertIn("…", item.text())
 
     def test_sidebar_uses_formal_icons_and_approved_row_geometry(self) -> None:
         sidebar = self.window.sidebar
@@ -132,8 +138,8 @@ class ApprovedShellMigrationTests(unittest.TestCase):
         self.assertEqual(sidebar.brand.height(), 84)
         self.assertEqual(sidebar.library_box.layout().contentsMargins().left(), 18)
         self.assertEqual(sidebar.library_box.layout().contentsMargins().right(), 14)
-        self.assertEqual(sidebar.settings_box.height(), 72)
-        self.assertEqual(sidebar.settings_box.geometry().bottom(), sidebar.contentsRect().bottom())
+        self.assertFalse(sidebar.settings_box.isVisible())
+        self.assertFalse(sidebar._items["settings"].isVisible())
         self.assertTrue(sidebar.playlist_section.layout().itemAt(1).widget() is sidebar.scroll_area)
         self.assertEqual(
             {
@@ -171,7 +177,8 @@ class ApprovedShellMigrationTests(unittest.TestCase):
         unselected_contents = selected.contentsRect()
         selected.set_selected(True)
         self.assertEqual(selected.contentsRect(), unselected_contents)
-        self.assertNotIn("border-left", selected.styleSheet())
+        self.assertIn("border-left", selected.styleSheet())
+        self.assertIn(get_theme("dark").colors.accent, selected.styleSheet())
         source = inspect.getsource(navigation_item_module.NavigationItem)
         self.assertNotIn("def paintEvent", source)
         self.assertNotIn("QPainter", source)
@@ -280,6 +287,26 @@ class ApprovedShellMigrationTests(unittest.TestCase):
         palette = palette_for(get_theme("dark"))
         self.assertGreater(palette.normal.lightness(), QColor(get_theme("dark").colors.text_secondary).lightness())
         self.assertLess(palette.normal.lightness(), palette.hover.lightness())
+
+    def test_compact_shell_uses_the_approved_icon_rail_without_hiding_player_actions(self) -> None:
+        self.window.resize(900, 600)
+        self.app.processEvents()
+
+        sidebar = self.window.sidebar
+        title_bar = self.window.title_bar
+        bar = self.window.player_bar
+        self.assertTrue(sidebar.compact)
+        self.assertEqual(sidebar.width(), 76)
+        self.assertFalse(sidebar.brand_label.isVisible())
+        self.assertFalse(sidebar.library_caption.isVisible())
+        self.assertFalse(sidebar.playlist_caption.isVisible())
+        self.assertEqual(title_bar._sidebar_spacer.width(), 76)
+        for item in (*sidebar._items.values(), *sidebar._playlist_items.values(), sidebar.more_playlists_button):
+            self.assertEqual(item.toolButtonStyle(), Qt.ToolButtonStyle.ToolButtonIconOnly)
+        self.assertFalse(sidebar.scroll_area.horizontalScrollBar().isVisible())
+        self.assertTrue(all(button.isVisible() for button in (
+            bar.shuffle_button, bar.repeat_button, bar.queue_button, bar.lyrics_button, bar.more_button,
+        )))
 
     def test_playerbar_uses_only_the_fixed_local_fluent_manifest(self) -> None:
         manifest_path = PROJECT_ROOT / "app" / "ui_v2" / "assets" / "icons" / "fluent_player" / "MANIFEST.json"

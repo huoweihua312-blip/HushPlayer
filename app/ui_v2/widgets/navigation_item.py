@@ -56,9 +56,13 @@ class NavigationItem(QToolButton):
         if self._compact == compact:
             return
         self._compact = compact
-        # The approved compact sidebar narrows but retains the full product
-        # vocabulary; it must not collapse names into a partial brand or icons.
-        self.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
+        # At the approved 900px breakpoint the rail keeps recognizable Fluent
+        # icons and tooltips while removing labels that cannot fit safely.
+        self.setToolButtonStyle(
+            Qt.ToolButtonStyle.ToolButtonIconOnly
+            if compact
+            else Qt.ToolButtonStyle.ToolButtonTextBesideIcon
+        )
         self._refresh_visuals()
 
     def set_selected(self, selected: bool) -> None:
@@ -107,8 +111,9 @@ class NavigationItem(QToolButton):
         )
         self.setIconSize(QSize(icon_size, icon_size))
         self.setMinimumWidth(0)
+        selected_border = f"border-left: 2px solid {c.accent};" if self._selected else ""
         self.setStyleSheet(
-            f"QToolButton {{ text-align: left; padding: 0 12px; border: 0; "
+            f"QToolButton {{ text-align: left; padding: 0 12px; border: 0; {selected_border} "
             f"border-radius: {self._theme.metrics.radius_md}px; font-size: {self._theme.fonts.body}px; "
             f"color: {c.primary_text if self._selected else c.secondary_text}; "
             f"background: {c.selected_background if self._selected else 'transparent'}; }}"

@@ -1,4 +1,4 @@
-"""Immutable semantic tokens for the approved UI V2 design system."""
+"""Single semantic token system for the approved Quiet Orbit shell."""
 
 from __future__ import annotations
 
@@ -9,9 +9,45 @@ from typing import Literal
 ThemeMode = Literal["light", "dark"]
 
 
+FONT_FALLBACKS = (
+    "MiSans",
+    "MiSans VF",
+    "HarmonyOS Sans SC",
+    "Noto Sans CJK SC",
+    "Source Han Sans SC",
+    "Microsoft YaHei UI",
+    "Segoe UI Variable Text",
+    "Segoe UI",
+    "sans-serif",
+)
+
+
+def resolve_font_family() -> str:
+    """Return the first approved family installed on this machine."""
+
+    try:
+        from PySide6.QtGui import QFontDatabase, QGuiApplication
+
+        if QGuiApplication.instance() is None:
+            return "Segoe UI"
+        installed = set(QFontDatabase.families())
+    except Exception:
+        installed = set()
+    for family in FONT_FALLBACKS:
+        if family == "sans-serif" or family in installed:
+            return family
+    return "sans-serif"
+
+
+def font_family_qss() -> str:
+    """Return the approved ordered stack without requiring a QApplication."""
+
+    return ", ".join(f'"{family}"' for family in FONT_FALLBACKS)
+
+
 @dataclass(frozen=True, slots=True)
 class ThemeColors:
-    """Palette names are semantic so pages never invent a parallel surface system."""
+    """Semantic colors shared by every Q1 shell surface and control."""
 
     app_background: str
     window_background: str
@@ -42,7 +78,6 @@ class ThemeColors:
     danger: str
     shadow: str
     overlay: str
-    # Compatibility names used by protected, not-yet-migrated V2 pages.
     navigation_background: str
     elevated_background: str
     player_background: str
@@ -67,9 +102,9 @@ class ThemeMetrics:
     spacing_md: int = 12
     spacing_lg: int = 16
     spacing_xl: int = 24
-    radius_sm: int = 5
-    radius_md: int = 7
-    radius_lg: int = 10
+    radius_sm: int = 6
+    radius_md: int = 8
+    radius_lg: int = 12
     page_margin: int = 30
     control_height: int = 38
     icon_sm: int = 16
@@ -77,22 +112,28 @@ class ThemeMetrics:
     icon_lg: int = 24
     title_bar_height: int = 59
     sidebar_width: int = 220
-    compact_sidebar_width: int = 188
+    compact_sidebar_width: int = 76
     player_bar_height: int = 102
     content_safe_bottom: int = 18
 
 
 @dataclass(frozen=True, slots=True)
 class ThemeFonts:
-    page_title: int = 36
-    section_title: int = 22
-    body: int = 15
-    secondary: int = 14
     caption: int = 12
+    body_small: int = 13
+    body: int = 15
+    control: int = 14
+    section_title: int = 22
+    page_title: int = 32
+    track_title: int = 15
+    metadata: int = 12
+    numeric: int = 12
+    secondary: int = 14
     card_title: int = 14
     card_meta: int = 12
     player_title: int = 14
     player_meta: int = 12
+    family: str = "Segoe UI"
 
 
 @dataclass(frozen=True, slots=True)
@@ -103,53 +144,117 @@ class Theme:
     fonts: ThemeFonts = ThemeFonts()
 
 
+def _colors(
+    *,
+    app: str,
+    sidebar: str,
+    content: str,
+    player: str,
+    surface: str,
+    surface_secondary: str,
+    elevated: str,
+    hover: str,
+    selected: str,
+    playing: str,
+    pressed: str,
+    divider: str,
+    primary: str,
+    secondary: str,
+    tertiary: str,
+    disabled: str,
+    icon: str,
+    active: str,
+    progress_track: str,
+    accent: str,
+    accent_hover: str,
+    accent_pressed: str,
+    danger: str,
+    warning: str,
+    success: str,
+    shadow: str,
+    overlay: str,
+) -> ThemeColors:
+    return ThemeColors(
+        app_background=app,
+        window_background=app,
+        content_background=content,
+        sidebar_background=sidebar,
+        titlebar_background=app,
+        playerbar_background=player,
+        surface_primary=surface,
+        surface_secondary=surface_secondary,
+        surface_elevated=elevated,
+        surface_hover=hover,
+        surface_selected=selected,
+        surface_pressed=pressed,
+        divider=divider,
+        text_primary=primary,
+        text_secondary=secondary,
+        text_tertiary=tertiary,
+        text_disabled=disabled,
+        icon_default=icon,
+        icon_hover=primary,
+        icon_active=active,
+        progress_track=progress_track,
+        progress_fill=primary,
+        accent=accent,
+        accent_hover=accent_hover,
+        accent_pressed=accent_pressed,
+        focus_ring=accent,
+        danger=danger,
+        shadow=shadow,
+        overlay=overlay,
+        navigation_background=sidebar,
+        elevated_background=elevated,
+        player_background=player,
+        input_background=elevated,
+        primary_text=primary,
+        secondary_text=secondary,
+        subtle_text=tertiary,
+        disabled_text=disabled,
+        border=divider,
+        border_strong=progress_track,
+        selected_background=selected,
+        playing_background=playing,
+        hover_background=hover,
+        warning=warning,
+        success=success,
+    )
+
+
 LIGHT_THEME = Theme(
     mode="light",
-    colors=ThemeColors(
-        app_background="#f1f1ef", sidebar_background="#e4e4e2",
-        window_background="#f1f1ef", content_background="#fafaf8",
-        titlebar_background="#f1f1ef", playerbar_background="#efefed",
-        surface_primary="#fafaf8", surface_secondary="#f0f0ee", surface_elevated="#ffffff",
-        surface_hover="#e8e8e6", surface_selected="#dcdcd9", surface_pressed="#d2d2cf",
-        divider="#d6d6d3", text_primary="#1f2021", text_secondary="#555759",
-        text_tertiary="#747677", text_disabled="#a1a2a0", icon_default="#424345",
-        icon_hover="#1f2021", icon_active="#7970d7", progress_track="#bdbebb", progress_fill="#1f2021", accent="#7970d7",
-        accent_hover="#6d65c7", accent_pressed="#5d55af", focus_ring="#7970d7",
-        danger="#a64e55", shadow="rgba(0, 0, 0, .18)", overlay="rgba(0, 0, 0, .38)",
-        navigation_background="#e4e4e2",
-        elevated_background="#ffffff", player_background="#efefed",
-        input_background="#ffffff", primary_text="#1f2021", secondary_text="#555759",
-        subtle_text="#747677", disabled_text="#a1a2a0", border="#d6d6d3",
-        border_strong="#bdbebb", selected_background="#dcdcd9", playing_background="#e5e3f6",
-        hover_background="#e8e8e6", warning="#9a6918", success="#277b50",
+    colors=_colors(
+        app="#f7f6f1", sidebar="#e8eee9", content="#fbfaf6", player="#eef2ed",
+        surface="#fbfaf6", surface_secondary="#f1f3ee", elevated="#ffffff",
+        hover="#e7eee9", selected="#dce9e1", playing="#eee4cd", pressed="#d0e0d6", divider="#d7e1da",
+        primary="#1d2925", secondary="#4f625a", tertiary="#74857d", disabled="#a0ada6",
+        icon="#52665d", active="#b18d48", progress_track="#b7c5bc", accent="#b18d48",
+        accent_hover="#c09d58", accent_pressed="#9d7b3c", danger="#b7665f",
+        warning="#9a7228", success="#3e805e", shadow="rgba(31, 48, 41, .16)",
+        overlay="rgba(31, 48, 41, .24)",
     ),
+    fonts=ThemeFonts(),
 )
 
 
 DARK_THEME = Theme(
     mode="dark",
-    colors=ThemeColors(
-        app_background="#111214", sidebar_background="#151618",
-        window_background="#111214", content_background="#111214",
-        titlebar_background="#111214", playerbar_background="#1a1c1e",
-        surface_primary="#17191b", surface_secondary="#1d1f21", surface_elevated="#252729",
-        surface_hover="#2d2f32", surface_selected="#2b2d30", surface_pressed="#35373a",
-        divider="#292b2e", text_primary="#f4f3f2", text_secondary="#b0afb0",
-        text_tertiary="#858689", text_disabled="#606166", icon_default="#c2c1c2",
-        icon_hover="#f4f3f2", icon_active="#a995e8", progress_track="#43464a", progress_fill="#f4f3f2", accent="#a995e8",
-        accent_hover="#b9a8f1", accent_pressed="#8e7bd1", focus_ring="#b9a8f1",
-        danger="#9e575a", shadow="rgba(0, 0, 0, .55)", overlay="rgba(0, 0, 0, .48)",
-        navigation_background="#151618",
-        elevated_background="#252729", player_background="#1a1c1e",
-        input_background="#252729", primary_text="#f4f3f2", secondary_text="#b0afb0",
-        subtle_text="#858689", disabled_text="#606166", border="#292b2e",
-        border_strong="#43464a", selected_background="#2b2d30", playing_background="#252238",
-        hover_background="#2d2f32", warning="#b38437", success="#74a888",
+    colors=_colors(
+        app="#101516", sidebar="#0c1012", content="#101516", player="#151c1e",
+        surface="#151a1c", surface_secondary="#151c1e", elevated="#1d2527",
+        hover="#222c2e", selected="#1a211f", playing="#28271f", pressed="#293536", divider="#222c2e",
+        primary="#f1f5f2", secondary="#c7d2ce", tertiary="#899792", disabled="#5e6c68",
+        icon="#d3ded9", active="#d6b879", progress_track="#5e6c68", accent="#d6b879",
+        accent_hover="#e7ca8c", accent_pressed="#b89a5c", danger="#e08f86",
+        warning="#d0a85e", success="#8dc6a2", shadow="rgba(0, 0, 0, .48)",
+        overlay="rgba(0, 0, 0, .42)",
     ),
+    fonts=ThemeFonts(),
 )
 
 
 def get_theme(mode: str) -> Theme:
-    """Resolve one complete V2 theme without mutable globals."""
+    """Resolve one complete immutable Quiet Orbit theme."""
 
-    return LIGHT_THEME if mode == "light" else DARK_THEME
+    return LIGHT_THEME if str(mode).casefold() == "light" else DARK_THEME
