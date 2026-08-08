@@ -27,6 +27,11 @@ class ImmersiveLyricsOptions:
     artwork_size: int = 100
     lyrics_max_width: int = 780
     controls_auto_hide: bool = True
+    background_blur: int = 40
+    background_darkness: int = 68
+    background_image_opacity: int = 100
+    background_transparency: int = 38
+    background_custom_path: str = ""
 
     def update(self, **values: object) -> None:
         """Apply known values only; the model intentionally has no persistence."""

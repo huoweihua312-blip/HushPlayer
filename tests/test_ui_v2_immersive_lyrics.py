@@ -128,13 +128,11 @@ class UiV2ImmersiveLyricsTests(unittest.TestCase):
         self.assertEqual(immersive.header_back_button.toolTip(), "返回普通页面")
         self.assertTrue(immersive.controls.play_button.styleSheet())
         self.assertEqual(len(immersive.controls.findChildren(QSlider)), 2)
-        self.assertIs(immersive.controls.parentWidget(), immersive.identity_column)
+        self.assertIs(immersive.controls.parentWidget(), immersive)
         self.assertEqual(immersive._content_layout.itemAt(0).widget(), immersive.identity_column)
         self.assertEqual(immersive._content_layout.itemAt(1).widget(), immersive.canvas)
-        controls_rect = QRect(immersive.controls.mapTo(immersive.content, QPoint(0, 0)), immersive.controls.size())
-        canvas_rect = immersive.canvas.geometry()
-        self.assertLess(controls_rect.center().x(), canvas_rect.left())
-        canvas_geometry = QRect(canvas_rect)
+        self.assertGreaterEqual(immersive.controls.geometry().top(), immersive.content_stack.geometry().bottom())
+        canvas_geometry = QRect(immersive.canvas.geometry())
         immersive.controls.hide()
         self.app.processEvents()
         self.assertEqual(immersive.canvas.geometry(), canvas_geometry)
@@ -304,12 +302,9 @@ class UiV2ImmersiveLyricsTests(unittest.TestCase):
         immersive.canvas.repaint()
         self.app.processEvents()
         self.assertEqual(id(immersive.canvas), canvas_id)
-        self.assertLess(immersive.content.geometry().right(), immersive.settings_panel.geometry().left())
-        active = immersive.lyrics_adapter.active_line
-        self.assertIsNotNone(active)
-        active_rect = immersive.canvas._line_rects[active.id]
-        active_origin = immersive.canvas.mapTo(immersive, active_rect.topLeft())
-        self.assertFalse(immersive.settings_panel.geometry().intersects(QRect(active_origin, active_rect.size())))
+        self.assertEqual(immersive.content.geometry(), closed_content)
+        self.assertIs(immersive.settings_panel.parentWidget(), immersive.overlay_host)
+        self.assertTrue(immersive.settings_panel.geometry().intersects(immersive.content.geometry()))
         immersive.hide_settings_panel()
         self.app.processEvents()
         self.assertEqual(immersive.content.geometry(), closed_content)
@@ -384,11 +379,9 @@ class UiV2ImmersiveLyricsTests(unittest.TestCase):
         self.window.resize(900, 600)
         immersive.show_settings_panel()
         self.app.processEvents()
-        self.assertFalse(immersive.content.isVisible())
-        self.assertLessEqual(immersive.settings_panel.width(), round(immersive.width() * 0.88))
-        # The compact settings sheet deliberately hides the complete content
-        # region; no left-column controls remain behind it.
-        self.assertFalse(immersive.controls.isVisible())
+        self.assertTrue(immersive.content.isVisible())
+        self.assertGreaterEqual(immersive.settings_panel.width(), 310)
+        self.assertTrue(immersive.controls.isVisible())
         self.assertEqual((id(immersive.canvas), id(immersive.identity), id(immersive.controls), id(immersive.settings_panel)), core_ids)
 
     def test_presentation_mode_removes_shell_columns_and_restores_them_without_drift(self) -> None:

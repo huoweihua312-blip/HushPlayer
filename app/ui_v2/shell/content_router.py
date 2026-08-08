@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
+
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import QLabel, QStackedWidget, QVBoxLayout, QWidget
 
@@ -14,6 +16,7 @@ from app.ui_v2.adapters.artists_adapter import (
 from app.ui_v2.adapters.favorites_adapter import FavoritesAdapter
 from app.ui_v2.adapters.library_collection import LibraryCollectionAdapter
 from app.ui_v2.adapters.lyrics_adapter import LyricsAdapter
+from app.ui_v2.adapters.legacy_settings_bridge import LegacySettingsBridge
 from app.ui_v2.adapters.navigation_adapter import NavigationAdapter
 from app.ui_v2.adapters.online_adapter import OnlineAdapter
 from app.ui_v2.adapters.online_source_adapter import OnlineSourceAdapter
@@ -103,6 +106,9 @@ class ContentRouter(QStackedWidget):
         immersive_options: ImmersiveLyricsOptions,
         theme: Theme,
         parent: QWidget | None = None,
+        *,
+        settings_bridge: LegacySettingsBridge | None = None,
+        settings_apply_callback: Callable[[dict[str, object]], None] | None = None,
     ) -> None:
         super().__init__(parent)
         self._theme = theme
@@ -113,6 +119,8 @@ class ContentRouter(QStackedWidget):
         self._lyrics_adapter = lyrics
         self._playback_adapter = playback
         self._immersive_options = immersive_options
+        self._settings_bridge = settings_bridge
+        self._settings_apply_callback = settings_apply_callback
         self._immersive_return_route = "lyrics"
         self._last_normal_route = navigation.route if not navigation.route.startswith("immersive") else "browse"
         self._content_safe_bottom = 0
@@ -367,6 +375,8 @@ class ContentRouter(QStackedWidget):
             self._theme,
             self._immersive_options,
             self,
+            settings_bridge=self._settings_bridge,
+            settings_apply_callback=self._settings_apply_callback,
         )
         page.immersive_exit_requested.connect(self._return_from_immersive)
         page.fullscreen_requested.connect(self.immersive_fullscreen_requested)

@@ -164,6 +164,8 @@ class MainWindow(QMainWindow):
             self.immersive_lyrics_options,
             self._theme,
             self,
+            settings_bridge=self.settings_bridge,
+            settings_apply_callback=self._apply_settings_snapshot,
         )
         self.player_bar = PlayerBar(self.playback_adapter, self._theme, self)
         self.player_bar.set_read_only(
@@ -280,6 +282,9 @@ class MainWindow(QMainWindow):
             self.settings_overlay.cancel_and_close()
         if self.real_library_adapter is not None:
             self.real_library_adapter.shutdown()
+        immersive_page = self.router._pages.get("immersive_lyrics")
+        if immersive_page is not None and hasattr(immersive_page, "shutdown"):
+            immersive_page.shutdown()
         controller = self.playback_adapter.controller
         if controller is not None:
             controller.shutdown()
@@ -431,8 +436,10 @@ class MainWindow(QMainWindow):
     def open_settings_overlay(self) -> None:
         """Show the one cached Settings surface without changing the route."""
 
-        if self._presentation_mode is not ShellPresentationMode.NORMAL:
-            return
+        immersive_page = self.router._pages.get("immersive_lyrics")
+        if self._presentation_mode is not ShellPresentationMode.NORMAL and immersive_page is not None:
+            if hasattr(immersive_page, "hide_settings_panel"):
+                immersive_page.hide_settings_panel()
         if self.settings_overlay is None:
             self.settings_overlay = SettingsOverlay(
                 self.settings_bridge,
@@ -445,6 +452,7 @@ class MainWindow(QMainWindow):
             self.settings_overlay.raise_()
             return
         self.settings_overlay.open()
+        self.settings_overlay.raise_()
 
     def _on_settings_saved(self, snapshot: SettingsSnapshot) -> None:
         """Keep the shell's last persisted snapshot in sync with the overlay."""
@@ -475,6 +483,22 @@ class MainWindow(QMainWindow):
             )
         except (TypeError, ValueError):
             self.immersive_lyrics_options.global_font_scale = 100
+        for attribute, key, default, low, high in (
+            ("background_blur", "immersive_background_blur", 40, 0, 100),
+            ("background_darkness", "immersive_background_darkness", 68, 0, 100),
+            ("background_image_opacity", "immersive_background_image_opacity", 100, 0, 100),
+            ("background_transparency", "immersive_background_transparency", 38, 0, 100),
+        ):
+            try:
+                value = max(low, min(high, int(values.get(key, default))))
+            except (TypeError, ValueError):
+                value = default
+            setattr(self.immersive_lyrics_options, attribute, value)
+            if attribute == "background_image_opacity":
+                self.immersive_lyrics_options.background_opacity = value
+        self.immersive_lyrics_options.background_custom_path = str(
+            values.get("immersive_background_custom_path", "") or ""
+        )
 
     def _apply_settings_snapshot(self, values: dict[str, object]) -> None:
         """Preview or apply a Settings snapshot without creating another shell."""

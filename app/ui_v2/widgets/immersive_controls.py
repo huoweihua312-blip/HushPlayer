@@ -24,6 +24,7 @@ class ImmersiveControls(QWidget):
     interaction_started = Signal()
     interaction_finished = Signal()
     queue_requested = Signal()
+    lyrics_requested = Signal()
 
     def __init__(self, theme: Theme, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -45,6 +46,7 @@ class ImmersiveControls(QWidget):
         self.duration_label = QLabel("--:--", self)
         self.volume_button = self._button("volume", "音量")
         self.queue_button = self._button("queue", "播放队列")
+        self.lyrics_button = self._button("lyrics", "歌词")
         self.volume_slider = QSlider(Qt.Orientation.Horizontal, self)
         self.volume_slider.setObjectName("immersiveVolumeSlider")
         self.volume_slider.setRange(0, 100)
@@ -80,6 +82,7 @@ class ImmersiveControls(QWidget):
         utility_layout.setContentsMargins(0, 0, 0, 0)
         utility_layout.setSpacing(6)
         utility_layout.addWidget(self.queue_button)
+        utility_layout.addWidget(self.lyrics_button)
         utility_layout.addWidget(self.volume_button)
         utility_layout.addWidget(self.volume_slider)
         utility_layout.addWidget(self.more_button)
@@ -117,6 +120,7 @@ class ImmersiveControls(QWidget):
         self.shuffle_button.clicked.connect(adapter.toggle_shuffle)
         self.repeat_button.clicked.connect(adapter.cycle_repeat_mode)
         self.queue_button.clicked.connect(self.queue_requested)
+        self.lyrics_button.clicked.connect(self.lyrics_requested)
         self.progress_slider.sliderPressed.connect(self._begin_progress)
         self.progress_slider.sliderReleased.connect(self._commit_progress)
         self.volume_slider.valueChanged.connect(adapter.set_volume)
@@ -142,7 +146,7 @@ class ImmersiveControls(QWidget):
             f"background: transparent; color: {_rgba(colors.primary_text, 228)}; }}"
             f"QToolButton:hover {{ background: {colors.hover_background}; color: {colors.primary_text}; }}"
         )
-        for button in (self.shuffle_button, self.previous_button, self.next_button, self.repeat_button, self.queue_button, self.volume_button, self.more_button):
+        for button in (self.shuffle_button, self.previous_button, self.next_button, self.repeat_button, self.queue_button, self.lyrics_button, self.volume_button, self.more_button):
             button.setStyleSheet(subtle)
         self.play_button.setStyleSheet(
             "QToolButton#immersivePlayButton { min-width: 58px; min-height: 58px; "
@@ -159,6 +163,7 @@ class ImmersiveControls(QWidget):
         self.shuffle_button.setIcon(fluent_icon("shuffle", theme, "selected" if self._adapter and self._adapter.state.shuffle_enabled else "normal", size=18))
         self.repeat_button.setIcon(fluent_icon("repeat", theme, "selected" if self._adapter and self._adapter.state.repeat_mode != RepeatMode.OFF else "normal", size=18))
         self.queue_button.setIcon(fluent_icon("queue", theme, size=18))
+        self.lyrics_button.setIcon(fluent_icon("lyrics", theme, size=18))
         self._on_playing_changed(self._adapter.state.is_playing if self._adapter else False)
         for label in (self.elapsed_label, self.duration_label):
             label.setStyleSheet(f"background: transparent; color: {_rgba(colors.primary_text, 224)}; font-size: {theme.fonts.caption}px;")

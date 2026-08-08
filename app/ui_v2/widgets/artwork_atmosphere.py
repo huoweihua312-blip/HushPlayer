@@ -114,6 +114,8 @@ class ArtworkAtmosphere(QWidget):
         # remain the visual focus at the approved default.
         self._opacity = 42
         self._overlay_strength = 52
+        self._blur_radius = 40
+        self._transparency = 38
         self.setObjectName("immersiveArtworkAtmosphere")
         self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
 
@@ -150,6 +152,14 @@ class ArtworkAtmosphere(QWidget):
         self._overlay_strength = max(15, min(85, int(value)))
         self.update()
 
+    def set_blur(self, value: int) -> None:
+        self._blur_radius = max(0, min(100, int(value)))
+        self.update()
+
+    def set_transparency(self, value: int) -> None:
+        self._transparency = max(0, min(100, int(value)))
+        self.update()
+
     def paintEvent(self, event) -> None:  # noqa: N802
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
@@ -168,11 +178,12 @@ class ArtworkAtmosphere(QWidget):
             base_left = "#111b28" if self._theme.mode == "dark" else "#e8f4f6"
             base_right = "#1c2b38" if self._theme.mode == "dark" else "#f5ece8"
             field = QLinearGradient(0, 0, self.width(), self.height())
-            field.setColorAt(0.0, _mix(base_left, colors[0], 0.40 if self._mode == "artwork" else 0.30))
-            field.setColorAt(0.53, _mix(base_right, colors[1], 0.34 if self._mode == "artwork" else 0.26))
-            field.setColorAt(1.0, _mix(base_left, colors[2], 0.30 if self._mode == "artwork" else 0.22))
+            palette_mix = max(0.12, (0.40 if self._mode == "artwork" else 0.30) - self._blur_radius / 300.0)
+            field.setColorAt(0.0, _mix(base_left, colors[0], palette_mix))
+            field.setColorAt(0.53, _mix(base_right, colors[1], max(0.10, palette_mix * 0.85)))
+            field.setColorAt(1.0, _mix(base_left, colors[2], max(0.10, palette_mix * 0.75)))
             painter.fillRect(self.rect(), field)
-        alpha_factor = self._opacity / 100
+        alpha_factor = (self._opacity / 100) * max(0.15, 1.0 - self._transparency / 125.0)
         for center, radius, color, alpha in (
             (QPointF(self.width() * 0.14, self.height() * 0.19), self.width() * 0.48, colors[0], 88),
             (QPointF(self.width() * 0.79, self.height() * 0.25), self.width() * 0.56, colors[1], 78),

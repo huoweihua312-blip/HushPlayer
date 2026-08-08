@@ -104,7 +104,10 @@ class UiV2ImmersivePlayerTests(unittest.TestCase):
         self._play_track()
         shell = self._shell()
         self.assertIs(shell.queue_panel.playback, self.window.playback_adapter)
-        self.assertEqual(shell.queue_panel.list_widget.count(), len(self.window.playback_adapter.queue_tracks))
+        expected_upcoming = len(self.window.playback_adapter.queue_tracks) - (
+            1 if self.window.playback_adapter.state.current_track is not None else 0
+        )
+        self.assertEqual(shell.queue_panel.list_widget.count(), expected_upcoming)
         shell.show_queue_panel()
         self.app.processEvents()
         self.assertTrue(shell.queue_panel_visible)
@@ -161,7 +164,8 @@ class UiV2ImmersivePlayerTests(unittest.TestCase):
         ]
         self.assertEqual(header_mode_texts.count("正在播放"), 1)
         self.assertFalse(hasattr(shell.controls, "now_playing_button"))
-        self.assertFalse(hasattr(shell.controls, "lyrics_button"))
+        self.assertTrue(hasattr(shell.controls, "lyrics_button"))
+        self.assertTrue(shell.controls.lyrics_button.isEnabled())
         self.assertFalse(hasattr(shell.controls, "mode_requested"))
 
     def test_immersive_mode_and_return_controls_use_fluent_text_tabs(self) -> None:

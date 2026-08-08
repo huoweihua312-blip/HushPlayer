@@ -114,8 +114,7 @@ class ImmersiveSettingsPanel(QFrame):
         layout.addWidget(self.header_widget)
         layout.addWidget(self.scroll_area, 1)
         layout.addWidget(self.footer_widget)
-        self.close_button.clicked.connect(self.hide)
-        self.close_button.clicked.connect(self.closed)
+        self.close_button.clicked.connect(self.request_close)
         self.exit_immersive_button.clicked.connect(self.exit_requested)
         for combo in (self.theme_combo, self.background_combo, self.weight_combo, self.text_protection_combo):
             combo.currentIndexChanged.connect(self.changed)
@@ -244,6 +243,10 @@ class ImmersiveSettingsPanel(QFrame):
 
     def set_reduce_motion(self, enabled: bool) -> None:
         self.advanced_disclosure.set_reduce_motion(enabled)
+
+    def request_close(self) -> None:
+        self.hide()
+        self.closed.emit()
 
     def any_popup_open(self) -> bool:
         return any(combo.view().isVisible() for combo in (self.theme_combo, self.background_combo, self.weight_combo, self.text_protection_combo))
