@@ -6,7 +6,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable
 
-from PySide6.QtCore import QSignalBlocker, QRect, QSize, Qt, Signal
+from PySide6.QtCore import QSignalBlocker, QTimer, QRect, QSize, Qt, Signal
+from PySide6.QtGui import QKeyEvent, QMouseEvent, QPixmap
 from PySide6.QtWidgets import (
     QFrame,
     QHBoxLayout,
@@ -14,7 +15,6 @@ from PySide6.QtWidgets import (
     QLineEdit,
     QListWidget,
     QPushButton,
-    QMessageBox,
     QScrollArea,
     QStackedWidget,
     QToolButton,
@@ -36,7 +36,10 @@ from app.ui_v2.theme.icons import fluent_settings_icon, fluent_settings_interact
 from app.ui_v2.theme.tokens import Theme
 from app.ui_v2.widgets.settings_control_factory import (
     SettingsControlFactory,
-    SliderSpinControl,
+    SettingSlider,
+    SettingsActionButton,
+    SettingsDangerAction,
+    SettingsPathPicker,
     ThemedComboBox,
 )
 from app.ui_v2.widgets.settings_footer import SettingsFooter
@@ -48,8 +51,82 @@ from app.ui_v2.widgets.settings_sidebar import SettingsSidebar
 @dataclass(slots=True)
 class _PathControl:
     widget: QWidget
-    input: QLineEdit
-    browse: QPushButton
+    picker: SettingsPathPicker
+
+
+class _OverlayScrim(QFrame):
+    clicked = Signal()
+
+    def mousePressEvent(self, event: QMouseEvent) -> None:  # noqa: N802
+        if event.button() == Qt.MouseButton.LeftButton:
+            self.clicked.emit()
+            event.accept()
+            return
+        super().mousePressEvent(event)
+
+
+class SettingsConfirmDialog(QFrame):
+    """Inline themed confirmation panel; never creates a system window."""
+
+    confirm_requested = Signal()
+    discard_requested = Signal()
+    cancel_requested = Signal()
+
+    def __init__(self, theme: Theme, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.setObjectName("settingsConfirmDialog")
+        self.title_label = QLabel(self)
+        self.message_label = QLabel(self)
+        self.message_label.setWordWrap(True)
+        self.confirm_button = SettingsDangerAction("确认", theme, self)
+        self.discard_button = SettingsDangerAction("放弃修改", theme, self)
+        self.cancel_button = SettingsActionButton("取消", theme, self)
+        self.confirm_button.clicked.connect(self.confirm_requested)
+        self.discard_button.clicked.connect(self.discard_requested)
+        self.cancel_button.clicked.connect(self.cancel_requested)
+        heading = QVBoxLayout()
+        heading.setContentsMargins(0, 0, 0, 0)
+        heading.setSpacing(6)
+        heading.addWidget(self.title_label)
+        heading.addWidget(self.message_label)
+        buttons = QHBoxLayout()
+        buttons.setContentsMargins(0, 12, 0, 0)
+        buttons.setSpacing(8)
+        buttons.addStretch(1)
+        buttons.addWidget(self.confirm_button)
+        buttons.addWidget(self.discard_button)
+        buttons.addWidget(self.cancel_button)
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(22, 20, 22, 18)
+        layout.addLayout(heading)
+        layout.addLayout(buttons)
+        self.set_theme(theme)
+        self.hide()
+
+    def set_content(self, title: str, message: str, *, danger: bool) -> None:
+        self.title_label.setText(title)
+        self.message_label.setText(message)
+        self.confirm_button.setVisible(danger)
+        self.discard_button.setVisible(not danger)
+        self.cancel_button.setDefault(True)
+        self.cancel_button.setFocus()
+
+    def set_theme(self, theme: Theme) -> None:
+        self._theme = theme
+        c = theme.colors
+        self.setStyleSheet(
+            f"QFrame#settingsConfirmDialog {{ background: {c.surface_elevated}; border: 1px solid {c.border_strong}; border-radius: {theme.metrics.radius_lg}px; }} "
+            f"QLabel {{ color: {c.primary_text}; }} QLabel:first-child {{ font-size: {theme.fonts.section_title}px; font-weight: 600; }}"
+        )
+        self.title_label.setStyleSheet(
+            f"font-size: {theme.fonts.section_title}px; font-weight: 600; color: {c.primary_text};"
+        )
+        self.message_label.setStyleSheet(
+            f"font-size: {theme.fonts.body}px; color: {c.secondary_text};"
+        )
+        self.confirm_button.set_theme(theme)
+        self.discard_button.set_theme(theme)
+        self.cancel_button.set_theme(theme)
 
 
 class SettingsOverlay(QWidget):
@@ -64,23 +141,32 @@ class SettingsOverlay(QWidget):
         theme: Theme,
         *,
         preview_callback: Callable[[dict[str, Any]], None] | None = None,
+        path_chooser: Callable[[str], str] | None = None,
+        folder_chooser: Callable[[], str] | None = None,
         parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
         self.bridge = bridge
         self._theme = theme
         self._preview_callback = preview_callback
+        self._path_chooser = path_chooser
+        self._folder_chooser = folder_chooser
         self._session: SettingsEditSession | None = None
         self._controls: dict[str, QWidget] = {}
         self._path_controls: dict[str, _PathControl] = {}
+        self._rows: list[SettingsRow] = []
+        self._sections: list[SettingsSection] = []
+        self._aux_controls: list[QWidget] = []
         self._category_pages: dict[str, QWidget] = {}
         self._category_scrolls: dict[str, QScrollArea] = {}
         self._current_category = "general"
         self._feedback = ""
-        self._last_parent_rect = None
+        self._save_state = "clean"
+        self._pending_action = ""
         self.setObjectName("settingsOverlay")
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         self.setAutoFillBackground(True)
+        self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         self._build_shell()
         self._build_categories()
         self._wire_state()
@@ -100,11 +186,17 @@ class SettingsOverlay(QWidget):
         return bool(self._session and self._session.is_dirty)
 
     def _build_shell(self) -> None:
-        self.dim_layer = QFrame(self)
+        self.dim_layer = _OverlayScrim(self)
         self.dim_layer.setObjectName("settingsDimLayer")
+        self.dim_layer.clicked.connect(self.request_close)
         self.dialog = QFrame(self)
         self.dialog.setObjectName("settingsDialog")
 
+        self.header_icon = QToolButton(self.dialog)
+        self.header_icon.setObjectName("settingsHeaderIcon")
+        self.header_icon.setFixedSize(32, 32)
+        self.header_icon.setAutoRaise(True)
+        self.header_icon.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self.title_label = QLabel("设置", self.dialog)
         self.subtitle_label = QLabel("管理 HushPlayer 的现有设置", self.dialog)
         self.close_button = QToolButton(self.dialog)
@@ -120,6 +212,7 @@ class SettingsOverlay(QWidget):
         heading.setSpacing(2)
         heading.addWidget(self.title_label)
         heading.addWidget(self.subtitle_label)
+        header.addWidget(self.header_icon)
         header.addLayout(heading, 1)
         header.addWidget(self.close_button, 0, Qt.AlignmentFlag.AlignTop)
 
@@ -148,6 +241,10 @@ class SettingsOverlay(QWidget):
         self.confirmation_bar.hide()
 
         self.footer = SettingsFooter(self._theme, self.dialog)
+        self.confirm_scrim = _OverlayScrim(self)
+        self.confirm_scrim.setObjectName("settingsConfirmScrim")
+        self.confirm_scrim.clicked.connect(self._hide_confirmation)
+        self.confirm_dialog = SettingsConfirmDialog(self._theme, self)
         layout = QVBoxLayout(self.dialog)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
@@ -155,6 +252,8 @@ class SettingsOverlay(QWidget):
         layout.addLayout(body, 1)
         layout.addWidget(self.confirmation_bar)
         layout.addWidget(self.footer)
+        self.confirm_scrim.hide()
+        self.confirm_dialog.hide()
 
     def _build_categories(self) -> None:
         builders = {
@@ -193,11 +292,14 @@ class SettingsOverlay(QWidget):
     def _wire_state(self) -> None:
         self.sidebar.category_requested.connect(self.set_category)
         self.close_button.clicked.connect(self.request_close)
-        self.footer.cancel_requested.connect(self.cancel_and_close)
-        self.footer.save_requested.connect(self.save_and_close)
+        self.footer.cancel_requested.connect(self.request_close)
+        self.footer.save_requested.connect(self.save)
         self.confirm_save.clicked.connect(self.save_and_close)
         self.confirm_discard.clicked.connect(self.cancel_and_close)
         self.confirm_cancel.clicked.connect(self._hide_confirmation)
+        self.confirm_dialog.confirm_requested.connect(self._confirm_pending_action)
+        self.confirm_dialog.discard_requested.connect(self.cancel_and_close)
+        self.confirm_dialog.cancel_requested.connect(self._hide_confirmation)
 
     def _section(self, title: str, description: str) -> SettingsSection:
         return SettingsSection(title, description, self._theme, self)
@@ -205,7 +307,7 @@ class SettingsOverlay(QWidget):
     def _toggle_row(self, key: str, title: str, description: str) -> SettingsRow:
         control = SettingsControlFactory.switch(False, self._theme, self)
         self._bind_control(key, control, lambda: bool(control.isChecked()), control.setChecked, control.toggled)
-        return SettingsRow(key, title, description, control, self._theme, self)
+        return self._track_row(SettingsRow(key, title, description, control, self._theme, self))
 
     def _combo_row(
         self,
@@ -222,7 +324,7 @@ class SettingsOverlay(QWidget):
             lambda value: control.setCurrentIndex(max(0, control.findData(value))),
             control.currentIndexChanged,
         )
-        return SettingsRow(key, title, description, control, self._theme, self)
+        return self._track_row(SettingsRow(key, title, description, control, self._theme, self))
 
     def _slider_row(
         self,
@@ -235,44 +337,49 @@ class SettingsOverlay(QWidget):
     ) -> SettingsRow:
         control = SettingsControlFactory.slider_spin(minimum, maximum, minimum, suffix, self._theme, self)
         self._bind_control(key, control, control.value, control.set_value, control.value_changed)
-        return SettingsRow(key, title, description, control, self._theme, self)
+        return self._track_row(SettingsRow(key, title, description, control, self._theme, self))
 
     def _path_row(self, key: str, title: str, description: str) -> SettingsRow:
         container = QWidget(self)
-        edit = QLineEdit(container)
-        edit.setObjectName(f"settingsPath_{key.replace('.', '_')}")
-        edit.setPlaceholderText("未选择")
-        browse = QPushButton("选择", container)
+        picker = SettingsPathPicker(self._theme, container)
         layout = QHBoxLayout(container)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(6)
-        layout.addWidget(edit, 1)
-        layout.addWidget(browse)
-        path_control = _PathControl(container, edit, browse)
+        layout.addWidget(picker)
+        path_control = _PathControl(container, picker)
         self._path_controls[key] = path_control
-        edit.textChanged.connect(lambda value, path=key: self._value_changed(path, value))
-        browse.clicked.connect(lambda _checked=False, path=key: self._choose_path(path))
+        picker.path_changed.connect(lambda value, path=key: self._value_changed(path, value))
+        picker.browse_requested.connect(lambda path=key: self._choose_path(path))
+        picker.open_requested.connect(lambda path=key: self._open_path(path))
         self._controls[key] = container
-        return SettingsRow(key, title, description, container, self._theme, self)
+        return self._track_row(SettingsRow(key, title, description, container, self._theme, self))
+
+    def _track_row(self, row: SettingsRow) -> SettingsRow:
+        self._rows.append(row)
+        return row
+
+    def _track_section(self, section: SettingsSection) -> SettingsSection:
+        self._sections.append(section)
+        return section
 
     def _build_general(self, layout: QVBoxLayout) -> None:
-        section = self._section("启动与窗口", "保留现有 HushPlayer 启动和窗口行为。")
+        section = self._track_section(self._section("启动与窗口", "保留现有 HushPlayer 启动和窗口行为。"))
         section.add_row(self._toggle_row("auto_scan_music_folders_on_startup", "启动时自动扫描这些文件夹", "启动时扫描已保存的音乐文件夹。"))
         section.add_row(self._toggle_row("floating_lyrics_auto_open", "启动时自动打开桌面歌词", "播放启动时自动打开现有桌面歌词窗口。"))
         layout.addWidget(section)
 
     def _build_appearance(self, layout: QVBoxLayout) -> None:
-        section = self._section("主题", "沿用当前正式 Theme，不创建第二套壳层。")
+        section = self._track_section(self._section("主题", "沿用当前正式 Theme，不创建第二套壳层。"))
         section.add_row(self._combo_row("appearance_mode", "主题", "切换后立即应用，保存后写入现有设置文件。", (("跟随系统", "system"), ("浅色", "light"), ("深色", "dark"))))
         layout.addWidget(section)
 
     def _build_playback(self, layout: QVBoxLayout) -> None:
-        section = self._section("播放恢复", "沿用现有播放会话恢复语义。")
+        section = self._track_section(self._section("播放恢复", "沿用现有播放会话恢复语义。"))
         section.add_row(self._toggle_row("restore_last_playback", "启动时恢复上次播放的歌曲和进度", "启动时读取现有播放会话。"))
         layout.addWidget(section)
 
     def _build_lyrics(self, layout: QVBoxLayout) -> None:
-        immersive = self._section("沉浸歌词", "保留现有沉浸歌词设置，不改变 Lyrics 或沉浸页面结构。")
+        immersive = self._track_section(self._section("沉浸歌词", "保留现有沉浸歌词设置，不改变 Lyrics 或沉浸页面结构。"))
         immersive.add_row(self._toggle_row("immersive_auto_hide_ui", "自动隐藏控制层", "播放中静止后按现有规则隐藏控制层。"))
         immersive.add_row(self._combo_row("immersive_background_mode", "背景模式", "使用封面、纯色、半透明或自定义背景。", (("封面背景", "cover"), ("纯色背景", "default"), ("半透明背景", "translucent"), ("自定义图片", "custom"))))
         immersive.add_row(self._path_row("immersive_background_custom_path", "自定义背景图片", "仅在选择自定义背景时使用。"))
@@ -284,7 +391,7 @@ class SettingsOverlay(QWidget):
         immersive.add_row(self._slider_row("immersive_lyrics_font_scale", "沉浸歌词字号比例", "沿用现有 70% 到 160% 范围。", 70, 160, "%"))
         layout.addWidget(immersive)
 
-        floating = self._section("桌面歌词", "调整现有桌面歌词窗口的默认外观。")
+        floating = self._track_section(self._section("桌面歌词", "调整现有桌面歌词窗口的默认外观。"))
         floating.add_row(self._combo_row("floating_lyrics_color", "默认歌词颜色", "保存后应用到桌面歌词窗口。", (("白色", "white"), ("黑色", "black"), ("黄色", "yellow"), ("蓝色", "blue"), ("绿色", "green"), ("粉色", "pink"), ("紫色", "purple"))))
         floating.add_row(self._slider_row("floating_lyrics_opacity", "默认不透明度", "保留现有 20% 到 100% 范围。", 20, 100, "%"))
         floating.add_row(self._slider_row("floating_lyrics_font_size", "默认字号", "保留现有 22 到 84 px 范围。", 22, 84, " px"))
@@ -292,15 +399,16 @@ class SettingsOverlay(QWidget):
         layout.addWidget(floating)
 
     def _build_library(self, layout: QVBoxLayout) -> None:
-        section = self._section("音乐文件夹", "修改后保存到现有扫描设置；手动扫描仍是独立操作。")
+        section = self._track_section(self._section("音乐文件夹", "修改后保存到现有扫描设置；手动扫描仍是独立操作。"))
         self.folder_list = QListWidget(self)
         self.folder_list.setObjectName("settingsFolderList")
         self.folder_list.setMinimumHeight(100)
         section.add_widget(self.folder_list)
         buttons = QHBoxLayout()
-        add = QPushButton("添加文件夹", self)
-        remove = QPushButton("移除选中", self)
-        scan = QPushButton("手动重新扫描", self)
+        add = SettingsActionButton("添加文件夹", self._theme, self)
+        remove = SettingsActionButton("移除选中", self._theme, self)
+        scan = SettingsActionButton("手动重新扫描", self._theme, self)
+        self._aux_controls.extend((add, remove, scan))
         add.clicked.connect(self._add_folder)
         remove.clicked.connect(self._remove_folder)
         scan.clicked.connect(lambda: self._run_action("scan_music_folders"))
@@ -313,7 +421,7 @@ class SettingsOverlay(QWidget):
         layout.addWidget(section)
 
     def _build_cache(self, layout: QVBoxLayout) -> None:
-        section = self._section("缓存", "缓存命令不参与 Save/Dirty；仅调用现有服务。")
+        section = self._track_section(self._section("缓存", "缓存命令不参与 Save/Dirty；仅调用现有服务。"))
         self.cache_status = QLabel("缓存统计由正式缓存服务提供。", self)
         self.cache_status.setWordWrap(True)
         section.add_widget(self.cache_status)
@@ -323,30 +431,48 @@ class SettingsOverlay(QWidget):
             ("清理未完成音频缓存", "clear_incomplete_audio_cache"),
             ("清理全部音频缓存", "clear_all_audio_cache"),
         ):
-            button = QPushButton(text, self)
+            button = (
+                SettingsActionButton(text, self._theme, self)
+                if action == "open_audio_cache_directory"
+                else SettingsDangerAction(text, self._theme, self)
+            )
+            self._aux_controls.append(button)
             button.clicked.connect(lambda _checked=False, name=action: self._run_action(name))
             button.setEnabled(self.bridge.has_action(action))
             section.add_widget(button)
         layout.addWidget(section)
 
     def _build_updates(self, layout: QVBoxLayout) -> None:
-        section = self._section("应用更新", "更新检查沿用现有 AppUpdateService。")
+        section = self._track_section(self._section("应用更新", "更新检查沿用现有 AppUpdateService。"))
         section.add_row(self._toggle_row("auto_check_updates_on_startup", "启动后自动检查更新", "下次启动时按现有服务规则检查。"))
         section.add_row(self._combo_row("update_check_delay_seconds", "启动后延迟", "保留现有 5 到 300 秒范围。", (("5 秒", "5"), ("15 秒", "15"), ("30 秒", "30"), ("60 秒", "60"))))
-        check = QPushButton("检查更新", self)
+        self.update_status = QLabel("尚未检查更新。", self)
+        self.update_status.setWordWrap(True)
+        section.add_widget(self.update_status)
+        check = SettingsActionButton("检查更新", self._theme, self)
+        self._aux_controls.append(check)
         check.clicked.connect(lambda: self._run_action("check_updates"))
         check.setEnabled(self.bridge.has_action("check_updates"))
         section.add_widget(check)
         layout.addWidget(section)
 
     def _build_about(self, layout: QVBoxLayout) -> None:
-        section = self._section("关于 HushPlayer", "当前 HushPlayer 的版本与应用信息。")
+        section = self._track_section(self._section("关于 HushPlayer", "当前 HushPlayer 的版本与应用信息。"))
+        logo = QLabel(self)
+        logo.setObjectName("settingsAboutLogo")
+        logo.setAccessibleName("Quiet Orbit")
+        logo.setFixedSize(72, 48)
+        logo.setPixmap(
+            QPixmap(str(Path(__file__).resolve().parents[1] / "assets" / "quiet-orbit-logo.svg"))
+            .scaled(72, 48, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
+        )
         app_name = QLabel(APP_NAME, self)
         app_name.setObjectName("settingsAboutAppName")
         app_name.setWordWrap(True)
         version = QLabel(f"版本 {APP_VERSION}", self)
         version.setObjectName("settingsAboutVersion")
         version.setWordWrap(True)
+        section.add_widget(logo)
         section.add_widget(app_name)
         section.add_widget(version)
         layout.addWidget(section)
@@ -373,15 +499,15 @@ class SettingsOverlay(QWidget):
             value = self.bridge.value(self._session.working_snapshot, key)
             if key in self._path_controls:
                 path_control = self._path_controls[key]
-                with QSignalBlocker(path_control.input):
-                    path_control.input.setText(str(value or ""))
+                with QSignalBlocker(path_control.picker):
+                    path_control.picker.set_path(str(value or ""))
                 continue
             with QSignalBlocker(control):
                 if isinstance(control, QLineEdit):
                     control.setText(str(value or ""))
                 elif isinstance(control, ThemedComboBox):
                     control.setCurrentIndex(max(0, control.findData(str(value))))
-                elif isinstance(control, SliderSpinControl):
+                elif isinstance(control, SettingSlider):
                     control.set_value(int(value))
                 elif hasattr(control, "setChecked"):
                     control.setChecked(bool(value))
@@ -391,12 +517,24 @@ class SettingsOverlay(QWidget):
                 self.folder_list.addItem(str(folder))
 
     def _choose_path(self, key: str) -> None:
-        selected = QFileDialog.getOpenFileName(self, "选择背景图片", str(Path.home()))[0]
+        if self._path_chooser is not None:
+            selected = self._path_chooser(key)
+        else:
+            selected = QFileDialog.getOpenFileName(self, "选择背景图片", str(Path.home()))[0]
         if selected:
-            self._path_controls[key].input.setText(selected)
+            self._path_controls[key].picker.set_path(selected)
+            self._value_changed(key, selected)
+
+    def _open_path(self, key: str) -> None:
+        path = self._path_controls[key].picker.path()
+        if path and Path(path).exists():
+            self._run_action("open_settings_path", path)
 
     def _add_folder(self) -> None:
-        selected = QFileDialog.getExistingDirectory(self, "添加音乐文件夹", str(Path.home()))
+        if self._folder_chooser is not None:
+            selected = self._folder_chooser()
+        else:
+            selected = QFileDialog.getExistingDirectory(self, "添加音乐文件夹", str(Path.home()))
         if not selected or self._session is None:
             return
         folders = list(self.bridge.value(self._session.working_snapshot, "music_scan_folders") or [])
@@ -426,76 +564,154 @@ class SettingsOverlay(QWidget):
             "clear_incomplete_audio_cache",
             "clear_all_audio_cache",
         }:
-            decision = QMessageBox.question(
-                self,
+            self._pending_action = name
+            self._show_confirmation(
                 "确认清理缓存",
-                "此操作会删除本地缓存文件，是否继续？",
-                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-                QMessageBox.StandardButton.No,
+                "此操作会删除本地缓存文件，且不会通过保存设置撤销。",
+                danger=True,
             )
-            if decision != QMessageBox.StandardButton.Yes:
-                return
+            return
+        self._execute_action(name)
+
+    def _confirm_pending_action(self) -> None:
+        name = self._pending_action
+        self._pending_action = ""
+        self._hide_confirmation()
+        if name:
+            self._execute_action(name)
+
+    def _execute_action(self, name: str) -> None:
+        self._save_state = "saving"
+        self.footer.set_state_message("saving", "正在处理…")
         try:
             result = self.bridge.run_action(name)
             if isinstance(result, str):
-                self._set_feedback(result)
+                if name == "check_updates" and hasattr(self, "update_status"):
+                    self.update_status.setText(result)
+                self._set_feedback(result, state="success")
             elif isinstance(result, dict):
-                self.cache_status.setText("缓存操作已完成。")
+                if hasattr(self, "cache_status"):
+                    self.cache_status.setText("缓存操作已完成。")
+                self._set_feedback("操作已完成。", state="success")
             else:
-                self._set_feedback("操作已发送到现有服务。")
+                self._set_feedback("操作已发送到现有服务。", state="success")
         except SettingsBridgeError as error:
-            self._set_feedback(str(error))
+            self._set_feedback(str(error), state="failed")
 
-    def _set_feedback(self, text: str) -> None:
+    def _set_feedback(self, text: str, *, state: str | None = None) -> None:
         self._feedback = str(text or "")
-        self.footer.set_status(self._feedback)
+        if state is not None:
+            self._save_state = state
+            self.footer.set_state_message(state, self._feedback)
+        else:
+            self.footer.set_status(self._feedback)
 
     def _refresh_state(self) -> None:
         if self._session is None:
             self.footer.set_state(dirty=False, valid=False)
             return
         errors = self._session.validate(self.bridge.validate)
-        self.footer.set_state(dirty=self._session.is_dirty, valid=not errors)
-        self.footer.set_status(self._feedback or ("有未保存修改" if self._session.is_dirty else ""))
+        if errors:
+            self._save_state = "failed"
+            self.footer.set_state(dirty=self._session.is_dirty, valid=False, state="failed")
+            self.footer.set_status(self._feedback or next(iter(errors.values())))
+            return
+        state = self._save_state if self._save_state in {"success", "failed"} and not self._session.is_dirty else None
+        self.footer.set_state(dirty=self._session.is_dirty, valid=True, state=state)
+        if state is None:
+            self.footer.set_status(self._feedback or ("有未保存修改" if self._session.is_dirty else ""))
 
     def open(self) -> None:  # noqa: A003
         self._session = SettingsEditSession.open(self.bridge.read_snapshot())
         self._feedback = ""
+        self._save_state = "clean"
+        self._pending_action = ""
         self.confirmation_bar.hide()
+        self._hide_confirmation()
         self.set_category("general")
         self._sync_controls()
         self._refresh_state()
+        self.sync_geometry(self.parentWidget().rect() if self.parentWidget() is not None else None)
         self.show()
         self.raise_()
-        self.setFocus()
-        self.sync_geometry(self.parentWidget().rect() if self.parentWidget() is not None else None)
+        self.setFocus(Qt.FocusReason.OtherFocusReason)
 
     def request_close(self) -> None:
         if self.is_dirty:
-            self.confirmation_bar.show()
+            self._show_confirmation(
+                "放弃未保存修改？",
+                "当前修改尚未保存。选择放弃后，预览中的主题和显示设置也会恢复。",
+                danger=False,
+            )
             return
         self._hide_overlay()
 
-    def _hide_confirmation(self) -> None:
-        self.confirmation_bar.hide()
+    def _show_confirmation(self, title: str, message: str, *, danger: bool) -> None:
+        self.confirm_scrim.setGeometry(self.rect())
+        self.confirm_scrim.show()
+        self.confirm_scrim.raise_()
+        self.confirm_dialog.set_content(title, message, danger=danger)
+        self.confirm_dialog.adjustSize()
+        dialog_rect = self.dialog.geometry()
+        width = min(max(360, self.confirm_dialog.sizeHint().width()), max(360, dialog_rect.width() - 48))
+        height = self.confirm_dialog.sizeHint().height()
+        self.confirm_dialog.setGeometry(
+            dialog_rect.x() + (dialog_rect.width() - width) // 2,
+            dialog_rect.y() + (dialog_rect.height() - height) // 2,
+            width,
+            height,
+        )
+        self.confirm_dialog.show()
+        self.confirm_dialog.raise_()
+        self.confirm_dialog.setFocus()
 
-    def save_and_close(self) -> None:
+    def _hide_confirmation(self) -> None:
+        self._pending_action = ""
+        self.confirmation_bar.hide()
+        self.confirm_scrim.hide()
+        self.confirm_dialog.hide()
+
+    def save(self) -> bool:
         if self._session is None:
-            return
+            return False
         self._session.validate(self.bridge.validate)
         if not self._session.is_valid:
+            self._save_state = "failed"
+            self.footer.set_state(
+                dirty=self._session.is_dirty,
+                valid=False,
+                state="failed",
+            )
             self._set_feedback(next(iter(self._session.validation_errors.values())))
-            return
+            return False
+        self._save_state = "saving"
+        self.footer.set_state_message("saving", "正在保存…")
         try:
             saved = self.bridge.save_snapshot(self._session.working_snapshot)
         except SettingsBridgeError as error:
+            self._save_state = "failed"
+            self.footer.set_state(dirty=True, valid=True, state="failed")
             self._set_feedback(str(error))
-            return
+            return False
         self._session.replace_after_save(saved)
         if self._preview_callback is not None:
             self._preview_callback(saved.to_dict())
         self.saved.emit(saved)
-        self._hide_overlay()
+        self._save_state = "success"
+        self._feedback = "设置已保存"
+        self.footer.set_state_message("success", self._feedback)
+        QTimer.singleShot(1800, self._clear_success)
+        return True
+
+    def _clear_success(self) -> None:
+        if self._session is not None and not self._session.is_dirty and self.isVisible():
+            self._save_state = "clean"
+            self._feedback = ""
+            self._refresh_state()
+
+    def save_and_close(self) -> None:
+        if self.save():
+            self._hide_overlay()
 
     def cancel_and_close(self) -> None:
         if self._session is None:
@@ -507,6 +723,7 @@ class SettingsOverlay(QWidget):
         self._hide_overlay()
 
     def _hide_overlay(self) -> None:
+        self._hide_confirmation()
         self.confirmation_bar.hide()
         self.hide()
         self.closed.emit()
@@ -520,8 +737,31 @@ class SettingsOverlay(QWidget):
         self.content_stack.setCurrentWidget(self._category_pages[key])
         self.subtitle_label.setText(category_for_key(key).title)
 
+    def set_appearance_mode(self, mode: str) -> None:
+        """Route the shell's quick theme action through this edit session."""
+
+        control = self._controls.get("appearance_mode")
+        if not isinstance(control, ThemedComboBox):
+            return
+        index = control.findData(str(mode))
+        if index >= 0:
+            control.setCurrentIndex(index)
+
     def set_responsive_reference_width(self, width: int) -> None:
-        self.sidebar.set_compact(int(width) < 1000)
+        compact = int(width) < 1000
+        self.sidebar.set_compact(compact)
+        for row in self._rows:
+            row.set_compact(compact)
+
+    def keyPressEvent(self, event: QKeyEvent) -> None:  # noqa: N802
+        if event.key() == Qt.Key.Key_Escape:
+            if self.confirm_dialog.isVisible() or self.confirm_scrim.isVisible():
+                self._hide_confirmation()
+            else:
+                self.request_close()
+            event.accept()
+            return
+        super().keyPressEvent(event)
 
     def sync_geometry(self, parent_rect) -> None:
         if parent_rect is None:
@@ -534,12 +774,18 @@ class SettingsOverlay(QWidget):
         super().resizeEvent(event)
         self.dim_layer.setGeometry(self.rect())
         self.dialog.setGeometry(self._dialog_geometry())
+        if self.confirm_scrim.isVisible():
+            self._show_confirmation(
+                self.confirm_dialog.title_label.text(),
+                self.confirm_dialog.message_label.text(),
+                danger=self.confirm_dialog.confirm_button.isVisible(),
+            )
 
     def _dialog_geometry(self):
         """Keep the fixed header/footer inside the body at narrow heights."""
 
         margin = 24 if self.width() < 1000 else 36
-        width = min(1020, max(820, self.width() - margin * 2))
+        width = min(920, max(820, self.width() - margin * 2))
         available_height = max(0, self.height() - margin * 2)
         height = min(740, max(360, available_height))
         return QRect(
@@ -552,7 +798,12 @@ class SettingsOverlay(QWidget):
     def set_theme(self, theme: Theme) -> None:
         self._theme = theme
         c = theme.colors
-        self.setStyleSheet(f"QWidget#settingsOverlay {{ background: transparent; }} QFrame#settingsDimLayer {{ background: rgba(0, 0, 0, 150); }}")
+        overlay_color = "rgba(31, 48, 41, 62)" if theme.mode == "light" else "rgba(0, 0, 0, 110)"
+        self.setStyleSheet(
+            f"QWidget#settingsOverlay {{ background: transparent; }} "
+            f"QFrame#settingsDimLayer {{ background: {overlay_color}; }} "
+            f"QFrame#settingsConfirmScrim {{ background: rgba(0, 0, 0, 78); }}"
+        )
         self.dialog.setStyleSheet(
             f"QFrame#settingsDialog {{ background: {c.content_background}; border: 1px solid {c.border_strong}; border-radius: {theme.metrics.radius_lg}px; }}"
             f"QFrame#settingsConfirmationBar {{ background: {c.selected_background}; border-top: 1px solid {c.border}; }}"
@@ -561,6 +812,11 @@ class SettingsOverlay(QWidget):
         )
         self.title_label.setStyleSheet(f"font-size: {theme.fonts.page_title}px; font-weight: 650; color: {c.primary_text};")
         self.subtitle_label.setStyleSheet(f"font-size: {theme.fonts.caption}px; color: {c.secondary_text};")
+        self.header_icon.setIcon(fluent_settings_icon("general", theme, "selected", 20))
+        self.header_icon.setIconSize(QSize(20, 20))
+        self.header_icon.setStyleSheet(
+            "QToolButton#settingsHeaderIcon { border: 0; background: transparent; padding: 0; }"
+        )
         self.close_button.setIcon(fluent_settings_interactive_icon("dismiss", theme, 18))
         self.close_button.setIconSize(QSize(18, 18))
         self.close_button.setStyleSheet(
@@ -571,9 +827,23 @@ class SettingsOverlay(QWidget):
         )
         self.sidebar.set_theme(theme)
         self.footer.set_theme(theme)
+        self.confirm_dialog.set_theme(theme)
+        for section in self._sections:
+            section.set_theme(theme)
+        for row in self._rows:
+            row.set_theme(theme)
         for control in self._controls.values():
             if hasattr(control, "set_theme"):
                 control.set_theme(theme)
+        for path_control in self._path_controls.values():
+            path_control.picker.set_theme(theme)
+        for control in self._aux_controls:
+            if hasattr(control, "set_theme"):
+                control.set_theme(theme)
+        if hasattr(self, "update_status"):
+            self.update_status.setStyleSheet(
+                f"font-size: {theme.fonts.caption}px; color: {c.secondary_text};"
+            )
         for page in self._category_pages.values():
             page.setStyleSheet(f"background: {c.content_background};")
         for scroll in self._category_scrolls.values():

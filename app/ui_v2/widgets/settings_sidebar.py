@@ -29,7 +29,10 @@ class SettingsSidebar(QFrame):
             button = QToolButton(self)
             button.setText(category.title)
             button.setToolTip(category.title)
+            button.setAccessibleName(category.title)
+            button.setAccessibleDescription(f"打开{category.title}设置")
             button.setCheckable(True)
+            button.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
             button.clicked.connect(lambda checked=False, key=category.key: self.category_requested.emit(key))
             self._group.addButton(button)
             self._buttons[category.key] = button

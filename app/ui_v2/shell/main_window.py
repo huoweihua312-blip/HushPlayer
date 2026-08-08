@@ -255,6 +255,9 @@ class MainWindow(QMainWindow):
         """Persist an explicit Light/Dark choice through the existing bridge."""
 
         target = "light" if self._theme.mode == "dark" else "dark"
+        if self.settings_overlay is not None and self.settings_overlay.isVisible():
+            self.settings_overlay.set_appearance_mode(target)
+            return
         snapshot = self._settings_snapshot.with_updates({"appearance_mode": target})
         saved = self.settings_bridge.save_snapshot(snapshot)
         self._settings_snapshot = saved
@@ -436,10 +439,16 @@ class MainWindow(QMainWindow):
                 preview_callback=self._apply_settings_snapshot,
                 parent=self.body,
             )
+            self.settings_overlay.saved.connect(self._on_settings_saved)
         elif self.settings_overlay.isVisible():
             self.settings_overlay.raise_()
             return
         self.settings_overlay.open()
+
+    def _on_settings_saved(self, snapshot: SettingsSnapshot) -> None:
+        """Keep the shell's last persisted snapshot in sync with the overlay."""
+
+        self._settings_snapshot = SettingsSnapshot.from_mapping(snapshot.to_dict())
 
     def _apply_settings_values(self, values: dict[str, object]) -> None:
         """Apply persisted settings to the small set of V2 runtime models."""

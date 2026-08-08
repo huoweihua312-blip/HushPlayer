@@ -236,6 +236,44 @@ class SettingsOverlayIntegrationTests(unittest.TestCase):
         self.assertTrue(overlay.isVisible())
         self.assertTrue(overlay.is_dirty)
 
+    def test_footer_save_keeps_overlay_open_and_clears_dirty_state(self) -> None:
+        overlay = self.open_overlay()
+        control = overlay._controls["auto_scan_music_folders_on_startup"]
+        control.setChecked(not control.isChecked())
+        self.app.processEvents()
+        overlay.footer.save_button.click()
+        self.app.processEvents()
+        self.assertTrue(overlay.isVisible())
+        self.assertFalse(overlay.is_dirty)
+        self.assertEqual(overlay.footer.state, "success")
+        self.assertFalse(overlay.footer.save_button.isEnabled())
+
+    def test_dirty_close_uses_inline_confirmation_and_discard_rolls_back(self) -> None:
+        overlay = self.open_overlay()
+        control = overlay._controls["auto_scan_music_folders_on_startup"]
+        control.setChecked(not control.isChecked())
+        self.app.processEvents()
+        overlay.request_close()
+        self.assertTrue(overlay.isVisible())
+        self.assertTrue(overlay.confirm_dialog.isVisible())
+        self.assertFalse(overlay.confirm_dialog.confirm_button.isVisible())
+        overlay.confirm_dialog.discard_button.click()
+        self.app.processEvents()
+        self.assertFalse(overlay.isVisible())
+        self.assertFalse(self.settings_path.exists())
+
+    def test_topbar_theme_toggle_joins_open_edit_session(self) -> None:
+        overlay = self.open_overlay()
+        original = self.window.theme.mode
+        self.window.toggle_theme()
+        self.app.processEvents()
+        self.assertNotEqual(self.window.theme.mode, original)
+        self.assertTrue(overlay.is_dirty)
+        self.assertFalse(self.settings_path.exists())
+        overlay.cancel_and_close()
+        self.app.processEvents()
+        self.assertEqual(self.window.theme.mode, original)
+
     def test_actions_are_not_dirty_and_unavailable_services_are_disabled(self) -> None:
         overlay = self.open_overlay()
         overlay.set_category("cache")

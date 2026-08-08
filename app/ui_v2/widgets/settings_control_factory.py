@@ -2,15 +2,17 @@
 
 from __future__ import annotations
 
-from PySide6.QtCore import QAbstractAnimation, QPropertyAnimation, QSize, Signal, QSignalBlocker, Qt
-from PySide6.QtGui import QColor, QPalette
+from pathlib import Path
+
+from PySide6.QtCore import QAbstractAnimation, QPropertyAnimation, QSize, Signal, QSignalBlocker, Qt, QRectF
+from PySide6.QtGui import QColor, QFontMetrics, QPalette, QPainter, QPen
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
     QHBoxLayout,
     QLabel,
     QSlider,
-    QSpinBox,
+    QPushButton,
     QStyle,
     QStyleOptionComboBox,
     QStylePainter,
@@ -42,6 +44,7 @@ class ThemedComboBox(QComboBox):
     def set_theme(self, theme: Theme) -> None:
         self._theme = theme
         self.setMinimumHeight(max(32, theme.metrics.control_height - 4))
+        SettingsControlFactory.style_combo(self, theme)
         self.update()
 
     def showPopup(self) -> None:  # noqa: N802
@@ -147,8 +150,53 @@ class ThemedDisclosureButton(QToolButton):
             self._content.hide()
 
 
+class SettingsToggle(QCheckBox):
+    """Quiet Orbit switch with no native checkbox indicator."""
+
+    def __init__(self, checked: bool, theme: Theme, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.setText("")
+        self.setChecked(checked)
+        self.setFixedSize(40, 24)
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+        self._theme = theme
+        self.set_theme(theme)
+
+    def set_theme(self, theme: Theme) -> None:
+        self._theme = theme
+        self.setToolTip(self.toolTip())
+        self.update()
+
+    def paintEvent(self, _event) -> None:  # noqa: N802
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        rect = QRectF(1.0, 2.0, 38.0, 20.0)
+        colors = self._theme.colors
+        if not self.isEnabled():
+            track = QColor(colors.border)
+            thumb = QColor(colors.disabled_text)
+        elif self.isChecked():
+            track = QColor(colors.accent)
+            thumb = QColor(colors.surface_elevated)
+        else:
+            track = QColor(colors.surface_pressed)
+            thumb = QColor(colors.text_tertiary)
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(track)
+        painter.drawRoundedRect(rect, 10, 10)
+        center_x = 29.0 if self.isChecked() else 11.0
+        painter.setBrush(thumb)
+        painter.drawEllipse(QRectF(center_x - 7.0, 5.0, 14.0, 14.0))
+        if self.hasFocus():
+            painter.setBrush(Qt.BrushStyle.NoBrush)
+            painter.setPen(QPen(QColor(colors.focus_ring), 1.0))
+            painter.drawRoundedRect(QRectF(0.5, 1.5, 39.0, 21.0), 10.5, 10.5)
+        painter.end()
+
+
 class SliderSpinControl(QWidget):
-    """A slider plus spin box with a single value signal and no feedback loop."""
+    """A stable Quiet Orbit slider with a readable value label."""
 
     value_changed = Signal(int)
 
@@ -156,17 +204,18 @@ class SliderSpinControl(QWidget):
         super().__init__(parent)
         self._theme = theme
         self.slider = QSlider(Qt.Orientation.Horizontal, self)
-        self.spin = QSpinBox(self)
         self.slider.setRange(minimum, maximum)
-        self.spin.setRange(minimum, maximum)
-        self.spin.setSuffix(suffix)
+        self.value_label = QLabel(self)
+        self.value_label.setObjectName("settingsSliderValue")
+        self.value_label.setMinimumWidth(52)
+        self.value_label.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+        self._suffix = suffix
         self.slider.valueChanged.connect(self._from_slider)
-        self.spin.valueChanged.connect(self._from_spin)
         layout = QHBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(8)
         layout.addWidget(self.slider, 1)
-        layout.addWidget(self.spin)
+        layout.addWidget(self.value_label)
         self.set_value(value)
         self.set_theme(theme)
 
@@ -174,29 +223,136 @@ class SliderSpinControl(QWidget):
         return self.slider.value()
 
     def set_value(self, value: int) -> None:
-        with QSignalBlocker(self.slider), QSignalBlocker(self.spin):
-            self.slider.setValue(value)
-            self.spin.setValue(value)
-
-    def _from_slider(self, value: int) -> None:
-        with QSignalBlocker(self.spin):
-            self.spin.setValue(value)
-        self.value_changed.emit(value)
-
-    def _from_spin(self, value: int) -> None:
         with QSignalBlocker(self.slider):
             self.slider.setValue(value)
+        self._refresh_value_label()
+
+    def _from_slider(self, value: int) -> None:
+        self._refresh_value_label()
         self.value_changed.emit(value)
+
+    def _refresh_value_label(self) -> None:
+        self.value_label.setText(f"{self.slider.value()}{self._suffix}")
 
     def set_theme(self, theme: Theme) -> None:
         self._theme = theme
-        self.slider.setStyleSheet(f"QSlider::groove:horizontal {{ height: 4px; border-radius: 2px; background: {theme.colors.border}; }} QSlider::sub-page:horizontal {{ background: {theme.colors.accent}; border-radius: 2px; }} QSlider::handle:horizontal {{ width: 14px; margin: -5px 0; border-radius: 7px; background: {theme.colors.accent}; }}")
-        self.spin.setStyleSheet(
-            f"QSpinBox {{ min-height: {theme.metrics.control_height - 4}px; min-width: 82px; padding: 0 6px; border: 1px solid {theme.colors.border}; border-radius: {theme.metrics.radius_sm}px; background: {theme.colors.input_background}; color: {theme.colors.primary_text}; }} "
-            f"QSpinBox:hover {{ border-color: {theme.colors.border_strong}; }} "
-            f"QSpinBox:focus {{ border: 1px solid {theme.colors.accent}; }} "
-            "QSpinBox::up-button, QSpinBox::down-button { width: 0; border: 0; } "
-            "QSpinBox::up-arrow, QSpinBox::down-arrow { image: none; width: 0; height: 0; }"
+        self.slider.setFixedHeight(18)
+        self.slider.setStyleSheet(
+            f"QSlider {{ background: transparent; }} "
+            f"QSlider::groove:horizontal {{ height: 4px; border-radius: 2px; background: {theme.colors.border}; }} "
+            f"QSlider::sub-page:horizontal {{ background: {theme.colors.accent}; border-radius: 2px; }} "
+            f"QSlider::handle:horizontal {{ width: 14px; margin: -5px 0; border-radius: 7px; background: {theme.colors.accent}; }} "
+            f"QSlider::handle:horizontal:hover {{ background: {theme.colors.accent_hover}; }} "
+            f"QSlider:disabled::groove:horizontal {{ background: {theme.colors.surface_pressed}; }} "
+            f"QSlider:disabled::handle:horizontal {{ background: {theme.colors.disabled_text}; }} "
+            f"QSlider:focus {{ border: 1px solid {theme.colors.focus_ring}; border-radius: {theme.metrics.radius_sm}px; }}"
+        )
+        self.value_label.setStyleSheet(
+            f"color: {theme.colors.secondary_text}; font-size: {theme.fonts.numeric}px;"
+        )
+        self._refresh_value_label()
+
+
+SettingSlider = SliderSpinControl
+
+
+class SettingsPathPicker(QWidget):
+    """Bounded path display with injected browse/open actions."""
+
+    path_changed = Signal(str)
+    browse_requested = Signal()
+    open_requested = Signal()
+
+    def __init__(self, theme: Theme, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self._theme = theme
+        self._path = ""
+        self.path_label = QLabel(self)
+        self.path_label.setObjectName("settingsPathValue")
+        self.path_label.setMinimumWidth(120)
+        self.path_label.setWordWrap(False)
+        self.path_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        self.status_label = QLabel(self)
+        self.status_label.setObjectName("settingsPathStatus")
+        self.browse_button = QToolButton(self)
+        self.browse_button.setText("浏览")
+        self.browse_button.setToolTip("选择路径")
+        self.open_button = QToolButton(self)
+        self.open_button.setText("打开位置")
+        self.open_button.setToolTip("打开路径位置")
+        self.browse_button.clicked.connect(self.browse_requested)
+        self.open_button.clicked.connect(self.open_requested)
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(6)
+        layout.addWidget(self.path_label, 1)
+        layout.addWidget(self.status_label, 0)
+        layout.addWidget(self.browse_button, 0)
+        layout.addWidget(self.open_button, 0)
+        self.setMinimumWidth(260)
+        self.setMaximumWidth(430)
+        self.set_theme(theme)
+        self.set_path("")
+
+    def path(self) -> str:
+        return self._path
+
+    def set_path(self, path: str) -> None:
+        self._path = str(path or "")
+        self._refresh_path_label()
+        self.path_label.setToolTip(self._path)
+        self.status_label.setText("" if not self._path else "路径不可用" if not Path(self._path).exists() else "")
+        self.open_button.setEnabled(bool(self._path))
+
+    def resizeEvent(self, event) -> None:  # noqa: N802
+        super().resizeEvent(event)
+        self._refresh_path_label()
+
+    def _refresh_path_label(self) -> None:
+        text = self._path or "未选择"
+        available = max(40, self.path_label.width() - 16)
+        self.path_label.setText(QFontMetrics(self.path_label.font()).elidedText(
+            text,
+            Qt.TextElideMode.ElideMiddle,
+            available,
+        ))
+
+    def set_theme(self, theme: Theme) -> None:
+        self._theme = theme
+        c = theme.colors
+        self.setStyleSheet(
+            f"QLabel#settingsPathValue {{ min-height: {theme.metrics.control_height - 4}px; padding: 0 8px; border: 1px solid {c.border}; border-radius: {theme.metrics.radius_sm}px; background: {c.surface_secondary}; color: {c.primary_text}; }} "
+            f"QLabel#settingsPathStatus {{ color: {c.warning}; font-size: {theme.fonts.caption}px; }} "
+            f"QToolButton {{ min-height: {theme.metrics.control_height - 4}px; padding: 0 8px; border: 1px solid {c.border}; border-radius: {theme.metrics.radius_sm}px; background: {c.surface_secondary}; color: {c.primary_text}; }} "
+            f"QToolButton:hover {{ background: {c.hover_background}; }} QToolButton:focus {{ border: 1px solid {c.focus_ring}; }} QToolButton:disabled {{ color: {c.disabled_text}; }}"
+        )
+
+
+class SettingsActionButton(QPushButton):
+    """Compact non-primary action used inside a setting section."""
+
+    def __init__(self, text: str, theme: Theme, parent: QWidget | None = None) -> None:
+        super().__init__(text, parent)
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.setMinimumHeight(max(32, theme.metrics.control_height - 4))
+        self.set_theme(theme)
+
+    def set_theme(self, theme: Theme) -> None:
+        c = theme.colors
+        self.setStyleSheet(
+            f"QPushButton {{ min-height: {theme.metrics.control_height - 4}px; padding: 0 10px; border: 1px solid {c.border}; border-radius: {theme.metrics.radius_sm}px; background: {c.surface_secondary}; color: {c.primary_text}; }} "
+            f"QPushButton:hover {{ background: {c.hover_background}; }} QPushButton:pressed {{ background: {c.surface_pressed}; }} QPushButton:focus {{ border: 1px solid {c.focus_ring}; }} QPushButton:disabled {{ color: {c.disabled_text}; }}"
+        )
+
+
+class SettingsDangerAction(SettingsActionButton):
+    """Quiet danger action; confirmation is owned by the overlay."""
+
+    def set_theme(self, theme: Theme) -> None:
+        c = theme.colors
+        self.setStyleSheet(
+            f"QPushButton {{ min-height: {theme.metrics.control_height - 4}px; padding: 0 10px; border: 1px solid {c.danger}; border-radius: {theme.metrics.radius_sm}px; background: transparent; color: {c.danger}; }} "
+            f"QPushButton:hover {{ background: {c.hover_background}; }} QPushButton:pressed {{ background: {c.surface_pressed}; }} QPushButton:focus {{ border: 1px solid {c.focus_ring}; }} QPushButton:disabled {{ color: {c.disabled_text}; border-color: {c.border}; }}"
         )
 
 
@@ -204,10 +360,8 @@ class SettingsControlFactory:
     """Creates settings controls with a consistent V2 surface and popup palette."""
 
     @staticmethod
-    def switch(checked: bool, theme: Theme, parent: QWidget | None = None) -> QCheckBox:
-        control = QCheckBox(parent)
-        control.setChecked(checked)
-        control.setText("")
+    def switch(checked: bool, theme: Theme, parent: QWidget | None = None) -> SettingsToggle:
+        control = SettingsToggle(checked, theme, parent)
         SettingsControlFactory.style_switch(control, theme)
         return control
 
@@ -226,38 +380,35 @@ class SettingsControlFactory:
         return SliderSpinControl(minimum, maximum, value, suffix, theme, parent)
 
     @staticmethod
-    def style_switch(control: QCheckBox, theme: Theme) -> None:
-        control.setStyleSheet(
-            f"QCheckBox::indicator {{ width: 36px; height: 20px; border-radius: 10px; background: {theme.colors.border_strong}; }} "
-            f"QCheckBox::indicator:checked {{ background: {theme.colors.accent}; }} "
-            f"QCheckBox::indicator:disabled {{ background: {theme.colors.border}; }}"
-        )
+    def style_switch(control: SettingsToggle, theme: Theme) -> None:
+        control.set_theme(theme)
 
     @staticmethod
     def style_combo(control: QComboBox, theme: Theme) -> None:
         c = theme.colors
         if isinstance(control, ThemedComboBox):
-            control.set_theme(theme)
+            control._theme = theme
+            control.setMinimumHeight(max(32, theme.metrics.control_height - 4))
         control.setStyleSheet(
-            f"QComboBox {{ min-height: {max(32, theme.metrics.control_height - 4)}px; min-width: 150px; padding: 0 38px 0 8px; border: 1px solid {c.border}; border-radius: {theme.metrics.radius_sm}px; background: {c.input_background}; color: {c.primary_text}; }} "
+            f"QComboBox {{ min-height: {max(32, theme.metrics.control_height - 4)}px; min-width: 150px; padding: 0 38px 0 8px; border: 1px solid {c.border}; border-radius: {theme.metrics.radius_sm}px; background: {c.surface_secondary}; color: {c.primary_text}; }} "
             f"QComboBox:hover {{ border-color: {c.border_strong}; }} QComboBox:focus {{ border: 1px solid {c.accent}; }} "
             f"QComboBox::drop-down {{ border: 0; width: {ThemedComboBox.arrow_hit_width}px; }} QComboBox::down-arrow {{ image: none; width: 0; height: 0; }}"
         )
         view = control.view()
         palette = view.palette()
-        palette.setColor(QPalette.ColorRole.Base, _opaque(c.elevated_background))
-        palette.setColor(QPalette.ColorRole.Window, _opaque(c.elevated_background))
+        palette.setColor(QPalette.ColorRole.Base, _opaque(c.surface_elevated))
+        palette.setColor(QPalette.ColorRole.Window, _opaque(c.surface_elevated))
         palette.setColor(QPalette.ColorRole.Text, _opaque(c.primary_text))
         palette.setColor(QPalette.ColorRole.Highlight, _opaque(c.selected_background))
         palette.setColor(QPalette.ColorRole.HighlightedText, _opaque(c.primary_text))
         view.setPalette(palette)
         view.setAutoFillBackground(True)
         view.setStyleSheet(
-            f"QAbstractItemView {{ background: {c.elevated_background}; color: {c.primary_text}; border: 1px solid {c.border}; selection-background-color: {c.selected_background}; selection-color: {c.primary_text}; outline: 0; }} "
-            f"QAbstractItemView::item {{ min-height: {theme.metrics.control_height - 4}px; padding: 0 8px; background: {c.elevated_background}; }} "
+            f"QAbstractItemView {{ background: {c.surface_elevated}; color: {c.primary_text}; border: 1px solid {c.border}; selection-background-color: {c.selected_background}; selection-color: {c.primary_text}; outline: 0; }} "
+            f"QAbstractItemView::item {{ min-height: {theme.metrics.control_height - 4}px; padding: 0 8px; background: {c.surface_elevated}; }} "
             f"QAbstractItemView::item:hover {{ background: {c.hover_background}; }} "
             f"QAbstractItemView::item:selected {{ background: {c.selected_background}; }} "
-            f"QScrollBar:vertical {{ width: 8px; background: {c.elevated_background}; }} QScrollBar::handle:vertical {{ min-height: 24px; border-radius: 4px; background: {c.border_strong}; }}"
+            f"QScrollBar:vertical {{ width: 8px; background: {c.surface_elevated}; }} QScrollBar::handle:vertical {{ min-height: 24px; border-radius: 4px; background: {c.border_strong}; }}"
         )
 
 
