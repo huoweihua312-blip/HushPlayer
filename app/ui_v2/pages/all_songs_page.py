@@ -5,6 +5,7 @@ from __future__ import annotations
 from PySide6.QtCore import Signal
 
 from app.ui_v2.pages.library_page import LibraryPage
+from app.ui_v2.models.track import format_duration
 from app.ui_v2.theme.tokens import Theme
 from app.ui_v2.widgets.collection_action_row import CollectionActionRow
 
@@ -61,3 +62,11 @@ class AllSongsPage(LibraryPage):
             tip = "播放功能尚未接入真实模式" if not enabled else ""
             self.collection_actions.play_button.setToolTip(tip or "播放全部歌曲")
             self.collection_actions.shuffle_button.setToolTip(tip or "随机播放全部歌曲")
+
+    def _on_tracks_reset(self, tracks) -> None:
+        super()._on_tracks_reset(tracks)
+        durations = [track.duration_ms for track in tracks if track.duration_ms is not None and track.duration_ms >= 0]
+        if durations:
+            self.header.count_label.setText(
+                f"{len(tracks)} 首歌曲  ·  {format_duration(sum(durations))}"
+            )

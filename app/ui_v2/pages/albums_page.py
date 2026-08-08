@@ -19,8 +19,16 @@ class AlbumsPage(EntityGridPage):
             parent=parent,
         )
         self.configure_cards(
-            lambda album: AlbumCard(album, theme, self.content),
-            lambda card, album: card.set_album(album),
+            lambda album: AlbumCard(
+                album,
+                theme,
+                self.content,
+                next((track for track in adapter.tracks_for_album(album.id) if not track.is_missing), None),
+            ),
+            lambda card, album: card.set_album(
+                album,
+                next((track for track in adapter.tracks_for_album(album.id) if not track.is_missing), None),
+            ),
         )
         self.empty_state.set_state("empty", "没有匹配的专辑。")
         adapter.albums_reset.connect(self.set_entities)

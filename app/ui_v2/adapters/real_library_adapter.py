@@ -52,7 +52,7 @@ class RealLibraryData:
     playlist_track_ids: dict[str, tuple[str, ...]]
 
 
-class _SnapshotWorker(QObject):
+class _SnapshotThread(QThread):
     completed = Signal(int, object, str)
 
     def __init__(
@@ -60,13 +60,13 @@ class _SnapshotWorker(QObject):
         generation: int,
         repository: LibraryRepository,
         remote_tracks: RemoteTrackStore,
+        parent: QObject | None = None,
     ) -> None:
-        super().__init__()
+        super().__init__(parent)
         self._generation = generation
         self._repository = repository
         self._remote_tracks = remote_tracks
 
-    @Slot()
     def run(self) -> None:
         try:
             snapshot = self._repository.load_snapshot()
@@ -117,8 +117,8 @@ class RealLibraryAdapter(QObject):
         self._remote_tracks = remote_tracks or RemoteTrackStore(
             data_dir / "remote_tracks.json"
         )
-        self._thread: QThread | None = None
-        self._worker: _SnapshotWorker | None = None
+        self._thread: _SnapshotThread | None = None
+        self._retired_threads: list[_SnapshotThread] = []
         self._generation = 0
         self._pending_generation = 0
         self._state = "idle"
@@ -327,24 +327,18 @@ class RealLibraryAdapter(QObject):
         if self._closed or self._thread is not None:
             return
         self._set_state("loading", "正在加载音乐库。")
-        # The worker may still be unwinding a read when the window closes.
-        # Keep the QThread independent of the widget tree; it deletes itself
-        # once finished rather than being destroyed with a running MainWindow.
-        thread = QThread()
-        worker = _SnapshotWorker(
+        # The adapter owns the task thread. Keeping the task and its Python
+        # wrapper together avoids a worker QObject being deleted after its
+        # thread event loop has already stopped.
+        thread = _SnapshotThread(
             generation,
             self._repository,
             self._remote_tracks,
+            self,
         )
-        worker.moveToThread(thread)
-        thread.started.connect(worker.run)
-        worker.completed.connect(self._on_worker_completed)
-        worker.completed.connect(thread.quit)
-        thread.finished.connect(worker.deleteLater)
-        thread.finished.connect(thread.deleteLater)
+        thread.completed.connect(self._on_worker_completed)
         thread.finished.connect(self._on_thread_finished)
         self._thread = thread
-        self._worker = worker
         thread.start()
 
     @Slot(int, object, str)
@@ -369,8 +363,12 @@ class RealLibraryAdapter(QObject):
 
     @Slot()
     def _on_thread_finished(self) -> None:
+        thread = self._thread
         self._thread = None
-        self._worker = None
+        if thread is not None:
+            # Keep the Python wrapper alive until the adapter itself is
+            # destroyed; Qt parent ownership handles the stopped C++ object.
+            self._retired_threads.append(thread)
         if self._closed or not self._pending_generation:
             return
         generation = self._pending_generation

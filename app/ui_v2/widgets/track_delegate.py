@@ -9,7 +9,12 @@ from PySide6.QtGui import QColor, QFont, QPainter, QPainterPath, QPen
 from PySide6.QtWidgets import QStyle, QStyledItemDelegate
 
 from app.ui_v2.models.track import Track
-from app.ui_v2.models.track_table_model import PLAYING_ROLE, TRACK_ROLE, TrackColumn
+from app.ui_v2.models.track_table_model import (
+    PLAYBACK_ACTIVE_ROLE,
+    PLAYING_ROLE,
+    TRACK_ROLE,
+    TrackColumn,
+)
 from app.ui_v2.theme.icons import fluent_icon, paint_icon
 from app.ui_v2.theme.tokens import Theme
 from app.ui_v2.widgets.placeholder_cover import cover_pixmap
@@ -20,8 +25,12 @@ class RowVisualState(str, Enum):
     HOVER = "hover"
     SELECTED = "selected"
     PLAYING = "playing"
+    PAUSED = "paused"
     SELECTED_PLAYING = "selected_playing"
+    SELECTED_PAUSED = "selected_paused"
     DISABLED = "disabled"
+    CURRENT_PLAYING = "playing"
+    CURRENT_PAUSED = "paused"
 
 
 class TrackDelegate(QStyledItemDelegate):
@@ -49,9 +58,16 @@ class TrackDelegate(QStyledItemDelegate):
         is_row_hovered = getattr(table, "is_row_hovered", lambda _row: False)
         hovered = bool(is_row_hovered(index.row()))
         playing = bool(index.data(PLAYING_ROLE))
+        playback_active = bool(index.data(PLAYBACK_ACTIVE_ROLE))
         colors = self._theme.colors
-        state = self.row_visual_state(track, selected, hovered, playing)
+        state = self.row_visual_state(track, selected, hovered, playing, playback_active)
         painter.fillRect(rect, self.background_color(state))
+        if option.state & QStyle.StateFlag.State_HasFocus:
+            focus_pen = QPen(QColor(colors.focus_ring), 1)
+            focus_pen.setCosmetic(True)
+            painter.setPen(focus_pen)
+            painter.setBrush(Qt.BrushStyle.NoBrush)
+            painter.drawRoundedRect(rect.adjusted(2, 2, -2, -2), 5, 5)
 
         column = TrackColumn(index.column())
         disabled = state == RowVisualState.DISABLED
@@ -68,8 +84,10 @@ class TrackDelegate(QStyledItemDelegate):
                 QColor(colors.accent),
             )
         if column == TrackColumn.STATUS:
-            if playing:
+            if playing and playback_active:
                 paint_icon(painter, "playing", self._icon_rect(content, 18), self._theme, "selected")
+            elif playing:
+                paint_icon(painter, "pause", self._icon_rect(content, 17), self._theme, "selected")
             elif hovered:
                 paint_icon(painter, "play", self._icon_rect(content, 16), self._theme, "hover")
             else:
@@ -143,14 +161,19 @@ class TrackDelegate(QStyledItemDelegate):
         selected: bool,
         hovered: bool,
         playing: bool,
+        playback_active: bool = True,
     ) -> RowVisualState:
         """Resolve row presentation in the documented, stable priority order."""
         if track.is_missing:
             return RowVisualState.DISABLED
+        if playing and not playback_active and selected:
+            return RowVisualState.SELECTED_PAUSED
         if selected and playing:
             return RowVisualState.SELECTED_PLAYING
         if selected:
             return RowVisualState.SELECTED
+        if playing and not playback_active:
+            return RowVisualState.PAUSED
         if playing:
             return RowVisualState.PLAYING
         if hovered:
@@ -164,7 +187,9 @@ class TrackDelegate(QStyledItemDelegate):
             RowVisualState.HOVER: colors.hover_background,
             RowVisualState.SELECTED: colors.selected_background,
             RowVisualState.PLAYING: self._playing_surface(),
+            RowVisualState.PAUSED: self._paused_surface(),
             RowVisualState.SELECTED_PLAYING: colors.selected_background,
+            RowVisualState.SELECTED_PAUSED: colors.selected_background,
             RowVisualState.DISABLED: colors.content_background,
         }
         return QColor(values[state])
@@ -174,6 +199,11 @@ class TrackDelegate(QStyledItemDelegate):
 
         color = QColor(self._theme.colors.accent)
         color.setAlpha(4)
+        return color
+
+    def _paused_surface(self) -> QColor:
+        color = QColor(self._theme.colors.surface_secondary)
+        color.setAlpha(160)
         return color
 
     @staticmethod

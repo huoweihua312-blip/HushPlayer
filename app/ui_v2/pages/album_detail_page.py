@@ -7,7 +7,7 @@ from app.ui_v2.adapters.library_collection import LibraryCollectionAdapter
 from app.ui_v2.adapters.track_list_adapter import TrackListAdapter
 from app.ui_v2.pages.track_list_page import TrackListPage
 from app.ui_v2.theme.tokens import Theme
-from app.ui_v2.widgets.track_collection_hero import TrackCollectionHero
+from app.ui_v2.widgets.content_heroes import AlbumHero
 
 
 class AlbumDetailPage(TrackListPage):
@@ -22,7 +22,8 @@ class AlbumDetailPage(TrackListPage):
         self._album_id = ""
         adapter = TrackListAdapter(collection, predicate=lambda _track: False)
         super().__init__("专辑", adapter, theme, parent)
-        self.collection_hero = TrackCollectionHero(theme, self)
+        self.collection_hero = AlbumHero(theme, self)
+        self.album_hero = self.collection_hero
         layout = self.layout()
         layout.replaceWidget(self.header, self.collection_hero)
         self.header.hide()
@@ -38,13 +39,7 @@ class AlbumDetailPage(TrackListPage):
         album = self.albums.album_for_id(album_id)
         track_ids = frozenset(album.track_ids) if album else frozenset()
         self.adapter.set_predicate(lambda track: track.id in track_ids)
-        if album is not None:
-            metadata = f"{album.artist}  ·  {len(album.track_ids)} 首歌曲"
-            self.collection_hero.set_content(
-                album.title, metadata, self.adapter.tracks(), "专辑"
-            )
-        else:
-            self.collection_hero.set_content("专辑", "专辑不存在", (), "专辑")
+        self.collection_hero.set_album(album, self.adapter.tracks())
 
     def set_theme(self, theme: Theme) -> None:
         super().set_theme(theme)
@@ -55,4 +50,4 @@ class AlbumDetailPage(TrackListPage):
     def set_responsive_reference_width(self, width: int) -> None:
         super().set_responsive_reference_width(width)
         if hasattr(self, "collection_hero"):
-            self.collection_hero._apply_responsive_layout()
+            self.collection_hero.set_responsive_reference_width(width)

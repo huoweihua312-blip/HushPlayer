@@ -11,7 +11,7 @@ from unittest.mock import patch
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QEvent, Qt
 from PySide6.QtWidgets import QApplication
 
 from app.ui_v2.models.track_table_model import TrackColumn
@@ -79,10 +79,25 @@ class RealLibraryPageTests(unittest.TestCase):
         self.assertEqual(self.window.real_library_adapter.state, "loaded")
 
     def tearDown(self) -> None:
-        self.window.close()
-        self.app.processEvents()
+        self._dispose_window()
         self.environment.stop()
         self.temporary_directory.cleanup()
+
+    def _dispose_window(self) -> None:
+        """Finish Qt deferred deletion before the next real-mode fixture starts."""
+
+        window = getattr(self, "window", None)
+        self.window = None
+        if window is None:
+            return
+        window.close()
+        adapter = getattr(window, "real_library_adapter", None)
+        if adapter is not None:
+            self.app.removePostedEvents(adapter, QEvent.Type.MetaCall)
+        window.deleteLater()
+        self.app.processEvents()
+        self.app.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+        self.app.processEvents()
 
     def _create_audio(self, relative_path: str) -> Path:
         path = self.root / relative_path
@@ -274,9 +289,8 @@ class RealLibraryPageTests(unittest.TestCase):
         self.assertEqual(self.before_state, _file_state(self.document_paths))
 
     def test_error_view_shows_retry_instead_of_mock_fallback(self) -> None:
-        self.window.close()
-        self.app.processEvents()
         self.library_file.write_text("[", encoding="utf-8")
+        self._dispose_window()
         self.window = MainWindow()
         self.assertTrue(
             self._wait_for(lambda: self.window.real_library_adapter.state == "error")
@@ -290,8 +304,7 @@ class RealLibraryPageTests(unittest.TestCase):
         )
 
     def test_mock_mode_remains_the_default_interactive_preview(self) -> None:
-        self.window.close()
-        self.app.processEvents()
+        self._dispose_window()
         os.environ["HUSHPLAYER_UI_V2_DATA_MODE"] = "mock"
         self.window = MainWindow()
         self.assertEqual(self.window.data_mode, "mock")

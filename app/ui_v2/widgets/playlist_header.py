@@ -13,6 +13,7 @@ from app.ui_v2.theme.icons import icon
 from app.ui_v2.theme.tokens import Theme
 from app.ui_v2.widgets.artwork_thumbnail import ArtworkThumbnail
 from app.ui_v2.widgets.elided_label import ElidedLabel
+from app.ui_v2.widgets.quiet_context_menu import apply_menu_theme
 
 
 class PlaylistHeader(QWidget):
@@ -82,7 +83,7 @@ class PlaylistHeader(QWidget):
         self.rename_button.clicked.connect(self.rename_requested)
         self.delete_button.clicked.connect(self.delete_requested)
 
-        self._more_menu = QMenu(self)
+        self._more_menu = apply_menu_theme(QMenu(self), theme)
         add_action = self._more_menu.addAction("添加歌曲")
         rename_action = self._more_menu.addAction("重命名")
         self._more_menu.addSeparator()
@@ -180,6 +181,7 @@ class PlaylistHeader(QWidget):
         metrics = theme.metrics
         colors = theme.colors
         self.artwork.set_theme(theme)
+        apply_menu_theme(self._more_menu, theme)
         self.eyebrow_label.setStyleSheet(
             f"font-size: {theme.fonts.caption}px; font-weight: 600; color: {colors.accent};"
         )

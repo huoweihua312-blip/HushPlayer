@@ -23,6 +23,7 @@ class TrackCollectionHero(QWidget):
     def __init__(self, theme: Theme, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self._theme = theme
+        self._reference_width = 0
         self.artwork = AbstractArtwork(theme, self)
         self.artwork.setObjectName("trackCollectionHeroArtwork")
         self.eyebrow_label = QLabel(self)
@@ -125,11 +126,20 @@ class TrackCollectionHero(QWidget):
         self._apply_responsive_layout()
 
     def _apply_responsive_layout(self) -> None:
-        compact = self.width() > 0 and self.width() < 780
-        extent = 190 if compact else 240
+        reference = self._reference_width or self.width()
+        if reference < 950:
+            extent = 82
+        elif reference < 1220:
+            extent = 118
+        else:
+            extent = 156
         self.artwork.setFixedSize(extent, extent)
-        self._layout.setDirection(
-            QBoxLayout.Direction.TopToBottom if compact else QBoxLayout.Direction.LeftToRight
-        )
-        self._layout.setSpacing(16 if compact else 24)
+        self._layout.setDirection(QBoxLayout.Direction.LeftToRight)
+        self._layout.setSpacing(13 if reference < 950 else 17 if reference < 1220 else 22)
         self.setMinimumHeight(extent)
+
+    def set_responsive_reference_width(self, width: int) -> None:
+        """Apply the content-page Hero scale without changing its layout role."""
+
+        self._reference_width = max(1, int(width))
+        self._apply_responsive_layout()

@@ -30,7 +30,7 @@ class FavoritesPage(TrackListPage):
     def set_responsive_reference_width(self, width: int) -> None:
         super().set_responsive_reference_width(width)
         if hasattr(self, "collection_hero"):
-            self.collection_hero._apply_responsive_layout()
+            self.collection_hero.set_responsive_reference_width(width)
 
     def _on_tracks_reset(self, tracks) -> None:
         super()._on_tracks_reset(tracks)

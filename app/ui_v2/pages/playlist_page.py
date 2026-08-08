@@ -8,7 +8,7 @@ from PySide6.QtWidgets import QHBoxLayout, QInputDialog, QVBoxLayout, QWidget
 from app.ui_v2.adapters.playlist_adapter import PlaylistAdapter, PlaylistTrackAdapter
 from app.ui_v2.pages.track_list_page import TrackListPage
 from app.ui_v2.theme.tokens import Theme
-from app.ui_v2.widgets.playlist_header import PlaylistHeader
+from app.ui_v2.widgets.content_heroes import PlaylistHero
 from app.ui_v2.widgets.related_playlists_panel import RelatedPlaylistsPanel
 
 
@@ -25,7 +25,8 @@ class PlaylistPage(TrackListPage):
     ) -> None:
         self.playlists = playlists
         super().__init__("歌单", adapter, theme, parent)
-        self.playlist_header = PlaylistHeader(theme, self)
+        self.playlist_header = PlaylistHero(theme, self)
+        self.playlist_hero = self.playlist_header
         layout = self.layout()
         layout.replaceWidget(self.header, self.playlist_header)
         self.header.hide()

@@ -116,6 +116,8 @@ class ContentRouter(QStackedWidget):
         self._immersive_return_route = "lyrics"
         self._last_normal_route = navigation.route if not navigation.route.startswith("immersive") else "browse"
         self._content_safe_bottom = 0
+        self._playing_track_id = ""
+        self._is_playing = True
         self._online_sources = OnlineSourceAdapter(online, self)
         self._playback_enabled = (
             not collection.read_only or playback.has_real_backend
@@ -232,7 +234,15 @@ class ContentRouter(QStackedWidget):
                 page.set_content_safe_bottom(self._content_safe_bottom)
 
     def set_playing_track(self, track_id: str) -> None:
+        self._playing_track_id = str(track_id or "")
         self._online_adapter.set_playing_track(track_id)
+        self._apply_playback_state()
+
+    def set_playback_state(self, is_playing: bool) -> None:
+        """Refresh only current rows when playback changes between play/pause."""
+
+        self._is_playing = bool(is_playing)
+        self._apply_playback_state()
 
     def set_global_query(self, text: str) -> None:
         """Forward the shell search to the active track-backed page."""
@@ -256,7 +266,18 @@ class ContentRouter(QStackedWidget):
                 page.set_content_safe_bottom(self._content_safe_bottom)
             if hasattr(page, "set_responsive_reference_width") and self.width() > 0:
                 page.set_responsive_reference_width(self.width())
+            self._apply_playback_state_to_page(page)
         return self._pages[key]
+
+    def _apply_playback_state(self) -> None:
+        for page in dict.fromkeys(self._pages.values()):
+            self._apply_playback_state_to_page(page)
+
+    def _apply_playback_state_to_page(self, page: QWidget) -> None:
+        table = getattr(page, "track_table", None)
+        setter = getattr(table, "set_playback_state", None)
+        if callable(setter):
+            setter(self._playing_track_id, self._is_playing)
 
     def _wire_track_page(self, page: TrackListPage) -> TrackListPage:
         if hasattr(page, "set_playback_enabled"):

@@ -19,8 +19,16 @@ class ArtistsPage(EntityGridPage):
             parent=parent,
         )
         self.configure_cards(
-            lambda artist: ArtistCard(artist, theme, self.content),
-            lambda card, artist: card.set_artist(artist),
+            lambda artist: ArtistCard(
+                artist,
+                theme,
+                self.content,
+                next((track for track in adapter.tracks_for_artist(artist.id) if not track.is_missing), None),
+            ),
+            lambda card, artist: card.set_artist(
+                artist,
+                next((track for track in adapter.tracks_for_artist(artist.id) if not track.is_missing), None),
+            ),
         )
         self.empty_state.set_state("empty", "没有匹配的歌手。")
         adapter.artists_reset.connect(self.set_entities)

@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 from enum import IntEnum
-from typing import Iterable
+from collections.abc import Callable, Iterable
+from weakref import WeakMethod
 
 from PySide6.QtCore import QAbstractTableModel, QModelIndex, Qt
 
@@ -26,6 +27,7 @@ class TrackColumn(IntEnum):
 
 TRACK_ROLE = int(Qt.ItemDataRole.UserRole) + 1
 PLAYING_ROLE = TRACK_ROLE + 1
+PLAYBACK_ACTIVE_ROLE = TRACK_ROLE + 2
 
 
 class TrackTableModel(QAbstractTableModel):
@@ -33,11 +35,21 @@ class TrackTableModel(QAbstractTableModel):
 
     HEADERS = ("#", "歌曲", "歌手", "专辑", "时长", "收藏", "来源", "")
 
-    def __init__(self, tracks: Iterable[Track] = (), parent=None) -> None:
+    def __init__(
+        self,
+        tracks: Iterable[Track] = (),
+        parent=None,
+        *,
+        meta_provider: Callable[[Track], str] | None = None,
+    ) -> None:
         super().__init__(parent)
         self._tracks = list(tracks)
         self._row_by_id = {track.id: row for row, track in enumerate(self._tracks)}
         self._playing_track_id = ""
+        self._playing_active = True
+        self._meta_provider: Callable[[Track], str] | None = None
+        self._meta_provider_ref = None
+        self._header_overrides: dict[TrackColumn, str] = {}
 
     def rowCount(self, parent: QModelIndex = QModelIndex()) -> int:  # noqa: N802
         return 0 if parent.isValid() else len(self._tracks)
@@ -54,7 +66,11 @@ class TrackTableModel(QAbstractTableModel):
             return track
         if role == PLAYING_ROLE:
             return track.id == self._playing_track_id
+        if role == PLAYBACK_ACTIVE_ROLE:
+            return track.id == self._playing_track_id and self._playing_active
         if role == Qt.ItemDataRole.DisplayRole:
+            if column == TrackColumn.SOURCE and self._has_meta_provider:
+                return self._meta_text(track)
             return self._display_value(track, column)
         if role == Qt.ItemDataRole.ToolTipRole:
             return self._tooltip_value(track, column)
@@ -64,7 +80,10 @@ class TrackTableModel(QAbstractTableModel):
 
     def headerData(self, section: int, orientation: Qt.Orientation, role: int = Qt.ItemDataRole.DisplayRole):  # noqa: N802
         if role == Qt.ItemDataRole.DisplayRole and orientation == Qt.Orientation.Horizontal:
-            return self.HEADERS[section] if 0 <= section < len(self.HEADERS) else None
+            if 0 <= section < len(self.HEADERS):
+                column = TrackColumn(section)
+                return self._header_overrides.get(column, self.HEADERS[section])
+            return None
         return super().headerData(section, orientation, role)
 
     def flags(self, index: QModelIndex) -> Qt.ItemFlag:
@@ -87,6 +106,23 @@ class TrackTableModel(QAbstractTableModel):
         self._row_by_id = {track.id: row for row, track in enumerate(self._tracks)}
         self.endResetModel()
 
+    def set_meta_provider(self, provider: Callable[[Track], str] | None) -> None:
+        """Set optional page metadata without changing track ownership."""
+
+        self._meta_provider = None
+        self._meta_provider_ref = None
+        if provider is not None:
+            try:
+                self._meta_provider_ref = WeakMethod(provider)
+            except TypeError:
+                self._meta_provider = provider
+        self._header_overrides[TrackColumn.SOURCE] = "最近" if provider else "来源"
+        self.headerDataChanged.emit(
+            Qt.Orientation.Horizontal,
+            int(TrackColumn.SOURCE),
+            int(TrackColumn.SOURCE),
+        )
+
     def update_track(self, updated: Track) -> None:
         row = self._row_by_id.get(updated.id)
         if row is None:
@@ -102,6 +138,7 @@ class TrackTableModel(QAbstractTableModel):
                 Qt.ItemDataRole.ToolTipRole,
                 TRACK_ROLE,
                 PLAYING_ROLE,
+                PLAYBACK_ACTIVE_ROLE,
             ],
         )
 
@@ -110,12 +147,40 @@ class TrackTableModel(QAbstractTableModel):
         if previous_id == track_id:
             return
         self._playing_track_id = track_id
+        self._playing_active = True
         changed_rows = {self._row_by_id[item_id] for item_id in (previous_id, track_id) if item_id in self._row_by_id}
         for row in sorted(changed_rows):
             self.dataChanged.emit(
                 self.index(row, 0),
                 self.index(row, self.columnCount() - 1),
-                [Qt.ItemDataRole.DisplayRole, Qt.ItemDataRole.ToolTipRole, PLAYING_ROLE],
+                [
+                    Qt.ItemDataRole.DisplayRole,
+                    Qt.ItemDataRole.ToolTipRole,
+                    PLAYING_ROLE,
+                    PLAYBACK_ACTIVE_ROLE,
+                ],
+            )
+
+    def set_playback_state(self, track_id: str, is_playing: bool) -> None:
+        """Update paused/playing presentation without rebuilding the model."""
+
+        normalized = str(track_id or "")
+        active = bool(is_playing)
+        if normalized == self._playing_track_id and active == self._playing_active:
+            return
+        previous_id = self._playing_track_id
+        self._playing_track_id = normalized
+        self._playing_active = active
+        changed_rows = {
+            self._row_by_id[item_id]
+            for item_id in (previous_id, normalized)
+            if item_id in self._row_by_id
+        }
+        for row in sorted(changed_rows):
+            self.dataChanged.emit(
+                self.index(row, 0),
+                self.index(row, self.columnCount() - 1),
+                [PLAYING_ROLE, PLAYBACK_ACTIVE_ROLE],
             )
 
     @staticmethod
@@ -135,8 +200,7 @@ class TrackTableModel(QAbstractTableModel):
         }
         return values[column]
 
-    @staticmethod
-    def _tooltip_value(track: Track, column: TrackColumn) -> str:
+    def _tooltip_value(self, track: Track, column: TrackColumn) -> str:
         from app.ui_v2.widgets.track_display import display_track_text
 
         title, artist, album = display_track_text(track)
@@ -158,6 +222,8 @@ class TrackTableModel(QAbstractTableModel):
                 details
             )
         if column == TrackColumn.SOURCE:
+            if self._has_meta_provider:
+                return self._meta_text(track)
             return f"{track.source_name} ({'在线' if track.is_online else '本地'})"
         if column == TrackColumn.DURATION:
             return format_duration(track.duration_ms)
@@ -172,3 +238,13 @@ class TrackTableModel(QAbstractTableModel):
         if value is None or value.year <= 1970:
             return ""
         return value.strftime(pattern)
+
+    @property
+    def _has_meta_provider(self) -> bool:
+        return self._meta_provider is not None or self._meta_provider_ref is not None
+
+    def _meta_text(self, track: Track) -> str:
+        provider = self._meta_provider
+        if provider is None and self._meta_provider_ref is not None:
+            provider = self._meta_provider_ref()
+        return str(provider(track) or "") if provider is not None else ""

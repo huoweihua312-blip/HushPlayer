@@ -416,6 +416,7 @@ class MainWindow(QMainWindow):
         )
         self.navigation_adapter.route_changed.connect(self._sync_immersive_shell)
         self.playback_adapter.track_changed.connect(self._on_playback_track_changed)
+        self.playback_adapter.playing_changed.connect(self.router.set_playback_state)
         self.playback_adapter.track_changed.connect(self.lyrics_adapter.set_track)
         self.playback_adapter.position_changed.connect(self.lyrics_adapter.set_position)
         self.lyrics_adapter.set_track(self.playback_adapter.state.current_track)
