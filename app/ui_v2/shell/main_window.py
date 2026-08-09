@@ -13,6 +13,7 @@ from PySide6.QtWidgets import QApplication, QHBoxLayout, QMainWindow, QVBoxLayou
 
 from app.core.app_paths import AppPaths
 from app.services.library_repository import LibraryRepository
+from app.services.online_discovery_runtime import OnlineDiscoveryRuntime
 from app.services.remote_track_store import RemoteTrackStore
 from app.ui_v2.adapters.library_adapter import LibraryAdapter
 from app.ui_v2.adapters.library_collection import LibraryCollectionAdapter
@@ -67,6 +68,7 @@ class MainWindow(QMainWindow):
         remote_tracks: RemoteTrackStore | None = None,
         playback_adapter: PlaybackAdapter | None = None,
         lyrics_adapter: LyricsAdapter | None = None,
+        online_discovery: OnlineDiscoveryRuntime | None = None,
         force_dark_theme: bool = False,
     ) -> None:
         super().__init__(parent)
@@ -116,6 +118,26 @@ class MainWindow(QMainWindow):
             Qt.WidgetAttribute.WA_TranslucentBackground
         )
         is_real_library = self.data_mode == "real"
+        if is_real_library:
+            resolved_paths = AppPaths.resolve()
+            repository = repository or LibraryRepository(
+                resolved_paths.data_dir / "library.json",
+                resolved_paths.data_dir / "playlists.json",
+                resolved_paths.data_dir / "stats.json",
+            )
+            remote_tracks = remote_tracks or RemoteTrackStore(
+                resolved_paths.data_dir / "remote_tracks.json"
+            )
+            self.online_discovery = online_discovery or OnlineDiscoveryRuntime(
+                resolved_paths,
+                repository,
+                remote_tracks,
+                self,
+            )
+            if self.online_discovery.parent() is None:
+                self.online_discovery.setParent(self)
+        else:
+            self.online_discovery = None
         self.library_collection = LibraryCollectionAdapter(
             () if is_real_library else create_mock_tracks(1000),
             self,
@@ -128,13 +150,16 @@ class MainWindow(QMainWindow):
             read_only=is_real_library,
         )
         self.online_adapter = OnlineAdapter(
-            self.library_collection, self.playlist_adapter, self
+            self.library_collection,
+            self.playlist_adapter,
+            self,
+            discovery=self.online_discovery,
         )
         self.library_adapter = LibraryAdapter(collection=self.library_collection, parent=self)
         self.navigation_adapter = NavigationAdapter(
             self.playlist_adapter,
             self,
-            include_online=not is_real_library,
+            include_online=True,
         )
         self.playback_adapter = playback_adapter or PlaybackAdapter(self)
         if playback_adapter is not None and playback_adapter.parent() is None:
@@ -198,6 +223,9 @@ class MainWindow(QMainWindow):
                 self.real_library_adapter.refresh
             )
             self.real_library_adapter.load()
+            self.online_adapter.remote_collection_changed.connect(
+                self.real_library_adapter.refresh
+            )
 
     @property
     def theme(self) -> Theme:
@@ -282,6 +310,9 @@ class MainWindow(QMainWindow):
             self.settings_overlay.cancel_and_close()
         if self.real_library_adapter is not None:
             self.real_library_adapter.shutdown()
+        self.online_adapter.shutdown()
+        if self.online_discovery is not None:
+            self.online_discovery.shutdown()
         immersive_page = self.router._pages.get("immersive_lyrics")
         if immersive_page is not None and hasattr(immersive_page, "shutdown"):
             immersive_page.shutdown()

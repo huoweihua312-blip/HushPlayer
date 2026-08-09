@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Sequence
 
 from PySide6.QtCore import QCoreApplication, Qt
-from PySide6.QtGui import QGuiApplication, QIcon
+from PySide6.QtGui import QFont, QGuiApplication, QIcon
 from PySide6.QtWidgets import QApplication
 
 from app.core.app_paths import APP_NAME, APP_VERSION, AppPaths
@@ -58,7 +58,7 @@ def apply_ui_theme(
     if flavor == UI_FLAVOR_V2:
         from app.ui_v2.theme.styles import build_application_palette, build_stylesheet
         from app.ui_v2.adapters.legacy_settings_bridge import load_settings_document
-        from app.ui_v2.theme.tokens import get_theme
+        from app.ui_v2.theme.tokens import get_theme, resolve_font_family
 
         resolved_settings_path = settings_path or os.environ.get(
             "HUSHPLAYER_UI_V2_SETTINGS_PATH", ""
@@ -68,6 +68,13 @@ def apply_ui_theme(
         values = load_settings_document(Path(resolved_settings_path))
         appearance = str(values.get("appearance_mode", "dark")).casefold()
         theme = get_theme("light" if appearance == "light" else "dark")
+        ui_font = QFont(resolve_font_family(), 10)
+        ui_font.setStyleHint(QFont.StyleHint.SansSerif)
+        ui_font.setStyleStrategy(
+            QFont.StyleStrategy.PreferQuality | QFont.StyleStrategy.PreferAntialias
+        )
+        ui_font.setHintingPreference(QFont.HintingPreference.PreferFullHinting)
+        app.setFont(ui_font)
         app.setPalette(build_application_palette(theme))
         app.setStyleSheet(build_stylesheet(theme))
         app.setProperty("hushUiFlavor", UI_FLAVOR_V2)

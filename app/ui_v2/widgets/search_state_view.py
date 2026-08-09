@@ -53,8 +53,8 @@ class SearchStateView(QWidget):
 
     def set_state(self, state: OnlineSearchState) -> None:
         values = {
-            "idle": ("开始在线搜索", "输入关键词后从已启用的 mock 来源搜索。"),
-            "searching": ("正在搜索", state.message or "正在等待 mock 来源响应。"),
+            "idle": ("开始在线搜索", "输入关键词后从已启用来源搜索。"),
+            "searching": ("正在搜索", state.message or "正在等待在线来源响应。"),
             "empty": ("没有找到结果", state.message or "尝试调整关键词或切换来源。"),
             "failed": ("搜索暂不可用", state.message or "请重试或检查来源状态。"),
         }

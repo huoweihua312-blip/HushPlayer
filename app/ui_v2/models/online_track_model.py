@@ -125,7 +125,11 @@ class OnlineTrackModel(QAbstractTableModel):
             OnlineColumn.DURATION: format_duration(track.duration_ms),
             OnlineColumn.SOURCE: track.source_name,
             OnlineColumn.QUALITY: track.quality,
-            OnlineColumn.STATUS: "可用" if track.availability == "available" else "来源不可用",
+            OnlineColumn.STATUS: (
+                "可用"
+                if track.availability == "available"
+                else "在线播放未接入"
+            ),
         }
         return values[column]
 

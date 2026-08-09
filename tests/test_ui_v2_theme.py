@@ -14,7 +14,7 @@ if str(PROJECT_ROOT) not in sys.path:
 from PySide6.QtGui import QColor
 from PySide6.QtWidgets import QApplication
 
-from app.ui_v2.theme.icons import favorite, online, search
+from app.ui_v2.theme.icons import favorite, icon, online, search
 from app.ui_v2.theme.styles import build_stylesheet
 from app.ui_v2.theme.tokens import ThemeColors, ThemeFonts, ThemeMetrics, get_theme
 
@@ -56,6 +56,8 @@ class UiV2ThemeTests(unittest.TestCase):
         self.assertFalse(favorite(theme).isNull())
         self.assertFalse(online(theme, "hover").isNull())
         self.assertFalse(search(theme, "disabled").isNull())
+        self.assertFalse(icon("moon", get_theme("dark")).isNull())
+        self.assertFalse(icon("sun", get_theme("light")).isNull())
 
     def test_light_and_dark_row_state_colors_are_distinct_and_restrained(self) -> None:
         for mode in ("light", "dark"):

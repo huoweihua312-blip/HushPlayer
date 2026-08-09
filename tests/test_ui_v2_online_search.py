@@ -12,6 +12,9 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
+from PySide6.QtCore import Qt
+from PySide6.QtGui import QColor, QPalette
+from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication
 
 from app.ui_v2.adapters.library_collection import LibraryCollectionAdapter
@@ -22,6 +25,7 @@ from app.ui_v2.models.online_track_model import ONLINE_PLAYING_ROLE, OnlineColum
 from app.ui_v2.pages.online_search_page import OnlineSearchPage
 from app.ui_v2.pages.online_source_page import OnlineSourcePage
 from app.ui_v2.shell.main_window import MainWindow
+from app.ui_v2.widgets.settings_control_factory import ToolbarComboBox
 
 
 class OnlineAdapterTests(unittest.TestCase):
@@ -212,7 +216,7 @@ class OnlineSearchPageTests(unittest.TestCase):
         source_action = next(
             action
             for action in page.source_selector._menu.actions()
-            if action.text().startswith("Mock Catalog")
+            if action.text().startswith("North Catalog")
         )
         self.assertIn("已完成", source_action.text())
         self.assertIn("16 条", source_action.text())
@@ -221,6 +225,59 @@ class OnlineSearchPageTests(unittest.TestCase):
         page.search_bar.search_requested.emit()
         self.app.processEvents()
         self.assertFalse(page.source_selector._menu.actions()[0].isEnabled())
+
+    def test_toolbar_selects_reuse_themed_combo_popup_and_keyboard_contract(self) -> None:
+        page = self._search_page()
+        self._complete_search(page, "工具栏")
+        controls = (page.result_toolbar.source_filter, page.result_toolbar.sort_selector)
+        self.assertTrue(all(isinstance(control, ToolbarComboBox) for control in controls))
+        self.assertEqual(controls[0].accessibleName(), "来源筛选")
+        self.assertEqual(controls[1].accessibleName(), "排序方式")
+        self.assertTrue(all(control.native_arrow_suppressed for control in controls))
+        self.assertTrue(all(control.height() == self.window.theme.metrics.control_height for control in controls))
+
+        for mode in ("light", "dark"):
+            self.window.set_theme(mode)
+            theme = self.window.theme
+            for control in controls:
+                palette = control.view().palette()
+                self.assertEqual(
+                    palette.color(QPalette.ColorRole.Base),
+                    QColor(theme.colors.surface_elevated),
+                )
+                self.assertEqual(
+                    palette.color(QPalette.ColorRole.Highlight),
+                    QColor(theme.colors.selected_background),
+                )
+                self.assertIn("down-arrow", control.styleSheet())
+                self.assertIn("image: none", control.styleSheet())
+
+        sort = page.result_toolbar.sort_selector
+        sort.setCurrentIndex(0)
+        sort.setFocus()
+        self.app.processEvents()
+        self.assertTrue(sort.property("focusVisible"))
+        QTest.keyClick(sort, Qt.Key.Key_Space)
+        self.app.processEvents()
+        self.assertTrue(sort.popup_open)
+        self.assertTrue(sort.property("popupOpen"))
+        QTest.keyClick(sort, Qt.Key.Key_Escape)
+        self.app.processEvents()
+        self.assertFalse(sort.popup_open)
+        QTest.keyClick(sort, Qt.Key.Key_Down)
+        self.assertEqual(sort.currentData(), "title")
+        QTest.keyClick(sort, Qt.Key.Key_Return)
+        self.app.processEvents()
+        self.assertTrue(sort.popup_open)
+        sort.hidePopup()
+
+        self.window.resize(900, 600)
+        self.app.processEvents()
+        self.assertTrue(page.result_toolbar.source_filter.isVisible())
+        self.assertTrue(page.result_toolbar.sort_selector.isVisible())
+        self.assertEqual(page.result_toolbar.source_filter.width(), 128)
+        self.assertEqual(page.result_toolbar.sort_selector.width(), 104)
+        self.assertFalse(page.result_table.horizontalScrollBar().isVisible())
 
     def test_recommended_query_and_return_to_history(self) -> None:
         page = self._search_page()

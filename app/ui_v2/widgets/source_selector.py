@@ -77,4 +77,4 @@ class SourceSelector(QToolButton):
     def _refresh_text(self) -> None:
         count = sum(source.enabled for source in self.adapter.sources())
         self.setText("来源" if self._compact else f"来源 {count}")
-        self.setToolTip(f"已启用 {count} 个 mock 来源")
+        self.setToolTip(f"已启用 {count} 个在线来源")

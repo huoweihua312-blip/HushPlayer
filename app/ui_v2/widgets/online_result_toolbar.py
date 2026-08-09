@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 from PySide6.QtCore import Qt, Signal
-from PySide6.QtWidgets import QComboBox, QHBoxLayout, QLabel, QToolButton, QWidget
+from PySide6.QtWidgets import QHBoxLayout, QLabel, QToolButton, QWidget
 
 from app.ui_v2.theme.tokens import Theme
+from app.ui_v2.widgets.settings_control_factory import ToolbarComboBox
 
 
 class OnlineResultToolbar(QWidget):
@@ -19,9 +20,15 @@ class OnlineResultToolbar(QWidget):
         self._theme = theme
         self.summary_label = QLabel(self)
         self.warning_label = QLabel(self)
-        self.source_filter = QComboBox(self)
+        self.source_filter = ToolbarComboBox(theme, self)
+        self.source_filter.setAccessibleName("来源筛选")
+        self.source_filter.setAccessibleDescription("筛选在线搜索结果的来源")
+        self.source_filter.view().setMinimumWidth(210)
         self.source_filter.currentIndexChanged.connect(self._emit_source_filter)
-        self.sort_selector = QComboBox(self)
+        self.sort_selector = ToolbarComboBox(theme, self)
+        self.sort_selector.setAccessibleName("排序方式")
+        self.sort_selector.setAccessibleDescription("选择在线搜索结果的排序方式")
+        self.sort_selector.view().setMinimumWidth(140)
         self.sort_selector.addItem("相关度", "relevance")
         self.sort_selector.addItem("歌曲名称", "title")
         self.sort_selector.addItem("时长", "duration")
@@ -42,6 +49,7 @@ class OnlineResultToolbar(QWidget):
         layout.addStretch(1)
         layout.addWidget(self.retry_button)
         layout.addWidget(self.sources_button)
+        self.set_compact(False)
         self.set_summary(0, "")
         self.set_theme(theme)
 
@@ -63,8 +71,8 @@ class OnlineResultToolbar(QWidget):
         self.source_filter.blockSignals(False)
 
     def set_compact(self, compact: bool) -> None:
-        self.source_filter.setVisible(not compact)
-        self.sort_selector.setVisible(not compact)
+        self.source_filter.setFixedWidth(128 if compact else 146)
+        self.sort_selector.setFixedWidth(104 if compact else 112)
 
     def set_summary(self, count: int, warning: str) -> None:
         self.summary_label.setText(f"{count} 条结果")
@@ -74,16 +82,13 @@ class OnlineResultToolbar(QWidget):
 
     def set_theme(self, theme: Theme) -> None:
         self._theme = theme
-        self.summary_label.setStyleSheet(f"color: {theme.colors.secondary_text};")
-        self.warning_label.setStyleSheet(f"color: {theme.colors.warning};")
-        combo_style = (
-            f"QComboBox {{ min-height: {theme.metrics.control_height}px; padding: 0 {theme.metrics.spacing_sm}px; "
-            f"border: 1px solid {theme.colors.border}; border-radius: {theme.metrics.radius_sm}px; "
-            f"background: {theme.colors.input_background}; color: {theme.colors.secondary_text}; }}"
-            f"QComboBox:hover {{ color: {theme.colors.primary_text}; background: {theme.colors.hover_background}; }}"
+        self.summary_label.setStyleSheet(
+            f"color: {theme.colors.secondary_text}; padding-right: {theme.metrics.spacing_xs}px; "
+            f"font-size: {theme.fonts.caption}px;"
         )
-        self.source_filter.setStyleSheet(combo_style)
-        self.sort_selector.setStyleSheet(combo_style)
+        self.warning_label.setStyleSheet(f"color: {theme.colors.warning};")
+        self.source_filter.set_theme(theme)
+        self.sort_selector.set_theme(theme)
         for button in (self.retry_button, self.sources_button):
             button.setStyleSheet(
                 f"QToolButton {{ min-height: {theme.metrics.control_height}px; padding: 0 {theme.metrics.spacing_sm}px; "

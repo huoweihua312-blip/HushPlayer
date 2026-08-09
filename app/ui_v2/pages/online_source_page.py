@@ -1,4 +1,4 @@
-"""Compact mock-source management page used by the online-search prototype."""
+"""Compact source-management page for the online discovery surface."""
 
 from __future__ import annotations
 
@@ -91,7 +91,7 @@ class OnlineSourcePage(QWidget):
         self._theme = theme
         self._rows: dict[str, SourceRow] = {}
         self.title_label = QLabel("在线来源", self)
-        self.detail_label = QLabel("以下为 UI V2 mock 来源状态，不会执行脚本或网络请求。", self)
+        self.detail_label = QLabel("查看已注册在线来源的能力与当前状态。", self)
         self.back_button = QToolButton(self)
         self.back_button.setText("返回搜索")
         self.back_button.clicked.connect(self.back_requested)

@@ -1,4 +1,4 @@
-"""Interactive mock online-search page with cached state and virtual results."""
+"""Quiet Orbit online discovery page backed by one shared query surface."""
 
 from __future__ import annotations
 
@@ -35,7 +35,7 @@ class OnlineSearchPage(QWidget):
         self._theme = theme
         self.setObjectName("onlineSearchPage")
         self.title_label = QLabel("在线搜索", self)
-        self.detail_label = QLabel("仅展示确定性的 mock 来源与结果，不会发起网络请求。", self)
+        self.detail_label = QLabel("从已启用的在线来源聚合结果。", self)
         self.search_bar = OnlineSearchBar(theme, self)
         self.source_selector = SourceSelector(adapter, theme, self)
         self.source_summary_label = QLabel(self)
@@ -59,6 +59,9 @@ class OnlineSearchPage(QWidget):
         search_row.setSpacing(8)
         search_row.addWidget(self.search_bar, 1)
         search_row.addWidget(self.source_selector)
+        # The shell title bar is the single production query input. Keep this
+        # control as a compatibility handle for deterministic tests.
+        self.search_bar.setVisible(False)
         self.result_toolbar = OnlineResultToolbar(theme, self)
         self.result_table = OnlineResultTable(adapter, playlists, theme, self)
         self.history_view = SearchHistoryView(theme, self)
@@ -95,6 +98,7 @@ class OnlineSearchPage(QWidget):
         adapter.source_state_changed.connect(self.result_toolbar.set_sources)
         adapter.state_changed.connect(self._sync_state)
         adapter.search_results_changed.connect(lambda _results: self._sync_state(adapter.state))
+        adapter.notification_changed.connect(self._sync_notification)
         self.search_bar.set_text(adapter.query)
         self.history_view.set_history(adapter.history())
         self._sync_sources(adapter.sources())
@@ -154,7 +158,12 @@ class OnlineSearchPage(QWidget):
     def _sync_sources(self, sources) -> None:
         enabled = [source for source in sources if source.enabled]
         unavailable = [source for source in enabled if source.status in {"failed", "disabled"}]
-        summary = f"已启用 {len(enabled)} 个 mock 来源"
+        summary = f"已启用 {len(enabled)} 个在线来源"
         if unavailable:
             summary += f"，其中 {len(unavailable)} 个暂不可用"
         self.source_summary_label.setText(summary)
+
+    def _sync_notification(self, message: str) -> None:
+        text = str(message or "").strip()
+        if text:
+            self.detail_label.setText(text)

@@ -16,6 +16,7 @@ from app.core.app_paths import AppPaths
 from app.services.library_repository import LibraryRepository
 from app.services.production_playback_controller import ProductionPlaybackController
 from app.services.remote_track_store import RemoteTrackStore
+from app.services.online_discovery_runtime import OnlineDiscoveryRuntime
 from app.startup import UI_FLAVOR_V2, create_application_context
 from app.ui_v2.adapters.lyrics_adapter import LyricsAdapter
 from app.ui_v2.adapters.playback_adapter import PlaybackAdapter
@@ -36,6 +37,7 @@ class UiV2RuntimeServices:
     remote_tracks: RemoteTrackStore
     playback_adapter: PlaybackAdapter
     lyrics_adapter: LyricsAdapter
+    online_discovery: OnlineDiscoveryRuntime | None = None
 
 
 def normalize_ui_v2_data_mode(value: str | None) -> str:
@@ -55,20 +57,27 @@ def build_ui_v2_runtime_services(
 
     resolved = paths or AppPaths.resolve()
     data_dir = resolved.data_dir
+    repository = LibraryRepository(
+        data_dir / "library.json",
+        data_dir / "playlists.json",
+        data_dir / "stats.json",
+    )
+    remote_tracks = RemoteTrackStore(data_dir / "remote_tracks.json")
     return UiV2RuntimeServices(
         paths=resolved,
         settings_path=data_dir / "settings.json",
-        repository=LibraryRepository(
-            data_dir / "library.json",
-            data_dir / "playlists.json",
-            data_dir / "stats.json",
-        ),
-        remote_tracks=RemoteTrackStore(data_dir / "remote_tracks.json"),
+        repository=repository,
+        remote_tracks=remote_tracks,
         playback_adapter=playback_adapter or PlaybackAdapter(
             timer_enabled=False,
             controller=ProductionPlaybackController(),
         ),
         lyrics_adapter=lyrics_adapter or LyricsAdapter(),
+        online_discovery=OnlineDiscoveryRuntime(
+            resolved,
+            repository,
+            remote_tracks,
+        ),
     )
 
 
@@ -102,6 +111,7 @@ def create_ui_v2_main_window(
         remote_tracks=runtime.remote_tracks,
         playback_adapter=runtime.playback_adapter,
         lyrics_adapter=runtime.lyrics_adapter,
+        online_discovery=runtime.online_discovery,
     )
 
 

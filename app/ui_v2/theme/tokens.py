@@ -10,14 +10,18 @@ ThemeMode = Literal["light", "dark"]
 
 
 FONT_FALLBACKS = (
+    # Windows UI fonts stay ahead of the optional cross-platform families so
+    # Chinese glyphs keep stable proportions and hinting on high-DPI screens.
+    "Microsoft YaHei UI",
+    "Microsoft YaHei",
+    "Segoe UI Variable Text",
+    "Segoe UI",
+    "DengXian",
     "MiSans",
     "MiSans VF",
     "HarmonyOS Sans SC",
     "Noto Sans CJK SC",
     "Source Han Sans SC",
-    "Microsoft YaHei UI",
-    "Segoe UI Variable Text",
-    "Segoe UI",
     "sans-serif",
 )
 
@@ -119,21 +123,21 @@ class ThemeMetrics:
 
 @dataclass(frozen=True, slots=True)
 class ThemeFonts:
-    caption: int = 12
+    caption: int = 13
     body_small: int = 13
     body: int = 15
     control: int = 14
     section_title: int = 22
     page_title: int = 32
     track_title: int = 15
-    metadata: int = 12
-    numeric: int = 12
+    metadata: int = 13
+    numeric: int = 13
     secondary: int = 14
     card_title: int = 14
-    card_meta: int = 12
+    card_meta: int = 13
     player_title: int = 14
-    player_meta: int = 12
-    family: str = "Segoe UI"
+    player_meta: int = 13
+    family: str = "Microsoft YaHei UI"
 
 
 @dataclass(frozen=True, slots=True)
@@ -228,7 +232,7 @@ LIGHT_THEME = Theme(
         app="#f7f6f1", sidebar="#e8eee9", content="#fbfaf6", player="#eef2ed",
         surface="#fbfaf6", surface_secondary="#f1f3ee", elevated="#ffffff",
         hover="#e7eee9", selected="#dce9e1", playing="#eee4cd", pressed="#d0e0d6", divider="#d7e1da",
-        primary="#1d2925", secondary="#4f625a", tertiary="#74857d", disabled="#a0ada6",
+        primary="#1d2925", secondary="#42554c", tertiary="#63766d", disabled="#a0ada6",
         icon="#52665d", active="#b18d48", progress_track="#b7c5bc", accent="#b18d48",
         accent_hover="#c09d58", accent_pressed="#9d7b3c", danger="#b7665f",
         warning="#9a7228", success="#3e805e", shadow="rgba(31, 48, 41, .16)",

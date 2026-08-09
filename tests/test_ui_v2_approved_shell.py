@@ -31,7 +31,7 @@ from app.ui_v2.theme.icons import (
 )
 from app.ui_v2.theme.tokens import get_theme
 import app.ui_v2.widgets.navigation_item as navigation_item_module
-from app.ui_v2.widgets.cover_card import CoverCard
+from app.ui_v2.widgets.cover_card import CoverCard, CoverCardPlayButton
 from app.ui_v2.widgets.placeholder_cover import placeholder_cover_index
 from app.ui_v2.widgets.playback_button import PlayerIconButton
 from app.ui_v2.shell.main_window import MainWindow
@@ -93,6 +93,7 @@ class ApprovedShellMigrationTests(unittest.TestCase):
             visible_cards = [card for card in section.cards if not card.isHidden()]
             self.assertEqual(len(visible_cards), 5)
             self.assertTrue(all(isinstance(card, CoverCard) for card in visible_cards))
+            self.assertTrue(all(isinstance(card.play_button, CoverCardPlayButton) for card in visible_cards))
             for card in visible_cards:
                 self.assertEqual(
                     placeholder_cover_index(card.track.stable_id),
@@ -201,7 +202,7 @@ class ApprovedShellMigrationTests(unittest.TestCase):
     def test_approved_svg_icon_sources_and_cache_contract(self) -> None:
         icon_dir = PROJECT_ROOT / "app" / "ui_v2" / "assets" / "icons"
         svg_paths = sorted(icon_dir.glob("*.svg"))
-        self.assertEqual(len(svg_paths), 23)
+        self.assertEqual(len(svg_paths), 25)
         for path in svg_paths:
             source = path.read_text(encoding="utf-8")
             self.assertTrue(source.isascii(), path.name)

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 
 from app.ui_v2.models.track import Track
@@ -26,6 +26,10 @@ class OnlineTrack:
     availability: str
     explicit: bool
     result_rank: int
+    artwork_url: str = ""
+    remote_id: str = ""
+    raw: dict = field(default_factory=dict)
+    artwork_data: bytes = b""
 
     @property
     def is_online(self) -> bool:

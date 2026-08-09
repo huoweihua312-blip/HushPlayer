@@ -1,4 +1,4 @@
-"""Timer-driven mock online search with deterministic source scenarios only."""
+"""Online discovery state adapter with deterministic mock and formal modes."""
 
 from __future__ import annotations
 
@@ -7,6 +7,8 @@ from datetime import datetime, timedelta
 
 from PySide6.QtCore import QObject, QTimer, Signal
 
+from app.services.online_discovery_runtime import OnlineDiscoveryRuntime
+from app.services.remote_track_store import RemoteTrackStore
 from app.ui_v2.adapters.library_collection import LibraryCollectionAdapter
 from app.ui_v2.adapters.playlist_adapter import PlaylistAdapter
 from app.ui_v2.models.online_search_state import OnlineSearchState
@@ -33,6 +35,10 @@ class OnlineAdapter(QObject):
     result_updated = Signal(object)
     playing_track_changed = Signal(str)
     state_changed = Signal(object)
+    playback_unavailable = Signal(str, str)
+    track_info_changed = Signal(object)
+    notification_changed = Signal(str)
+    remote_collection_changed = Signal()
 
     def __init__(
         self,
@@ -41,6 +47,7 @@ class OnlineAdapter(QObject):
         parent: QObject | None = None,
         *,
         timer_enabled: bool = True,
+        discovery: OnlineDiscoveryRuntime | None = None,
     ) -> None:
         super().__init__(parent)
         self.collection = collection
@@ -59,7 +66,16 @@ class OnlineAdapter(QObject):
         self._timer.timeout.connect(self._advance_search)
         self._playing_track_id = ""
         self._clock = datetime(2026, 3, 1, 10, 0)
+        self.discovery = discovery
+        self._formal_generation = 0
+        self._formal_catalog: list[dict] = []
+        self._formal_selected_source_ids: list[str] = []
+        self._metadata_requests: dict[int, tuple[int, str, str]] = {}
+        self._artwork_generation = 0
+        self._closed = False
         collection.favorite_changed.connect(self._sync_collection_favorite)
+        if self.discovery is not None:
+            self._connect_formal_services()
 
     @property
     def query(self) -> str:
@@ -72,6 +88,14 @@ class OnlineAdapter(QObject):
     @property
     def scenario(self) -> str:
         return self._scenario
+
+    @property
+    def is_formal(self) -> bool:
+        return self.discovery is not None
+
+    @property
+    def can_mutate_remote(self) -> bool:
+        return self.discovery is not None and self.discovery.bridge is not None
 
     @property
     def playing_track_id(self) -> str:
@@ -87,13 +111,24 @@ class OnlineAdapter(QObject):
         return tuple(self._history)
 
     def set_query(self, text: str) -> None:
+        if self._closed:
+            return
         query = str(text or "").strip()
         if query == self._query:
             return
         self._query = query
         self.query_changed.emit(query)
+        if self.is_formal:
+            self._formal_generation = self._schedule_formal_search(query)
 
     def search(self) -> bool:
+        if self._closed:
+            return False
+        if self.is_formal:
+            if not self._query:
+                return False
+            self._formal_generation = self._schedule_formal_search(self._query)
+            return True
         if not self._query:
             return False
         self._generation += 1
@@ -121,6 +156,10 @@ class OnlineAdapter(QObject):
         return True
 
     def cancel_search(self) -> None:
+        if self.is_formal:
+            self.discovery.search_service.schedule_search("")
+            self._set_state("idle", "搜索已取消。")
+            return
         if self._state.phase != "searching":
             return
         self._generation += 1
@@ -143,6 +182,15 @@ class OnlineAdapter(QObject):
         self._advance_search()
 
     def set_enabled_sources(self, source_ids) -> None:
+        if self.is_formal:
+            selected = [str(source_id or "").strip() for source_id in source_ids]
+            self._formal_selected_source_ids = [value for value in selected if value]
+            self.discovery.search_service.set_selected_source_ids(
+                self._formal_selected_source_ids,
+                restart=True,
+            )
+            self._sync_formal_sources()
+            return
         if self._state.phase == "searching":
             return
         selected = set(source_ids)
@@ -161,6 +209,14 @@ class OnlineAdapter(QObject):
         self._sync_result_availability()
 
     def set_source_enabled(self, source_id: str, enabled: bool) -> None:
+        if self.is_formal:
+            selected = set(self._formal_selected_source_ids)
+            if enabled:
+                selected.add(str(source_id or "").strip())
+            else:
+                selected.discard(str(source_id or "").strip())
+            self.set_enabled_sources(selected)
+            return
         if self._state.phase == "searching":
             return
         self._set_sources(
@@ -174,6 +230,12 @@ class OnlineAdapter(QObject):
         self._sync_result_availability()
 
     def clear_results(self) -> None:
+        if self.is_formal:
+            self.discovery.search_service.schedule_search("")
+            self._results = ()
+            self.search_results_changed.emit(self._results)
+            self._set_state("idle", "")
+            return
         self._results = ()
         self.search_results_changed.emit(self._results)
         self._set_state("idle", "")
@@ -193,10 +255,22 @@ class OnlineAdapter(QObject):
         self.history_changed.emit(self.history())
 
     def request_play(self, track_id: str) -> bool:
+        if self.is_formal:
+            track = self._track_for_id(track_id)
+            if track is None:
+                return False
+            message = "在线歌曲暂不可直接播放，请先使用本地文件。"
+            self.playback_unavailable.emit(track.id, message)
+            self.notification_changed.emit(message)
+            return False
         if self.collection.read_only:
             return False
         track = self._track_for_id(track_id)
         if track is None or track.availability != "available":
+            if track is not None:
+                message = "在线歌曲暂不可直接播放，请先使用本地文件。"
+                self.playback_unavailable.emit(track.id, message)
+                self.notification_changed.emit(message)
             return False
         unified = self.collection.upsert_track(track.as_track())
         self.set_playing_track(track.id)
@@ -204,6 +278,20 @@ class OnlineAdapter(QObject):
         return True
 
     def toggle_favorite(self, track_id: str) -> None:
+        if self.is_formal:
+            track = self._track_for_id(track_id)
+            if track is None:
+                return
+            desired = not track.is_favorite
+            if not self.discovery.bridge.set_favorite(self._payload_for_track(track), desired):
+                return
+            self._replace_result(replace(track, is_favorite=desired))
+            self.favorite_changed.emit(track.id, desired)
+            self.remote_collection_changed.emit()
+            self.notification_changed.emit(
+                "已收藏到‘我喜欢’。" if desired else "已取消收藏该在线歌曲。"
+            )
+            return
         if self.collection.read_only:
             return
         track = self._track_for_id(track_id)
@@ -214,6 +302,9 @@ class OnlineAdapter(QObject):
         self.collection.set_favorite(unified.id, desired)
 
     def request_download(self, track_id: str) -> bool:
+        if self.is_formal:
+            self.notification_changed.emit("在线下载不属于 Q5A 范围。")
+            return False
         if self.collection.read_only:
             return False
         track = self._track_for_id(track_id)
@@ -225,6 +316,18 @@ class OnlineAdapter(QObject):
         return True
 
     def request_add_to_playlist(self, track_id: str, playlist_id: str) -> bool:
+        if self.is_formal:
+            track = self._track_for_id(track_id)
+            if track is None:
+                return False
+            if not self.discovery.bridge.add_to_playlist(
+                self._payload_for_track(track), playlist_id
+            ):
+                return False
+            self.add_to_playlist_requested.emit(track.id, playlist_id)
+            self.remote_collection_changed.emit()
+            self.notification_changed.emit("在线歌曲已加入歌单。")
+            return True
         if self.collection.read_only:
             return False
         track = self._track_for_id(track_id)
@@ -237,6 +340,8 @@ class OnlineAdapter(QObject):
         return True
 
     def load_mock_scenario(self, name: str) -> None:
+        if self.is_formal:
+            return
         allowed = {
             "success",
             "empty",
@@ -257,13 +362,279 @@ class OnlineAdapter(QObject):
         self._playing_track_id = normalized
         self.playing_track_changed.emit(normalized)
 
+    def request_metadata(self, track_id: str) -> bool:
+        track = self._track_for_id(track_id)
+        if track is None:
+            return False
+        if not self.is_formal:
+            self.track_info_changed.emit(track)
+            self.notification_changed.emit("在线歌曲信息已更新。")
+            return True
+        request_id = self.discovery.client.get_metadata(
+            track.source_id,
+            self._payload_for_track(track),
+        )
+        self._metadata_requests[request_id] = (
+            self._formal_generation,
+            track.id,
+            track.source_id,
+        )
+        self.notification_changed.emit("正在读取在线歌曲信息…")
+        return True
+
+    def shutdown(self) -> None:
+        self._closed = True
+        if self.discovery is not None:
+            self._metadata_requests.clear()
+
+    def _connect_formal_services(self) -> None:
+        search = self.discovery.search_service
+        search.resultsChanged.connect(self._on_formal_results)
+        search.sourceCatalogChanged.connect(self._on_formal_catalog)
+        search.statusChanged.connect(self._on_formal_status)
+        client = self.discovery.client
+        client.metadataFinished.connect(self._on_metadata_finished)
+        client.requestFailed.connect(self._on_formal_request_failed)
+        artwork = self.discovery.artwork_service
+        artwork.imageReady.connect(self._on_artwork_ready)
+        artwork.failed.connect(self._on_artwork_failed)
+        search.ensure_source_catalog()
+
+    def _schedule_formal_search(self, query: str) -> int:
+        service = self.discovery.search_service
+        expected = int(getattr(service, "generation", self._formal_generation) or 0) + 1
+        self._formal_generation = expected
+        generation = service.schedule_search(query)
+        self._formal_generation = int(generation or expected)
+        return self._formal_generation
+
+    def _on_formal_catalog(self, catalog, selected) -> None:
+        if self._closed:
+            return
+        self._formal_catalog = [dict(item) for item in catalog if isinstance(item, dict)]
+        self._formal_selected_source_ids = [str(item or "") for item in selected if item]
+        self._sync_formal_sources()
+
+    def _on_formal_status(self, message: str) -> None:
+        if self._closed:
+            return
+        text = str(message or "")
+        if self._state.phase == "idle" and not self._query:
+            self._set_state("idle", text)
+            return
+        if self._state.phase != "results":
+            self._set_state("searching", text, self._state.progress)
+
+    def _on_formal_results(self, generation: int, keyword: str, results: list, summary: dict) -> None:
+        if self._closed:
+            return
+        if generation != self._formal_generation or str(keyword or "").strip() != self._query:
+            return
+        mapped = tuple(
+            self._map_formal_track(dict(item), index)
+            for index, item in enumerate(results if isinstance(results, list) else [])
+            if isinstance(item, dict)
+        )
+        self._results = mapped
+        self.search_results_changed.emit(self._results)
+        self._sync_summary_sources(summary)
+        final = bool(summary.get("final"))
+        pending = int(summary.get("pendingCount") or 0)
+        if not final or pending:
+            self._set_state("searching", self._state.message, 50)
+        elif mapped:
+            self._add_history(self._query)
+            errors = summary.get("errors") if isinstance(summary, dict) else {}
+            warning = "部分来源未返回结果。" if errors else ""
+            self._set_state("results", warning, 100)
+            self._request_artwork(mapped)
+            self.search_completed.emit(self._results)
+        else:
+            errors = summary.get("errors") if isinstance(summary, dict) else {}
+            phase = "failed" if errors else "empty"
+            self._set_state(phase, "在线搜索没有返回可展示的结果。", 100)
+            self.search_completed.emit(self._results)
+
+    def _on_formal_request_failed(self, request_id: int, action: str, message: str) -> None:
+        pending = self._metadata_requests.pop(request_id, None)
+        if pending is not None and action == "getMetadata":
+            generation, _track_id, _source_id = pending
+            if generation == self._formal_generation:
+                self.notification_changed.emit(str(message or "在线歌曲信息读取失败。"))
+
+    def _on_metadata_finished(self, request_id: int, source_id: str, metadata: dict) -> None:
+        if self._closed:
+            return
+        pending = self._metadata_requests.pop(request_id, None)
+        if pending is None:
+            return
+        generation, track_id, expected_source = pending
+        if generation != self._formal_generation or str(source_id or "") != expected_source:
+            return
+        track = self._track_for_id(track_id)
+        if track is None:
+            return
+        merged = dict(track.raw)
+        if isinstance(metadata, dict):
+            merged.update(metadata)
+        updated = self._map_formal_track(merged, track.result_rank, existing=track)
+        self._replace_result(updated)
+        self.track_info_changed.emit(updated)
+        self.notification_changed.emit("在线歌曲信息已更新。")
+
+    def _request_artwork(self, tracks: tuple[OnlineTrack, ...]) -> None:
+        requests = [
+            (track.id, track.artwork_url)
+            for track in tracks
+            if track.artwork_url
+        ][:32]
+        if not requests:
+            return
+        self._artwork_generation = self.discovery.artwork_service.request_many(requests)
+
+    def _on_artwork_ready(self, generation: int, track_key: str, data: bytes) -> None:
+        if self._closed:
+            return
+        if generation != self._artwork_generation:
+            return
+        track = self._track_for_id(track_key)
+        if track is None:
+            return
+        self._replace_result(replace(track, artwork_data=bytes(data), artwork_key=track.id))
+
+    def _on_artwork_failed(self, generation: int, track_key: str, _message: str) -> None:
+        if self._closed:
+            return
+        if generation != self._artwork_generation:
+            return
+        if self._track_for_id(track_key) is not None:
+            self.notification_changed.emit("部分在线封面暂不可用。")
+
+    def _sync_summary_sources(self, summary: dict) -> None:
+        states = summary.get("sources") if isinstance(summary, dict) else []
+        by_id = {
+            str(item.get("sourceId") or ""): dict(item)
+            for item in states
+            if isinstance(item, dict)
+        }
+        self._sources = [
+            replace(
+                source,
+                status=str(by_id.get(source.id, {}).get("status") or source.status),
+                result_count=int(by_id.get(source.id, {}).get("resultCount") or source.result_count),
+                last_error=str(by_id.get(source.id, {}).get("message") or source.last_error),
+            )
+            for source in self._sources
+        ]
+        self.source_state_changed.emit(self.sources())
+
+    def _sync_formal_sources(self) -> None:
+        selected = set(self._formal_selected_source_ids)
+        values: list[OnlineSource] = []
+        for item in self._formal_catalog:
+            source_id = str(item.get("id") or "").strip()
+            if not source_id:
+                continue
+            capabilities = item.get("capabilities") if isinstance(item.get("capabilities"), dict) else {}
+            values.append(
+                OnlineSource(
+                    source_id,
+                    str(item.get("name") or source_id),
+                    source_id in selected,
+                    "ready" if item.get("selectable") else "disabled",
+                    0,
+                    0,
+                    str(item.get("reason") or ""),
+                    bool(capabilities.get("playback")),
+                    bool(capabilities.get("download")),
+                    bool(capabilities.get("lyrics")),
+                    "registered",
+                )
+            )
+        self._sources = values
+        self.source_state_changed.emit(self.sources())
+
+    def _map_formal_track(
+        self,
+        raw: dict,
+        rank: int,
+        *,
+        existing: OnlineTrack | None = None,
+    ) -> OnlineTrack:
+        source_id = str(raw.get("sourceId") or raw.get("source_id") or (existing.source_id if existing else "")).strip()
+        remote_id = str(
+            raw.get("remote_id")
+            or raw.get("remoteId")
+            or raw.get("id")
+            or raw.get("songmid")
+            or (existing.remote_id if existing else "")
+        ).strip()
+        identity_payload = dict(raw)
+        identity_payload["source_id"] = source_id
+        identity_payload["remote_id"] = remote_id
+        stable_id = RemoteTrackStore.stable_id_for_track(identity_payload)
+        track_id = existing.id if existing is not None else stable_id
+        source = self._source_for_id(source_id)
+        current = self._track_for_id(track_id) or self._track_for_id(stable_id)
+        return OnlineTrack(
+            id=track_id,
+            source_id=source_id,
+            source_name=str(raw.get("sourceName") or (source.name if source else source_id)),
+            title=str(raw.get("title") or (existing.title if existing else "未知歌曲")),
+            artist=str(raw.get("artist") or (existing.artist if existing else "未知艺术家")),
+            album=str(raw.get("album") or (existing.album if existing else "未知专辑")),
+            duration_ms=self._duration_ms(raw.get("duration") or raw.get("durationMs"), existing),
+            artwork_key=str(raw.get("artwork") or raw.get("artworkKey") or (existing.artwork_key if existing else stable_id)),
+            quality=str(raw.get("quality") or raw.get("bitrate") or (existing.quality if existing else "标准")),
+            stable_identity=stable_id,
+            is_favorite=current.is_favorite if current is not None else (existing.is_favorite if existing else False),
+            is_downloaded=bool(raw.get("downloaded") or (existing.is_downloaded if existing else False)),
+            is_cached=bool(raw.get("cached") or (existing.is_cached if existing else False)),
+            availability="unavailable",
+            explicit=bool(raw.get("explicit") or raw.get("explicitContent")),
+            result_rank=rank,
+            artwork_url=str(raw.get("artworkUrl") or raw.get("artwork_url") or raw.get("cover") or raw.get("coverUrl") or ""),
+            remote_id=remote_id,
+            raw=dict(raw),
+            artwork_data=existing.artwork_data if existing is not None else b"",
+        )
+
+    @staticmethod
+    def _duration_ms(value, existing: OnlineTrack | None = None) -> int | None:
+        if value in (None, ""):
+            return existing.duration_ms if existing is not None else None
+        try:
+            duration = max(0, int(float(value)))
+        except (TypeError, ValueError):
+            return existing.duration_ms if existing is not None else None
+        return duration * 1000 if duration < 10000 else duration
+
+    def _payload_for_track(self, track: OnlineTrack) -> dict:
+        payload = dict(track.raw)
+        payload.update(
+            {
+                "id": track.remote_id,
+                "remote_id": track.remote_id,
+                "source_id": track.source_id,
+                "sourceId": track.source_id,
+                "source_url": payload.get("source_url") or payload.get("sourceUrl") or "",
+                "title": track.title,
+                "artist": track.artist,
+                "album": track.album,
+                "duration": track.duration_ms or 0,
+                "artwork": track.artwork_url or payload.get("artwork") or "",
+                "raw": dict(track.raw),
+            }
+        )
+        return payload
+
     def _advance_search(self) -> None:
         generation = self._generation
         if self._state.phase != "searching":
             return
         self._search_step += 1
         if self._scenario == "slow" and self._search_step < 3:
-            self._set_state("searching", "正在等待较慢的 mock 来源。", self._search_step * 30)
+            self._set_state("searching", "正在等待较慢的在线来源。", self._search_step * 30)
             return
         self._complete_search(generation)
 
@@ -278,7 +649,7 @@ class OnlineAdapter(QObject):
                         source,
                         status="failed" if source.enabled else "disabled",
                         result_count=0,
-                        last_error="Mock 来源暂不可用" if source.enabled else "",
+                        last_error="在线来源暂不可用" if source.enabled else "",
                     )
                     for source in self._sources
                 )
@@ -294,7 +665,7 @@ class OnlineAdapter(QObject):
                 continue
             if self._scenario == "partial_failure" and index == 0:
                 sources[index] = replace(
-                    source, status="failed", result_count=0, last_error="Mock 响应超时"
+                    source, status="failed", result_count=0, last_error="在线来源响应超时"
                 )
                 continue
             generated = () if self._scenario == "empty" else self._generate_source_results(source, index)
@@ -316,7 +687,7 @@ class OnlineAdapter(QObject):
             self._set_state("results", message, progress=100)
             self.search_completed.emit(self._results)
             return
-        self._set_state("empty", "没有找到匹配的 mock 在线歌曲。", progress=100)
+        self._set_state("empty", "没有找到匹配的在线歌曲。", progress=100)
         self.search_completed.emit(self._results)
 
     def _generate_source_results(self, source: OnlineSource, source_index: int) -> tuple[OnlineTrack, ...]:
@@ -331,7 +702,7 @@ class OnlineAdapter(QObject):
             "长标题用于在线搜索结果省略验证以及工具提示覆盖",
         )
         artists = ("林澈", "North Window", "陈默与 The Quiet Hours", "A Long Online Artist Name")
-        albums = ("在线试听集", "Night Signals", "Mock Source Archive", "A Long Online Album Title")
+        albums = ("在线试听集", "Night Signals", "Source Archive", "A Long Online Album Title")
         values: list[OnlineTrack] = []
         for rank in range(16):
             raw_id = f"{source.id}-{rank:03d}"
@@ -339,7 +710,7 @@ class OnlineAdapter(QObject):
                 raw_id = f"{source.id}-000"
             title = titles[rank % len(titles)]
             if self._scenario == "long_text" and rank == 1:
-                title = f"{title} - 这一段很长的 mock 搜索标题用于验证所有宽度下的省略行为"
+                title = f"{title} - 这一段很长的在线搜索标题用于验证所有宽度下的省略行为"
             explicit = self._scenario == "explicit_content" and rank % 3 == 0
             duration = None if rank == 7 else 3_721_000 if rank == 8 else 170_000 + rank * 13_700
             track_id = f"online:{source.id}:{raw_id}"
@@ -423,7 +794,7 @@ class OnlineAdapter(QObject):
             query=self._query,
             progress=max(0, min(100, progress)),
             message=message,
-            generation=self._generation,
+            generation=self._formal_generation if self.is_formal else self._generation,
         )
         self.state_changed.emit(self._state)
         self.search_progress_changed.emit(self._state.progress)
@@ -431,9 +802,9 @@ class OnlineAdapter(QObject):
     @staticmethod
     def _default_sources() -> list[OnlineSource]:
         return [
-            OnlineSource("catalog", "Mock Catalog", True, "ready", 82, 0, "", True, True, True, "catalog"),
-            OnlineSource("archive", "Mock Archive", True, "ready", 126, 0, "", True, False, True, "archive"),
-            OnlineSource("radio", "Mock Radio", True, "ready", 178, 0, "", True, True, False, "radio"),
+            OnlineSource("catalog", "North Catalog", True, "ready", 82, 0, "", True, True, True, "catalog"),
+            OnlineSource("archive", "Archive Index", True, "ready", 126, 0, "", True, False, True, "archive"),
+            OnlineSource("radio", "Radio Public", True, "ready", 178, 0, "", True, True, False, "radio"),
             OnlineSource("indie", "Indie Shelf", True, "ready", 94, 0, "", True, True, True, "catalog"),
             OnlineSource("community", "Community Index", True, "ready", 214, 0, "", False, False, False, "index"),
             OnlineSource("public", "Public Collection", True, "ready", 156, 0, "", True, True, True, "archive"),

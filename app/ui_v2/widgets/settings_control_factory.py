@@ -30,16 +30,30 @@ class ThemedComboBox(QComboBox):
     arrow_hit_width = 34
     native_arrow_suppressed = True
 
-    def __init__(self, theme: Theme, parent: QWidget | None = None) -> None:
+    def __init__(
+        self,
+        theme: Theme,
+        parent: QWidget | None = None,
+        *,
+        variant: str = "settings",
+    ) -> None:
         super().__init__(parent)
         self._theme = theme
+        self._variant = "toolbar" if variant == "toolbar" else "settings"
         self._popup_open = False
         self.setObjectName("themedComboBox")
+        self.setProperty("quietOrbitComboVariant", self._variant)
+        self.setProperty("popupOpen", False)
+        self.setProperty("focusVisible", False)
         self.setMinimumHeight(max(32, theme.metrics.control_height - 4))
 
     @property
     def popup_open(self) -> bool:
         return self._popup_open
+
+    @property
+    def variant(self) -> str:
+        return self._variant
 
     def set_theme(self, theme: Theme) -> None:
         self._theme = theme
@@ -48,14 +62,39 @@ class ThemedComboBox(QComboBox):
         self.update()
 
     def showPopup(self) -> None:  # noqa: N802
-        self._popup_open = True
-        self.update()
+        if not self.isEnabled():
+            return
+        self._set_popup_open(True)
         super().showPopup()
 
     def hidePopup(self) -> None:  # noqa: N802
         super().hidePopup()
-        self._popup_open = False
-        self.update()
+        self._set_popup_open(False)
+
+    def keyPressEvent(self, event) -> None:  # noqa: N802
+        if (
+            self._variant == "toolbar"
+            and not self._popup_open
+            and event.key() in {Qt.Key.Key_Enter, Qt.Key.Key_Return, Qt.Key.Key_Space}
+        ):
+            self.showPopup()
+            event.accept()
+            return
+        if self._variant == "toolbar" and self._popup_open and event.key() == Qt.Key.Key_Escape:
+            self.hidePopup()
+            event.accept()
+            return
+        super().keyPressEvent(event)
+
+    def focusInEvent(self, event) -> None:  # noqa: N802
+        super().focusInEvent(event)
+        if self._variant == "toolbar":
+            self._set_visual_property("focusVisible", True)
+
+    def focusOutEvent(self, event) -> None:  # noqa: N802
+        super().focusOutEvent(event)
+        if self._variant == "toolbar":
+            self._set_visual_property("focusVisible", False)
 
     def paintEvent(self, event) -> None:  # noqa: N802
         option = QStyleOptionComboBox()
@@ -64,19 +103,69 @@ class ThemedComboBox(QComboBox):
         painter = QStylePainter(self)
         painter.drawComplexControl(QStyle.ComplexControl.CC_ComboBox, option)
         painter.drawControl(QStyle.ControlElement.CE_ComboBoxLabel, option)
+        if (
+            self._variant == "toolbar"
+            and self.isEnabled()
+            and (self._popup_open or self.hasFocus() or bool(self.property("focusVisible")))
+        ):
+            painter.save()
+            painter.setBrush(Qt.BrushStyle.NoBrush)
+            painter.setPen(QPen(QColor(self._theme.colors.focus_ring), 1))
+            painter.drawRoundedRect(
+                QRectF(self.rect()).adjusted(0.5, 0.5, -0.5, -0.5),
+                self._theme.metrics.radius_md,
+                self._theme.metrics.radius_md,
+            )
+            painter.restore()
         arrow_rect = self.rect().adjusted(
             self.width() - self.arrow_hit_width,
             0,
             -4,
             0,
         )
-        state = "disabled" if not self.isEnabled() else "hover" if self.underMouse() else "normal"
+        state = (
+            "disabled"
+            if not self.isEnabled()
+            else "hover"
+            if self._popup_open or self.hasFocus() or self.underMouse()
+            else "normal"
+        )
         icon("chevron_up" if self._popup_open else "chevron_down", self._theme, state).paint(
             painter,
             arrow_rect,
             Qt.AlignmentFlag.AlignCenter,
         )
         painter.end()
+
+    def _set_popup_open(self, open_: bool) -> None:
+        self._popup_open = bool(open_)
+        self._set_visual_property("popupOpen", self._popup_open)
+
+    def _set_visual_property(self, name: str, value: bool) -> None:
+        self.setProperty(name, bool(value))
+        self.style().unpolish(self)
+        self.style().polish(self)
+        self.update()
+
+
+class ToolbarComboBox(ThemedComboBox):
+    """The shared themed ComboBox tuned for compact action toolbars."""
+
+    arrow_hit_width = 30
+
+    def __init__(self, theme: Theme, parent: QWidget | None = None) -> None:
+        super().__init__(theme, parent, variant="toolbar")
+        self.setObjectName("quietOrbitToolbarComboBox")
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+        self.set_theme(theme)
+
+    def set_theme(self, theme: Theme) -> None:
+        self._theme = theme
+        height = max(34, min(38, theme.metrics.control_height))
+        self.setFixedHeight(height)
+        SettingsControlFactory.style_combo(self, theme)
+        self.update()
 
 
 class ThemedDisclosureButton(QToolButton):
@@ -241,6 +330,7 @@ class SliderSpinControl(QWidget):
             f"QSlider {{ background: transparent; }} "
             f"QSlider::groove:horizontal {{ height: 4px; border-radius: 2px; background: {theme.colors.border}; }} "
             f"QSlider::sub-page:horizontal {{ background: {theme.colors.accent}; border-radius: 2px; }} "
+            f"QSlider::add-page:horizontal {{ background: transparent; border: 0; }} "
             f"QSlider::handle:horizontal {{ width: 14px; margin: -5px 0; border-radius: 7px; background: {theme.colors.accent}; }} "
             f"QSlider::handle:horizontal:hover {{ background: {theme.colors.accent_hover}; }} "
             f"QSlider:disabled::groove:horizontal {{ background: {theme.colors.surface_pressed}; }} "
@@ -388,12 +478,30 @@ class SettingsControlFactory:
         c = theme.colors
         if isinstance(control, ThemedComboBox):
             control._theme = theme
-            control.setMinimumHeight(max(32, theme.metrics.control_height - 4))
-        control.setStyleSheet(
-            f"QComboBox {{ min-height: {max(32, theme.metrics.control_height - 4)}px; min-width: 150px; padding: 0 38px 0 8px; border: 1px solid {c.border}; border-radius: {theme.metrics.radius_sm}px; background: {c.surface_secondary}; color: {c.primary_text}; }} "
-            f"QComboBox:hover {{ border-color: {c.border_strong}; }} QComboBox:focus {{ border: 1px solid {c.accent}; }} "
-            f"QComboBox::drop-down {{ border: 0; width: {ThemedComboBox.arrow_hit_width}px; }} QComboBox::down-arrow {{ image: none; width: 0; height: 0; }}"
-        )
+            if control.variant != "toolbar":
+                control.setMinimumHeight(max(32, theme.metrics.control_height - 4))
+        if isinstance(control, ToolbarComboBox):
+            height = max(34, min(38, theme.metrics.control_height))
+            content_height = height - 2
+            radius = theme.metrics.radius_md
+            selector = 'QComboBox[quietOrbitComboVariant="toolbar"]'
+            control.setStyleSheet(
+                f"{selector} {{ min-height: {content_height}px; max-height: {content_height}px; padding: 0 34px 0 {theme.metrics.spacing_md}px; "
+                f"border: 1px solid transparent; border-radius: {radius}px; background: {c.surface_secondary}; "
+                f"color: {c.primary_text}; font-size: {theme.fonts.control}px; }} "
+                f"{selector}:hover {{ border-color: {c.divider}; background: {c.hover_background}; }} "
+                f"{selector}:pressed {{ border-color: transparent; background: {c.surface_pressed}; }} "
+                f"{selector}:focus, {selector}[focusVisible=\"true\"], {selector}:on, {selector}[popupOpen=\"true\"] {{ border-color: {c.focus_ring}; background: {c.surface_secondary}; }} "
+                f"{selector}:disabled {{ border-color: transparent; background: {c.surface_secondary}; color: {c.disabled_text}; }} "
+                f"{selector}::drop-down {{ border: 0; width: {control.arrow_hit_width}px; background: transparent; }} "
+                f"{selector}::down-arrow {{ image: none; width: 0; height: 0; }}"
+            )
+        else:
+            control.setStyleSheet(
+                f"QComboBox {{ min-height: {max(32, theme.metrics.control_height - 4)}px; min-width: 150px; padding: 0 38px 0 8px; border: 1px solid {c.border}; border-radius: {theme.metrics.radius_sm}px; background: {c.surface_secondary}; color: {c.primary_text}; }} "
+                f"QComboBox:hover {{ border-color: {c.border_strong}; }} QComboBox:focus {{ border: 1px solid {c.accent}; }} "
+                f"QComboBox::drop-down {{ border: 0; width: {ThemedComboBox.arrow_hit_width}px; }} QComboBox::down-arrow {{ image: none; width: 0; height: 0; }}"
+            )
         view = control.view()
         palette = view.palette()
         palette.setColor(QPalette.ColorRole.Base, _opaque(c.surface_elevated))

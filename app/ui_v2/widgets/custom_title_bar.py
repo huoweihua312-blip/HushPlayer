@@ -50,7 +50,11 @@ class CustomTitleBar(QFrame):
 
         self.settings_button = self._button("settings", "设置", self)
         self.settings_button.setAccessibleName("设置")
-        self.theme_button = self._button("settings", "切换主题", self)
+        self.theme_button = self._button(
+            "moon" if theme.mode == "dark" else "sun",
+            "切换主题",
+            self,
+        )
         self.theme_button.setAccessibleName("主题切换")
         self.view_options_button = self._button("more", "视图选项（暂不可用）", self)
         self.view_options_button.setAccessibleName("视图选项")
@@ -144,7 +148,8 @@ class CustomTitleBar(QFrame):
             button.setIconSize(QSize(self._icon_size(name), self._icon_size(name)))
         self.settings_button.setIcon(fluent_settings_interactive_icon("general", theme, 18))
         self.settings_button.setIconSize(QSize(18, 18))
-        self.theme_button.setIcon(fluent_settings_interactive_icon("appearance", theme, 18))
+        theme_icon = "moon" if theme.mode == "dark" else "sun"
+        self.theme_button.setIcon(icon(theme_icon, theme))
         self.theme_button.setIconSize(QSize(18, 18))
         self.view_options_button.setIcon(icon("more", theme))
         self.view_options_button.setIconSize(QSize(18, 18))
@@ -202,7 +207,7 @@ class CustomTitleBar(QFrame):
 
     @staticmethod
     def _icon_size(icon_name: str) -> int:
-        if icon_name in {"settings", "notification", "user", "more"}:
+        if icon_name in {"settings", "sun", "moon", "notification", "user", "more"}:
             return 17
         if icon_name in {"back", "forward", "search"}:
             return 16

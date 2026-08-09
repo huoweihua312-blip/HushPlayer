@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from PySide6.QtCore import QSize, Qt, Signal
+from PySide6.QtGui import QColor, QPainter, QPainterPath, QPen
 from PySide6.QtWidgets import (
     QFrame,
     QGraphicsOpacityEffect,
@@ -21,6 +22,61 @@ from app.ui_v2.widgets.placeholder_cover import cover_pixmap
 from app.ui_v2.widgets.track_display import display_track_text
 
 
+class CoverCardPlayButton(QToolButton):
+    """Paint a complete circular play surface without native button chrome."""
+
+    def __init__(self, theme: Theme, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self._theme = theme
+        self.setAccessibleName("播放")
+        self.setMouseTracking(True)
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
+
+    def set_theme(self, theme: Theme) -> None:
+        self._theme = theme
+        self.update()
+
+    def paintEvent(self, event) -> None:  # noqa: N802
+        del event
+        colors = self._theme.colors
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        circle = self.rect().adjusted(0, 0, -1, -1)
+        if not self.isEnabled():
+            background = QColor(colors.surface_secondary)
+            foreground = QColor(colors.disabled_text)
+        elif self.isDown():
+            background = QColor(colors.accent_pressed)
+            foreground = QColor(colors.app_background)
+        elif self.underMouse():
+            background = QColor(colors.accent_hover)
+            foreground = QColor(colors.app_background)
+        else:
+            background = QColor(colors.accent)
+            foreground = QColor(colors.app_background)
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(background)
+        painter.drawEllipse(circle)
+
+        triangle = QPainterPath()
+        left = circle.left() + circle.width() * 0.39
+        top = circle.top() + circle.height() * 0.29
+        triangle.moveTo(left, top)
+        triangle.lineTo(circle.left() + circle.width() * 0.70, circle.center().y())
+        triangle.lineTo(left, circle.top() + circle.height() * 0.71)
+        triangle.closeSubpath()
+        painter.setBrush(foreground)
+        painter.drawPath(triangle)
+
+        if self.hasFocus():
+            focus_pen = QPen(QColor(colors.focus_ring), 1.0)
+            focus_pen.setCosmetic(True)
+            painter.setPen(focus_pen)
+            painter.setBrush(Qt.BrushStyle.NoBrush)
+            painter.drawEllipse(circle.adjusted(1, 1, -1, -1))
+        painter.end()
+
+
 class CoverCard(QFrame):
     """A compact artwork/title/meta card with one shared hover-play treatment."""
 
@@ -29,6 +85,8 @@ class CoverCard(QFrame):
 
     COVER_WIDTH = 164
     COVER_HEIGHT = 164
+    PLAY_BUTTON_SIZE = 36
+    PLAY_BUTTON_INSET = 10
 
     def __init__(self, theme: Theme, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -47,9 +105,9 @@ class CoverCard(QFrame):
         self._artwork_effect = QGraphicsOpacityEffect(self.artwork)
         self._artwork_effect.setOpacity(1.0)
         self.artwork.setGraphicsEffect(self._artwork_effect)
-        self.play_button = QToolButton(self)
+        self.play_button = CoverCardPlayButton(theme, self)
         self.play_button.setObjectName("coverCardPlay")
-        self.play_button.setFixedSize(34, 34)
+        self.play_button.setFixedSize(self.PLAY_BUTTON_SIZE, self.PLAY_BUTTON_SIZE)
         self.play_button.setToolTip("播放")
         self.play_button.clicked.connect(self._emit_play_requested)
 
@@ -91,12 +149,11 @@ class CoverCard(QFrame):
             f"QLabel#coverCardArtwork {{ border: 0; border-radius: {theme.metrics.radius_lg}px; background: {c.surface_secondary}; }}"
             f"QLabel#coverCardTitle {{ color: {c.text_primary}; font-size: {theme.fonts.card_title}px; font-weight: 600; line-height: 18px; }}"
             f"QLabel#coverCardMeta {{ color: {c.text_secondary}; font-size: {theme.fonts.card_meta}px; line-height: 17px; }}"
-            f"QToolButton#coverCardPlay {{ border: 0; border-radius: 17px; background: {c.surface_elevated}; color: {c.app_background}; margin: 0 8px 8px 0; }}"
-            f"QToolButton#coverCardPlay:hover {{ background: {c.text_primary}; }}"
-            f"QToolButton#coverCardPlay:disabled {{ background: {c.surface_secondary}; color: {c.text_disabled}; }}"
+            f"QToolButton#coverCardPlay {{ border: 0; background: transparent; padding: 0; margin: 0 {self.PLAY_BUTTON_INSET}px {self.PLAY_BUTTON_INSET}px 0; }}"
         )
         self.play_button.setIcon(icon("play", theme, "disabled" if not self._interactive else "normal"))
-        self.play_button.setIconSize(QSize(15, 15))
+        self.play_button.setIconSize(QSize(16, 16))
+        self.play_button.set_theme(theme)
         self._refresh_artwork()
 
     def set_track(self, track: Track) -> None:

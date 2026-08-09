@@ -291,6 +291,9 @@ class UnifiedSearchService(QObject):
                     "name": source_name,
                     "selectable": selectable,
                     "reason": unavailable_reason,
+                    "sourceUrl": str(source.get("sourceUrl") or ""),
+                    "contentPolicy": str(source.get("contentPolicy") or ""),
+                    "capabilities": dict(capabilities),
                 }
             )
             if selectable:
