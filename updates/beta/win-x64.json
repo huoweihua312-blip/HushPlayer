@@ -1,27 +1,16 @@
 {
     "schema_version": 1,
     "channel": "beta",
-    "version": "0.6.0-beta.1",
-    "numeric_version": "0.6.0.1",
+    "version": "0.6.0-beta.2",
+    "numeric_version": "0.6.0.2",
     "architecture": "win-x64",
     "mandatory": false,
-    "setup_url": "https://gitcode.com/gcw_iPVB8B5g/HushPlayer-updates/releases/download/v0.6.0-beta.1/HushPlayer-0.6.0-beta.1-win-x64-setup.exe",
-    "setup_size": 68323904,
-    "sha256": "59ff24ee643c63adceae9134448e2a86d670aff155051e60a1a42b90b9676443",
+    "setup_url": "https://gitcode.com/gcw_iPVB8B5g/HushPlayer-updates/releases/download/v0.6.0-beta.2/HushPlayer-0.6.0-beta.2-win-x64-setup.exe",
+    "setup_size": 68335256,
+    "sha256": "08d0eb7d884d1bb5a504fd7fba236baff906f5b6d1a6db224e691647899862ff",
     "release_notes": [
-        "将 Quiet Orbit 设为默认启动界面，保留显式 UI V2 兼容参数和开发用 mock 入口。",
-        "完成圆角窗口外壳，Windows 圆角优先使用系统平滑渲染，并保留安全的兼容回退路径。",
-        "优化自绘标题栏控件间距，关闭按钮与右边界保持明确留白。",
-        "接入真实本地音乐库、播放队列、播放状态、收藏和歌单数据，并保持旧数据结构兼容。",
-        "完善浏览页、最近播放、收藏和自定义歌单的内容展示与播放操作层级。",
-        "支持在线搜索、在线推荐、歌曲元数据匹配、封面与歌词匹配，并改善在线失败后的重试反馈。",
-        "支持在线来源的安全导入、启用、停用和移除，导入时明确提示内容授权范围。",
-        "支持本地歌曲与在线歌曲的统一播放状态、混合队列和播放控制交互。",
-        "完善本地歌词、在线歌词和沉浸歌词的切歌同步、时间轴显示与播放状态反馈。",
-        "增加歌单创建、重命名、删除和歌曲管理对话框，统一 Quiet Orbit 的圆角控件样式。",
-        "优化歌曲整行选中、当前播放标记、响应式列宽和窄窗口下的布局稳定性。",
-        "完善深色、浅色和跟随系统外观设置，以及设置页的版本和运行环境信息显示。",
-        "修复在线播放解析失败状态、歌词切歌时序和部分窗口圆角边缘显示不平滑的问题。"
+        "修复 Quiet Orbit 设置页“检查更新”按钮被错误禁用的问题。",
+        "将设置页检查更新操作接入真实更新服务，并显示检查结果与更新提示。"
     ],
     "release_history": [
         {
@@ -124,6 +113,15 @@
                 "优化歌曲整行选中、当前播放标记、响应式列宽和窄窗口下的布局稳定性。",
                 "完善深色、浅色和跟随系统外观设置，以及设置页的版本和运行环境信息显示。",
                 "修复在线播放解析失败状态、歌词切歌时序和部分窗口圆角边缘显示不平滑的问题。"
+            ]
+        },
+        {
+            "version": "0.6.0-beta.2",
+            "numeric_version": "0.6.0.2",
+            "release_date": "2026-08-10",
+            "notes": [
+                "修复 Quiet Orbit 设置页“检查更新”按钮被错误禁用的问题。",
+                "将设置页检查更新操作接入真实更新服务，并显示检查结果与更新提示。"
             ]
         }
     ]

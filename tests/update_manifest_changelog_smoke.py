@@ -160,7 +160,7 @@ def main() -> None:
     helper.validate_prebuild_manifest(current_release_document, current_releases)
     helper.validate_manifest_matches_application(current_release_document)
 
-    if current_sequence >= 2:
+    if current_sequence > 2:
         previous_version, previous_numeric_version = manifest_version(
             current_sequence - 1
         )
