@@ -57,6 +57,7 @@ def production_node_package_files(source, destination):
 datas = []
 datas += directory_if_present("assets", "assets")
 datas += directory_if_present("app/resources", "app/resources")
+datas += directory_if_present("app/ui_v2/assets", "app/ui_v2/assets")
 
 for runtime_name in (
     "runner.js",
