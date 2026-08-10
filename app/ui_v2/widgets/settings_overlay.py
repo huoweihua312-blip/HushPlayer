@@ -613,6 +613,13 @@ class SettingsOverlay(QWidget):
         else:
             self.footer.set_status(self._feedback)
 
+    def set_update_status(self, text: str, *, state: str = "success") -> None:
+        """Show asynchronous AppUpdateService feedback in the updates section."""
+
+        if hasattr(self, "update_status"):
+            self.update_status.setText(str(text or ""))
+        self._set_feedback(str(text or ""), state=state)
+
     def _refresh_state(self) -> None:
         if self._session is None:
             self.footer.set_state(dirty=False, valid=False)

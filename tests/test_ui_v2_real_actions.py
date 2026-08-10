@@ -7,8 +7,9 @@ import tempfile
 import unittest
 from datetime import datetime
 from pathlib import Path
+from unittest.mock import patch
 
-from PySide6.QtWidgets import QApplication, QDialog
+from PySide6.QtWidgets import QApplication, QDialog, QPushButton
 
 from app.services.library_repository import LibraryRepository
 from app.services.online_discovery_bridge import OnlineDiscoveryBridge
@@ -81,6 +82,33 @@ class QuietOrbitActionSurfaceTests(unittest.TestCase):
     def test_fixed_liked_route_has_no_playlist_mutation(self) -> None:
         self.assertFalse(self.window.playlist_adapter.rename_playlist("liked", "新的名字"))
         self.assertFalse(self.window.playlist_adapter.delete_playlist("liked"))
+
+    def test_settings_update_action_is_enabled_and_delegates_to_real_service(self) -> None:
+        self.window.open_settings_overlay()
+        self.app.processEvents()
+
+        buttons = [
+            button
+            for button in self.window.settings_overlay.findChildren(QPushButton)
+            if button.text() == "检查更新"
+        ]
+        self.assertEqual(len(buttons), 1)
+        check_button = buttons[0]
+        self.assertTrue(self.window.settings_bridge.has_action("check_updates"))
+        self.assertTrue(check_button.isEnabled())
+
+        with patch.object(
+            self.window.update_service,
+            "check_for_updates",
+            return_value=True,
+        ) as check_for_updates:
+            check_button.click()
+
+        check_for_updates.assert_called_once_with(manual=True)
+        self.assertEqual(
+            self.window.settings_overlay.update_status.text(),
+            "正在检查更新…",
+        )
 
 
 class PlaylistDialogTests(unittest.TestCase):

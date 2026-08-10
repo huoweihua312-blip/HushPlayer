@@ -30,6 +30,8 @@ from PySide6.QtWidgets import (
 )
 
 from app.core.app_paths import AppPaths
+from app.core.version import APP_VERSION
+from app.services.app_update_service import AppUpdateService, UpdateManifest
 from app.services.library_repository import LibraryRepository
 from app.services.online_discovery_runtime import OnlineDiscoveryRuntime
 from app.services.remote_track_store import RemoteTrackStore
@@ -56,6 +58,7 @@ from app.ui_v2.models.track import artwork_url_from_payload
 from app.ui_v2.shell.content_router import ContentRouter
 from app.ui_v2.shell.navigation_sidebar import NavigationSidebar
 from app.ui_v2.shell.player_bar import PlayerBar
+from app.ui.update_dialog import UpdateDialog
 from app.ui_v2.widgets.custom_title_bar import CustomTitleBar
 from app.ui_v2.widgets.settings_overlay import SettingsOverlay
 from app.ui_v2.theme.styles import build_application_palette, build_stylesheet
@@ -117,9 +120,17 @@ class MainWindow(QMainWindow):
             )
         else:
             resolved_settings_path = AppPaths.resolve().data_dir / "settings.json"
+        self.update_service = AppUpdateService(self)
+        self.update_service.updateAvailable.connect(self._on_update_available)
+        self.update_service.noUpdate.connect(self._on_update_no_update)
+        self.update_service.checkFailed.connect(self._on_update_check_failed)
+        self.update_service.installerLaunched.connect(
+            self._on_update_installer_launched
+        )
         self.settings_bridge = LegacySettingsBridge(
             settings_path=resolved_settings_path,
             apply_callback=self._apply_settings_snapshot,
+            action_callbacks={"check_updates": self._check_for_updates},
             parent=self,
         )
         self._settings_snapshot = self.settings_bridge.read_snapshot()
@@ -269,6 +280,7 @@ class MainWindow(QMainWindow):
         )
         self._build_shell()
         self.settings_overlay: SettingsOverlay | None = None
+        self._update_dialog: UpdateDialog | None = None
         QApplication.instance().installEventFilter(self)
         self._connect_state()
         self.setWindowTitle("HushPlayer UI V2")
@@ -418,6 +430,7 @@ class MainWindow(QMainWindow):
         self.online_adapter.shutdown()
         if self.online_discovery is not None:
             self.online_discovery.shutdown()
+        self.update_service.shutdown()
         immersive_page = self.router._pages.get("immersive_lyrics")
         if immersive_page is not None and hasattr(immersive_page, "shutdown"):
             immersive_page.shutdown()
@@ -692,6 +705,38 @@ class MainWindow(QMainWindow):
             return
         self.settings_overlay.open()
         self.settings_overlay.raise_()
+
+    def _set_update_status(self, message: str, *, state: str = "success") -> None:
+        """Reflect asynchronous update service feedback in the settings surface."""
+
+        if self.settings_overlay is not None:
+            self.settings_overlay.set_update_status(message, state=state)
+
+    def _check_for_updates(self) -> str:
+        """Start a manual update check from the Quiet Orbit settings surface."""
+
+        if not self.update_service.check_for_updates(manual=True):
+            return "当前已有更新检查或下载正在进行。"
+        return "正在检查更新…"
+
+    def _on_update_available(self, manifest: object, _manual: bool) -> None:
+        if not isinstance(manifest, UpdateManifest):
+            return
+        self._set_update_status(f"发现新版本 {manifest.version}。")
+        dialog = UpdateDialog(self.update_service, manifest, self)
+        self._update_dialog = dialog
+        dialog.exec()
+        if self._update_dialog is dialog:
+            self._update_dialog = None
+
+    def _on_update_no_update(self, _manual: bool) -> None:
+        self._set_update_status(f"当前已是最新版本（{APP_VERSION}）。")
+
+    def _on_update_check_failed(self, message: str, _manual: bool) -> None:
+        self._set_update_status(message, state="failed")
+
+    def _on_update_installer_launched(self, _path: str) -> None:
+        self.close()
 
     def _on_settings_saved(self, snapshot: SettingsSnapshot) -> None:
         """Keep the shell's last persisted snapshot in sync with the overlay."""
