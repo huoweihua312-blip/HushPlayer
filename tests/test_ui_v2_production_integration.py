@@ -67,13 +67,13 @@ class StartupArgumentTests(unittest.TestCase):
     def setUpClass(cls) -> None:
         cls.app = QApplication.instance() or QApplication([])
 
-    def test_no_arguments_keep_legacy_ui_as_default(self) -> None:
+    def test_no_arguments_start_quiet_orbit_as_default(self) -> None:
         with patch.object(main, "run_legacy_application", return_value=0) as legacy, patch.object(
             main, "run_ui_v2_from_main", return_value=0
         ) as ui_v2:
             self.assertEqual(main.main(["main.py"]), 0)
-        legacy.assert_called_once()
-        ui_v2.assert_not_called()
+        legacy.assert_not_called()
+        ui_v2.assert_called_once_with(["main.py"], data_mode="real")
 
     def test_ui_v2_argument_uses_opt_in_v2_entry(self) -> None:
         with patch.object(main, "run_legacy_application", return_value=0) as legacy, patch.object(

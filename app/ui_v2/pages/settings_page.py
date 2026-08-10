@@ -25,6 +25,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from app.core.version import APP_VERSION
 from app.ui_v2.adapters.settings_adapter import SettingsAdapter
 from app.ui_v2.models.settings_category import SETTINGS_CATEGORIES, category_for_key, category_key_for
 from app.ui_v2.models.settings_search_result import SettingsSearchResult
@@ -389,7 +390,7 @@ class SettingsPage(QWidget):
     def _build_about(self, layout: QVBoxLayout) -> None:
         section = self._section("HushPlayer", "查看应用和运行环境信息。")
         details = QLabel(
-            f"HushPlayer\n版本 0.2.0\nPython {platform.python_version()}\nPySide6\n{platform.platform()}",
+            f"HushPlayer\n版本 {APP_VERSION}\nPython {platform.python_version()}\nPySide6\n{platform.platform()}",
             self,
         )
         details.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)

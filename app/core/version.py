@@ -5,8 +5,8 @@ from collections.abc import Sequence
 
 
 APP_NAME = "HushPlayer"
-APP_VERSION = "0.5.0-beta.7"
-APP_NUMERIC_VERSION = (0, 5, 0, 7)
+APP_VERSION = "0.6.0-beta.1"
+APP_NUMERIC_VERSION = (0, 6, 0, 1)
 UPDATE_CHANNEL = "beta"
 UPDATE_ARCHITECTURE = "win-x64"
 UPDATE_MANIFEST_SOURCES = (

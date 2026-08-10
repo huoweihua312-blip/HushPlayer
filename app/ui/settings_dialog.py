@@ -28,8 +28,7 @@ from app.ui.theme_manager import (
     normalize_appearance_mode,
     
 )
-
-APP_VERSION = "0.5.0-beta.7"
+from app.core.version import APP_VERSION
 
 def normalize_update_check_delay_seconds(value) -> int:
     try:
