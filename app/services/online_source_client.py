@@ -33,6 +33,7 @@ class OnlineSourceClient(QObject):
         registry_path: Path | None = None,
         user_sources_dir: Path | None = None,
         bundled_node_executable: Path | None = None,
+        runtime_dependencies_dir: Path | None = None,
         frozen: bool | None = None,
     ) -> None:
         super().__init__(parent)
@@ -66,6 +67,11 @@ class OnlineSourceClient(QObject):
             if inherited_user_sources
             else self.project_root / "user_sources"
         )
+        self.runtime_dependencies_dir = (
+            Path(runtime_dependencies_dir).resolve()
+            if runtime_dependencies_dir is not None
+            else self.runtime_dir / "node_modules"
+        )
         self.bundled_node_executable = (
             Path(bundled_node_executable).resolve()
             if bundled_node_executable is not None
@@ -90,13 +96,13 @@ class OnlineSourceClient(QObject):
         environment.insert("HUSHPLAYER_SOURCE_HOME", str(self.source_home_dir))
         environment.insert("HUSHPLAYER_USER_SOURCES", str(self.user_sources_dir))
         node_modules = str(self.runtime_dir / "node_modules")
+        runtime_dependencies = str(self.runtime_dependencies_dir)
         inherited_node_path = environment.value("NODE_PATH")
-        environment.insert(
-            "NODE_PATH",
-            os.pathsep.join(
-                item for item in (node_modules, inherited_node_path) if item
-            ),
-        )
+        node_path_entries: list[str] = []
+        for item in (node_modules, runtime_dependencies, inherited_node_path):
+            if item and item not in node_path_entries:
+                node_path_entries.append(item)
+        environment.insert("NODE_PATH", os.pathsep.join(node_path_entries))
         self.process.setProcessEnvironment(environment)
         self.process.readyReadStandardOutput.connect(self._read_standard_output)
         self.process.readyReadStandardError.connect(self._read_standard_error)
@@ -126,7 +132,9 @@ class OnlineSourceClient(QObject):
         self._log_process_diagnostic(
             f"node_path={self.node_path}; node_path.exists={node_exists}; "
             f"runner_path={self.runner_path}; "
-            f"runner_path.exists={runner_exists}"
+            f"runner_path.exists={runner_exists}; "
+            f"runtime_dependencies_dir={self.runtime_dependencies_dir}; "
+            f"runtime_dependencies_dir.exists={self.runtime_dependencies_dir.is_dir()}"
         )
 
         if not self.node_program or not self.node_path.is_file():

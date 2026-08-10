@@ -1,0 +1,23 @@
+{
+  "source": "Microsoft Fluent UI System Icons",
+  "package": "@fluentui/svg-icons",
+  "version": "1.1.334",
+  "style": "Regular",
+  "icons": [
+    {
+      "feature": "immersive_header_now_playing",
+      "filename": "music_note_2_play_20_regular.svg",
+      "render_size_px": 18
+    },
+    {
+      "feature": "immersive_header_lyrics",
+      "filename": "subtitles_20_regular.svg",
+      "render_size_px": 18
+    },
+    {
+      "feature": "immersive_return_to_current_lyrics",
+      "filename": "target_arrow_20_regular.svg",
+      "render_size_px": 18
+    }
+  ]
+}

@@ -1,0 +1,424 @@
+"""Cached UI V2 music-library route pages and their shared action bridge."""
+
+from __future__ import annotations
+
+from collections.abc import Callable
+
+from PySide6.QtCore import Qt, Signal
+from PySide6.QtWidgets import QLabel, QStackedWidget, QVBoxLayout, QWidget
+
+from app.ui_v2.adapters.albums_adapter import AlbumsAdapter
+from app.ui_v2.adapters.artists_adapter import (
+    ArtistsAdapter,
+    artist_identity,
+    normalize_artist,
+)
+from app.ui_v2.adapters.favorites_adapter import FavoritesAdapter
+from app.ui_v2.adapters.library_collection import LibraryCollectionAdapter
+from app.ui_v2.adapters.lyrics_adapter import LyricsAdapter
+from app.ui_v2.adapters.legacy_settings_bridge import LegacySettingsBridge
+from app.ui_v2.adapters.navigation_adapter import NavigationAdapter
+from app.ui_v2.adapters.online_adapter import OnlineAdapter
+from app.ui_v2.adapters.online_source_adapter import OnlineSourceAdapter
+from app.ui_v2.adapters.playback_adapter import PlaybackAdapter
+from app.ui_v2.adapters.playlist_adapter import PlaylistAdapter, PlaylistTrackAdapter
+from app.ui_v2.adapters.recent_adapter import RecentAdapter
+from app.ui_v2.pages.album_detail_page import AlbumDetailPage
+from app.ui_v2.pages.albums_page import AlbumsPage
+from app.ui_v2.pages.artist_page import ArtistPage
+from app.ui_v2.pages.artists_page import ArtistsPage
+from app.ui_v2.pages.browse_page import BrowsePage
+from app.ui_v2.pages.favorites_page import FavoritesPage
+from app.ui_v2.pages.library_page import LibraryPage
+from app.ui_v2.pages.immersive_lyrics_page import ImmersiveLyricsPage
+from app.ui_v2.shell.immersive_player_shell import ImmersivePlayerShell
+from app.ui_v2.pages.lyrics_page import LyricsPage
+from app.ui_v2.pages.online_search_page import OnlineSearchPage
+from app.ui_v2.pages.online_source_page import OnlineSourcePage
+from app.ui_v2.pages.playlist_page import PlaylistPage
+from app.ui_v2.pages.recent_page import RecentPage
+from app.ui_v2.pages.track_list_page import TrackListPage
+from app.ui_v2.theme.icons import icon
+from app.ui_v2.theme.tokens import Theme
+from app.ui_v2.models.immersive_lyrics_options import ImmersiveLyricsOptions
+
+
+class ComingSoonPage(QWidget):
+    """A formal V2 destination for routes outside the current implementation stage."""
+
+    def __init__(
+        self, title: str, icon_name: str, theme: Theme, parent: QWidget | None = None
+    ) -> None:
+        super().__init__(parent)
+        self._theme = theme
+        self.icon_label = QLabel(self)
+        self.title_label = QLabel(title, self)
+        self.detail_label = QLabel("该页面将在后续阶段实现。", self)
+        self.detail_label.setWordWrap(True)
+        for label in (self.icon_label, self.title_label, self.detail_label):
+            label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(32, 32, 32, 32)
+        layout.setSpacing(8)
+        layout.addStretch(1)
+        layout.addWidget(self.icon_label)
+        layout.addWidget(self.title_label)
+        layout.addWidget(self.detail_label)
+        layout.addStretch(1)
+        self._icon_name = icon_name
+        self.set_theme(theme)
+
+    def set_theme(self, theme: Theme) -> None:
+        self._theme = theme
+        self.setStyleSheet(f"background: {theme.colors.content_background};")
+        self.icon_label.setPixmap(icon(self._icon_name, theme, "selected").pixmap(32, 32))
+        self.title_label.setStyleSheet(
+            f"font-size: {theme.fonts.page_title}px; font-weight: 600; color: {theme.colors.primary_text};"
+        )
+        self.detail_label.setStyleSheet(
+            f"font-size: {theme.fonts.secondary}px; color: {theme.colors.secondary_text};"
+        )
+
+
+class ContentRouter(QStackedWidget):
+    """Caches static pages and reuses one detail page per entity kind."""
+
+    track_play_requested = Signal(object, str)
+    queue_requested = Signal(object, bool)
+    online_play_requested = Signal(object)
+    immersive_fullscreen_requested = Signal(bool)
+    immersive_transparency_requested = Signal(bool)
+
+    ROUTE_METADATA = {
+        "online_search": ("在线搜索", "search"),
+        "lyrics": ("歌词", "lyrics"),
+    }
+
+    def __init__(
+        self,
+        library_page: LibraryPage,
+        navigation: NavigationAdapter,
+        collection: LibraryCollectionAdapter,
+        playlists: PlaylistAdapter,
+        online: OnlineAdapter,
+        lyrics: LyricsAdapter,
+        playback: PlaybackAdapter,
+        immersive_options: ImmersiveLyricsOptions,
+        theme: Theme,
+        parent: QWidget | None = None,
+        *,
+        settings_bridge: LegacySettingsBridge | None = None,
+        settings_apply_callback: Callable[[dict[str, object]], None] | None = None,
+    ) -> None:
+        super().__init__(parent)
+        self._theme = theme
+        self._navigation = navigation
+        self._collection = collection
+        self._playlists = playlists
+        self._online_adapter = online
+        self._lyrics_adapter = lyrics
+        self._playback_adapter = playback
+        self._immersive_options = immersive_options
+        self._settings_bridge = settings_bridge
+        self._settings_apply_callback = settings_apply_callback
+        self._immersive_return_route = "lyrics"
+        self._last_normal_route = navigation.route if not navigation.route.startswith("immersive") else "browse"
+        self._content_safe_bottom = 0
+        self._playing_track_id = ""
+        self._is_playing = True
+        self._online_sources = OnlineSourceAdapter(online, self)
+        self._playback_enabled = (
+            not collection.read_only or playback.has_real_backend
+        )
+        self.browse_page = BrowsePage(
+            collection,
+            theme,
+            self,
+            playback_enabled=self._playback_enabled,
+            playlists=playlists,
+            online=online,
+            online_discovery=online.discovery,
+        )
+        self._pages: dict[str, QWidget] = {
+            "browse": self.browse_page,
+            "library": library_page,
+        }
+        self._favorites_adapter = FavoritesAdapter(collection, self)
+        self._recent_adapter = RecentAdapter(collection, self)
+        self._playlist_tracks = PlaylistTrackAdapter(collection, playlists, self)
+        self._artists_adapter = ArtistsAdapter(collection, self)
+        self._albums_adapter = AlbumsAdapter(collection, self)
+        self.addWidget(self.browse_page)
+        self.addWidget(library_page)
+        self.browse_page.track_play_requested.connect(self.track_play_requested)
+        self.browse_page.online_search_requested.connect(
+            lambda: self._navigation.set_route("online_search")
+        )
+        library_page.track_table.play_requested.connect(
+            lambda track_id: self.track_play_requested.emit(
+                library_page.adapter.tracks(), track_id
+            )
+        )
+        if hasattr(library_page, "play_requested"):
+            library_page.play_requested.connect(
+                lambda: self.queue_requested.emit(library_page.adapter.tracks(), False)
+            )
+        if hasattr(library_page, "shuffle_requested"):
+            library_page.shuffle_requested.connect(
+                lambda: self.queue_requested.emit(library_page.adapter.tracks(), True)
+            )
+        navigation.route_changed.connect(self.show_route)
+        self.show_route(navigation.route)
+
+    def page_for_route(self, route_id: str) -> QWidget:
+        if route_id in {"liked", "favorites"}:
+            return self._cached_page("favorites", self._create_favorites_page)
+        if route_id == "recent":
+            return self._cached_page("recent", self._create_recent_page)
+        if route_id == "artists":
+            return self._cached_page("artists", self._create_artists_page)
+        if route_id == "albums":
+            return self._cached_page("albums", self._create_albums_page)
+        if route_id == "online_search":
+            return self._cached_page("online_search", self._create_online_search_page)
+        if route_id == "online_sources":
+            return self._cached_page("online_sources", self._create_online_source_page)
+        if route_id == "lyrics":
+            return self._cached_page("lyrics", self._create_lyrics_page)
+        if route_id == "settings":
+            # Settings is a shell overlay, not a content route.  Keep the
+            # current page visible for compatibility with callers that still
+            # try to resolve the legacy route id.
+            return self.currentWidget() or self._pages["browse"]
+        if route_id in {"immersive_lyrics", "immersive_now_playing"}:
+            return self._cached_page("immersive_lyrics", self._create_immersive_lyrics_page)
+        if route_id.startswith("playlist:"):
+            page = self._cached_page("playlist", self._create_playlist_page)
+            page.set_playlist(route_id.removeprefix("playlist:"))
+            return page
+        if route_id.startswith("artist_detail:"):
+            page = self._cached_page("artist_detail", self._create_artist_detail_page)
+            page.set_artist(route_id.removeprefix("artist_detail:"))
+            return page
+        if route_id.startswith("album_detail:"):
+            page = self._cached_page("album_detail", self._create_album_detail_page)
+            page.set_album(route_id.removeprefix("album_detail:"))
+            return page
+        if route_id == "library":
+            return self._pages["library"]
+        if route_id == "browse":
+            return self._pages["browse"]
+        return self._cached_page(route_id, lambda: self._create_coming_soon(route_id))
+
+    def show_route(self, route_id: str) -> None:
+        if route_id == "settings":
+            return
+        if route_id in {"immersive_lyrics", "immersive_now_playing"}:
+            if not self._last_normal_route.startswith("immersive"):
+                self._immersive_return_route = self._last_normal_route
+            page = self.page_for_route(route_id)
+            if hasattr(page, "set_mode"):
+                page.set_mode("now_playing" if route_id == "immersive_now_playing" else "lyrics")
+            self.setCurrentWidget(page)
+            return
+        self._last_normal_route = route_id
+        self.setCurrentWidget(self.page_for_route(route_id))
+
+    def set_theme(self, theme: Theme) -> None:
+        self._theme = theme
+        for page in dict.fromkeys(self._pages.values()):
+            if hasattr(page, "set_theme"):
+                page.set_theme(theme)
+
+    def set_responsive_reference_width(self, width: int) -> None:
+        for page in dict.fromkeys(self._pages.values()):
+            if hasattr(page, "set_responsive_reference_width"):
+                page.set_responsive_reference_width(width)
+
+    @property
+    def content_safe_bottom(self) -> int:
+        return self._content_safe_bottom
+
+    def set_content_safe_bottom(self, height: int) -> None:
+        """Apply one shared safe-area contract to normal scrollable page roots."""
+
+        self._content_safe_bottom = max(0, int(height))
+        for page in dict.fromkeys(self._pages.values()):
+            if hasattr(page, "set_content_safe_bottom"):
+                page.set_content_safe_bottom(self._content_safe_bottom)
+
+    def set_playing_track(self, track_id: str) -> None:
+        self._playing_track_id = str(track_id or "")
+        self._online_adapter.set_playing_track(track_id)
+        self._apply_playback_state()
+
+    def set_playback_state(self, is_playing: bool) -> None:
+        """Refresh only current rows when playback changes between play/pause."""
+
+        self._is_playing = bool(is_playing)
+        self._apply_playback_state()
+
+    def set_global_query(self, text: str) -> None:
+        """Forward the shell search to the active track-backed page."""
+
+        page = self.currentWidget()
+        adapter = getattr(page, "adapter", None)
+        setter = getattr(adapter, "set_query", None)
+        if callable(setter):
+            setter(text)
+
+    @property
+    def cached_page_count(self) -> int:
+        return len(self._pages)
+
+    def _cached_page(self, key: str, factory) -> QWidget:
+        if key not in self._pages:
+            page = factory()
+            self._pages[key] = page
+            self.addWidget(page)
+            if hasattr(page, "set_content_safe_bottom"):
+                page.set_content_safe_bottom(self._content_safe_bottom)
+            if hasattr(page, "set_responsive_reference_width") and self.width() > 0:
+                page.set_responsive_reference_width(self.width())
+            self._apply_playback_state_to_page(page)
+        return self._pages[key]
+
+    def _apply_playback_state(self) -> None:
+        for page in dict.fromkeys(self._pages.values()):
+            self._apply_playback_state_to_page(page)
+
+    def _apply_playback_state_to_page(self, page: QWidget) -> None:
+        table = getattr(page, "track_table", None)
+        setter = getattr(table, "set_playback_state", None)
+        if callable(setter):
+            setter(self._playing_track_id, self._is_playing)
+
+    def _wire_track_page(self, page: TrackListPage) -> TrackListPage:
+        if hasattr(page, "set_playback_enabled"):
+            page.set_playback_enabled(self._playback_enabled)
+        page.track_play_requested.connect(self.track_play_requested)
+        page.queue_requested.connect(self.queue_requested)
+        page.browse_library_requested.connect(lambda: self._navigation.set_route("library"))
+        return page
+
+    def _create_favorites_page(self) -> FavoritesPage:
+        return self._wire_track_page(FavoritesPage(self._favorites_adapter, self._theme, self))
+
+    def _create_recent_page(self) -> RecentPage:
+        return self._wire_track_page(RecentPage(self._recent_adapter, self._theme, self))
+
+    def _create_playlist_page(self) -> PlaylistPage:
+        page = PlaylistPage(self._playlist_tracks, self._playlists, self._theme, self)
+        page.playlist_deleted.connect(lambda _playlist_id: self._navigation.set_route("library"))
+        page.playlist_requested.connect(
+            lambda playlist_id: self._navigation.set_route(f"playlist:{playlist_id}")
+        )
+        return self._wire_track_page(page)
+
+    def _create_artists_page(self) -> ArtistsPage:
+        page = ArtistsPage(self._artists_adapter, self._theme, self)
+        page.entity_requested.connect(
+            lambda artist_id: self._navigation.set_route(f"artist_detail:{artist_id}")
+        )
+        return page
+
+    def _create_albums_page(self) -> AlbumsPage:
+        page = AlbumsPage(self._albums_adapter, self._theme, self)
+        page.entity_requested.connect(
+            lambda album_id: self._navigation.set_route(f"album_detail:{album_id}")
+        )
+        return page
+
+    def _create_artist_detail_page(self) -> ArtistPage:
+        page = ArtistPage(
+            self._collection,
+            self._artists_adapter,
+            self._albums_adapter,
+            self._theme,
+            self,
+            playback_enabled=self._playback_enabled,
+        )
+        page.back_button.clicked.connect(lambda: self._navigation.set_route("artists"))
+        page.artist_requested.connect(self._open_artist_by_name)
+        page.album_requested.connect(
+            lambda album_id: self._navigation.set_route(f"album_detail:{album_id}")
+        )
+        return self._wire_track_page(page)
+
+    def _open_artist_by_name(self, name: str) -> None:
+        artist_id = artist_identity(normalize_artist(name))
+        if self._artists_adapter.artist_for_id(artist_id) is not None:
+            self._navigation.set_route(f"artist_detail:{artist_id}")
+
+    def _create_album_detail_page(self) -> AlbumDetailPage:
+        page = AlbumDetailPage(self._collection, self._albums_adapter, self._theme, self)
+        page.back_button.clicked.connect(lambda: self._navigation.set_route("albums"))
+        return self._wire_track_page(page)
+
+    def _create_online_search_page(self) -> OnlineSearchPage:
+        page = OnlineSearchPage(self._online_adapter, self._playlists, self._theme, self)
+        page.source_management_requested.connect(
+            lambda: self._navigation.set_route("online_sources")
+        )
+        self._online_adapter.play_requested.connect(self.online_play_requested)
+        return page
+
+    def _create_online_source_page(self) -> OnlineSourcePage:
+        page = OnlineSourcePage(self._online_sources, self._theme, self)
+        page.back_requested.connect(lambda: self._navigation.set_route("online_search"))
+        return page
+
+    def _create_lyrics_page(self) -> LyricsPage:
+        page = LyricsPage(self._lyrics_adapter, self._theme, self)
+        page.source_requested.connect(lambda: self._navigation.set_route("online_sources"))
+        page.immersive_requested.connect(lambda: self._navigation.set_route("immersive_lyrics"))
+        return page
+
+    def _create_immersive_lyrics_page(self) -> ImmersiveLyricsPage:
+        page = ImmersivePlayerShell(
+            self._lyrics_adapter,
+            self._playback_adapter,
+            self._theme,
+            self._immersive_options,
+            self,
+            settings_bridge=self._settings_bridge,
+            settings_apply_callback=self._settings_apply_callback,
+        )
+        page.immersive_exit_requested.connect(self._return_from_immersive)
+        page.fullscreen_requested.connect(self.immersive_fullscreen_requested)
+        page.transparency_mode_changed.connect(self.immersive_transparency_requested)
+        page.mode_changed.connect(self._switch_immersive_mode)
+        # The page may have been created while transparent mode was already
+        # selected in Settings.  Its constructor cannot emit to this router yet.
+        page.transparency_mode_changed.emit(page.background_mode == "transparent")
+        return page
+
+    def _switch_immersive_mode(self, mode: str) -> None:
+        page = self._pages.get("immersive_lyrics")
+        if isinstance(page, ImmersiveLyricsPage):
+            # These are views inside one cached player workspace.  Changing a
+            # tab must not rewrite navigation state or rebuild the shell.
+            page.set_mode(str(mode))
+            self.setCurrentWidget(page)
+            return
+        self._navigation.set_route(
+            "immersive_now_playing" if str(mode) == "now_playing" else "immersive_lyrics"
+        )
+
+    def apply_immersive_options(self, options: ImmersiveLyricsOptions) -> None:
+        page = self._pages.get("immersive_lyrics")
+        if isinstance(page, ImmersiveLyricsPage):
+            page.apply_options(options)
+
+    def set_reduce_motion_preview(self, enabled: bool) -> None:
+        page = self._pages.get("immersive_lyrics")
+        if isinstance(page, ImmersiveLyricsPage):
+            page.set_reduce_motion(enabled)
+
+    def _return_from_immersive(self) -> None:
+        self._navigation.set_route(self._immersive_return_route)
+        self._immersive_return_route = "lyrics"
+
+    def _create_coming_soon(self, route_id: str) -> ComingSoonPage:
+        title, icon_name = self.ROUTE_METADATA.get(route_id, ("页面", "library"))
+        return ComingSoonPage(title, icon_name, self._theme, self)
