@@ -3,12 +3,13 @@
 from __future__ import annotations
 
 from PySide6.QtCore import Signal
-from PySide6.QtWidgets import QHBoxLayout, QInputDialog, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QDialog, QHBoxLayout, QVBoxLayout, QWidget
 
 from app.ui_v2.adapters.playlist_adapter import PlaylistAdapter, PlaylistTrackAdapter
 from app.ui_v2.pages.track_list_page import TrackListPage
 from app.ui_v2.theme.tokens import Theme
 from app.ui_v2.widgets.content_heroes import PlaylistHero
+from app.ui_v2.widgets.playlist_dialogs import PlaylistConfirmDialog, PlaylistNameDialog
 from app.ui_v2.widgets.related_playlists_panel import RelatedPlaylistsPanel
 
 
@@ -46,13 +47,12 @@ class PlaylistPage(TrackListPage):
         self.playlist_header.rename_requested.connect(self._rename_playlist)
         self.playlist_header.delete_requested.connect(self._delete_playlist)
         self.playlist_header.add_requested.connect(self._add_first_available_track)
-        self.playlist_header.set_read_only(playlists.read_only)
+        self.playlist_header.set_read_only(not playlists.can_mutate)
         self.playlist_header.set_playback_enabled(not playlists.read_only)
         self.track_table.set_playback_enabled(not playlists.read_only)
-        self.playlist_header.favorite_requested.connect(self._on_favorite_requested)
         self.related_playlists.playlist_requested.connect(self._open_related_playlist)
         self.track_table.set_playlist_context(
-            None if playlists.read_only else self._remove_track_from_current_playlist
+            self._remove_track_from_current_playlist if playlists.can_mutate else None
         )
         playlists.playlist_changed.connect(self._on_playlist_changed)
         self.empty_state.set_state("empty", "这个歌单还没有歌曲。")
@@ -101,24 +101,37 @@ class PlaylistPage(TrackListPage):
             )
 
     def _rename_playlist(self) -> None:
-        if self.playlists.read_only:
+        if not self.playlists.can_mutate:
             return
         playlist = self.playlists.playlist_for_id(self.playlist_id)
         if playlist is None:
             return
-        title, accepted = QInputDialog.getText(self, "重命名歌单", "歌单名称", text=playlist.name)
-        if accepted:
-            self.playlists.rename_playlist(playlist.id, title)
+        dialog = PlaylistNameDialog(
+            self._theme,
+            "重命名歌单",
+            initial_name=playlist.name,
+            parent=self,
+        )
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            self.playlists.rename_playlist(playlist.id, dialog.name)
 
     def _delete_playlist(self) -> None:
-        if self.playlists.read_only:
+        if not self.playlists.can_mutate:
             return
         playlist_id = self.playlist_id
-        if playlist_id and self.playlists.delete_playlist(playlist_id):
+        if not playlist_id:
+            return
+        dialog = PlaylistConfirmDialog(
+            self._theme,
+            "删除歌单",
+            "删除歌单不会删除音乐库中的歌曲。",
+            parent=self,
+        )
+        if dialog.exec() == QDialog.DialogCode.Accepted and self.playlists.delete_playlist(playlist_id):
             self.playlist_deleted.emit(playlist_id)
 
     def _add_first_available_track(self) -> None:
-        if self.playlists.read_only:
+        if not self.playlists.can_mutate:
             return
         playlist = self.playlists.playlist_for_id(self.playlist_id)
         if playlist is None:
@@ -135,15 +148,9 @@ class PlaylistPage(TrackListPage):
             self.playlists.add_tracks(playlist.id, (next_track.id,))
 
     def _remove_track_from_current_playlist(self, track_id: str) -> None:
-        if self.playlists.read_only:
+        if not self.playlists.can_mutate:
             return
         self.playlists.remove_track(self.playlist_id, track_id)
-
-    def _on_favorite_requested(self, value: bool) -> None:
-        # Playlist values intentionally have no persistence field yet. Mock
-        # keeps the visual toggle local; real mode disables the control.
-        self.playlist_header._favorite = bool(value)
-        self.playlist_header.set_theme(self._theme)
 
     def _open_related_playlist(self, playlist_id: str) -> None:
         if playlist_id != self.playlist_id:

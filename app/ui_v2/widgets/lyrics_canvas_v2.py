@@ -2,13 +2,13 @@
 
 from __future__ import annotations
 
-import re
+from bisect import bisect_right
 from dataclasses import dataclass
 from math import ceil
 
-from PySide6.QtCore import QPoint, QRect, QRectF, QSize, Qt, Signal
+from PySide6.QtCore import QElapsedTimer, QPoint, QRect, QRectF, QSize, QTimer, Qt, Signal
 from PySide6.QtGui import QColor, QFont, QFontMetrics, QPainter, QPen
-from PySide6.QtWidgets import QToolButton, QWidget
+from PySide6.QtWidgets import QSizePolicy, QToolButton, QWidget
 
 from app.ui_v2.models.lyric_line import LyricLine
 from app.ui_v2.models.lyrics_document import LyricsDocument
@@ -95,6 +95,8 @@ class LyricsCanvasV2(QWidget):
 
     seek_requested = Signal(str)
     browsing_changed = Signal(bool)
+    _POSITION_REANCHOR_TOLERANCE_MS = 750
+    _POSITION_BACKWARD_REANCHOR_MS = 300
 
     def __init__(self, theme: Theme, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -103,6 +105,13 @@ class LyricsCanvasV2(QWidget):
         self._active_line: LyricLine | None = None
         self._active_segment_index = -1
         self._active_segment_progress = 0.0
+        self._playback_position_ms = 0
+        self._playback_clock = QElapsedTimer()
+        self._playback_clock.start()
+        self._playback_active = False
+        self._highlight_timer = QTimer(self)
+        self._highlight_timer.setInterval(16)
+        self._highlight_timer.timeout.connect(self._on_highlight_tick)
         self._translation_visible = True
         self._romanization_visible = False
         self._mode = "ordinary"
@@ -123,6 +132,7 @@ class LyricsCanvasV2(QWidget):
         self.setAttribute(Qt.WidgetAttribute.WA_NoSystemBackground)
         self.setAutoFillBackground(False)
         self.setStyleSheet("background: transparent;")
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         self.setMinimumHeight(260)
         self.return_button = QToolButton(self)
         self.return_button.setText("回到当前歌词")
@@ -176,7 +186,15 @@ class LyricsCanvasV2(QWidget):
         if self._mode == "ordinary":
             active_bounds, normal_bounds = (34, 48), (22, 32)
         else:
-            active_bounds, normal_bounds = (54, 64), (29, 38)
+            # Keep the approved 100% immersive baseline while scaling the
+            # actual rendered size at every setting value. The former hard
+            # lower bounds flattened 75%-112% into one visually identical
+            # primary lyric size, making the live settings preview misleading.
+            active = max(54, min(64, active))
+            normal = max(29, min(38, normal))
+            translation = max(18, min(26, translation))
+            romanization = max(15, min(22, romanization))
+            active_bounds, normal_bounds = (36, 76), (20, 52)
         return (
             max(active_bounds[0], min(active_bounds[1], round(active * scale))),
             max(normal_bounds[0], min(normal_bounds[1], round(normal * scale))),
@@ -239,6 +257,8 @@ class LyricsCanvasV2(QWidget):
 
     def set_mode(self, mode: str) -> None:
         self._mode = "immersive" if mode == "immersive" else "ordinary"
+        if self._mode != "immersive":
+            self._highlight_timer.stop()
         self._refresh_ordinary_metrics()
         self.update()
 
@@ -249,17 +269,122 @@ class LyricsCanvasV2(QWidget):
         self.update()
 
     def set_active_line(self, line: LyricLine | None) -> None:
+        previous_id = self._active_line.id if self._active_line is not None else ""
         self._active_line = line
+        if line is None or line.id != previous_id:
+            self._active_segment_index = -1
+            self._active_segment_progress = 0.0
+        if self._playback_active and line is not None and line.segments and self._mode == "immersive":
+            self._highlight_timer.start()
         if not self.browsing:
             self.update()
 
     def set_active_segment(self, line: LyricLine, index: int, progress: float) -> None:
-        if self._active_line is None or line.id == self._active_line.id:
-            self._active_line = line
-            self._active_segment_index = int(index)
-            self._active_segment_progress = max(0.0, min(1.0, float(progress)))
-            if not self.browsing:
-                self.update()
+        line_changed = self._active_line is None or line.id != self._active_line.id
+        self._active_line = line
+        incoming_index = int(index)
+        incoming_progress = max(0.0, min(1.0, float(progress)))
+        incoming_position = None
+        if 0 <= index < len(line.segments):
+            segment = line.segments[index]
+            if segment.end_ms is not None and segment.end_ms > segment.start_ms:
+                incoming_position = round(
+                    segment.start_ms
+                    + (segment.end_ms - segment.start_ms) * incoming_progress
+                )
+        predicted_position = self._interpolated_position_ms()
+        reanchor = (
+            not self._playback_active
+            or self._mode != "immersive"
+            or line_changed
+            or self._active_segment_index < 0
+            or (
+                incoming_position is not None
+                and (
+                    incoming_position < predicted_position - self._POSITION_BACKWARD_REANCHOR_MS
+                    or abs(incoming_position - predicted_position) > self._POSITION_REANCHOR_TOLERANCE_MS
+                )
+            )
+        )
+        if reanchor:
+            self._active_segment_index = incoming_index
+            self._active_segment_progress = incoming_progress
+            if incoming_position is not None:
+                self._set_playback_anchor(incoming_position)
+        if self._playback_active and self._mode == "immersive":
+            self._highlight_timer.start()
+        if not self.browsing:
+            self.update()
+
+    def set_playback_position(self, position_ms: int, *, force: bool = False) -> None:
+        """Correct local interpolation only when the shared clock actually drifts."""
+
+        position = max(0, int(position_ms))
+        predicted = self._interpolated_position_ms()
+        if (
+            force
+            or not self._playback_active
+            or position < predicted - self._POSITION_BACKWARD_REANCHOR_MS
+            or abs(position - predicted) > self._POSITION_REANCHOR_TOLERANCE_MS
+        ):
+            self._set_playback_anchor(position)
+
+    def set_playback_active(self, active: bool) -> None:
+        """Refresh the visual highlight only while the shared player is running."""
+
+        active = bool(active)
+        if active == self._playback_active:
+            if not active:
+                self._highlight_timer.stop()
+            return
+        if not active and self._playback_active:
+            self._playback_position_ms = self._interpolated_position_ms()
+        self._playback_active = active
+        self._playback_clock.restart()
+        if self._playback_active and self._mode == "immersive" and self._active_line is not None and self._active_line.segments:
+            self._highlight_timer.start()
+        else:
+            self._highlight_timer.stop()
+
+    def _on_highlight_tick(self) -> None:
+        if (
+            not self._playback_active
+            or self._mode != "immersive"
+            or self.browsing
+            or self._active_line is None
+            or not self._active_line.segments
+        ):
+            return
+        position = self._interpolated_position_ms()
+        index, progress = self._segment_at_position(self._active_line, position)
+        if index < 0:
+            return
+        if index != self._active_segment_index or abs(progress - self._active_segment_progress) >= 0.008:
+            self._active_segment_index = index
+            self._active_segment_progress = progress
+            self.update()
+
+    def _interpolated_position_ms(self) -> int:
+        if not self._playback_active:
+            return self._playback_position_ms
+        return self._playback_position_ms + self._playback_clock.elapsed()
+
+    def _set_playback_anchor(self, position_ms: int) -> None:
+        self._playback_position_ms = max(0, int(position_ms))
+        self._playback_clock.restart()
+
+    @staticmethod
+    def _segment_at_position(line: LyricLine, position_ms: int) -> tuple[int, float]:
+        starts = tuple(segment.start_ms for segment in line.segments)
+        index = bisect_right(starts, int(position_ms)) - 1
+        if index < 0:
+            return -1, 0.0
+        segment = line.segments[index]
+        end = segment.end_ms
+        if end is None or end <= segment.start_ms:
+            return index, 1.0
+        progress = (int(position_ms) - segment.start_ms) / (end - segment.start_ms)
+        return index, max(0.0, min(1.0, progress))
 
     def set_display_options(self, options: dict[str, object], *, update_font_scale: bool = True) -> None:
         self._translation_visible = bool(options.get("translation", True))
@@ -485,12 +610,12 @@ class LyricsCanvasV2(QWidget):
     def _line_spacing(self) -> int:
         if self._mode == "ordinary" and self._ordinary_metrics is not None:
             return self._ordinary_metrics.line_spacing
-        return max(4, round(7 * self._responsive_scale))
+        return max(9, round(11 * self._responsive_scale))
 
     def _section_spacing(self) -> int:
         if self._mode == "ordinary" and self._ordinary_metrics is not None:
             return self._ordinary_metrics.section_spacing
-        return max(10, round((17 if self._mode == "ordinary" else 19) * self._responsive_scale))
+        return max(10, round((17 if self._mode == "ordinary" else 25) * self._responsive_scale))
 
     def _font(self, size: int, weight: QFont.Weight) -> QFont:
         font = QFont(self.font())
@@ -535,40 +660,73 @@ class LyricsCanvasV2(QWidget):
 
     @staticmethod
     def _wrapped_lines(font: QFont, text: str, width: int) -> list[str]:
-        """Wrap deterministically without allowing Qt to ellipsize active text."""
+        """Wrap without eliding and keep source offsets for smooth highlighting."""
+
+        return [value for value, _start, _end in LyricsCanvasV2._wrapped_line_ranges(font, text, width)]
+
+    @staticmethod
+    def _wrapped_line_ranges(font: QFont, text: str, width: int) -> list[tuple[str, int, int]]:
+        """Return displayed lines plus their source-text offsets.
+
+        The painter must know which source characters belong to each visual
+        line.  Reconstructing that relationship from ``len(wrapped)`` loses
+        spaces at wrap boundaries and makes later glyphs snap into the accent
+        color.  Keeping the offsets here lets the highlight use the exact
+        same text that was measured by ``QFontMetrics``.
+        """
+
         if not text:
-            return [""]
+            return [("", 0, 0)]
         metrics = QFontMetrics(font)
         available = max(1, int(width))
-        lines: list[str] = []
+        ranges: list[tuple[str, int, int]] = []
         paragraphs = text.split("\n")
+        source_offset = 0
         for paragraph_index, paragraph in enumerate(paragraphs):
-            current = ""
-            # Whitespace-terminated words preserve natural English breaks;
-            # unspaced Chinese text still reaches the character fallback below.
-            for token in re.findall(r"\S+\s*|\s+", paragraph):
-                candidate = current + token
-                if current and metrics.horizontalAdvance(candidate) > available:
-                    lines.append(current.rstrip())
-                    current = token.lstrip()
-                else:
-                    current = candidate
-                while current and metrics.horizontalAdvance(current) > available:
-                    fragment = ""
-                    for character in current:
-                        if fragment and metrics.horizontalAdvance(fragment + character) > available:
+            paragraph_start = source_offset
+            paragraph_end = paragraph_start + len(paragraph)
+            if not paragraph:
+                ranges.append(("", paragraph_start, paragraph_start))
+            else:
+                start = paragraph_start
+                while start < paragraph_end:
+                    if metrics.horizontalAdvance(text[start:paragraph_end]) <= available:
+                        visible_end = paragraph_end
+                        while visible_end > start and text[visible_end - 1].isspace():
+                            visible_end -= 1
+                        ranges.append((text[start:visible_end], start, visible_end))
+                        break
+
+                    candidate_end = start
+                    for end in range(start + 1, paragraph_end + 1):
+                        if metrics.horizontalAdvance(text[start:end]) > available:
                             break
-                        fragment += character
-                    if not fragment:
-                        fragment, current = current[:1], current[1:]
-                    else:
-                        current = current[len(fragment) :].lstrip()
-                    lines.append(fragment.rstrip())
-            if current or not lines:
-                lines.append(current.rstrip())
-            if paragraph_index < len(paragraphs) - 1 and not lines[-1]:
-                lines.append("")
-        return lines or [""]
+                        candidate_end = end
+                    if candidate_end <= start:
+                        candidate_end = min(paragraph_end, start + 1)
+
+                    # Prefer a whitespace boundary when one fits; otherwise
+                    # split at the last measured glyph that fits the width.
+                    break_end = candidate_end
+                    whitespace = -1
+                    for index in range(start, candidate_end):
+                        if text[index].isspace():
+                            whitespace = index
+                    if whitespace > start:
+                        break_end = whitespace + 1
+
+                    visible_end = break_end
+                    while visible_end > start and text[visible_end - 1].isspace():
+                        visible_end -= 1
+                    ranges.append((text[start:visible_end], start, visible_end))
+                    start = break_end
+                    while start < paragraph_end and text[start].isspace():
+                        start += 1
+
+            source_offset = paragraph_end + 1
+            if paragraph_index < len(paragraphs) - 1 and ranges and not ranges[-1][0]:
+                ranges.append(("", source_offset, source_offset))
+        return ranges or [("", 0, 0)]
 
     def _text_rect(
         self,
@@ -596,25 +754,70 @@ class LyricsCanvasV2(QWidget):
             shadow=self._mode == "immersive" and self._text_protection != "无",
             lines=lines,
         )
-        prefix = self._segment_prefix(line)
-        if not prefix:
+        highlight_position = self._highlight_character_progress(line)
+        if highlight_position <= 0:
             return 0
-        remaining = len(prefix)
         drawn = 0
         metrics = QFontMetrics(font)
         line_height = metrics.height()
         start_y = rect.y() + max(0, (rect.height() - line_height * len(lines)) // 2)
+        ranges = self._wrapped_line_ranges(font, line.text, rect.width())
         painter.setFont(font)
         painter.setPen(_with_alpha(self._theme.colors.accent, 255))
         for index, wrapped in enumerate(lines):
-            if remaining <= 0:
+            if index >= len(ranges) or not wrapped:
                 break
-            fragment = wrapped[:remaining]
-            if fragment:
-                painter.drawText(QRect(rect.x(), start_y + index * line_height, rect.width(), line_height), int(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter), fragment)
-                drawn += 1
-            remaining -= len(wrapped)
+            _source_text, source_start, _source_end = ranges[index]
+            local_progress = max(0.0, min(float(len(wrapped)), highlight_position - source_start))
+            if local_progress <= 0:
+                continue
+            whole_count = min(len(wrapped), int(local_progress))
+            fractional = local_progress - whole_count
+            highlight_width = metrics.horizontalAdvance(wrapped[:whole_count])
+            if fractional > 0 and whole_count < len(wrapped):
+                highlight_width += metrics.horizontalAdvance(wrapped[whole_count]) * fractional
+            if highlight_width <= 0:
+                continue
+            painter.save()
+            painter.setClipRect(
+                QRectF(
+                    rect.x(),
+                    start_y + index * line_height,
+                    max(0.5, highlight_width),
+                    line_height,
+                ),
+                Qt.ClipOperation.IntersectClip,
+            )
+            painter.drawText(
+                QRect(rect.x(), start_y + index * line_height, rect.width(), line_height),
+                int(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter),
+                wrapped,
+            )
+            painter.restore()
+            drawn += 1
         return drawn
+
+    def _highlight_character_progress(self, line: LyricLine) -> float:
+        """Return a fractional source-text offset for the active segment."""
+
+        if not line.segments or line.id != (self._active_line.id if self._active_line else ""):
+            return 0.0
+        index = max(0, min(self._active_segment_index, len(line.segments) - 1))
+        source_offset = 0
+        for segment in line.segments[:index]:
+            match = line.text.find(segment.text, source_offset)
+            if match >= 0:
+                source_offset = match + len(segment.text)
+            else:
+                source_offset += len(segment.text)
+        current = line.segments[index].text
+        current_start = line.text.find(current, source_offset)
+        if current_start < 0:
+            current_start = source_offset
+        return min(
+            float(len(line.text)),
+            float(current_start) + len(current) * self._active_segment_progress,
+        )
 
     def _segment_prefix(self, line: LyricLine) -> str:
         if not line.segments:

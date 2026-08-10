@@ -224,7 +224,7 @@ class UiV2MainWindowTests(unittest.TestCase):
                 self.assertIs(self.window.router.currentWidget(), self.window.router.browse_page)
             elif route_id == "library":
                 self.assertIs(self.window.router.currentWidget(), self.window.library_page)
-            elif route_id == "liked":
+            elif route_id in {"liked", "online_search"}:
                 self.assertNotIsInstance(self.window.router.currentWidget(), ComingSoonPage)
             else:
                 self.assertIsInstance(self.window.router.currentWidget(), ComingSoonPage)

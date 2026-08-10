@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import QSize, Qt, Signal
 from PySide6.QtWidgets import QBoxLayout, QHBoxLayout, QLabel, QToolButton, QVBoxLayout, QWidget
 
 from app.ui_v2.models.track import Track
@@ -33,17 +33,20 @@ class TrackCollectionHero(QWidget):
         self.shuffle_button = QToolButton(self)
         self.more_button = QToolButton(self)
         self.back_button = QToolButton(self)
+        self.play_button.setAccessibleName("播放")
+        self.shuffle_button.setAccessibleName("随机播放")
         self.back_button.hide()
+        # The generic collection hero has no formal More action. Keep the
+        # handle for compatibility, but do not expose a no-op control.
+        self.more_button.hide()
         self.play_button.clicked.connect(self.play_requested)
         self.shuffle_button.clicked.connect(self.shuffle_requested)
-        self.more_button.clicked.connect(self.more_requested)
         self._actions_layout = QHBoxLayout()
         self._actions_layout.setContentsMargins(0, 0, 0, 0)
         self._actions_layout.setSpacing(8)
         self._actions_layout.addWidget(self.back_button)
         self._actions_layout.addWidget(self.play_button)
         self._actions_layout.addWidget(self.shuffle_button)
-        self._actions_layout.addWidget(self.more_button)
         self._actions_layout.addStretch(1)
         self._details_layout = QVBoxLayout()
         self._details_layout.setContentsMargins(0, 0, 0, 0)
@@ -100,19 +103,37 @@ class TrackCollectionHero(QWidget):
             f"font-size: {theme.fonts.secondary}px; color: {colors.secondary_text};"
         )
         self.play_button.setText("播放")
-        self.play_button.setIcon(icon("play", theme, "selected"))
+        # The filled action uses the inverse icon color so the play glyph does
+        # not disappear into the Quiet Orbit accent surface.
+        self.play_button.setIcon(icon("play", theme, "inverse"))
         self.shuffle_button.setText("随机播放")
-        self.shuffle_button.setIcon(icon("shuffle", theme, "selected"))
+        self.shuffle_button.setIcon(icon("shuffle", theme, "normal"))
         self.more_button.setText("更多")
         self.play_button.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
         self.shuffle_button.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
         for button in (self.play_button, self.shuffle_button):
-            button.setStyleSheet(
-                f"QToolButton {{ min-height: {metrics.control_height}px; padding: 0 {metrics.spacing_md}px; "
-                f"border: 0; border-radius: {metrics.radius_sm}px; background: {colors.accent}; color: {colors.content_background}; }}"
-                f"QToolButton:hover {{ background: {colors.accent_hover}; }}"
-                f"QToolButton:pressed {{ background: {colors.accent_pressed}; }}"
-            )
+            button.setIconSize(QSize(metrics.icon_sm, metrics.icon_sm))
+            button.setMinimumHeight(metrics.control_height)
+        self.play_button.setMinimumWidth(92)
+        self.shuffle_button.setMinimumWidth(116)
+        self.play_button.setStyleSheet(
+            f"QToolButton {{ min-height: {metrics.control_height}px; padding: 0 {metrics.spacing_md}px; "
+            f"border: 1px solid transparent; border-radius: {metrics.radius_md}px; "
+            f"background: {colors.accent}; color: {colors.content_background}; font-weight: 600; }}"
+            f"QToolButton:hover {{ background: {colors.accent_hover}; }}"
+            f"QToolButton:pressed {{ background: {colors.accent_pressed}; }}"
+            f"QToolButton:focus {{ border-color: {colors.focus_ring}; }}"
+            f"QToolButton:disabled {{ color: {colors.disabled_text}; background: {colors.surface_secondary}; }}"
+        )
+        self.shuffle_button.setStyleSheet(
+            f"QToolButton {{ min-height: {metrics.control_height}px; padding: 0 {metrics.spacing_md}px; "
+            f"border: 1px solid {colors.border}; border-radius: {metrics.radius_md}px; "
+            f"background: {colors.surface_secondary}; color: {colors.primary_text}; }}"
+            f"QToolButton:hover {{ background: {colors.hover_background}; border-color: {colors.border_strong}; }}"
+            f"QToolButton:pressed {{ background: {colors.selected_background}; }}"
+            f"QToolButton:focus {{ border-color: {colors.focus_ring}; }}"
+            f"QToolButton:disabled {{ color: {colors.disabled_text}; background: transparent; border-color: {colors.border}; }}"
+        )
         for button in (self.more_button, self.back_button):
             button.setStyleSheet(
                 f"QToolButton {{ min-height: {metrics.control_height}px; padding: 0 {metrics.spacing_sm}px; "

@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import json
+import time
 from pathlib import Path
-from typing import Callable
+from typing import Callable, Iterable
 
 from PySide6.QtCore import QObject, Signal
 
@@ -105,6 +106,124 @@ class OnlineDiscoveryBridge(QObject):
             name = str(playlist.get("name") or "未命名歌单").strip()
             values.append((str(playlist_id), name or "未命名歌单"))
         return tuple(values)
+
+    def create_playlist(
+        self,
+        playlist_id: str,
+        name: str,
+        description: str = "",
+        created_at_ms: int | None = None,
+    ) -> bool:
+        """Create one ordinary playlist in the existing playlist document."""
+
+        target = str(playlist_id or "").strip()
+        title = str(name or "").strip()
+        if not target or target == "liked" or not title:
+            return False
+        records = self.repository.load_playlist_records()
+        if records.load_error or target in records.playlists:
+            return False
+        now_ms = max(0, int(created_at_ms or time.time() * 1000))
+        records.playlists[target] = {
+            "name": title,
+            "description": str(description or "").strip(),
+            "songs": [],
+            "remoteSongs": [],
+            "members": [],
+            "membershipVersion": PlaylistMembership.VERSION,
+            "fixed": False,
+            "created_at": now_ms,
+        }
+        self._save_playlists(records.playlists)
+        return True
+
+    def rename_playlist(self, playlist_id: str, name: str) -> bool:
+        """Rename an ordinary playlist while preserving its other fields."""
+
+        target = str(playlist_id or "").strip()
+        title = str(name or "").strip()
+        if not target or target == "liked" or not title:
+            return False
+        records = self.repository.load_playlist_records()
+        playlist = records.playlists.get(target)
+        if records.load_error or not isinstance(playlist, dict) or playlist.get("fixed"):
+            return False
+        playlist["name"] = title
+        self._save_playlists(records.playlists)
+        return True
+
+    def delete_playlist(self, playlist_id: str) -> bool:
+        """Delete an ordinary playlist without touching any track document."""
+
+        target = str(playlist_id or "").strip()
+        if not target or target == "liked":
+            return False
+        records = self.repository.load_playlist_records()
+        playlist = records.playlists.get(target)
+        if records.load_error or not isinstance(playlist, dict) or playlist.get("fixed"):
+            return False
+        del records.playlists[target]
+        self._save_playlists(records.playlists)
+        return True
+
+    def add_playlist_members(
+        self,
+        playlist_id: str,
+        members: Iterable[tuple[str, str]],
+    ) -> int:
+        """Persist local or remote members through the shared membership contract."""
+
+        return self._mutate_playlist_members(playlist_id, members, present=True)
+
+    def remove_playlist_members(
+        self,
+        playlist_id: str,
+        members: Iterable[tuple[str, str]],
+    ) -> int:
+        """Remove local or remote members without rewriting unknown fields."""
+
+        return self._mutate_playlist_members(playlist_id, members, present=False)
+
+    def _mutate_playlist_members(
+        self,
+        playlist_id: str,
+        members: Iterable[tuple[str, str]],
+        *,
+        present: bool,
+    ) -> int:
+        target = str(playlist_id or "").strip()
+        normalized = [
+            {
+                "kind": str(kind or "").strip(),
+                "id": str(identifier or "").strip(),
+            }
+            for kind, identifier in members
+            if str(kind or "").strip() and str(identifier or "").strip()
+        ]
+        if not target or not normalized:
+            return 0
+        records = self.repository.load_playlist_records()
+        playlist = records.playlists.get(target)
+        if records.load_error or not isinstance(playlist, dict):
+            return 0
+        if present:
+            result = PlaylistMembership.add_members(
+                playlist,
+                normalized,
+                LibraryRepository.normalize_song_path,
+                assume_normalized=True,
+            )
+        else:
+            result = PlaylistMembership.remove_members(
+                playlist,
+                normalized,
+                LibraryRepository.normalize_song_path,
+                assume_normalized=True,
+            )
+        changed = int(result.get("added", 0) or 0) if present else int(result.get("removed", 0) or 0)
+        if changed:
+            self._save_playlists(records.playlists)
+        return changed
 
     def _set_member(
         self,

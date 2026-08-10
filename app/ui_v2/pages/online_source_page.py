@@ -2,19 +2,22 @@
 
 from __future__ import annotations
 
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import QSize, Qt, Signal
 from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QScrollArea, QToolButton, QVBoxLayout, QWidget
 
 from app.ui_v2.adapters.online_source_adapter import OnlineSourceAdapter
 from app.ui_v2.models.online_source import OnlineSource
+from app.ui_v2.theme.icons import icon
 from app.ui_v2.theme.styles import build_stylesheet
 from app.ui_v2.theme.tokens import Theme
+from app.ui_v2.widgets.source_import_dialog import SourceImportDialog, SourceRemoveConfirmDialog
 from app.ui_v2.widgets.source_status_badge import SourceStatusBadge
 
 
 class SourceRow(QFrame):
     toggle_requested = Signal(str, bool)
     retry_requested = Signal()
+    remove_requested = Signal(str)
 
     def __init__(self, source: OnlineSource, theme: Theme, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -29,6 +32,9 @@ class SourceRow(QFrame):
         self.retry_button = QToolButton(self)
         self.retry_button.setText("重试")
         self.retry_button.clicked.connect(self.retry_requested)
+        self.remove_button = QToolButton(self)
+        self.remove_button.setText("移除")
+        self.remove_button.clicked.connect(lambda: self.remove_requested.emit(self.source_id))
         text = QVBoxLayout()
         text.setContentsMargins(0, 0, 0, 0)
         text.setSpacing(1)
@@ -42,6 +48,7 @@ class SourceRow(QFrame):
         layout.addWidget(self.badge)
         layout.addWidget(self.enabled_button)
         layout.addWidget(self.retry_button)
+        layout.addWidget(self.remove_button)
         self.set_source(source)
         self.set_theme(theme)
 
@@ -71,7 +78,7 @@ class SourceRow(QFrame):
         self.detail_label.setStyleSheet(f"font-size: {theme.fonts.caption}px; color: {theme.colors.secondary_text};")
         self.error_label.setStyleSheet(f"font-size: {theme.fonts.caption}px; color: {theme.colors.danger};")
         self.badge.set_theme(theme)
-        for button in (self.enabled_button, self.retry_button):
+        for button in (self.enabled_button, self.retry_button, self.remove_button):
             button.setStyleSheet(
                 f"QToolButton {{ min-height: {theme.metrics.control_height}px; padding: 0 {theme.metrics.spacing_sm}px; "
                 f"border: 0; border-radius: {theme.metrics.radius_sm}px; color: {theme.colors.secondary_text}; }}"
@@ -84,6 +91,7 @@ class SourceRow(QFrame):
 
 class OnlineSourcePage(QWidget):
     back_requested = Signal()
+    add_source_requested = Signal()
 
     def __init__(self, adapter: OnlineSourceAdapter, theme: Theme, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -95,6 +103,13 @@ class OnlineSourcePage(QWidget):
         self.back_button = QToolButton(self)
         self.back_button.setText("返回搜索")
         self.back_button.clicked.connect(self.back_requested)
+        self.add_source_button = QToolButton(self)
+        self.add_source_button.setText("添加来源")
+        self.add_source_button.setAccessibleName("添加在线来源")
+        self.add_source_button.setToolTip("通过 .js 或 .json URL 添加在线来源")
+        self.add_source_button.setIcon(icon("add", theme))
+        self.add_source_button.setIconSize(QSize(16, 16))
+        self.add_source_button.clicked.connect(self._open_import_dialog)
         self.select_all_button = QToolButton(self)
         self.select_all_button.setText("全选")
         self.select_all_button.clicked.connect(adapter.select_all)
@@ -105,6 +120,7 @@ class OnlineSourcePage(QWidget):
         header.setContentsMargins(0, 0, 0, 0)
         header.addWidget(self.title_label)
         header.addStretch(1)
+        header.addWidget(self.add_source_button)
         header.addWidget(self.select_all_button)
         header.addWidget(self.clear_button)
         header.addWidget(self.back_button)
@@ -144,10 +160,18 @@ class OnlineSourcePage(QWidget):
                 row = SourceRow(source, self._theme, self.content)
                 row.toggle_requested.connect(self.adapter.set_enabled)
                 row.retry_requested.connect(self.adapter.retry)
+                row.remove_requested.connect(self._confirm_remove)
                 self._rows[source.id] = row
                 self.content_layout.insertWidget(max(0, self.content_layout.count() - 1), row)
             else:
                 row.set_source(source)
+            row.remove_button.setVisible(self.adapter.importer is not None)
+        self.add_source_button.setEnabled(self.adapter.importer is not None)
+        self.add_source_button.setToolTip(
+            "通过 .js 或 .json URL 添加在线来源"
+            if self.adapter.importer is not None
+            else "正式运行模式可管理在线来源"
+        )
 
     def set_theme(self, theme: Theme) -> None:
         self._theme = theme
@@ -156,7 +180,12 @@ class OnlineSourcePage(QWidget):
             f"font-size: {theme.fonts.page_title}px; font-weight: 600; color: {theme.colors.primary_text};"
         )
         self.detail_label.setStyleSheet(f"color: {theme.colors.secondary_text};")
-        for button in (self.back_button, self.select_all_button, self.clear_button):
+        for button in (
+            self.add_source_button,
+            self.back_button,
+            self.select_all_button,
+            self.clear_button,
+        ):
             button.setStyleSheet(
                 f"QToolButton {{ min-height: {theme.metrics.control_height}px; padding: 0 {theme.metrics.spacing_sm}px; "
                 f"border: 0; border-radius: {theme.metrics.radius_sm}px; color: {theme.colors.secondary_text}; }}"
@@ -165,8 +194,29 @@ class OnlineSourcePage(QWidget):
         for row in self._rows.values():
             row.set_theme(theme)
 
+    def _open_import_dialog(self) -> None:
+        importer = self.adapter.importer
+        if importer is None:
+            return
+        dialog = SourceImportDialog(importer, self._theme, self)
+        dialog.exec()
+        dialog.deleteLater()
+
+    def _confirm_remove(self, source_id: str) -> None:
+        source = next(
+            (item for item in self.adapter.sources() if item.id == str(source_id or "")),
+            None,
+        )
+        if source is None:
+            return
+        dialog = SourceRemoveConfirmDialog(source.name, self._theme, self)
+        if dialog.exec() == dialog.DialogCode.Accepted:
+            self.adapter.remove(source.id)
+        dialog.deleteLater()
+
     def set_responsive_reference_width(self, width: int) -> None:
         compact = width < 950
         self.detail_label.setVisible(not compact)
+        self.add_source_button.setText("添加" if compact else "添加来源")
         self.select_all_button.setText("全选" if not compact else "全")
         self.clear_button.setText("清空" if not compact else "清")

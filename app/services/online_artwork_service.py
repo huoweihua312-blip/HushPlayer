@@ -47,15 +47,23 @@ class OnlineArtworkService(QObject):
                 self.failed.emit(generation, track_key, "没有可用的在线封面")
                 continue
             digest = hashlib.sha256(url.toString().encode("utf-8")).hexdigest()
-            cache_path = self.cache_dir / f"{digest}.img"
-            if cache_path.is_file():
+            cache_path = self.cache_dir / "online" / f"{digest}.img"
+            cache_candidates = (
+                cache_path,
+                self.cache_dir / f"{digest}.img",
+            )
+            cache_hit = False
+            for candidate in cache_candidates:
                 try:
-                    data = cache_path.read_bytes()
+                    data = candidate.read_bytes() if candidate.is_file() else b""
                 except OSError:
                     data = b""
                 if data and not QImage.fromData(data).isNull():
                     self.imageReady.emit(generation, track_key, data)
-                    continue
+                    cache_hit = True
+                    break
+            if cache_hit:
+                continue
             request = QNetworkRequest(url)
             request.setRawHeader(
                 b"User-Agent",

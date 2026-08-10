@@ -27,6 +27,7 @@ from app.ui_v2.adapters.legacy_settings_bridge import (
     DEFAULT_SETTINGS,
     LegacySettingsBridge,
     SettingsBridgeError,
+    normalize_immersive_background_visual_mode,
 )
 from app.core.version import APP_NAME, APP_VERSION
 from app.ui_v2.models.settings_category import SETTINGS_CATEGORIES, category_for_key
@@ -348,7 +349,7 @@ class SettingsOverlay(QWidget):
         layout.addWidget(picker)
         path_control = _PathControl(container, picker)
         self._path_controls[key] = path_control
-        picker.path_changed.connect(lambda value, path=key: self._value_changed(path, value))
+        picker.path_changed.connect(lambda value, path=key: self._path_value_changed(path, value))
         picker.browse_requested.connect(lambda path=key: self._choose_path(path))
         picker.open_requested.connect(lambda path=key: self._open_path(path))
         self._controls[key] = container
@@ -487,6 +488,11 @@ class SettingsOverlay(QWidget):
         if key == "update_check_delay_seconds":
             value = int(value)
         changed = self._session.set(key, value)
+        if changed and key == "immersive_background_mode":
+            self._session.set(
+                "immersive_background_visual_mode",
+                normalize_immersive_background_visual_mode(None, value),
+            )
         if changed and key == "appearance_mode" and self._preview_callback is not None:
             self._session.mark_previewed(key)
             self._preview_callback(self._session.working_snapshot.to_dict())
@@ -523,7 +529,8 @@ class SettingsOverlay(QWidget):
             selected = QFileDialog.getOpenFileName(self, "选择背景图片", str(Path.home()))[0]
         if selected:
             self._path_controls[key].picker.set_path(selected)
-            self._value_changed(key, selected)
+            if key == "immersive_background_custom_path":
+                self._set_immersive_background_mode("custom")
 
     def _open_path(self, key: str) -> None:
         path = self._path_controls[key].picker.path()
@@ -631,10 +638,27 @@ class SettingsOverlay(QWidget):
         self.set_category("general")
         self._sync_controls()
         self._refresh_state()
-        self.sync_geometry(self.parentWidget().rect() if self.parentWidget() is not None else None)
+        parent = self.parentWidget()
+        self.sync_geometry(parent.rect() if parent is not None else None)
         self.show()
         self.raise_()
         self.setFocus(Qt.FocusReason.OtherFocusReason)
+
+    def _path_value_changed(self, key: str, value: str) -> None:
+        self._value_changed(key, value)
+        if key == "immersive_background_custom_path" and not str(value or "").strip():
+            self._set_immersive_background_mode("cover")
+
+    def _set_immersive_background_mode(self, value: str) -> None:
+        control = self._controls.get("immersive_background_mode")
+        if not isinstance(control, ThemedComboBox):
+            return
+        index = control.findData(value)
+        if index < 0:
+            return
+        with QSignalBlocker(control):
+            control.setCurrentIndex(index)
+        self._value_changed("immersive_background_mode", value)
 
     def request_close(self) -> None:
         if self.is_dirty:

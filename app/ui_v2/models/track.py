@@ -2,8 +2,47 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
+
+
+_ARTWORK_URL_KEYS = (
+    "artwork_url",
+    "artworkUrl",
+    "cover_url",
+    "coverUrl",
+    "artwork",
+    "cover",
+    "picUrl",
+    "pic_url",
+    "pic",
+    "imageUrl",
+    "image_url",
+    "image",
+)
+
+
+def artwork_url_from_payload(payload: dict | None) -> str:
+    """Extract a real artwork URL without treating provider keys as images."""
+
+    if not isinstance(payload, dict):
+        return ""
+    candidates: list[dict] = [payload]
+    for key in ("metadata", "data", "item", "raw", "provider_data"):
+        nested = payload.get(key)
+        if isinstance(nested, dict):
+            candidates.append(nested)
+            if isinstance(nested.get("data"), dict):
+                candidates.append(nested["data"])
+    for candidate in candidates:
+        for key in _ARTWORK_URL_KEYS:
+            value = candidate.get(key)
+            if isinstance(value, dict):
+                value = value.get("url") or value.get("src") or value.get("href")
+            text = str(value or "").strip()
+            if text.startswith(("http://", "https://", "file://", "data:image/")):
+                return text
+    return ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -29,6 +68,11 @@ class Track:
     availability: str = "available"
     local_path: str = ""
     remote_identity: str = ""
+    remote_track_id: str = ""
+    remote_payload: dict = field(default_factory=dict)
+    availability_detail: str = ""
+    artwork_url: str = ""
+    artwork_data: bytes = b""
 
     @property
     def stable_id(self) -> str:

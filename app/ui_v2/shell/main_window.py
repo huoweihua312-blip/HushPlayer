@@ -2,14 +2,32 @@
 
 from __future__ import annotations
 
+import ctypes
+from dataclasses import replace
 from enum import Enum
 import os
 from pathlib import Path
 import tempfile
 
-from PySide6.QtCore import QEvent, QPoint, QRect, Qt, QTimer
-from PySide6.QtGui import QColor, QGuiApplication, QKeySequence, QMouseEvent, QPalette, QShortcut
-from PySide6.QtWidgets import QApplication, QHBoxLayout, QMainWindow, QVBoxLayout, QWidget
+from PySide6.QtCore import QEvent, QPoint, QRect, QRectF, Qt, QTimer
+from PySide6.QtGui import (
+    QColor,
+    QGuiApplication,
+    QKeySequence,
+    QMouseEvent,
+    QPainterPath,
+    QPalette,
+    QRegion,
+    QShortcut,
+)
+from PySide6.QtWidgets import (
+    QAbstractSlider,
+    QApplication,
+    QHBoxLayout,
+    QMainWindow,
+    QVBoxLayout,
+    QWidget,
+)
 
 from app.core.app_paths import AppPaths
 from app.services.library_repository import LibraryRepository
@@ -26,11 +44,15 @@ from app.ui_v2.adapters.real_library_adapter import (
     RealLibraryAdapter,
     ui_v2_data_mode,
 )
-from app.ui_v2.adapters.legacy_settings_bridge import LegacySettingsBridge
+from app.ui_v2.adapters.legacy_settings_bridge import (
+    LegacySettingsBridge,
+    normalize_immersive_background_visual_mode,
+)
 from app.ui_v2.mock.track_factory import create_mock_tracks
 from app.ui_v2.pages.all_songs_page import AllSongsPage
 from app.ui_v2.models.immersive_lyrics_options import ImmersiveLyricsOptions
 from app.ui_v2.models.settings_snapshot import SettingsSnapshot
+from app.ui_v2.models.track import artwork_url_from_payload
 from app.ui_v2.shell.content_router import ContentRouter
 from app.ui_v2.shell.navigation_sidebar import NavigationSidebar
 from app.ui_v2.shell.player_bar import PlayerBar
@@ -38,6 +60,11 @@ from app.ui_v2.widgets.custom_title_bar import CustomTitleBar
 from app.ui_v2.widgets.settings_overlay import SettingsOverlay
 from app.ui_v2.theme.styles import build_application_palette, build_stylesheet
 from app.ui_v2.theme.tokens import Theme, get_theme
+
+
+_DWMWA_WINDOW_CORNER_PREFERENCE = 33
+_DWMWCP_DEFAULT = 0
+_DWMWCP_ROUND = 2
 
 
 class ShellPresentationMode(str, Enum):
@@ -57,6 +84,8 @@ def _resolve_data_mode(value: str | None) -> str:
 
 class MainWindow(QMainWindow):
     """Composes cached V2 pages around one mock or read-only library source."""
+
+    _WINDOW_CORNER_RADIUS = 16
 
     def __init__(
         self,
@@ -149,6 +178,11 @@ class MainWindow(QMainWindow):
             seed_mock=not is_real_library,
             read_only=is_real_library,
         )
+        if self.online_discovery is not None:
+            # Playlist CRUD writes through the one bridge that already owns
+            # the formal playlists.json contract; the library projection stays
+            # read-only and keeps its existing playback semantics.
+            self.playlist_adapter.set_mutation_backend(self.online_discovery.bridge)
         self.online_adapter = OnlineAdapter(
             self.library_collection,
             self.playlist_adapter,
@@ -164,7 +198,32 @@ class MainWindow(QMainWindow):
         self.playback_adapter = playback_adapter or PlaybackAdapter(self)
         if playback_adapter is not None and playback_adapter.parent() is None:
             playback_adapter.setParent(self)
-        self.lyrics_adapter = lyrics_adapter or LyricsAdapter(self)
+        if self.online_discovery is not None and self.playback_adapter.controller is not None:
+            self.playback_adapter.controller.set_online_resolver(
+                self.online_discovery.playback_resolver
+            )
+            self.playback_adapter.controller.set_online_audio_cache(
+                self.online_discovery.online_audio_cache,
+                cache_allowed=self.online_discovery.online_source_allows_audio_cache,
+            )
+        self.lyrics_adapter = lyrics_adapter or LyricsAdapter(
+            self,
+            lyrics_service=(
+                self.online_discovery.lyrics_service
+                if is_real_library and self.online_discovery is not None
+                else None
+            ),
+            lyrics_cache_dir=(
+                self.online_discovery.paths.cache_dir / "lyrics"
+                if is_real_library and self.online_discovery is not None
+                else None
+            ),
+            lyrics_bindings_path=(
+                self.online_discovery.paths.data_dir / "lyrics_bindings.json"
+                if is_real_library and self.online_discovery is not None
+                else None
+            ),
+        )
         if lyrics_adapter is not None and lyrics_adapter.parent() is None:
             lyrics_adapter.setParent(self)
         self.immersive_lyrics_options = ImmersiveLyricsOptions(theme=self._theme.mode)
@@ -216,6 +275,7 @@ class MainWindow(QMainWindow):
         self.setMinimumSize(900, 600)
         self.resize(1200, 800)
         self.set_theme(self._theme.mode)
+        self._update_window_shape()
         if self.real_library_adapter is not None:
             self.real_library_adapter.state_changed.connect(self._on_real_library_state)
             self.real_library_adapter.data_loaded.connect(self._on_real_library_loaded)
@@ -303,6 +363,48 @@ class MainWindow(QMainWindow):
         if self.settings_overlay is not None:
             self.settings_overlay.set_responsive_reference_width(self.width())
             self.settings_overlay.sync_geometry(self.body.rect())
+        self._update_window_shape()
+
+    def _update_window_shape(self) -> None:
+        """Clip the normal window to a rounded shell while preserving full-screen geometry."""
+
+        if QGuiApplication.platformName().lower() in {"offscreen", "minimal"}:
+            return
+        rounded = not self.isMaximized() and not self.isFullScreen()
+        if self.width() <= 0 or self.height() <= 0:
+            return
+        if self._set_windows_corner_preference(rounded):
+            self.clearMask()
+            return
+        if not rounded:
+            self.clearMask()
+            return
+        path = QPainterPath()
+        path.addRoundedRect(
+            QRectF(self.rect()),
+            self._WINDOW_CORNER_RADIUS,
+            self._WINDOW_CORNER_RADIUS,
+        )
+        self.setMask(QRegion(path.toFillPolygon().toPolygon()))
+
+    def _set_windows_corner_preference(self, rounded: bool) -> bool:
+        """Ask Windows 11/DWM for an antialiased corner treatment when available."""
+
+        if os.name != "nt":
+            return False
+        try:
+            preference = ctypes.c_int(
+                _DWMWCP_ROUND if rounded else _DWMWCP_DEFAULT
+            )
+            result = ctypes.windll.dwmapi.DwmSetWindowAttribute(
+                int(self.winId()),
+                _DWMWA_WINDOW_CORNER_PREFERENCE,
+                ctypes.byref(preference),
+                ctypes.sizeof(preference),
+            )
+        except (AttributeError, OSError, TypeError, ValueError):
+            return False
+        return int(result) == 0
 
     def closeEvent(self, event) -> None:  # noqa: N802
         QApplication.instance().removeEventFilter(self)
@@ -310,6 +412,9 @@ class MainWindow(QMainWindow):
             self.settings_overlay.cancel_and_close()
         if self.real_library_adapter is not None:
             self.real_library_adapter.shutdown()
+        browse_page = getattr(self.router, "browse_page", None)
+        if browse_page is not None and hasattr(browse_page, "shutdown"):
+            browse_page.shutdown()
         self.online_adapter.shutdown()
         if self.online_discovery is not None:
             self.online_discovery.shutdown()
@@ -324,6 +429,8 @@ class MainWindow(QMainWindow):
     def eventFilter(self, watched, event) -> bool:  # noqa: N802
         """Provide native-feeling edge resizing for the frameless approved shell."""
 
+        if event.type() == QEvent.Type.KeyPress and self._handle_immersive_key_event(event):
+            return True
         if not isinstance(event, QMouseEvent) or self.isMaximized() or self.isFullScreen():
             return super().eventFilter(watched, event)
         if not isinstance(watched, QWidget) or watched.window() is not self:
@@ -348,6 +455,48 @@ class MainWindow(QMainWindow):
             event.accept()
             return True
         return super().eventFilter(watched, event)
+
+    def _handle_immersive_key_event(self, event) -> bool:
+        """Handle unmodified immersive controls only while this window is foreground."""
+
+        if self._presentation_mode is ShellPresentationMode.NORMAL:
+            return False
+        application = QApplication.instance()
+        if application is None:
+            return False
+        platform = QGuiApplication.platformName().lower()
+        if platform not in {"offscreen", "minimal"}:
+            if not self.isActiveWindow() or application.activeWindow() is not self:
+                return False
+        if event.modifiers() != Qt.KeyboardModifier.NoModifier:
+            return False
+        page = self.router._pages.get("immersive_lyrics")
+        if page is None:
+            return False
+        key = event.key()
+        if key == Qt.Key.Key_Escape:
+            page.handle_escape()
+            event.accept()
+            return True
+        if page.settings_panel.isVisible() or page.queue_panel.isVisible():
+            return False
+        if isinstance(application.focusWidget(), QAbstractSlider):
+            return False
+        if key == Qt.Key.Key_Space:
+            self.playback_adapter.toggle_playback()
+        elif key in (Qt.Key.Key_Up, Qt.Key.Key_Down):
+            delta = 5 if key == Qt.Key.Key_Up else -5
+            self.playback_adapter.set_volume(
+                self.playback_adapter.state.volume + delta
+            )
+        elif key in (Qt.Key.Key_Left, Qt.Key.Key_Right):
+            delta = -5_000 if key == Qt.Key.Key_Left else 5_000
+            state = self.playback_adapter.state
+            self.playback_adapter.seek(state.position_ms + delta)
+        else:
+            return False
+        event.accept()
+        return True
 
     def _resize_edges_for(self, global_position: QPoint) -> Qt.Edge:
         frame = self.frameGeometry()
@@ -436,11 +585,30 @@ class MainWindow(QMainWindow):
     def _connect_state(self) -> None:
         self.library_page.theme_changed.connect(self.set_theme)
         self.title_bar.search_text_changed.connect(self.router.set_global_query)
+        self.title_bar.search_submitted.connect(self._submit_global_query)
+        self.title_bar.back_requested.connect(self.navigation_adapter.go_back)
+        self.title_bar.forward_requested.connect(self.navigation_adapter.go_forward)
         self.title_bar.settings_requested.connect(self.open_settings_overlay)
         self.title_bar.theme_toggle_requested.connect(self.toggle_theme)
         self.sidebar.settings_requested.connect(self.open_settings_overlay)
         self.settings_shortcut = QShortcut(QKeySequence("Ctrl+,"), self)
         self.settings_shortcut.activated.connect(self.open_settings_overlay)
+        self.previous_track_shortcut = QShortcut(QKeySequence("Ctrl+Alt+Left"), self)
+        self.previous_track_shortcut.setContext(Qt.ShortcutContext.WindowShortcut)
+        self.previous_track_shortcut.activated.connect(self.playback_adapter.play_previous)
+        self.play_pause_shortcut = QShortcut(QKeySequence("Ctrl+Alt+Space"), self)
+        self.play_pause_shortcut.setContext(Qt.ShortcutContext.WindowShortcut)
+        self.play_pause_shortcut.activated.connect(self.playback_adapter.toggle_playback)
+        self.next_track_shortcut = QShortcut(QKeySequence("Ctrl+Alt+Right"), self)
+        self.next_track_shortcut.setContext(Qt.ShortcutContext.WindowShortcut)
+        self.next_track_shortcut.activated.connect(self.playback_adapter.play_next)
+        self.navigation_adapter.history_changed.connect(
+            self.title_bar.set_navigation_state
+        )
+        self.title_bar.set_navigation_state(
+            self.navigation_adapter.can_go_back,
+            self.navigation_adapter.can_go_forward,
+        )
         self.router.track_play_requested.connect(self._play_tracks)
         self.router.queue_requested.connect(self._play_queue)
         self.router.online_play_requested.connect(self._play_online_track)
@@ -453,16 +621,56 @@ class MainWindow(QMainWindow):
         self.navigation_adapter.route_changed.connect(self._sync_immersive_shell)
         self.playback_adapter.track_changed.connect(self._on_playback_track_changed)
         self.playback_adapter.playing_changed.connect(self.router.set_playback_state)
-        self.playback_adapter.track_changed.connect(self.lyrics_adapter.set_track)
+        self.playback_adapter.playback_status_changed.connect(
+            self.lyrics_adapter.set_playback_status
+        )
+        self.playback_adapter.remote_track_state_changed.connect(
+            self._on_remote_track_state_changed
+        )
+        self.playback_adapter.duration_changed.connect(
+            self._on_playback_duration_changed
+        )
+        # Lyrics parsing and online lyric requests must not delay the media
+        # switch during previous/next.  Let the controller start the new
+        # source first, then refresh the shared lyric surface in the event loop.
+        self.playback_adapter.track_changed.connect(
+            self.lyrics_adapter.set_track,
+            (
+                Qt.ConnectionType.DirectConnection
+                if self.data_mode == "mock"
+                else Qt.ConnectionType.QueuedConnection
+            ),
+        )
         self.playback_adapter.position_changed.connect(self.lyrics_adapter.set_position)
         self.lyrics_adapter.set_track(self.playback_adapter.state.current_track)
+        self.lyrics_adapter.set_playback_status(
+            self.playback_adapter.state.status,
+            self.playback_adapter.state.status_detail,
+        )
         self.lyrics_adapter.seek_requested.connect(self.playback_adapter.seek)
         self.player_bar.mock_action_requested.connect(self._on_player_bar_action)
         self.player_bar.track_open_requested.connect(self._open_now_playing)
         self.library_collection.track_updated.connect(self.playback_adapter.update_track)
+        if self.online_adapter.is_formal:
+            self.online_adapter.track_updated.connect(self.playback_adapter.update_track)
+        if self.online_discovery is not None:
+            self.online_discovery.artwork_service.imageReady.connect(
+                self._on_online_artwork_ready
+            )
         self.library_collection.favorite_changed.connect(self._sync_favorite_from_library)
         self.playback_adapter.favorite_changed.connect(self._sync_favorite_from_player)
         self._sync_immersive_shell(self.navigation_adapter.route)
+
+    def _submit_global_query(self, text: str) -> None:
+        """Submit the shell query through the one online-search route."""
+
+        query = str(text or "").strip()
+        if not query:
+            return
+        if self.navigation_adapter.route != "online_search":
+            self.navigation_adapter.set_route("online_search")
+        self.router.set_global_query(query)
+        self.online_adapter.search()
 
     def open_settings_overlay(self) -> None:
         """Show the one cached Settings surface without changing the route."""
@@ -498,12 +706,10 @@ class MainWindow(QMainWindow):
         self.immersive_lyrics_options.theme = (
             "light" if resolved_appearance == "light" else "dark"
         )
-        background = {
-            "cover": "artwork",
-            "default": "solid",
-            "translucent": "transparent",
-            "custom": "artwork",
-        }.get(str(values.get("immersive_background_mode", "cover")), "artwork")
+        background = normalize_immersive_background_visual_mode(
+            values.get("immersive_background_visual_mode"),
+            values.get("immersive_background_mode", "cover"),
+        )
         self.immersive_lyrics_options.background_mode = background
         self.immersive_lyrics_options.controls_auto_hide = bool(
             values.get("immersive_auto_hide_ui", True)
@@ -669,9 +875,14 @@ class MainWindow(QMainWindow):
             self.setGeometry(geometry)
             self.raise_()
             self.activateWindow()
+        self._update_window_shape()
 
     def _apply_root_stylesheet(self) -> None:
         stylesheet = build_stylesheet(self._theme)
+        stylesheet += (
+            f"\nQWidget#uiV2Root {{ border: 1px solid {self._theme.colors.divider}; "
+            f"border-radius: {self._WINDOW_CORNER_RADIUS}px; }}\n"
+        )
         if self._immersive_transparency_enabled and self._immersive_transparency_supported:
             stylesheet += (
                 "\nQWidget#uiV2Root, QWidget#uiV2Body, QWidget#uiV2ContentContainer, "
@@ -680,14 +891,24 @@ class MainWindow(QMainWindow):
         self.root.setStyleSheet(stylesheet)
 
     def _play_tracks(self, tracks, track_id: str) -> None:
-        available = tuple(track for track in tracks if not track.is_missing)
+        allow_remote = self.playback_adapter.has_real_backend
+        available = tuple(
+            track
+            for track in tracks
+            if not track.is_missing or (allow_remote and track.is_online)
+        )
         if not available:
             return
         self.playback_adapter.set_queue(available)
         self.playback_adapter.play_track(track_id)
 
     def _play_queue(self, tracks, shuffle: bool) -> None:
-        available = tuple(track for track in tracks if not track.is_missing)
+        allow_remote = self.playback_adapter.has_real_backend
+        available = tuple(
+            track
+            for track in tracks
+            if not track.is_missing or (allow_remote and track.is_online)
+        )
         if not available:
             return
         self.playback_adapter.set_queue(available)
@@ -696,12 +917,12 @@ class MainWindow(QMainWindow):
         self.playback_adapter.play_track(available[0].id)
 
     def _play_online_track(self, track) -> None:
-        if self.data_mode == "real" and getattr(track, "is_online", False):
-            self.playback_adapter.error_occurred.emit(
-                "Online playback is not available in this version."
-            )
-            return
-        self.playback_adapter.set_queue((track,))
+        # The next play_item call replaces the old media synchronously. Keep
+        # the new queue alive long enough for that call to reach the controller.
+        self.playback_adapter.set_queue(
+            (track,),
+            preserve_current_context=True,
+        )
         self.playback_adapter.play_track(track.id)
 
     def _on_playback_track_changed(self, track) -> None:
@@ -710,6 +931,35 @@ class MainWindow(QMainWindow):
         self.router.set_playing_track(track_id)
         if track is not None:
             self.library_collection.record_play(track.id)
+
+    def _on_remote_track_state_changed(
+        self,
+        identity: str,
+        state: str,
+        detail: str,
+        payload: object,
+    ) -> None:
+        self.online_adapter.apply_remote_state(
+            identity,
+            state,
+            detail,
+            payload if isinstance(payload, dict) else {},
+        )
+
+    def _on_playback_duration_changed(self, duration_ms: int | None) -> None:
+        if duration_ms is None or int(duration_ms) <= 0:
+            return
+        current = self.playback_adapter.state.current_track
+        if (
+            self.online_adapter.is_formal
+            and current is not None
+            and current.is_online
+            and current.stable_identity
+        ):
+            self.online_adapter.update_remote_duration(
+                current.stable_identity,
+                int(duration_ms),
+            )
 
     def _sync_favorite_from_library(self, track_id: str, favorite: bool) -> None:
         current = self.playback_adapter.state.current_track
@@ -742,9 +992,46 @@ class MainWindow(QMainWindow):
         """Refresh the local playback projection after the read-only snapshot arrives."""
 
         self.playback_adapter.set_queue(self.library_collection.tracks())
+        self._request_loaded_remote_artwork()
         self.library_page.set_playback_enabled(
             self.playback_adapter.has_real_backend
         )
+
+    def _request_loaded_remote_artwork(self) -> None:
+        """Warm artwork for persisted remote tracks before they reach player surfaces."""
+
+        if self.online_discovery is None:
+            return
+        requests: list[tuple[str, str]] = []
+        for track in self.library_collection.tracks():
+            if not track.is_online:
+                continue
+            artwork_url = track.artwork_url or artwork_url_from_payload(track.remote_payload)
+            if artwork_url:
+                requests.append((track.stable_identity, artwork_url))
+        if requests:
+            self.online_discovery.artwork_service.request_many(requests[:32])
+
+    def _on_online_artwork_ready(self, _generation: int, track_key: str, data: bytes) -> None:
+        """Apply one fetched cover to every existing projection of its stable track."""
+
+        identity = str(track_key or "")
+        artwork = bytes(data or b"")
+        if not identity or not artwork:
+            return
+        for track in self.library_collection.tracks():
+            identities = {
+                track.id,
+                track.stable_identity,
+                track.remote_identity,
+                track.remote_track_id,
+            }
+            if not track.is_online or identity not in identities:
+                continue
+            updated = replace(track, artwork_data=artwork)
+            self.library_collection.update_runtime_track(updated)
+            self.playback_adapter.update_track(updated)
+            break
 
     def _on_player_bar_action(self, action: str) -> None:
         if action == "lyrics":

@@ -3,13 +3,15 @@
 from __future__ import annotations
 
 from hashlib import sha256
+from pathlib import Path
 
 from PySide6.QtCore import QPointF, QRect, QRectF, Qt
-from PySide6.QtGui import QColor, QLinearGradient, QPainter, QPainterPath, QPen, QRadialGradient
+from PySide6.QtGui import QColor, QImage, QLinearGradient, QPainter, QPainterPath, QPen, QRadialGradient
 from PySide6.QtWidgets import QSizePolicy, QWidget
 
 from app.ui_v2.models.track import Track
 from app.ui_v2.theme.tokens import Theme
+from app.ui_v2.widgets.artwork_thumbnail import artwork_pixmap_for_track
 
 
 def _color(value: str, alpha: int = 255) -> QColor:
@@ -50,6 +52,7 @@ class AbstractArtwork(QWidget):
         super().__init__(parent)
         self._theme = theme
         self._palette = ArtworkPalette()
+        self._track: Track | None = None
         self.setObjectName("immersiveArtwork")
         self.setToolTip("当前歌曲封面")
         self.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
@@ -60,6 +63,7 @@ class AbstractArtwork(QWidget):
         return self._palette.colors[0]
 
     def set_track(self, track: Track | None) -> None:
+        self._track = track
         key = track.stable_identity if track is not None else "hushplayer"
         self._palette = ArtworkPalette(key)
         self.setToolTip(track.title if track is not None else "当前歌曲封面")
@@ -71,8 +75,19 @@ class AbstractArtwork(QWidget):
 
     def paintEvent(self, event) -> None:  # noqa: N802
         painter = QPainter(self)
-        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        painter.setRenderHints(
+            QPainter.RenderHint.Antialiasing
+            | QPainter.RenderHint.SmoothPixmapTransform
+        )
         rect = QRectF(self.rect()).adjusted(1, 1, -1, -1)
+        pixmap = artwork_pixmap_for_track(self._track, max(1, int(rect.width())), max(1, int(rect.height())))
+        if not pixmap.isNull():
+            clip = QPainterPath()
+            clip.addRoundedRect(rect, 10, 10)
+            painter.setClipPath(clip)
+            painter.drawPixmap(rect.toRect(), pixmap)
+            painter.end()
+            return
         colors = self._palette.colors
         gradient = QLinearGradient(rect.topLeft(), rect.bottomRight())
         gradient.setColorAt(0.0, QColor(colors[0]))
@@ -116,6 +131,8 @@ class ArtworkAtmosphere(QWidget):
         self._overlay_strength = 52
         self._blur_radius = 40
         self._transparency = 38
+        self._custom_path = ""
+        self._custom_image = QImage()
         self.setObjectName("immersiveArtworkAtmosphere")
         self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
 
@@ -141,8 +158,29 @@ class ArtworkAtmosphere(QWidget):
         self.update()
 
     def set_mode(self, mode: str) -> None:
-        self._mode = mode if mode in {"artwork", "gradient", "solid", "transparent"} else "artwork"
+        self._mode = mode if mode in {"artwork", "gradient", "solid", "transparent", "custom"} else "artwork"
         self.update()
+
+    def set_custom_path(self, value: str) -> None:
+        path_text = str(value or "").strip()
+        if path_text == self._custom_path:
+            return
+        self._custom_path = path_text
+        self._custom_image = QImage()
+        if path_text:
+            try:
+                candidate = Path(path_text).expanduser()
+                if candidate.is_file():
+                    image = QImage(str(candidate))
+                    if not image.isNull():
+                        self._custom_image = image
+            except OSError:
+                pass
+        self.update()
+
+    @property
+    def custom_image_available(self) -> bool:
+        return not self._custom_image.isNull()
 
     def set_opacity(self, value: int) -> None:
         self._opacity = max(0, min(100, int(value)))
@@ -164,7 +202,9 @@ class ArtworkAtmosphere(QWidget):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         colors = self._palette.colors
-        if self._mode == "transparent":
+        if self._mode == "custom" and not self._custom_image.isNull():
+            self._paint_custom_image(painter)
+        elif self._mode == "transparent":
             painter.fillRect(
                 self.rect(),
                 _color(
@@ -178,7 +218,7 @@ class ArtworkAtmosphere(QWidget):
             base_left = "#111b28" if self._theme.mode == "dark" else "#e8f4f6"
             base_right = "#1c2b38" if self._theme.mode == "dark" else "#f5ece8"
             field = QLinearGradient(0, 0, self.width(), self.height())
-            palette_mix = max(0.12, (0.40 if self._mode == "artwork" else 0.30) - self._blur_radius / 300.0)
+            palette_mix = max(0.12, (0.40 if self._mode in {"artwork", "custom"} else 0.30) - self._blur_radius / 300.0)
             field.setColorAt(0.0, _mix(base_left, colors[0], palette_mix))
             field.setColorAt(0.53, _mix(base_right, colors[1], max(0.10, palette_mix * 0.85)))
             field.setColorAt(1.0, _mix(base_left, colors[2], max(0.10, palette_mix * 0.75)))
@@ -196,6 +236,33 @@ class ArtworkAtmosphere(QWidget):
             painter.setPen(Qt.PenStyle.NoPen)
             painter.setBrush(glow)
             painter.drawEllipse(QRectF(center.x() - radius, center.y() - radius, radius * 2, radius * 2))
+
+    def _paint_custom_image(self, painter: QPainter) -> None:
+        rect = self.rect()
+        if rect.isEmpty() or self._custom_image.isNull():
+            return
+        scaled = self._custom_image.scaled(
+            rect.size(),
+            Qt.AspectRatioMode.KeepAspectRatioByExpanding,
+            Qt.TransformationMode.SmoothTransformation,
+        )
+        source = QRect(
+            max(0, (scaled.width() - rect.width()) // 2),
+            max(0, (scaled.height() - rect.height()) // 2),
+            min(rect.width(), scaled.width()),
+            min(rect.height(), scaled.height()),
+        )
+        base = "#111b28" if self._theme.mode == "dark" else "#e8f4f6"
+        painter.fillRect(rect, QColor(base))
+        painter.setOpacity(max(0.0, min(1.0, self._opacity / 100.0)))
+        painter.drawImage(rect, scaled, source)
+        painter.setOpacity(1.0)
+        darkness = max(0.0, min(1.0, self._overlay_strength / 100.0))
+        transparency = max(0.15, 1.0 - self._transparency / 125.0)
+        overlay_alpha = round(165 * darkness * transparency)
+        if overlay_alpha:
+            surface = "#081018" if self._theme.mode == "dark" else "#fffaf3"
+            painter.fillRect(rect, _color(surface, overlay_alpha))
 
 
 class ReadabilityOverlay(QWidget):

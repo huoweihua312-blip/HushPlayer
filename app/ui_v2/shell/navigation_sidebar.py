@@ -10,7 +10,7 @@ from PySide6.QtGui import QColor, QIcon, QPalette, QPixmap
 from PySide6.QtWidgets import (
     QFrame,
     QHBoxLayout,
-    QInputDialog,
+    QDialog,
     QLabel,
     QMenu,
     QScrollArea,
@@ -24,6 +24,8 @@ from app.ui_v2.models.navigation_item import NavigationItem as NavigationValue
 from app.ui_v2.theme.icons import icon
 from app.ui_v2.theme.tokens import Theme
 from app.ui_v2.widgets.navigation_item import NavigationItem
+from app.ui_v2.widgets.playlist_dialogs import PlaylistConfirmDialog, PlaylistNameDialog
+from app.ui_v2.widgets.quiet_context_menu import apply_menu_theme
 
 
 _PLAYLIST_COVER_DIR = Path(__file__).resolve().parent.parent / "assets" / "sidebar_playlist_covers"
@@ -35,6 +37,7 @@ class NavigationSidebar(QFrame):
     """Persistent 220px navigation rail with one contained playlist scroller."""
 
     more_playlists_requested = Signal()
+    new_playlist_requested = Signal()
     settings_requested = Signal()
 
     def __init__(
@@ -68,27 +71,49 @@ class NavigationSidebar(QFrame):
         brand_layout.addWidget(self.brand_mark)
         brand_layout.addWidget(self.brand_label)
         brand_layout.addStretch(1)
+        # Keep the historical public brand handles for integrations and tests,
+        # but render the visible lockup in the aligned TopBar column.
+        self.brand.setVisible(False)
 
         self.primary_section = QWidget(self)
         self.primary_section.setObjectName("navigationPrimarySection")
         self.library_box = self.primary_section  # Compatibility handle for existing shell tests.
         primary_layout = QVBoxLayout(self.primary_section)
-        primary_layout.setContentsMargins(18, 0, 14, 0)
+        primary_layout.setContentsMargins(18, 20, 14, 0)
         primary_layout.setSpacing(0)
         self.library_caption = self._caption("资料库", self.primary_section)
         self.library_caption.setFixedHeight(29)
         primary_layout.addWidget(self.library_caption)
         self._add_static_item("library", primary_layout, 42)
         self._add_static_item("browse", primary_layout, 42)
+        if any(item.route_id == "online_search" for item in adapter.items()):
+            self._add_static_item("online_search", primary_layout, 42)
 
         self.playlist_section = QWidget(self)
         self.playlist_section.setObjectName("navigationPlaylistSection")
         playlist_outer = QVBoxLayout(self.playlist_section)
         playlist_outer.setContentsMargins(18, 20, 14, 0)
         playlist_outer.setSpacing(5)
-        self.playlist_caption = self._caption("歌单", self.playlist_section)
+        self.playlist_caption_row = QWidget(self.playlist_section)
+        self.playlist_caption_row.setObjectName("playlistCaptionRow")
+        caption_layout = QHBoxLayout(self.playlist_caption_row)
+        caption_layout.setContentsMargins(0, 0, 0, 0)
+        caption_layout.setSpacing(4)
+        self.playlist_caption = self._caption("歌单", self.playlist_caption_row)
         self.playlist_caption.setFixedHeight(25)
-        playlist_outer.addWidget(self.playlist_caption)
+        caption_layout.addWidget(self.playlist_caption)
+        caption_layout.addStretch(1)
+        self.playlist_add_button = QToolButton(self.playlist_caption_row)
+        self.playlist_add_button.setObjectName("playlistAddButton")
+        self.playlist_add_button.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonIconOnly)
+        self.playlist_add_button.setFixedSize(26, 26)
+        self.playlist_add_button.setToolTip("新建歌单")
+        self.playlist_add_button.setAccessibleName("新建歌单")
+        self.playlist_add_button.setVisible(adapter.playlist_adapter.can_mutate)
+        self.playlist_add_button.clicked.connect(self.new_playlist_requested)
+        self.playlist_add_button.clicked.connect(self._open_create_playlist_dialog)
+        caption_layout.addWidget(self.playlist_add_button)
+        playlist_outer.addWidget(self.playlist_caption_row)
         self.scroll_area = QScrollArea(self.playlist_section)
         self.scroll_area.setObjectName("navigationScrollArea")
         self.scroll_area.setWidgetResizable(True)
@@ -103,6 +128,8 @@ class NavigationSidebar(QFrame):
         self.playlist_layout.setSpacing(0)
         self.playlist_container = self.content
         self._add_static_item("liked", self.playlist_layout, 42)
+        # Compatibility handle for older shell tests. It is not attached to
+        # the layout and therefore cannot appear as a dead visible action.
         self.more_playlists_button = NavigationItem(
             NavigationValue("more_playlists", "更多歌单", "playlist_more", "歌单"),
             self._theme,
@@ -110,10 +137,10 @@ class NavigationSidebar(QFrame):
         )
         self.more_playlists_button.setObjectName("morePlaylistsButton")
         self.more_playlists_button.setFixedHeight(42)
+        self.more_playlists_button.setVisible(False)
         self.more_playlists_button.route_requested.connect(
             lambda _route_id: self.more_playlists_requested.emit()
         )
-        self.playlist_layout.addWidget(self.more_playlists_button)
         self.playlist_layout.addStretch(1)
         self.scroll_area.setWidget(self.content)
         playlist_outer.addWidget(self.scroll_area, 1)
@@ -129,15 +156,12 @@ class NavigationSidebar(QFrame):
         # hidden widget and signal remain for compatibility with V2 callers.
         self.settings_box.setVisible(False)
 
-        # This compatibility handle deliberately remains invisible. Real mode
-        # cannot surface a write entry in the approved navigation shell.
-        self.new_playlist_button = QToolButton(self)
-        self.new_playlist_button.setVisible(False)
+        # Keep the historical public handle while making the add action real.
+        self.new_playlist_button = self.playlist_add_button
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
-        layout.addWidget(self.brand)
         layout.addWidget(self.primary_section)
         layout.addWidget(self.playlist_section, 1)
         layout.addWidget(self.settings_box)
@@ -187,6 +211,14 @@ class NavigationSidebar(QFrame):
         for item in (*self._items.values(), *self._playlist_items.values()):
             item.set_theme(theme)
         self.more_playlists_button.set_theme(theme)
+        self.playlist_add_button.setIcon(icon("add", theme, "normal"))
+        self.playlist_add_button.setIconSize(QSize(17, 17))
+        self.playlist_add_button.setStyleSheet(
+            f"QToolButton#playlistAddButton {{ border: 0; border-radius: {theme.metrics.radius_sm}px; "
+            f"background: transparent; color: {c.secondary_text}; }}"
+            f"QToolButton#playlistAddButton:hover {{ background: {c.hover_background}; color: {c.primary_text}; }}"
+            f"QToolButton#playlistAddButton:pressed {{ background: {c.playing_background}; }}"
+        )
         self._apply_surface_backgrounds(c.sidebar_background)
 
     def set_compact(self, compact: bool) -> None:
@@ -201,11 +233,12 @@ class NavigationSidebar(QFrame):
         self.library_caption.setVisible(not compact)
         self.playlist_caption.setVisible(not compact)
         self.brand.layout().setContentsMargins(18 if compact else 28, 0, 18 if compact else 16, 0)
-        self.primary_section.layout().setContentsMargins(12 if compact else 18, 0, 12 if compact else 14, 0)
+        self.primary_section.layout().setContentsMargins(12 if compact else 18, 20, 12 if compact else 14, 0)
         self.playlist_section.layout().setContentsMargins(12 if compact else 18, 20, 12 if compact else 14, 0)
         for item in (*self._items.values(), *self._playlist_items.values()):
             item.set_compact(compact)
         self.more_playlists_button.set_compact(compact)
+        self.playlist_add_button.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonIconOnly)
 
     def create_mock_playlist(self, name: str = "") -> str:
         playlist = self.adapter.create_playlist(name)
@@ -216,6 +249,15 @@ class NavigationSidebar(QFrame):
 
     def delete_mock_playlist(self, playlist_id: str) -> bool:
         return self.adapter.delete_playlist(playlist_id)
+
+    def _open_create_playlist_dialog(self) -> str:
+        if not self.adapter.playlist_adapter.can_mutate:
+            return ""
+        dialog = PlaylistNameDialog(self._theme, "新建歌单", parent=self)
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return ""
+        playlist = self.adapter.create_playlist(dialog.name)
+        return playlist.id if playlist is not None else ""
 
     def _caption(self, text: str, parent: QWidget) -> QLabel:
         label = QLabel(text, parent)
@@ -231,7 +273,6 @@ class NavigationSidebar(QFrame):
             item.route_requested.connect(lambda _route_id: self.settings_requested.emit())
         else:
             item.route_requested.connect(self.adapter.set_route)
-        item.context_requested.connect(self._show_playlist_menu)
         self._items[route_id] = item
         layout.addWidget(item)
         return item
@@ -241,7 +282,7 @@ class NavigationSidebar(QFrame):
             self.playlist_layout.removeWidget(item)
             item.deleteLater()
         self._playlist_items.clear()
-        for index, playlist in enumerate(tuple(playlists)[:3], start=1):
+        for index, playlist in enumerate(tuple(playlists), start=1):
             value = NavigationValue(
                 f"playlist:{playlist.id}", playlist.name, "playlist", "歌单", playlist.id
             )
@@ -290,9 +331,9 @@ class NavigationSidebar(QFrame):
             surface.setAutoFillBackground(True)
 
     def _show_playlist_menu(self, playlist_id: str, global_position) -> None:
-        if self.adapter.playlist_adapter.read_only:
+        if not self.adapter.playlist_adapter.can_mutate or playlist_id == "liked":
             return
-        menu = QMenu(self)
+        menu = apply_menu_theme(QMenu(self), self._theme)
         rename_action = menu.addAction("重命名歌单")
         delete_action = menu.addAction("删除歌单")
         selected = menu.exec(global_position)
@@ -301,9 +342,21 @@ class NavigationSidebar(QFrame):
                 (item for item in self.adapter.playlists() if item.id == playlist_id), None
             )
             if playlist is not None:
-                title, accepted = QInputDialog.getText(self, "重命名歌单", "歌单名称", text=playlist.name)
-                if accepted:
-                    self.adapter.rename_playlist(playlist_id, title)
+                dialog = PlaylistNameDialog(
+                    self._theme,
+                    "重命名歌单",
+                    initial_name=playlist.name,
+                    parent=self,
+                )
+                if dialog.exec() == QDialog.DialogCode.Accepted:
+                    self.adapter.rename_playlist(playlist_id, dialog.name)
         elif selected is delete_action:
-            self.adapter.delete_playlist(playlist_id)
+            dialog = PlaylistConfirmDialog(
+                self._theme,
+                "删除歌单",
+                "删除歌单不会删除音乐库中的歌曲。",
+                parent=self,
+            )
+            if dialog.exec() == QDialog.DialogCode.Accepted:
+                self.adapter.delete_playlist(playlist_id)
         menu.deleteLater()

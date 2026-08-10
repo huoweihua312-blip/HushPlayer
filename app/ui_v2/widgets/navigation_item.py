@@ -111,9 +111,8 @@ class NavigationItem(QToolButton):
         )
         self.setIconSize(QSize(icon_size, icon_size))
         self.setMinimumWidth(0)
-        selected_border = f"border-left: 2px solid {c.accent};" if self._selected else ""
         self.setStyleSheet(
-            f"QToolButton {{ text-align: left; padding: 0 12px; border: 0; {selected_border} "
+            f"QToolButton {{ text-align: left; padding: 0 12px; border: 0; "
             f"border-radius: {self._theme.metrics.radius_md}px; font-size: {self._theme.fonts.body}px; "
             f"color: {c.primary_text if self._selected else c.secondary_text}; "
             f"background: {c.selected_background if self._selected else 'transparent'}; }}"

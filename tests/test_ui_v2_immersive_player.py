@@ -107,7 +107,11 @@ class UiV2ImmersivePlayerTests(unittest.TestCase):
         expected_upcoming = len(self.window.playback_adapter.queue_tracks) - (
             1 if self.window.playback_adapter.state.current_track is not None else 0
         )
-        self.assertEqual(shell.queue_panel.list_widget.count(), expected_upcoming)
+        self.assertEqual(
+            shell.queue_panel.model.rowCount(),
+            len(self.window.playback_adapter.queue_tracks),
+        )
+        self.assertEqual(shell.queue_panel.list_widget.model().rowCount(), expected_upcoming)
         shell.show_queue_panel()
         self.app.processEvents()
         self.assertTrue(shell.queue_panel_visible)

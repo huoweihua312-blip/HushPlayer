@@ -19,6 +19,7 @@ from app.ui_v2.shell.main_window import MainWindow
 from app.ui_v2.widgets.track_delegate import RowVisualState
 from app.ui_v2.widgets.track_table import TrackTable
 from app.ui_v2.widgets.playlist_header import PlaylistHeader
+from app.ui_v2.widgets.track_collection_hero import TrackCollectionHero
 
 
 class UiV2ContentPageTests(unittest.TestCase):
@@ -56,7 +57,8 @@ class UiV2ContentPageTests(unittest.TestCase):
         page = self._playlist_page()
         self.assertTrue(page.playlist_header.play_button.isEnabled())
         self.assertTrue(page.playlist_header.shuffle_button.isEnabled())
-        self.assertFalse(page.playlist_header.favorite_button.isHidden())
+        self.assertTrue(page.playlist_header.favorite_button.isHidden())
+        self.assertFalse(page.playlist_header.favorite_button.isEnabled())
         page.set_responsive_reference_width(1200)
         self.assertTrue(page.related_playlists.isHidden())
         page.set_responsive_reference_width(1600)
@@ -107,6 +109,19 @@ class UiV2ContentPageTests(unittest.TestCase):
         self.assertEqual(playlist.playlist_header.shuffle_button.text(), "")
         self.assertEqual(playlist.playlist_header.shuffle_button.toolTip(), "随机播放")
         self.assertEqual(playlist.playlist_header.more_button.text(), "")
+
+    def test_collection_hero_actions_keep_clear_primary_hierarchy(self) -> None:
+        hero = TrackCollectionHero(self.window.theme)
+        self.assertEqual(hero.play_button.accessibleName(), "播放")
+        self.assertEqual(hero.shuffle_button.accessibleName(), "随机播放")
+        self.assertIn("background: " + self.window.theme.colors.accent, hero.play_button.styleSheet())
+        self.assertIn("background: " + self.window.theme.colors.surface_secondary, hero.shuffle_button.styleSheet())
+        self.assertIn("border: 1px solid " + self.window.theme.colors.border, hero.shuffle_button.styleSheet())
+        self.assertGreaterEqual(hero.play_button.minimumWidth(), 92)
+        self.assertGreaterEqual(hero.shuffle_button.minimumWidth(), 116)
+        self.assertEqual(hero.play_button.iconSize(), hero.shuffle_button.iconSize())
+        self.assertNotEqual(hero.play_button.icon().cacheKey(), hero.shuffle_button.icon().cacheKey())
+        hero.deleteLater()
 
     def test_empty_playlist_uses_formal_copy_and_music_semantic_icon(self) -> None:
         page = self.window.router.page_for_route("playlist:playlist-seed-8")

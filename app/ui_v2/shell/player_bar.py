@@ -22,7 +22,7 @@ from app.ui_v2.theme.tokens import Theme
 from app.ui_v2.widgets.artwork_thumbnail import ArtworkThumbnail
 from app.ui_v2.widgets.elided_label import ElidedLabel
 from app.ui_v2.widgets.playback_button import PlayerIconButton
-from app.ui_v2.widgets.track_display import display_track_text
+from app.ui_v2.widgets.track_display import present_track_identity
 
 
 class _PlayerSlider(QSlider):
@@ -90,6 +90,7 @@ class PlayerBar(QFrame):
         self._compact = False
         self._read_only = False
         self._transport_available = False
+        self._track_availability = None
         self.setObjectName("playerBar")
         self.setFixedHeight(theme.metrics.player_bar_height)
         self._build_layout()
@@ -111,6 +112,7 @@ class PlayerBar(QFrame):
             f"QFrame#playerBar {{ background: {c.playerbar_background}; border-top: 1px solid {c.divider}; }}"
             f"QLabel#playerTitle {{ color: {c.text_primary}; font-size: {theme.fonts.player_title}px; font-weight: 600; }}"
             f"QLabel#playerArtist {{ color: {c.text_secondary}; font-size: {theme.fonts.player_meta}px; }}"
+            f"QLabel#playerAvailability {{ color: {c.warning}; font-size: {theme.fonts.caption}px; }}"
             f"QLabel#playerTime {{ color: {c.text_secondary}; font-size: 11px; }}"
             f"QSlider#playerProgress, QSlider#playerVolume {{ background: transparent; border: 0; }}"
             f"QSlider#playerProgress::groove:horizontal {{ height: 3px; border-radius: 2px; background: {c.progress_track}; }}"
@@ -134,10 +136,27 @@ class PlayerBar(QFrame):
             return
         self._compact = compact
         # The approved 900px shell keeps every transport and navigation action
-        # reachable. Only the fixed side widths and metadata width tighten.
+        # reachable. The identity block tightens only to the actual side-region
+        # width so long titles do not inherit an arbitrary fixed truncation.
         self.center_region.setFixedWidth(360 if compact else 500)
-        self.metadata.setFixedWidth(118 if compact else 154)
+        self._refresh_metadata_width()
         self._constrain_side_inner_widths()
+
+    def resizeEvent(self, event) -> None:  # noqa: N802
+        super().resizeEvent(event)
+        self._refresh_metadata_width()
+
+    def _refresh_metadata_width(self) -> None:
+        if not all(hasattr(self, name) for name in ("metadata", "artwork", "favorite_button")):
+            return
+        base_width = 118 if self._compact else 154
+        region_width = max(0, self.track_region.width() - 32)
+        fixed_width = self.artwork.width() + self.favorite_button.width() + 24
+        available = max(base_width, region_width - fixed_width)
+        width = min(260, available)
+        self.metadata.setFixedWidth(width)
+        if hasattr(self, "identity_stack"):
+            self.identity_stack.setFixedWidth(width)
 
     def set_read_only(self, read_only: bool, *, allow_playback: bool = False) -> None:
         """Keep writes disabled while allowing a formal local playback backend."""
@@ -174,12 +193,23 @@ class PlayerBar(QFrame):
         self.title_label.setObjectName("playerTitle")
         self.artist_label = ElidedLabel(self.track_inner)
         self.artist_label.setObjectName("playerArtist")
-        self.metadata = QWidget(self.track_inner)
+        self.identity_stack = QWidget(self.track_inner)
+        self.identity_stack.setObjectName("playerIdentityStack")
+        self.identity_stack.setFixedWidth(154)
+        self.identity_stack.setFixedHeight(53)
+        identity_layout = QVBoxLayout(self.identity_stack)
+        identity_layout.setContentsMargins(0, 0, 0, 0)
+        identity_layout.setSpacing(4)
+        self.availability_label = QLabel(self.identity_stack)
+        self.availability_label.setObjectName("playerAvailability")
+        self.availability_label.setVisible(False)
+        self.availability_label.setToolTip("")
+        self.metadata = QWidget(self.identity_stack)
         self.metadata.setObjectName("trackMetadata")
         # The approved track copy is one compact two-line group.  Give it a
         # fixed vertical rhythm instead of letting the two labels consume the
         # full-height side region independently.
-        self.metadata.setFixedWidth(174)
+        self.metadata.setFixedWidth(154)
         self.metadata.setFixedHeight(36)
         self.metadata.setSizePolicy(
             QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed
@@ -196,15 +226,21 @@ class PlayerBar(QFrame):
         self.artist_label.setSizePolicy(
             QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed
         )
+        self.availability_label.setFixedHeight(16)
+        self.availability_label.setSizePolicy(
+            QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Fixed
+        )
         metadata_layout.addWidget(self.title_label)
         metadata_layout.addWidget(self.artist_label)
+        identity_layout.addWidget(self.metadata)
+        identity_layout.addWidget(self.availability_label)
         self.favorite_button = PlayerIconButton(
             "favorite", "收藏", self._theme, self.track_inner, size=32, icon_canvas_size=18,
             asset_family="fluent_player",
         )
         self.favorite_button.clicked.connect(self.adapter.toggle_favorite)
         track_inner_layout.addWidget(self.artwork)
-        track_inner_layout.addWidget(self.metadata)
+        track_inner_layout.addWidget(self.identity_stack)
         track_inner_layout.addWidget(self.favorite_button)
         # The outer region owns the complete left grid column.  Its two equal
         # stretches center this natural-width group without anchoring artwork
@@ -336,9 +372,11 @@ class PlayerBar(QFrame):
             "more", "更多", self._theme, self.utility_inner, size=32, icon_canvas_size=18,
             asset_family="fluent_player",
         )
+        # Compatibility handle for older integrations; the placeholder action
+        # is intentionally not part of the visible PlayerBar layout.
+        self.more_button.setVisible(False)
         self.lyrics_button.clicked.connect(lambda: self.mock_action_requested.emit("lyrics"))
         self.queue_button.clicked.connect(lambda: self.mock_action_requested.emit("queue"))
-        self.more_button.clicked.connect(lambda: self.mock_action_requested.emit("more"))
         self.volume_button.clicked.connect(self._toggle_mute)
         self.volume_group = QWidget(self.utility_inner)
         self.volume_group.setObjectName("volumeGroup")
@@ -350,7 +388,6 @@ class PlayerBar(QFrame):
         utility_layout.addWidget(self.queue_button)
         utility_layout.addWidget(self.lyrics_button)
         utility_layout.addWidget(self.volume_group)
-        utility_layout.addWidget(self.more_button)
         # Like TrackRegion, tools retain their intrinsic width and sit at the
         # visual centre of the complete right grid column rather than its edge.
         utility_region_layout.addWidget(
@@ -376,7 +413,14 @@ class PlayerBar(QFrame):
             self.play_button, self.next_button, self.repeat_button,
             self.lyrics_button, self.queue_button, self.volume_button, self.more_button,
         )
-        for widget in (self.track_inner, self.artwork, self.title_label, self.artist_label, self.metadata):
+        for widget in (
+            self.track_inner,
+            self.artwork,
+            self.identity_stack,
+            self.title_label,
+            self.artist_label,
+            self.metadata,
+        ):
             widget.installEventFilter(self)
             widget.setCursor(Qt.CursorShape.PointingHandCursor)
 
@@ -406,6 +450,7 @@ class PlayerBar(QFrame):
         self.adapter.favorite_changed.connect(self._on_favorite_changed)
         self.adapter.shuffle_changed.connect(self._on_shuffle_changed)
         self.adapter.repeat_mode_changed.connect(self._on_repeat_mode_changed)
+        self.adapter.playback_status_changed.connect(self._on_playback_status_changed)
 
     def _apply_state(self) -> None:
         state = self.adapter.state
@@ -418,20 +463,53 @@ class PlayerBar(QFrame):
         self._on_favorite_changed(state.is_favorite)
         self._on_shuffle_changed(state.shuffle_enabled)
         self._on_repeat_mode_changed(state.repeat_mode)
+        self._on_playback_status_changed(state.status, state.status_detail)
 
     def _on_track_changed(self, track: Track | None) -> None:
         self.artwork.set_track(track)
         if track is None:
-            title, artist = "未选择歌曲", "选择一首歌曲开始播放"
+            title, metadata = "未选择歌曲", "选择一首歌曲开始播放"
+            self._track_availability = None
         else:
-            title, artist, _album = display_track_text(track)
+            identity = present_track_identity(track)
+            title, metadata = identity.title, identity.metadata
+            self._track_availability = identity.availability
         self.title_label.set_full_text(title)
-        self.artist_label.set_full_text(artist)
+        self.artist_label.set_full_text(metadata)
+        self.availability_label.clear()
+        self.availability_label.setToolTip("")
+        self.availability_label.setVisible(False)
+        self.artist_label.setToolTip("")
         self._set_track_controls_enabled(track is not None)
 
     def _on_playing_changed(self, is_playing: bool) -> None:
         self.play_button.set_icon_name("pause" if is_playing else "play")
         self.play_button.setToolTip("暂停" if is_playing else "播放")
+
+    def _on_playback_status_changed(self, status: str, detail: str) -> None:
+        track = self.adapter.state.current_track
+        if track is None:
+            return
+        identity = present_track_identity(
+            track,
+            playback_status=status,
+            playback_detail=detail,
+        )
+        self._track_availability = identity.availability
+        self.artist_label.set_full_text(identity.metadata)
+        if identity.availability.is_visible:
+            self.availability_label.setText(identity.availability.label)
+            self.availability_label.setToolTip(identity.availability.tooltip)
+            self.availability_label.setVisible(True)
+            self.artist_label.setToolTip(
+                f"{identity.metadata}\n状态: {identity.availability.label}\n"
+                f"{identity.availability.tooltip}"
+            )
+        else:
+            self.availability_label.clear()
+            self.availability_label.setToolTip("")
+            self.availability_label.setVisible(False)
+            self.artist_label.setToolTip("")
 
     def _on_duration_changed(self, duration_ms: int | None) -> None:
         duration = max(0, int(duration_ms or 0))

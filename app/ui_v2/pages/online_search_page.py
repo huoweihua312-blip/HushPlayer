@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
-from PySide6.QtCore import Signal
+from PySide6.QtCore import QSize, Signal
 from PySide6.QtWidgets import QHBoxLayout, QLabel, QToolButton, QVBoxLayout, QWidget
 
 from app.ui_v2.adapters.online_adapter import OnlineAdapter
 from app.ui_v2.adapters.playlist_adapter import PlaylistAdapter
 from app.ui_v2.models.online_search_state import OnlineSearchState
+from app.ui_v2.theme.icons import icon
 from app.ui_v2.theme.styles import build_stylesheet
 from app.ui_v2.theme.tokens import Theme
 from app.ui_v2.widgets.online_result_table import OnlineResultTable
@@ -36,6 +37,15 @@ class OnlineSearchPage(QWidget):
         self.setObjectName("onlineSearchPage")
         self.title_label = QLabel("在线搜索", self)
         self.detail_label = QLabel("从已启用的在线来源聚合结果。", self)
+        self.query_context_label = QLabel(self)
+        self.query_context_label.setObjectName("onlineSearchQueryContext")
+        self.scope_label = QLabel("范围：在线来源", self)
+        self.scope_label.setObjectName("onlineSearchScope")
+        self.manage_sources_button = QToolButton(self)
+        self.manage_sources_button.setText("管理来源")
+        self.manage_sources_button.setAccessibleName("管理在线来源")
+        self.manage_sources_button.setToolTip("查看、添加或管理在线来源")
+        self.manage_sources_button.clicked.connect(self.source_management_requested)
         self.search_bar = OnlineSearchBar(theme, self)
         self.source_selector = SourceSelector(adapter, theme, self)
         self.source_summary_label = QLabel(self)
@@ -54,11 +64,6 @@ class OnlineSearchPage(QWidget):
             recommendation_layout.addWidget(button)
             self.recommendation_buttons.append(button)
         recommendation_layout.addStretch(1)
-        search_row = QHBoxLayout()
-        search_row.setContentsMargins(0, 0, 0, 0)
-        search_row.setSpacing(8)
-        search_row.addWidget(self.search_bar, 1)
-        search_row.addWidget(self.source_selector)
         # The shell title bar is the single production query input. Keep this
         # control as a compatibility handle for deterministic tests.
         self.search_bar.setVisible(False)
@@ -72,8 +77,21 @@ class OnlineSearchPage(QWidget):
         layout.setSpacing(metrics.spacing_md)
         layout.addWidget(self.title_label)
         layout.addWidget(self.detail_label)
-        layout.addLayout(search_row)
-        layout.addWidget(self.source_summary_label)
+        query_context = QHBoxLayout()
+        query_context.setContentsMargins(0, 0, 0, 0)
+        query_context.setSpacing(metrics.spacing_sm)
+        query_context.addWidget(self.query_context_label)
+        query_context.addWidget(self.scope_label)
+        query_context.addStretch(1)
+        query_context.addWidget(self.manage_sources_button)
+        layout.addLayout(query_context)
+        source_context = QHBoxLayout()
+        source_context.setContentsMargins(0, 0, 0, 0)
+        source_context.setSpacing(metrics.spacing_sm)
+        source_context.addWidget(self.source_summary_label)
+        source_context.addStretch(1)
+        source_context.addWidget(self.source_selector)
+        layout.addLayout(source_context)
         layout.addWidget(self.recommendation_widget)
         layout.addWidget(self.result_toolbar)
         layout.addWidget(self.history_view, 1)
@@ -93,6 +111,7 @@ class OnlineSearchPage(QWidget):
         self.result_toolbar.source_filter_changed.connect(self.result_table.set_source_filter)
         self.result_toolbar.sort_changed.connect(self.result_table.set_sort_mode)
         self.result_table.source_requested.connect(self.source_management_requested)
+        adapter.query_changed.connect(lambda _query: self._sync_query_context())
         adapter.history_changed.connect(self.history_view.set_history)
         adapter.source_state_changed.connect(self._sync_sources)
         adapter.source_state_changed.connect(self.result_toolbar.set_sources)
@@ -113,6 +132,12 @@ class OnlineSearchPage(QWidget):
             f"font-size: {theme.fonts.page_title}px; font-weight: 600; color: {theme.colors.primary_text};"
         )
         self.detail_label.setStyleSheet(f"color: {theme.colors.secondary_text};")
+        self.query_context_label.setStyleSheet(
+            f"color: {theme.colors.primary_text}; font-size: {theme.fonts.secondary}px; font-weight: 600;"
+        )
+        self.scope_label.setStyleSheet(
+            f"color: {theme.colors.subtle_text}; font-size: {theme.fonts.caption}px;"
+        )
         self.source_summary_label.setStyleSheet(f"color: {theme.colors.subtle_text};")
         self.recommendation_label.setStyleSheet(f"color: {theme.colors.secondary_text};")
         recommendation_style = (
@@ -122,6 +147,9 @@ class OnlineSearchPage(QWidget):
         )
         for button in self.recommendation_buttons:
             button.setStyleSheet(recommendation_style)
+        self.manage_sources_button.setIcon(icon("online", theme))
+        self.manage_sources_button.setIconSize(QSize(16, 16))
+        self.manage_sources_button.setStyleSheet(recommendation_style)
         self.search_bar.set_theme(theme)
         self.source_selector.set_theme(theme)
         self.result_toolbar.set_theme(theme)
@@ -133,6 +161,8 @@ class OnlineSearchPage(QWidget):
         narrow = width < 950
         self.detail_label.setVisible(not narrow)
         self.source_summary_label.setVisible(not narrow)
+        self.scope_label.setVisible(not narrow)
+        self.manage_sources_button.setText("管理" if narrow else "管理来源")
         self.source_selector.set_compact(narrow)
         self.result_table.set_responsive_reference_width(width)
         self.result_toolbar.set_compact(narrow)
@@ -154,6 +184,7 @@ class OnlineSearchPage(QWidget):
         self.state_view.setVisible(not (state.phase == "results" and has_results))
         self.state_view.set_state(state)
         self.result_toolbar.set_summary(len(self.adapter.results()), state.message)
+        self._sync_query_context()
 
     def _sync_sources(self, sources) -> None:
         enabled = [source for source in sources if source.enabled]
@@ -162,6 +193,12 @@ class OnlineSearchPage(QWidget):
         if unavailable:
             summary += f"，其中 {len(unavailable)} 个暂不可用"
         self.source_summary_label.setText(summary)
+
+    def _sync_query_context(self) -> None:
+        query = str(self.adapter.query or "").strip()
+        self.query_context_label.setText(
+            f"当前搜索：{query}" if query else "尚未输入关键词"
+        )
 
     def _sync_notification(self, message: str) -> None:
         text = str(message or "").strip()

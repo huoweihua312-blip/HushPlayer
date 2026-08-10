@@ -9,6 +9,7 @@ from PySide6.QtCore import QAbstractTableModel, QModelIndex, Qt
 
 from app.ui_v2.models.online_track import OnlineTrack
 from app.ui_v2.models.track import format_duration
+from app.ui_v2.widgets.track_display import present_track_identity_values
 
 
 class OnlineColumn(IntEnum):
@@ -68,7 +69,20 @@ class OnlineTrackModel(QAbstractTableModel):
             return Qt.ItemFlag.NoItemFlags
         track = self._tracks[index.row()]
         flags = Qt.ItemFlag.ItemIsSelectable
-        return flags | Qt.ItemFlag.ItemIsEnabled if track.availability == "available" else flags
+        identity = present_track_identity_values(
+            track.title,
+            track.artist,
+            track.album,
+            is_online=True,
+            availability=track.availability,
+            playback_detail=track.availability_detail,
+        )
+        return (
+            flags | Qt.ItemFlag.ItemIsEnabled
+            if not identity.availability.is_confirmed_error
+            or identity.availability.is_retryable
+            else flags
+        )
 
     def track_at(self, row: int) -> OnlineTrack | None:
         return self._tracks[row] if 0 <= row < len(self._tracks) else None
@@ -117,32 +131,66 @@ class OnlineTrackModel(QAbstractTableModel):
 
     @staticmethod
     def _display_value(track: OnlineTrack, column: OnlineColumn) -> str:
+        identity = present_track_identity_values(
+            track.title,
+            track.artist,
+            track.album,
+            is_online=True,
+            availability=track.availability,
+            playback_detail=track.availability_detail,
+        )
         values = {
             OnlineColumn.FAVORITE: "",
-            OnlineColumn.TITLE: track.title,
-            OnlineColumn.ARTIST: track.artist,
-            OnlineColumn.ALBUM: track.album,
+            OnlineColumn.TITLE: identity.title,
+            OnlineColumn.ARTIST: identity.artist,
+            OnlineColumn.ALBUM: identity.album,
             OnlineColumn.DURATION: format_duration(track.duration_ms),
             OnlineColumn.SOURCE: track.source_name,
             OnlineColumn.QUALITY: track.quality,
             OnlineColumn.STATUS: (
-                "可用"
-                if track.availability == "available"
-                else "在线播放未接入"
+                identity.availability.label
+                if identity.availability.is_visible
+                else "可用"
+                if identity.availability.is_playable
+                else "未解析"
             ),
         }
         return values[column]
 
     @staticmethod
     def _tooltip_value(track: OnlineTrack, column: OnlineColumn) -> str:
+        identity = present_track_identity_values(
+            track.title,
+            track.artist,
+            track.album,
+            is_online=True,
+            availability=track.availability,
+        )
         if column == OnlineColumn.FAVORITE:
             return "取消收藏" if track.is_favorite else "添加到我喜欢"
         if column == OnlineColumn.TITLE:
             explicit = "\n显式内容" if track.explicit else ""
-            return (
-                f"{track.title}\n歌手: {track.artist}\n专辑: {track.album}\n"
-                f"来源: {track.source_name}\n音质: {track.quality}{explicit}"
-            )
+            details = [
+                identity.title,
+                f"歌手: {identity.artist or '未知艺人'}",
+                f"专辑: {identity.album or '未知专辑'}",
+                f"来源: {track.source_name}",
+                f"音质: {track.quality}",
+            ]
+            if identity.availability.is_visible:
+                details.extend(
+                    [
+                        f"状态: {identity.availability.label}",
+                        identity.availability.tooltip,
+                    ]
+                )
+            return "\n".join(details) + explicit
         if column == OnlineColumn.SOURCE:
             return f"{track.source_name} ({track.source_id})"
+        if column == OnlineColumn.STATUS:
+            if identity.availability.is_visible:
+                return identity.availability.tooltip
+            if identity.availability.is_playable:
+                return "当前来源支持在线播放。"
+            return "尚未尝试解析在线播放地址。"
         return OnlineTrackModel._display_value(track, column)

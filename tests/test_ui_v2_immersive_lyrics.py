@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 import sys
 import unittest
+from dataclasses import replace
 from pathlib import Path
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
@@ -365,6 +366,139 @@ class UiV2ImmersiveLyricsTests(unittest.TestCase):
         self.assertLessEqual(metrics["active_line_count"], 2)
         self.assertEqual(metrics["active_line_elided"], 0)
         self.assertEqual(metrics["active_highlight_line_count"], metrics["active_line_count"])
+
+    def test_immersive_highlight_interpolates_and_stops_when_paused(self) -> None:
+        immersive = self._immersive_page()
+        canvas = immersive.canvas
+        segments = tuple(
+            LyricSegment(character, index * 240, (index + 1) * 240, "character")
+            for index, character in enumerate("逐字高亮")
+        )
+        line = LyricLine("smooth-highlight", 0, 960, "逐字高亮", segments=segments)
+        canvas.set_document(LyricsDocument("smooth", "Smooth", "Artist", "mock", (line,)))
+        canvas.set_active_line(line)
+        canvas.set_active_segment(line, 1, 0.35)
+        canvas.set_playback_active(True)
+        self.assertTrue(canvas._highlight_timer.isActive())
+        self.assertEqual(canvas._highlight_timer.interval(), 16)
+        self.assertGreater(canvas._highlight_character_progress(line), 1.0)
+        canvas.set_playback_active(False)
+        self.assertFalse(canvas._highlight_timer.isActive())
+
+    def test_external_position_updates_do_not_reset_smooth_highlight_clock(self) -> None:
+        immersive = self._immersive_page()
+        canvas = immersive.canvas
+        segments = tuple(
+            LyricSegment(character, index * 240, (index + 1) * 240, "character")
+            for index, character in enumerate("连续高亮")
+        )
+        line = LyricLine("external-clock", 0, 960, "连续高亮", segments=segments)
+        canvas.set_document(LyricsDocument("clock", "Clock", "Artist", "mock", (line,)))
+        canvas.set_active_line(line)
+        canvas.set_active_segment(line, 0, 0.0)
+        canvas.set_playback_active(True)
+        QTest.qWait(130)
+        elapsed_before_update = canvas._playback_clock.elapsed()
+        canvas.set_playback_position(130)
+        elapsed_after_update = canvas._playback_clock.elapsed()
+        self.assertGreater(elapsed_after_update, max(20, elapsed_before_update // 2))
+        canvas.set_playback_active(False)
+
+    def test_active_segment_updates_do_not_snap_playing_highlight(self) -> None:
+        immersive = self._immersive_page()
+        canvas = immersive.canvas
+        segments = tuple(
+            LyricSegment(character, index * 240, (index + 1) * 240, "character")
+            for index, character in enumerate("连续绘制")
+        )
+        line = LyricLine("segment-sync", 0, 960, "连续绘制", segments=segments)
+        canvas.set_document(LyricsDocument("segment", "Segment", "Artist", "mock", (line,)))
+        canvas.set_active_line(line)
+        canvas.set_active_segment(line, 0, 0.0)
+        canvas.set_playback_active(True)
+        QTest.qWait(150)
+        elapsed_before_signal = canvas._playback_clock.elapsed()
+        canvas.set_active_segment(line, 0, 0.0)
+        elapsed_after_signal = canvas._playback_clock.elapsed()
+        self.assertGreater(elapsed_after_signal, max(30, elapsed_before_signal // 2))
+        canvas.set_playback_active(False)
+
+    def test_highlight_progress_maps_to_real_glyph_widths(self) -> None:
+        immersive = self._immersive_page()
+        canvas = immersive.canvas
+        segments = tuple(
+            LyricSegment(value, index * 400, (index + 1) * 400, "character")
+            for index, value in enumerate(("W", "中", "i"))
+        )
+        line = LyricLine("glyph-widths", 0, 1_200, "W中i", segments=segments)
+        canvas.set_document(LyricsDocument("glyphs", "Glyphs", "Artist", "mock", (line,)))
+        canvas.set_active_line(line)
+        canvas.set_active_segment(line, 1, 0.5)
+        canvas.resize(520, 320)
+        canvas.show()
+        self.app.processEvents()
+
+        font = canvas._font(canvas.effective_font_sizes[0], canvas._active_weight())
+        metrics = canvas._wrapped_line_ranges(font, line.text, 480)
+        self.assertEqual("".join(value for value, _start, _end in metrics), line.text)
+        progress = canvas._highlight_character_progress(line)
+        self.assertEqual(progress, 1.5)
+        first_glyph = canvas._font(canvas.effective_font_sizes[0], canvas._active_weight())
+        first_width = canvas.fontMetrics().horizontalAdvance("W")
+        self.assertGreater(first_width, 0)
+        self.assertGreater(
+            canvas.fontMetrics().horizontalAdvance("W中") - first_width,
+            0,
+        )
+        self.assertEqual(first_glyph.family(), font.family())
+
+    def test_unplayable_track_suppresses_default_lyrics_with_warning(self) -> None:
+        self._play_track()
+        immersive = self._immersive_page()
+        current = self.window.playback_adapter.state.current_track
+        self.assertIsNotNone(current)
+        unavailable = replace(
+            current,
+            source_type="online",
+            availability="unavailable",
+            is_missing=True,
+        )
+        self.window.lyrics_adapter.set_track(unavailable)
+        self.app.processEvents()
+        self.assertIsNone(self.window.lyrics_adapter.document)
+        self.assertEqual(self.window.lyrics_adapter.state.phase, "playback_unavailable")
+        self.assertEqual(immersive.lyrics_state_view.title_label.text(), "歌曲无法播放")
+        self.assertIn("暂不显示默认歌词", immersive.lyrics_state_view.detail_label.text())
+
+        self.window.lyrics_adapter.set_track(current)
+        self.window.lyrics_adapter.set_playback_status("error", "当前无法播放这首歌曲")
+        self.app.processEvents()
+        self.assertIsNone(self.window.lyrics_adapter.document)
+        self.assertEqual(self.window.lyrics_adapter.state.phase, "playback_unavailable")
+
+    def test_immersive_empty_state_uses_full_content_geometry_and_restores(self) -> None:
+        immersive = self._immersive_page()
+        self.window.playback_adapter.clear()
+        self.app.processEvents()
+        self.assertFalse(immersive.identity_column.isVisible())
+        self.assertFalse(immersive.canvas.isVisible())
+        self.assertTrue(immersive.lyrics_state_view.isVisible())
+        self.assertEqual(immersive.lyrics_state_view.geometry(), immersive.content.rect())
+
+        self._play_track()
+        self.app.processEvents()
+        self.assertTrue(immersive.identity_column.isVisible())
+        self.assertEqual(immersive.lyrics_state_view.geometry(), immersive.canvas.geometry())
+
+    def test_large_immersive_layout_keeps_identity_inset_and_canvas_width(self) -> None:
+        self._play_track()
+        immersive = self._immersive_page()
+        for width, height in ((1200, 800), (1600, 900), (2048, 1152)):
+            self.window.resize(width, height)
+            self.app.processEvents()
+            self.assertLessEqual(immersive.identity_column.maximumWidth(), 560)
+            self.assertGreater(immersive.canvas.width(), 600)
+            self.assertGreaterEqual(immersive.identity_column.geometry().x(), 0)
 
     def test_identity_title_uses_at_most_two_lines_and_compact_sheet_has_no_overlap(self) -> None:
         immersive = self._immersive_page()

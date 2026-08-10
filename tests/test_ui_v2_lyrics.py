@@ -3,7 +3,9 @@ from __future__ import annotations
 import importlib
 import os
 import sys
+import tempfile
 import unittest
+from dataclasses import replace
 from pathlib import Path
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
@@ -12,7 +14,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from PySide6.QtCore import QPoint, QPointF, Qt
+from PySide6.QtCore import QPoint, QPointF, QObject, Qt, Signal
 from PySide6.QtGui import QWheelEvent
 from PySide6.QtWidgets import QApplication, QSlider
 
@@ -22,6 +24,25 @@ from app.ui_v2.models.track_table_model import TrackColumn
 from app.ui_v2.pages.lyrics_page import LyricsPage
 from app.ui_v2.shell.main_window import MainWindow
 from app.ui_v2.widgets.lyrics_canvas_v2 import LyricsCanvasV2, ResponsiveLyricsMetrics
+
+
+class FakeLyricsService(QObject):
+    statusChanged = Signal(int, str, str)
+    lyricsReady = Signal(int, str, dict)
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.generation = 0
+        self.requests = []
+        self.cancel_count = 0
+
+    def request_lyrics(self, item) -> int:
+        self.generation += 1
+        self.requests.append(item)
+        return self.generation
+
+    def cancel(self) -> None:
+        self.cancel_count += 1
 
 
 class LyricsAdapterTests(unittest.TestCase):
@@ -82,6 +103,82 @@ class LyricsAdapterTests(unittest.TestCase):
         self.assertTrue(self.adapter.document.has_romanization)
         self.adapter.toggle_romanization()
         self.assertTrue(self.adapter.display_options["romanization"])
+
+    def test_formal_adapter_loads_actual_local_lrc_instead_of_mock_text(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="hushplayer-v2-lyrics-") as root:
+            song_path = Path(root) / "actual-song.mp3"
+            lyric_path = song_path.with_suffix(".lrc")
+            song_path.write_bytes(b"fixture")
+            lyric_path.write_text(
+                "[00:00.00]真实第一行\n[00:02.00]真实第二行\n",
+                encoding="utf-8",
+            )
+            service = FakeLyricsService()
+            adapter = LyricsAdapter(lyrics_service=service)
+            track = replace(
+                self.track,
+                source_id="local",
+                source_name="本地音乐",
+                source_type="local",
+                local_path=str(song_path),
+                duration_ms=5_000,
+            )
+
+            adapter.set_track(track)
+
+            self.assertEqual(service.requests, [])
+            self.assertEqual(adapter.state.phase, "ready")
+            self.assertEqual(
+                [line.text for line in adapter.document.lines],
+                ["真实第一行", "真实第二行"],
+            )
+            self.assertNotIn("雾落在清晨的海岸", adapter.document.lines[0].text)
+            self.assertEqual(adapter.document.lines[0].segments[0].text, "真")
+
+    def test_formal_adapter_rejects_stale_online_lyrics_by_identity_and_generation(self) -> None:
+        service = FakeLyricsService()
+        adapter = LyricsAdapter(lyrics_service=service)
+        first = replace(
+            self.track,
+            source_type="online",
+            source_id="fixture",
+            source_name="Fixture",
+            stable_identity="remote:fixture:first",
+            remote_identity="first",
+            remote_track_id="first",
+            remote_payload={"id": "first"},
+        )
+        second = replace(
+            first,
+            id="second",
+            stable_identity="remote:fixture:second",
+            remote_identity="second",
+            remote_track_id="second",
+            remote_payload={"id": "second"},
+        )
+
+        adapter.set_track(first)
+        first_generation = service.generation
+        adapter.set_track(second)
+        second_generation = service.generation
+        service.lyricsReady.emit(
+            first_generation,
+            first.stable_identity,
+            {"text": "过期歌词", "source": "stale"},
+        )
+        self.assertIsNone(adapter.document)
+        service.lyricsReady.emit(
+            second_generation,
+            second.stable_identity,
+            {
+                "text": "[00:00.00]真实在线歌词",
+                "source": "Fixture",
+            },
+        )
+
+        self.assertEqual(adapter.state.phase, "ready")
+        self.assertEqual(adapter.document.lines[0].text, "真实在线歌词")
+        self.assertNotIn("雾落在清晨的海岸", adapter.document.lines[0].text)
 
 
 class LyricsPageTests(unittest.TestCase):

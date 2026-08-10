@@ -367,10 +367,15 @@ class SettingsPathPicker(QWidget):
         self.browse_button = QToolButton(self)
         self.browse_button.setText("浏览")
         self.browse_button.setToolTip("选择路径")
+        self.clear_button = QToolButton(self)
+        self.clear_button.setText("清除")
+        self.clear_button.setToolTip("清除路径")
+        self.clear_button.setAccessibleName("清除路径")
         self.open_button = QToolButton(self)
         self.open_button.setText("打开位置")
         self.open_button.setToolTip("打开路径位置")
         self.browse_button.clicked.connect(self.browse_requested)
+        self.clear_button.clicked.connect(lambda: self.set_path(""))
         self.open_button.clicked.connect(self.open_requested)
         layout = QHBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -378,6 +383,7 @@ class SettingsPathPicker(QWidget):
         layout.addWidget(self.path_label, 1)
         layout.addWidget(self.status_label, 0)
         layout.addWidget(self.browse_button, 0)
+        layout.addWidget(self.clear_button, 0)
         layout.addWidget(self.open_button, 0)
         self.setMinimumWidth(260)
         self.setMaximumWidth(430)
@@ -388,11 +394,16 @@ class SettingsPathPicker(QWidget):
         return self._path
 
     def set_path(self, path: str) -> None:
-        self._path = str(path or "")
+        normalized = str(path or "")
+        changed = normalized != self._path
+        self._path = normalized
         self._refresh_path_label()
         self.path_label.setToolTip(self._path)
         self.status_label.setText("" if not self._path else "路径不可用" if not Path(self._path).exists() else "")
+        self.clear_button.setVisible(bool(self._path))
         self.open_button.setEnabled(bool(self._path))
+        if changed:
+            self.path_changed.emit(self._path)
 
     def resizeEvent(self, event) -> None:  # noqa: N802
         super().resizeEvent(event)

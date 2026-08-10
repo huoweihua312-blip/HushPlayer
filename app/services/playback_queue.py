@@ -34,6 +34,47 @@ class PlaybackQueue:
     def shuffle_history(self) -> tuple[str, ...]:
         return tuple(self._shuffle_history)
 
+    def presentation_items(self, mode: str) -> tuple[PlaybackQueueItem, ...]:
+        """Return the queue ordered from the current playback context.
+
+        This is a read-only view for queue UI.  ``items`` remains the stable
+        membership order used by playback and persistence; shuffle state is
+        projected here without mutating either the queue or playlist data.
+        """
+
+        if not self.items:
+            return ()
+        if self.current_index < 0 or self.current_item is None:
+            return tuple(self.items)
+
+        current = self.current_item
+        current_identity = current.stable_identity
+        if mode == "shuffle":
+            history = list(self._shuffle_history)
+            cursor = self._shuffle_cursor
+            if not (0 <= cursor < len(history)) or history[cursor] != current_identity:
+                history = [current_identity]
+                cursor = 0
+            future_identities = history[cursor + 1 :] + list(reversed(self._shuffle_remaining))
+            past_identities = list(reversed(history[:cursor]))
+            ordered_identities = [current_identity, *future_identities, *past_identities]
+        else:
+            index = self.current_index
+            tail = [item.stable_identity for item in self.items[index + 1 :]]
+            head = [item.stable_identity for item in self.items[:index]]
+            ordered_identities = [current_identity, *tail, *head]
+
+        by_identity = {item.stable_identity: item for item in self.items}
+        ordered: list[PlaybackQueueItem] = []
+        seen: set[str] = set()
+        for identity in ordered_identities:
+            item = by_identity.get(identity)
+            if item is not None and identity not in seen:
+                ordered.append(item)
+                seen.add(identity)
+        ordered.extend(item for item in self.items if item.stable_identity not in seen)
+        return tuple(ordered)
+
     def clear(self) -> None:
         self.items = []
         self.current_index = -1

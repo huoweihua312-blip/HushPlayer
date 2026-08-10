@@ -11,7 +11,7 @@ from app.ui_v2.models.album import Album
 from app.ui_v2.models.track import Track
 from app.ui_v2.theme.tokens import Theme
 from app.ui_v2.widgets.elided_label import ElidedLabel
-from app.ui_v2.widgets.placeholder_cover import cover_pixmap
+from app.ui_v2.widgets.artwork_thumbnail import artwork_pixmap_for_track
 
 
 class ArtistAlbumCard(QFrame):
@@ -126,7 +126,7 @@ class ArtistAlbumCard(QFrame):
         if self._representative is None:
             return
         self.artwork.setPixmap(
-            cover_pixmap(self._representative.stable_id, self._cover_size, self._cover_size)
+            artwork_pixmap_for_track(self._representative, self._cover_size, self._cover_size)
         )
         self.artwork.update()
 

@@ -303,8 +303,8 @@ class RealLibraryAdapterTests(unittest.TestCase):
         self.assertEqual(remote.stable_id, "remote_fixture_001")
         self.assertEqual(remote.remote_identity, "remote_fixture_001")
         self.assertEqual(remote.source_type, "online")
-        self.assertTrue(remote.is_missing)
-        self.assertEqual(remote.availability, "source-unavailable")
+        self.assertFalse(remote.is_missing)
+        self.assertEqual(remote.availability, "not_resolved")
         self.assertEqual([track.id for track in self.adapter.favorites()], [remote.id, alpha.id])
         self.assertEqual([track.id for track in self.adapter.recent_tracks()], [beta.id, alpha.id])
         self.assertEqual(

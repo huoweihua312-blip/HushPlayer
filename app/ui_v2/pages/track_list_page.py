@@ -99,11 +99,11 @@ class TrackListPage(QWidget):
     def _on_tracks_reset(self, tracks) -> None:
         self.header.set_count(len(tracks))
         has_playable_track = any(
-            not track.is_missing
-            and not (self.adapter.collection.read_only and track.is_online)
+            (not track.is_missing or track.is_online)
+            and self._playback_enabled
             for track in tracks
         )
-        self.toolbar.setEnabled(has_playable_track and self._playback_enabled)
+        self.toolbar.setEnabled(has_playable_track)
         if not tracks:
             self.current_view_state = "empty"
             self.view_stack.setCurrentWidget(self.empty_state)
@@ -115,6 +115,9 @@ class TrackListPage(QWidget):
         self.track_play_requested.emit(self.adapter.tracks(), track_id)
 
     def _request_queue(self, shuffle: bool) -> None:
-        tracks = tuple(track for track in self.adapter.tracks() if not track.is_missing)
+        tracks = tuple(
+            track for track in self.adapter.tracks()
+            if not track.is_missing or track.is_online
+        )
         if tracks:
             self.queue_requested.emit(tracks, shuffle)

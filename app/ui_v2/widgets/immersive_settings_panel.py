@@ -49,7 +49,7 @@ class ImmersiveSettingsPanel(QFrame):
         form.setHorizontalSpacing(12)
         form.setVerticalSpacing(10)
         self.theme_combo = self._combo((("跟随窗口", ""), ("深色", "dark"), ("浅色", "light")))
-        self.background_combo = self._combo((("封面背景", "artwork"), ("渐变背景", "gradient"), ("纯色背景", "solid"), ("透明背景", "transparent")))
+        self.background_combo = self._combo((("封面背景", "artwork"), ("渐变背景", "gradient"), ("纯色背景", "solid"), ("透明背景", "transparent"), ("自定义图片", "custom")))
         self.background_opacity_slider = self._slider(0, 100)
         self.overlay_strength_slider = self._slider(15, 85)
         self.control_surface_opacity_slider = self._slider(20, 80)

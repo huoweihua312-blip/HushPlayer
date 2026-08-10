@@ -18,7 +18,7 @@ from app.ui_v2.models.track import Track
 from app.ui_v2.theme.icons import icon
 from app.ui_v2.theme.tokens import Theme
 from app.ui_v2.widgets.elided_label import ElidedLabel
-from app.ui_v2.widgets.placeholder_cover import cover_pixmap
+from app.ui_v2.widgets.artwork_thumbnail import artwork_pixmap_for_track
 from app.ui_v2.widgets.track_display import display_track_text
 
 
@@ -82,6 +82,7 @@ class CoverCard(QFrame):
 
     activated = Signal(object)
     play_requested = Signal(object)
+    context_menu_requested = Signal(object, object)
 
     COVER_WIDTH = 164
     COVER_HEIGHT = 164
@@ -97,6 +98,8 @@ class CoverCard(QFrame):
         self.setFixedWidth(self.COVER_WIDTH)
         self.setFixedHeight(210)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.customContextMenuRequested.connect(self._emit_context_menu)
 
         self.artwork = QLabel(self)
         self.artwork.setObjectName("coverCardArtwork")
@@ -161,9 +164,15 @@ class CoverCard(QFrame):
         title, artist, album = display_track_text(track)
         title = title or "未命名歌曲"
         meta = artist or album or "未知艺术家"
+        if track.is_online:
+            meta = f"在线 · {meta}"
         self.title_label.set_full_text(title)
         self.meta_label.set_full_text(meta)
-        self.setToolTip(f"{title} · {meta}")
+        source = str(track.source_name or track.source_id or "在线来源").strip()
+        tooltip = f"{title} · {meta}"
+        if track.is_online:
+            tooltip += f"\n来源：{source}"
+        self.setToolTip(tooltip)
         self._refresh_artwork()
 
     def set_interactive(self, enabled: bool, tooltip: str = "") -> None:
@@ -204,9 +213,16 @@ class CoverCard(QFrame):
             self.artwork.clear()
             return
         self.artwork.setPixmap(
-            cover_pixmap(self._track.stable_id, self.COVER_WIDTH, self.COVER_HEIGHT)
+            artwork_pixmap_for_track(self._track, self.COVER_WIDTH, self.COVER_HEIGHT)
         )
 
     def _emit_play_requested(self) -> None:
         if self._interactive and self._track is not None:
             self.play_requested.emit(self._track)
+
+    def _emit_context_menu(self, position) -> None:
+        if self._track is not None:
+            self.context_menu_requested.emit(
+                self._track,
+                self.mapToGlobal(position),
+            )

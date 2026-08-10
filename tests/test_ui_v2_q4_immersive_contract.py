@@ -61,7 +61,7 @@ class UiV2Q4ImmersiveContractTests(unittest.TestCase):
         self.assertIsInstance(page, ImmersivePlayerShell)
         return page
 
-    def test_one_host_shares_playback_and_has_independent_queue_lyrics_entries(self) -> None:
+    def test_one_workspace_keeps_lyrics_view_when_queue_opens(self) -> None:
         shell = self._shell()
         self.assertIsInstance(shell, ImmersiveLyricsPage)
         self.assertIs(shell.playback_adapter, self.window.playback_adapter)
@@ -71,15 +71,28 @@ class UiV2Q4ImmersiveContractTests(unittest.TestCase):
         shell.header_lyrics.click()
         self.app.processEvents()
         self.assertEqual(shell.mode, "lyrics")
+        route_before_overlay = self.window.navigation_adapter.route
         shell.controls.queue_button.click()
         self.app.processEvents()
-        self.assertEqual(shell.mode, "now_playing")
+        self.assertEqual(shell.mode, "lyrics")
         self.assertTrue(shell.queue_panel.isVisible())
         self.assertEqual(id(shell.controls), control_id)
         shell.controls.lyrics_button.click()
         self.app.processEvents()
-        self.assertEqual(self.window.navigation_adapter.route, "immersive_lyrics")
-        self.assertFalse(shell.queue_panel.isVisible())
+        self.assertEqual(self.window.navigation_adapter.route, route_before_overlay)
+        self.assertEqual(shell.mode, "lyrics")
+        self.assertTrue(shell.queue_panel.isVisible())
+
+    def test_settings_overlay_keeps_current_workspace_view(self) -> None:
+        shell = self._shell("immersive_lyrics")
+        shell.header_lyrics.click()
+        self.app.processEvents()
+        route_before_overlay = self.window.navigation_adapter.route
+        shell.show_settings_panel()
+        self.app.processEvents()
+        self.assertEqual(shell.mode, "lyrics")
+        self.assertEqual(self.window.navigation_adapter.route, route_before_overlay)
+        self.assertTrue(shell.settings_panel.isVisible())
 
     def test_floating_panels_do_not_change_content_geometry(self) -> None:
         shell = self._shell()
@@ -139,13 +152,18 @@ class UiV2Q4ImmersiveContractTests(unittest.TestCase):
         self.app.processEvents()
         current_id = self.window.playback_adapter.state.current_track.id
         self.assertTrue(shell.queue_panel.current_row.isVisible())
+        self.assertEqual(
+            shell.queue_panel.model.rowCount(),
+            len(self.window.playback_adapter.queue_tracks),
+        )
+        view_model = shell.queue_panel.list_widget.model()
         self.assertTrue(all(
-            shell.queue_panel.list_widget.item(row).data(256).id != current_id
-            for row in range(shell.queue_panel.list_widget.count())
+            view_model.index(row, 0).data(Qt.ItemDataRole.UserRole).id != current_id
+            for row in range(view_model.rowCount())
         ))
-        item = shell.queue_panel.list_widget.item(0)
-        target = item.data(256)
-        shell.queue_panel.list_widget.itemDoubleClicked.emit(item)
+        index = view_model.index(0, 0)
+        target = index.data(Qt.ItemDataRole.UserRole)
+        shell.queue_panel.list_widget.doubleClicked.emit(index)
         self.app.processEvents()
         self.assertEqual(self.window.playback_adapter.state.current_track.id, target.id)
 

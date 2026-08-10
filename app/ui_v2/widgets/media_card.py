@@ -9,7 +9,7 @@ from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QVBoxLayout, QWidget
 from app.ui_v2.theme.icons import IconName, icon
 from app.ui_v2.theme.tokens import Theme
 from app.ui_v2.widgets.elided_label import ElidedLabel
-from app.ui_v2.widgets.placeholder_cover import cover_pixmap
+from app.ui_v2.widgets.artwork_thumbnail import artwork_pixmap_for_track
 from app.ui_v2.models.track import Track
 
 
@@ -95,4 +95,6 @@ class MediaCard(QFrame):
             self.cover_label.setPixmap(icon(self._icon_name, self._theme, "selected").pixmap(QSize(30, 30)))
             return
         size = self.cover_label.size()
-        self.cover_label.setPixmap(cover_pixmap(self._representative.stable_id, size.width(), size.height()))
+        self.cover_label.setPixmap(
+            artwork_pixmap_for_track(self._representative, size.width(), size.height())
+        )

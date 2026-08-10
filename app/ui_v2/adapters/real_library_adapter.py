@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import os
 from collections import defaultdict
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime
 from typing import Iterable
 
@@ -24,7 +24,7 @@ from app.ui_v2.adapters.playlist_adapter import PlaylistAdapter
 from app.ui_v2.models.album import Album
 from app.ui_v2.models.artist import Artist
 from app.ui_v2.models.playlist import Playlist, PlaylistEntry
-from app.ui_v2.models.track import Track
+from app.ui_v2.models.track import Track, artwork_url_from_payload
 
 
 def ui_v2_data_mode() -> str:
@@ -125,6 +125,7 @@ class RealLibraryAdapter(QObject):
         self._last_error = ""
         self._data = self._empty_data()
         self._closed = False
+        self.playlist_adapter.playlists_changed.connect(self._on_playlists_changed)
 
     @property
     def repository(self) -> LibraryRepository:
@@ -184,6 +185,16 @@ class RealLibraryAdapter(QObject):
     def playlist_tracks(self, playlist_id: str) -> tuple[Track, ...]:
         return self._tracks_for_ids(
             self._data.playlist_track_ids.get(str(playlist_id), ())
+        )
+
+    def _on_playlists_changed(self, playlists: object) -> None:
+        """Keep the read projection current after an approved playlist edit."""
+
+        values = tuple(playlists or ())
+        self._data = replace(
+            self._data,
+            playlists=values,
+            playlist_track_ids={item.id: item.track_ids for item in values},
         )
 
     def track_by_id(self, track_id: str) -> Track | None:
@@ -266,6 +277,25 @@ class RealLibraryAdapter(QObject):
             favorite_at = favorite_members.get(("remote", track_id))
             local_path = str(record.get("local_path") or "")
             source_id = str(record.get("source_id") or "remote")
+            stored_state = str(
+                record.get("runtime_availability")
+                or record.get("availability")
+                or ""
+            ).strip()
+            availability = stored_state or ("playable" if local_path else "not_resolved")
+            confirmed_error = {
+                "unavailable",
+                "source_unavailable",
+                "source-unavailable",
+                "resolve_failed",
+                "resolve-failed",
+                "permission_denied",
+                "permission-denied",
+                "playback_error",
+                "playback-error",
+            }
+            remote_payload = RemoteTrackStore.to_online_track(track_id, record)
+            artwork_url = artwork_url_from_payload(remote_payload) or artwork_url_from_payload(record)
             track = Track(
                 id=track_id,
                 title=str(record.get("title") or "未知歌曲"),
@@ -277,15 +307,25 @@ class RealLibraryAdapter(QObject):
                 source_type="online",
                 added_at=_timestamp(record.get("added_at")),
                 is_favorite=favorite_at is not None,
-                is_missing=not bool(local_path),
+                # A persisted remote membership is not proof that its source
+                # is unavailable. Runtime failures are transient and normally
+                # do not live in the remote-track record.
+                is_missing=availability in confirmed_error,
                 is_loading=False,
                 artwork_path=None,
                 stable_identity=track_id,
                 favorite_added_at=_timestamp(favorite_at) if favorite_at else None,
                 artwork_key=str(record.get("artwork") or track_id),
-                availability="downloaded" if local_path else "source-unavailable",
+                availability=availability,
                 local_path=local_path,
                 remote_identity=track_id,
+                remote_track_id=str(
+                    record.get("remote_id")
+                    or record.get("songmid")
+                    or track_id
+                ),
+                remote_payload=remote_payload,
+                artwork_url=artwork_url,
             )
             tracks.append(track)
             tracks_by_id[track.id] = track
@@ -357,7 +397,11 @@ class RealLibraryAdapter(QObject):
         self._data = data
         self._last_error = ""
         self.collection.set_tracks(data.tracks)
-        self.playlist_adapter.set_playlists(data.playlists, read_only=True)
+        self.playlist_adapter.set_playlists(
+            data.playlists,
+            read_only=True,
+            can_mutate=self.playlist_adapter.mutation_backend is not None,
+        )
         self._set_state("empty" if not data.tracks else "loaded", "")
         self.data_loaded.emit()
 

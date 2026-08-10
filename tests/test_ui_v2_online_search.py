@@ -101,12 +101,16 @@ class OnlineAdapterTests(unittest.TestCase):
         self.adapter.set_source_enabled(source_id, False)
         self.assertEqual(next(source for source in self.adapter.sources() if source.id == source_id).status, "disabled")
         self.assertTrue(
-            all(track.availability == "unavailable" for track in self.adapter.results() if track.source_id == source_id)
+            all(
+                track.availability == "source_unavailable"
+                for track in self.adapter.results()
+                if track.source_id == source_id
+            )
         )
 
     def test_favorite_playlist_download_and_mock_play_requests(self) -> None:
         self._search()
-        available = next(track for track in self.adapter.results() if track.availability == "available")
+        available = next(track for track in self.adapter.results() if track.availability == "not_resolved")
         self.adapter.toggle_favorite(available.id)
         self.assertTrue(next(track for track in self.adapter.results() if track.id == available.id).is_favorite)
         self.assertTrue(self.collection.track_for_id(available.id).is_favorite)
@@ -130,7 +134,9 @@ class OnlineAdapterTests(unittest.TestCase):
         self.adapter.play_requested.connect(requested.append)
         self.assertTrue(self.adapter.request_play(available.id))
         self.assertEqual(requested[0].id, available.id)
-        unavailable = next(track for track in self.adapter.results() if track.availability == "unavailable")
+        unavailable = next(
+            track for track in self.adapter.results() if track.availability == "source_unavailable"
+        )
         self.assertFalse(self.adapter.request_play(unavailable.id))
 
 
@@ -162,7 +168,7 @@ class OnlineSearchPageTests(unittest.TestCase):
         return next(
             page.result_table.model.index(row, int(OnlineColumn.TITLE))
             for row, track in enumerate(page.result_table.model.tracks())
-            if track.availability == "available"
+            if track.availability == "not_resolved"
         )
 
     def _complete_search(self, page: OnlineSearchPage, query: str = "Paper Moon") -> None:
@@ -192,7 +198,7 @@ class OnlineSearchPageTests(unittest.TestCase):
         unavailable_index = next(
             model.index(row, int(OnlineColumn.TITLE))
             for row, track in enumerate(model.tracks())
-            if track.availability == "unavailable"
+            if track.availability == "source_unavailable"
         )
         menu = page.result_table.build_context_menu(unavailable_index)
         self.assertFalse(next(action for action in menu.actions() if action.text() == "播放").isEnabled())

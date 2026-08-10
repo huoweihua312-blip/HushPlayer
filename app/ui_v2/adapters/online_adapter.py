@@ -15,6 +15,8 @@ from app.ui_v2.models.online_search_state import OnlineSearchState
 from app.ui_v2.models.online_source import OnlineSource
 from app.ui_v2.models.online_track import OnlineTrack
 from app.ui_v2.models.search_history_item import SearchHistoryItem
+from app.ui_v2.models.track import Track, artwork_url_from_payload
+from app.ui_v2.widgets.track_display import present_track_identity_values
 
 
 class OnlineAdapter(QObject):
@@ -33,6 +35,7 @@ class OnlineAdapter(QObject):
     play_requested = Signal(object)
     add_to_playlist_requested = Signal(str, str)
     result_updated = Signal(object)
+    track_updated = Signal(object)
     playing_track_changed = Signal(str)
     state_changed = Signal(object)
     playback_unavailable = Signal(str, str)
@@ -55,6 +58,7 @@ class OnlineAdapter(QObject):
         self._query = ""
         self._scenario = "success"
         self._results: tuple[OnlineTrack, ...] = ()
+        self._recommendation_results: dict[str, OnlineTrack] = {}
         self._sources = self._default_sources()
         self._history: list[SearchHistoryItem] = []
         self._state = OnlineSearchState("idle", "")
@@ -74,6 +78,7 @@ class OnlineAdapter(QObject):
         self._artwork_generation = 0
         self._closed = False
         collection.favorite_changed.connect(self._sync_collection_favorite)
+        collection.tracks_changed.connect(self._sync_result_availability)
         if self.discovery is not None:
             self._connect_formal_services()
 
@@ -103,6 +108,57 @@ class OnlineAdapter(QObject):
 
     def results(self) -> tuple[OnlineTrack, ...]:
         return self._results
+
+    def register_recommendation_tracks(self, tracks) -> None:
+        """Keep temporary Browse results available for existing actions."""
+
+        for track in tracks if isinstance(tracks, (tuple, list)) else ():
+            if isinstance(track, OnlineTrack):
+                self._recommendation_results[track.id] = track
+
+    def clear_recommendation_tracks(self) -> None:
+        self._recommendation_results.clear()
+
+    def map_recommendation_track(self, raw: dict, rank: int) -> OnlineTrack | None:
+        """Map a background result without changing the Online Search page."""
+
+        if not self.is_formal or not isinstance(raw, dict):
+            return None
+        return self._map_formal_track(dict(raw), int(rank))
+
+    def ensure_actionable_track(self, track: Track) -> OnlineTrack | None:
+        """Expose one persisted remote track through the existing action path."""
+
+        if not isinstance(track, Track) or not track.is_online:
+            return None
+        existing = self._track_for_id(track.id)
+        if existing is not None:
+            return existing
+        remote = OnlineTrack(
+            id=track.id,
+            source_id=track.source_id,
+            source_name=track.source_name,
+            title=track.title,
+            artist=track.artist,
+            album=track.album,
+            duration_ms=track.duration_ms,
+            artwork_key=track.artwork_key or track.stable_id,
+            quality="标准",
+            stable_identity=track.stable_id,
+            is_favorite=track.is_favorite,
+            is_downloaded=bool(track.local_path),
+            is_cached=False,
+            availability=track.availability,
+            explicit=False,
+            result_rank=0,
+            artwork_url=track.artwork_url,
+            remote_id=track.remote_track_id,
+            raw=dict(track.remote_payload),
+            artwork_data=bytes(track.artwork_data),
+            availability_detail=track.availability_detail,
+        )
+        self.register_recommendation_tracks((remote,))
+        return remote
 
     def sources(self) -> tuple[OnlineSource, ...]:
         return tuple(self._sources)
@@ -174,6 +230,10 @@ class OnlineAdapter(QObject):
 
     def retry(self) -> bool:
         return self.search()
+
+    def refresh_sources(self) -> None:
+        if self.is_formal:
+            self.discovery.search_service.refresh_source_catalog()
 
     def complete_for_test(self, generation: int | None = None) -> None:
         self._complete_search(self._generation if generation is None else generation)
@@ -259,19 +319,32 @@ class OnlineAdapter(QObject):
             track = self._track_for_id(track_id)
             if track is None:
                 return False
-            message = "在线歌曲暂不可直接播放，请先使用本地文件。"
-            self.playback_unavailable.emit(track.id, message)
-            self.notification_changed.emit(message)
-            return False
+            if not self._can_request_play(track):
+                message = (
+                    str(track.availability_detail or "").strip()
+                    or "当前在线来源暂不支持播放这首歌曲。"
+                )
+                self.playback_unavailable.emit(track.id, message)
+                self.notification_changed.emit(message)
+                return False
+            track = replace(track, availability="resolving", availability_detail="")
+            self._replace_result(track)
+            unified = track.as_track()
+            self.collection.upsert_track(unified)
+            self.set_playing_track(track.id)
+            self.play_requested.emit(unified)
+            return True
         if self.collection.read_only:
             return False
         track = self._track_for_id(track_id)
-        if track is None or track.availability != "available":
+        if track is None or not self._can_request_play(track):
             if track is not None:
                 message = "在线歌曲暂不可直接播放，请先使用本地文件。"
                 self.playback_unavailable.emit(track.id, message)
                 self.notification_changed.emit(message)
             return False
+        track = replace(track, availability="resolving", availability_detail="")
+        self._replace_result(track)
         unified = self.collection.upsert_track(track.as_track())
         self.set_playing_track(track.id)
         self.play_requested.emit(unified)
@@ -362,6 +435,201 @@ class OnlineAdapter(QObject):
         self._playing_track_id = normalized
         self.playing_track_changed.emit(normalized)
 
+    def apply_remote_state(
+        self,
+        stable_identity: str,
+        state: str | None = None,
+        detail: str = "",
+        payload: dict | None = None,
+        duration_ms: int | None = None,
+    ) -> Track | None:
+        """Apply runtime state and enrichment to one stable remote identity."""
+
+        identity = str(stable_identity or "").strip()
+        if self._closed or not identity:
+            return None
+        online = self._online_result_for_identity(identity)
+        if online is not None:
+            updated = self._enrich_online_track(
+                online,
+                state=state,
+                detail=detail,
+                payload=payload,
+                duration_ms=duration_ms,
+            )
+            self._replace_result(updated)
+            return updated.as_track()
+
+        current = self._collection_track_for_identity(identity)
+        if current is None or not current.is_online:
+            return None
+        updated = self._enrich_track(
+            current,
+            state=state,
+            detail=detail,
+            payload=payload,
+            duration_ms=duration_ms,
+        )
+        self.collection.update_runtime_track(updated)
+        self.track_updated.emit(updated)
+        return updated
+
+    def update_remote_duration(self, stable_identity: str, duration_ms: int | None) -> Track | None:
+        """Merge a media-layer duration without changing availability state."""
+
+        return self.apply_remote_state(
+            stable_identity,
+            duration_ms=duration_ms,
+        )
+
+    def _enrich_online_track(
+        self,
+        track: OnlineTrack,
+        *,
+        state: str | None,
+        detail: str,
+        payload: dict | None,
+        duration_ms: int | None,
+    ) -> OnlineTrack:
+        payload = payload if isinstance(payload, dict) else {}
+        duration = self._enriched_duration(payload, duration_ms, track.duration_ms)
+        artwork_url = artwork_url_from_payload(payload) or track.artwork_url
+        artwork_key = self._payload_text(payload, "artworkKey", "artwork_key", "artwork") or track.artwork_key
+        return replace(
+            track,
+            title=self._payload_text(payload, "title", "name") or track.title,
+            artist=self._payload_text(payload, "artist", "singer") or track.artist,
+            album=self._payload_text(payload, "album", "albumName") or track.album,
+            duration_ms=duration,
+            artwork_url=artwork_url,
+            artwork_key=artwork_key,
+            availability=str(state or track.availability).strip() or track.availability,
+            availability_detail=str(detail or track.availability_detail or "").strip(),
+        )
+
+    def _enrich_track(
+        self,
+        track: Track,
+        *,
+        state: str | None,
+        detail: str,
+        payload: dict | None,
+        duration_ms: int | None,
+    ) -> Track:
+        payload = payload if isinstance(payload, dict) else {}
+        duration = self._enriched_duration(payload, duration_ms, track.duration_ms)
+        availability = str(state or track.availability).strip() or track.availability
+        identity = present_track_identity_values(
+            track.title,
+            track.artist,
+            track.album,
+            is_online=True,
+            availability=availability,
+            playback_detail=detail,
+        )
+        remote_payload = dict(track.remote_payload) if isinstance(track.remote_payload, dict) else {}
+        for key, value in (
+            ("title", self._payload_text(payload, "title", "name")),
+            ("artist", self._payload_text(payload, "artist", "singer")),
+            ("album", self._payload_text(payload, "album", "albumName")),
+            ("artwork", self._payload_text(payload, "artwork", "artworkKey", "cover")),
+        ):
+            if value:
+                remote_payload[key] = value
+        if duration is not None:
+            remote_payload["duration"] = duration
+        artwork_url = artwork_url_from_payload(payload) or track.artwork_url
+        if artwork_url:
+            remote_payload["artwork"] = artwork_url
+            remote_payload["artworkUrl"] = artwork_url
+            remote_payload["artwork_url"] = artwork_url
+        return replace(
+            track,
+            title=self._payload_text(payload, "title", "name") or track.title,
+            artist=self._payload_text(payload, "artist", "singer") or track.artist,
+            album=self._payload_text(payload, "album", "albumName") or track.album,
+            duration_ms=duration,
+            artwork_key=self._payload_text(payload, "artwork", "artworkKey", "cover") or track.artwork_key,
+            artwork_url=artwork_url,
+            availability=availability,
+            availability_detail=str(detail or track.availability_detail or "").strip(),
+            is_missing=identity.availability.is_confirmed_error,
+            is_loading=identity.availability.is_resolving,
+            remote_payload=remote_payload,
+        )
+
+    def _publish_track(self, track: Track) -> None:
+        if self.collection.track_for_id(track.id) is not None:
+            self.collection.update_runtime_track(track)
+        self.track_updated.emit(track)
+
+    def _online_result_for_identity(self, identity: str) -> OnlineTrack | None:
+        return next(
+            (
+                track
+                for track in (*self._results, *self._recommendation_results.values())
+                if identity in {track.id, track.stable_identity, track.remote_id}
+            ),
+            None,
+        )
+
+    def _collection_track_for_identity(self, identity: str) -> Track | None:
+        return next(
+            (
+                track
+                for track in self.collection.tracks()
+                if track.is_online
+                and identity in {track.id, track.stable_identity, track.remote_identity}
+            ),
+            None,
+        )
+
+    @staticmethod
+    def _payload_text(payload: dict, *keys: str) -> str:
+        candidates = [payload]
+        metadata = payload.get("metadata")
+        if isinstance(metadata, dict):
+            candidates.insert(0, metadata)
+        for candidate in candidates:
+            for key in keys:
+                value = candidate.get(key)
+                if value is not None and str(value).strip():
+                    return str(value).strip()
+        return ""
+
+    def _enriched_duration(
+        self,
+        payload: dict,
+        duration_ms: int | None,
+        current: int | None,
+    ) -> int | None:
+        if duration_ms is not None:
+            try:
+                value = int(duration_ms)
+            except (TypeError, ValueError):
+                value = 0
+            if value > 0:
+                return value
+        raw = payload.get("durationMs") if "durationMs" in payload else payload.get("duration")
+        if raw not in (None, ""):
+            parsed = self._duration_ms(raw, None)
+            return parsed if parsed and parsed > 0 else current
+        return current
+
+    @staticmethod
+    def _can_request_play(track: OnlineTrack) -> bool:
+        identity = present_track_identity_values(
+            track.title,
+            track.artist,
+            track.album,
+            is_online=True,
+            availability=track.availability,
+        )
+        return (
+            identity.availability.is_retryable
+            or not identity.availability.is_confirmed_error
+        )
+
     def request_metadata(self, track_id: str) -> bool:
         track = self._track_for_id(track_id)
         if track is None:
@@ -384,6 +652,7 @@ class OnlineAdapter(QObject):
 
     def shutdown(self) -> None:
         self._closed = True
+        self._recommendation_results.clear()
         if self.discovery is not None:
             self._metadata_requests.clear()
 
@@ -422,6 +691,18 @@ class OnlineAdapter(QObject):
         if self._state.phase == "idle" and not self._query:
             self._set_state("idle", text)
             return
+        if any(
+            marker in text
+            for marker in (
+                "没有已启用",
+                "没有可搜索",
+                "请至少选择",
+                "读取自定义来源失败",
+                "来源列表格式无效",
+            )
+        ):
+            self._set_state("failed", text, self._state.progress)
+            return
         if self._state.phase != "results":
             self._set_state("searching", text, self._state.progress)
 
@@ -451,8 +732,24 @@ class OnlineAdapter(QObject):
             self.search_completed.emit(self._results)
         else:
             errors = summary.get("errors") if isinstance(summary, dict) else {}
-            phase = "failed" if errors else "empty"
-            self._set_state(phase, "在线搜索没有返回可展示的结果。", 100)
+            sources = summary.get("sources") if isinstance(summary, dict) else []
+            source_states = [
+                dict(item)
+                for item in sources
+                if isinstance(item, dict)
+            ]
+            unavailable = bool(errors) or bool(source_states) and all(
+                str(item.get("status") or "").casefold()
+                in {"failed", "error", "unavailable"}
+                for item in source_states
+            )
+            phase = "failed" if unavailable else "empty"
+            message = (
+                "已启用来源均不可用，请管理来源后重试。"
+                if unavailable
+                else "在线搜索没有返回可展示的结果。"
+            )
+            self._set_state(phase, message, 100)
             self.search_completed.emit(self._results)
 
     def _on_formal_request_failed(self, request_id: int, action: str, message: str) -> None:
@@ -526,6 +823,7 @@ class OnlineAdapter(QObject):
             )
             for source in self._sources
         ]
+        self._sync_result_availability()
         self.source_state_changed.emit(self.sources())
 
     def _sync_formal_sources(self) -> None:
@@ -552,6 +850,7 @@ class OnlineAdapter(QObject):
                 )
             )
         self._sources = values
+        self._sync_result_availability()
         self.source_state_changed.emit(self.sources())
 
     def _map_formal_track(
@@ -561,21 +860,57 @@ class OnlineAdapter(QObject):
         *,
         existing: OnlineTrack | None = None,
     ) -> OnlineTrack:
-        source_id = str(raw.get("sourceId") or raw.get("source_id") or (existing.source_id if existing else "")).strip()
+        existing = existing or self._existing_formal_result(raw)
+        source_id = str(
+            existing.source_id
+            if existing is not None and existing.source_id
+            else raw.get("sourceId")
+            or raw.get("source_id")
+            or ""
+        ).strip()
         remote_id = str(
-            raw.get("remote_id")
+            existing.remote_id
+            if existing is not None and existing.remote_id
+            else raw.get("remote_id")
             or raw.get("remoteId")
             or raw.get("id")
             or raw.get("songmid")
-            or (existing.remote_id if existing else "")
+            or ""
         ).strip()
         identity_payload = dict(raw)
         identity_payload["source_id"] = source_id
         identity_payload["remote_id"] = remote_id
-        stable_id = RemoteTrackStore.stable_id_for_track(identity_payload)
+        stable_id = (
+            existing.stable_identity
+            if existing is not None and existing.stable_identity
+            else RemoteTrackStore.stable_id_for_track(identity_payload)
+        )
         track_id = existing.id if existing is not None else stable_id
         source = self._source_for_id(source_id)
         current = self._track_for_id(track_id) or self._track_for_id(stable_id)
+        collection_current = self._collection_track_for_identity(stable_id)
+        artwork_source = existing or current or collection_current
+        if existing is not None:
+            availability = existing.availability
+        else:
+            explicit_state = str(
+                raw.get("runtimeAvailability")
+                or raw.get("runtime_availability")
+                or ""
+            ).strip()
+            availability = explicit_state or (
+                "not_resolved"
+                if source is not None and source.enabled and source.supports_playback
+                else "source_unavailable"
+            )
+        artwork_payload = dict(raw)
+        artwork_url = artwork_url_from_payload(raw) or (
+            str(getattr(artwork_source, "artwork_url", "") or "")
+        )
+        if artwork_url:
+            artwork_payload.setdefault("artwork", artwork_url)
+            artwork_payload.setdefault("artworkUrl", artwork_url)
+            artwork_payload.setdefault("artwork_url", artwork_url)
         return OnlineTrack(
             id=track_id,
             source_id=source_id,
@@ -584,20 +919,56 @@ class OnlineAdapter(QObject):
             artist=str(raw.get("artist") or (existing.artist if existing else "未知艺术家")),
             album=str(raw.get("album") or (existing.album if existing else "未知专辑")),
             duration_ms=self._duration_ms(raw.get("duration") or raw.get("durationMs"), existing),
-            artwork_key=str(raw.get("artwork") or raw.get("artworkKey") or (existing.artwork_key if existing else stable_id)),
+            artwork_key=str(
+                raw.get("artwork")
+                or raw.get("artworkKey")
+                or getattr(artwork_source, "artwork_key", "")
+                or stable_id
+            ),
             quality=str(raw.get("quality") or raw.get("bitrate") or (existing.quality if existing else "标准")),
             stable_identity=stable_id,
             is_favorite=current.is_favorite if current is not None else (existing.is_favorite if existing else False),
             is_downloaded=bool(raw.get("downloaded") or (existing.is_downloaded if existing else False)),
             is_cached=bool(raw.get("cached") or (existing.is_cached if existing else False)),
-            availability="unavailable",
+            availability=availability,
             explicit=bool(raw.get("explicit") or raw.get("explicitContent")),
             result_rank=rank,
-            artwork_url=str(raw.get("artworkUrl") or raw.get("artwork_url") or raw.get("cover") or raw.get("coverUrl") or ""),
+            artwork_url=artwork_url,
             remote_id=remote_id,
-            raw=dict(raw),
-            artwork_data=existing.artwork_data if existing is not None else b"",
+            raw=artwork_payload,
+            artwork_data=bytes(
+                getattr(artwork_source, "artwork_data", b"") or b""
+            ),
+            availability_detail=(
+                str(raw.get("availabilityDetail") or raw.get("availability_detail") or "").strip()
+                or (existing.availability_detail if existing is not None else "")
+            ),
         )
+
+    def _existing_formal_result(self, raw: dict) -> OnlineTrack | None:
+        """Keep runtime state when an incremental source result is remapped."""
+
+        if not isinstance(raw, dict):
+            return None
+        source_id = str(raw.get("sourceId") or raw.get("source_id") or "").strip()
+        remote_id = str(
+            raw.get("remote_id")
+            or raw.get("remoteId")
+            or raw.get("id")
+            or raw.get("songmid")
+            or ""
+        ).strip()
+        identity_payload = dict(raw)
+        identity_payload["source_id"] = source_id
+        identity_payload["remote_id"] = remote_id
+        stable_id = RemoteTrackStore.stable_id_for_track(identity_payload)
+        identities = {value for value in (remote_id, stable_id) if value}
+        for track in self._results:
+            if source_id and track.source_id != source_id:
+                continue
+            if identities & {track.id, track.stable_identity, track.remote_id}:
+                return track
+        return None
 
     @staticmethod
     def _duration_ms(value, existing: OnlineTrack | None = None) -> int | None:
@@ -623,6 +994,8 @@ class OnlineAdapter(QObject):
                 "album": track.album,
                 "duration": track.duration_ms or 0,
                 "artwork": track.artwork_url or payload.get("artwork") or "",
+                "artworkUrl": track.artwork_url or payload.get("artworkUrl") or "",
+                "artwork_url": track.artwork_url or payload.get("artwork_url") or "",
                 "raw": dict(track.raw),
             }
         )
@@ -730,7 +1103,7 @@ class OnlineAdapter(QObject):
                     is_favorite=current.is_favorite if current is not None else False,
                     is_downloaded=False,
                     is_cached=False,
-                    availability="available" if source.supports_playback else "unavailable",
+                    availability="not_resolved" if source.supports_playback else "source_unavailable",
                     explicit=explicit,
                     result_rank=source_index * 16 + rank,
                 )
@@ -759,27 +1132,117 @@ class OnlineAdapter(QObject):
 
     def _replace_result(self, updated: OnlineTrack) -> None:
         for index, track in enumerate(self._results):
-            if track.id != updated.id:
+            if not ({track.id, track.stable_identity} & {updated.id, updated.stable_identity}):
                 continue
             values = list(self._results)
             values[index] = updated
             self._results = tuple(values)
             self.result_updated.emit(updated)
+            self._publish_track(updated.as_track())
+            return
+        for key, track in tuple(self._recommendation_results.items()):
+            if not ({track.id, track.stable_identity, track.remote_id} & {
+                updated.id,
+                updated.stable_identity,
+                updated.remote_id,
+            }):
+                continue
+            self._recommendation_results.pop(key, None)
+            self._recommendation_results[updated.id] = updated
+            self.result_updated.emit(updated)
+            self._publish_track(updated.as_track())
             return
 
     def _sync_result_availability(self) -> None:
-        for track in self._results:
+        for track in (*self._results, *self._recommendation_results.values()):
             source = self._source_for_id(track.source_id)
-            availability = (
-                "available"
-                if source is not None and source.enabled and source.supports_playback
-                else "unavailable"
+            source_blocked = self._source_is_blocked(source)
+            if source_blocked and track.availability not in {
+                "resolve_failed",
+                "resolve-failed",
+                "permission_denied",
+                "permission-denied",
+                "playback_error",
+                "playback-error",
+            }:
+                self._replace_result(
+                    replace(
+                        track,
+                        availability="source_unavailable",
+                        availability_detail=(
+                            source.last_error
+                            if source is not None and source.last_error
+                            else "当前在线来源不可用。"
+                        ),
+                    )
+                )
+            elif not source_blocked and track.availability in {
+                "source_unavailable",
+                "source-unavailable",
+            }:
+                self._replace_result(
+                    replace(track, availability="not_resolved", availability_detail="")
+                )
+        for track in self.collection.tracks():
+            if not track.is_online:
+                continue
+            source = self._source_for_id(track.source_id)
+            if self._source_is_blocked(source) and track.availability not in {
+                "resolve_failed",
+                "resolve-failed",
+                "permission_denied",
+                "permission-denied",
+                "playback_error",
+                "playback-error",
+            }:
+                self.collection.update_runtime_track(
+                    replace(
+                        track,
+                        availability="source_unavailable",
+                        availability_detail=(
+                            source.last_error
+                            if source is not None and source.last_error
+                            else "当前在线来源不可用。"
+                        ),
+                        is_missing=True,
+                    )
+                )
+            elif not self._source_is_blocked(source) and track.availability in {
+                "source_unavailable",
+                "source-unavailable",
+            }:
+                self.collection.update_runtime_track(
+                    replace(
+                        track,
+                        availability="not_resolved",
+                        availability_detail="",
+                        is_missing=False,
+                    )
+                )
+
+    @staticmethod
+    def _source_is_blocked(source: OnlineSource | None) -> bool:
+        # A missing catalog entry is not proof of a capability denial. Keep
+        # that track unresolved until the source registry reports a real state.
+        return bool(
+            source is not None
+            and (
+                not source.enabled
+                or not source.supports_playback
+                or source.status in {"failed", "disabled"}
             )
-            if availability != track.availability:
-                self._replace_result(replace(track, availability=availability))
+        )
 
     def _track_for_id(self, track_id: str) -> OnlineTrack | None:
-        return next((track for track in self._results if track.id == track_id), None)
+        normalized = str(track_id or "")
+        return next(
+            (
+                track
+                for track in (*self._results, *self._recommendation_results.values())
+                if normalized in {track.id, track.stable_identity, track.remote_id}
+            ),
+            None,
+        )
 
     def _source_for_id(self, source_id: str) -> OnlineSource | None:
         return next((source for source in self._sources if source.id == source_id), None)

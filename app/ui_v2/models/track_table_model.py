@@ -185,15 +185,15 @@ class TrackTableModel(QAbstractTableModel):
 
     @staticmethod
     def _display_value(track: Track, column: TrackColumn) -> str:
-        from app.ui_v2.widgets.track_display import display_track_text
+        from app.ui_v2.widgets.track_display import present_track_identity
 
-        title, artist, album = display_track_text(track)
+        identity = present_track_identity(track)
         values = {
             TrackColumn.STATUS: "",
             TrackColumn.FAVORITE: "",
-            TrackColumn.TITLE: title,
-            TrackColumn.ARTIST: artist,
-            TrackColumn.ALBUM: album,
+            TrackColumn.TITLE: identity.title,
+            TrackColumn.ARTIST: identity.artist,
+            TrackColumn.ALBUM: identity.album,
             TrackColumn.DURATION: format_duration(track.duration_ms),
             TrackColumn.SOURCE: track.source_name,
             TrackColumn.MORE: "",
@@ -201,10 +201,13 @@ class TrackTableModel(QAbstractTableModel):
         return values[column]
 
     def _tooltip_value(self, track: Track, column: TrackColumn) -> str:
-        from app.ui_v2.widgets.track_display import display_track_text
+        from app.ui_v2.widgets.track_display import present_track_identity
 
-        title, artist, album = display_track_text(track)
-        if column in {TrackColumn.STATUS, TrackColumn.MORE}:
+        identity = present_track_identity(track)
+        title, artist, album = identity.title, identity.artist, identity.album
+        if column == TrackColumn.STATUS:
+            return identity.availability.tooltip if identity.availability.is_visible else ""
+        if column == TrackColumn.MORE:
             return ""
         if column == TrackColumn.FAVORITE:
             return "取消收藏" if track.is_favorite else "添加到我喜欢"

@@ -14,6 +14,7 @@ class NavigationAdapter(QObject):
     """Owns only route state; playlists are supplied by PlaylistAdapter."""
 
     route_changed = Signal(str)
+    history_changed = Signal(bool, bool)
     playlists_changed = Signal(object)
     current_playlist_changed = Signal(str)
 
@@ -44,6 +45,8 @@ class NavigationAdapter(QObject):
         self._route = "browse"
         self._current_playlist_id = ""
         self._include_online = bool(include_online)
+        self._back_stack: list[str] = []
+        self._forward_stack: list[str] = []
         self.playlist_adapter.playlists_changed.connect(self._on_playlists_changed)
 
     @property
@@ -54,6 +57,14 @@ class NavigationAdapter(QObject):
     def current_playlist_id(self) -> str:
         return self._current_playlist_id
 
+    @property
+    def can_go_back(self) -> bool:
+        return bool(self._back_stack)
+
+    @property
+    def can_go_forward(self) -> bool:
+        return bool(self._forward_stack)
+
     def items(self) -> tuple[NavigationItem, ...]:
         if self._include_online:
             return self.MAIN_ITEMS
@@ -62,7 +73,7 @@ class NavigationAdapter(QObject):
     def playlists(self) -> tuple[Playlist, ...]:
         return self.playlist_adapter.playlists()
 
-    def set_route(self, route_id: str) -> None:
+    def set_route(self, route_id: str, *, record_history: bool = True) -> None:
         route = str(route_id or "library")
         playlist_id = route.removeprefix("playlist:") if route.startswith("playlist:") else ""
         if playlist_id and self.playlist_adapter.playlist_for_id(playlist_id) is None:
@@ -70,13 +81,37 @@ class NavigationAdapter(QObject):
             playlist_id = ""
         if route == self._route and playlist_id == self._current_playlist_id:
             return
+        previous_route = self._route
+        if record_history and self._is_history_route(previous_route) and self._is_history_route(route):
+            if not self._back_stack or self._back_stack[-1] != previous_route:
+                self._back_stack.append(previous_route)
+            self._forward_stack.clear()
         self._route = route
         self._current_playlist_id = playlist_id
         self.route_changed.emit(route)
         if playlist_id:
             self.current_playlist_changed.emit(playlist_id)
+        self._emit_history_changed()
 
-    def create_playlist(self, name: str = "") -> Playlist:
+    def go_back(self) -> None:
+        if not self._back_stack:
+            return
+        target = self._back_stack.pop()
+        current = self._route
+        if self._is_history_route(current):
+            self._forward_stack.append(current)
+        self.set_route(target, record_history=False)
+
+    def go_forward(self) -> None:
+        if not self._forward_stack:
+            return
+        target = self._forward_stack.pop()
+        current = self._route
+        if self._is_history_route(current):
+            self._back_stack.append(current)
+        self.set_route(target, record_history=False)
+
+    def create_playlist(self, name: str = "") -> Playlist | None:
         return self.playlist_adapter.create_playlist(name)
 
     def rename_playlist(self, playlist_id: str, name: str) -> bool:
@@ -90,6 +125,12 @@ class NavigationAdapter(QObject):
         if self._current_playlist_id and self.playlist_adapter.playlist_for_id(
             self._current_playlist_id
         ) is None:
-            self._current_playlist_id = ""
-            self._route = "library"
-            self.route_changed.emit("library")
+            self.set_route("library", record_history=False)
+
+    @staticmethod
+    def _is_history_route(route: str) -> bool:
+        normalized = str(route or "")
+        return normalized != "settings" and not normalized.startswith("immersive")
+
+    def _emit_history_changed(self) -> None:
+        self.history_changed.emit(self.can_go_back, self.can_go_forward)

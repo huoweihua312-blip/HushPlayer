@@ -114,7 +114,9 @@ class StartupArgumentTests(unittest.TestCase):
         self.assertFalse(second.created_application)
 
     def test_v2_theme_is_installed_by_flavor_before_window_creation(self) -> None:
-        apply_ui_theme(self.app, "ui-v2")
+        with tempfile.TemporaryDirectory() as temporary:
+            settings_path = str(Path(temporary) / "settings.json")
+            apply_ui_theme(self.app, "ui-v2", settings_path=settings_path)
         self.assertEqual(self.app.property("hushUiFlavor"), "ui-v2")
         self.assertEqual(self.app.property("hushUiV2ThemeMode"), "dark")
         self.assertIn(get_theme("dark").colors.app_background, self.app.styleSheet())
@@ -316,12 +318,18 @@ class ProductionRuntimeTests(unittest.TestCase):
         self.assertEqual(self.repository.load_count, 1)
 
     def test_real_read_only_mode_disables_write_and_network_surfaces(self) -> None:
-        self.assertNotIn("online_search", self.window.sidebar._items)
-        self.assertTrue(self.window.sidebar.new_playlist_button.isHidden())
+        self.assertIn("online_search", self.window.sidebar._items)
+        self.assertFalse(self.window.sidebar.new_playlist_button.isHidden())
         self.assertFalse(self.window.library_collection.set_favorite("missing", True))
-        self.assertIsNone(self.window.playlist_adapter.create_playlist("No write"))
-        self.assertFalse(self.window.playlist_adapter.delete_playlist("road"))
-        self.assertEqual(self.before_state, _file_state(self.document_paths))
+        created = self.window.playlist_adapter.create_playlist("生产歌单")
+        self.assertIsNotNone(created)
+        assert created is not None
+        self.assertTrue(self.window.playlist_adapter.rename_playlist(created.id, "生产歌单已重命名"))
+        self.assertTrue(self.window.playlist_adapter.delete_playlist(created.id))
+        self.assertEqual(
+            {path: self.before_state[path] for path in (self.library_file, self.stats_file, self.remote_file, self.settings_file)},
+            {path: _file_state(self.document_paths)[path] for path in (self.library_file, self.stats_file, self.remote_file, self.settings_file)},
+        )
 
     def test_empty_real_library_starts_with_formal_empty_state(self) -> None:
         self.window.close()

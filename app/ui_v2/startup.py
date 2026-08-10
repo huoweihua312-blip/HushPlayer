@@ -63,21 +63,37 @@ def build_ui_v2_runtime_services(
         data_dir / "stats.json",
     )
     remote_tracks = RemoteTrackStore(data_dir / "remote_tracks.json")
+    online_discovery = OnlineDiscoveryRuntime(
+        resolved,
+        repository,
+        remote_tracks,
+    )
+    if playback_adapter is None:
+        controller = ProductionPlaybackController(
+            online_resolver=online_discovery.playback_resolver,
+            online_audio_cache=online_discovery.online_audio_cache,
+            online_cache_allowed=online_discovery.online_source_allows_audio_cache,
+        )
+        playback_adapter = PlaybackAdapter(
+            timer_enabled=False,
+            controller=controller,
+        )
+    elif playback_adapter.controller is not None:
+        playback_adapter.controller.set_online_resolver(
+            online_discovery.playback_resolver
+        )
     return UiV2RuntimeServices(
         paths=resolved,
         settings_path=data_dir / "settings.json",
         repository=repository,
         remote_tracks=remote_tracks,
-        playback_adapter=playback_adapter or PlaybackAdapter(
-            timer_enabled=False,
-            controller=ProductionPlaybackController(),
+        playback_adapter=playback_adapter,
+        lyrics_adapter=lyrics_adapter or LyricsAdapter(
+            lyrics_service=online_discovery.lyrics_service,
+            lyrics_cache_dir=resolved.cache_dir / "lyrics",
+            lyrics_bindings_path=resolved.data_dir / "lyrics_bindings.json",
         ),
-        lyrics_adapter=lyrics_adapter or LyricsAdapter(),
-        online_discovery=OnlineDiscoveryRuntime(
-            resolved,
-            repository,
-            remote_tracks,
-        ),
+        online_discovery=online_discovery,
     )
 
 

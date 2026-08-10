@@ -216,7 +216,10 @@ class OnlineDiscoveryQ5ATests(unittest.TestCase):
         self.assertEqual(len(tracks), 2)
         self.assertEqual(len({track.id for track in tracks}), 2)
         self.assertEqual(len({track.stable_identity for track in tracks}), 2)
-        self.assertTrue(all(track.availability == "unavailable" for track in tracks))
+        self.assertEqual(
+            [track.availability for track in tracks],
+            ["not_resolved", "source_unavailable"],
+        )
         self.adapter.set_query("新查询")
         second = self.search.generation
         self.search.emit_results(self._results(), generation=first)
@@ -243,15 +246,14 @@ class OnlineDiscoveryQ5ATests(unittest.TestCase):
         self.assertTrue(self.adapter.request_add_to_playlist(track.id, "playlist-1"))
         self.assertEqual(self.bridge.playlists, [(track.remote_id, "playlist-1")])
 
-    def test_online_playback_is_explicitly_unavailable(self) -> None:
-        notices: list[tuple[str, str]] = []
-        self.adapter.playback_unavailable.connect(lambda track_id, message: notices.append((track_id, message)))
+    def test_playable_remote_track_leaves_the_unavailable_boundary(self) -> None:
+        played = []
+        self.adapter.play_requested.connect(played.append)
         generation = self._search()
         self.search.emit_results(self._results(), generation=generation)
         track = self.adapter.results()[0]
-        self.assertFalse(self.adapter.request_play(track.id))
-        self.assertEqual(notices[0][0], track.id)
-        self.assertIn("不可直接播放", notices[0][1])
+        self.assertTrue(self.adapter.request_play(track.id))
+        self.assertEqual(played[0].stable_identity, track.stable_identity)
 
     def test_formal_bridge_preserves_remote_membership_identity(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

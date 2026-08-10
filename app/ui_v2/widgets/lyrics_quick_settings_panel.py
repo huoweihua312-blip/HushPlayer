@@ -5,9 +5,14 @@ from __future__ import annotations
 from collections.abc import Callable
 
 from PySide6.QtCore import Qt, Signal
+from PySide6.QtGui import QFontMetrics
 from PySide6.QtWidgets import QFileDialog, QFormLayout, QHBoxLayout, QLabel, QSlider, QToolButton
 
-from app.ui_v2.adapters.legacy_settings_bridge import LegacySettingsBridge
+from app.ui_v2.adapters.legacy_settings_bridge import (
+    IMMERSIVE_BACKGROUND_VISUAL_MODES,
+    LegacySettingsBridge,
+    normalize_immersive_background_visual_mode,
+)
 from app.ui_v2.models.settings_edit_session import SettingsEditSession
 from app.ui_v2.models.settings_snapshot import SettingsSnapshot
 from app.ui_v2.theme.tokens import Theme
@@ -33,6 +38,7 @@ class LyricsQuickSettingsFloatingPanel(ImmersiveSettingsPanel):
         self._path_picker = path_picker
         self._session: SettingsEditSession | None = None
         self._syncing_session = False
+        self._custom_path = ""
         super().__init__(theme, parent)
         self._add_formal_controls()
         self._add_transaction_footer()
@@ -50,15 +56,25 @@ class LyricsQuickSettingsFloatingPanel(ImmersiveSettingsPanel):
         self.background_transparency_slider = self._slider(0, 100)
         self.custom_path_button = QToolButton(self.content_widget)
         self.custom_path_button.setText("选择背景图片")
+        self.custom_clear_button = QToolButton(self.content_widget)
+        self.custom_clear_button.setText("清除")
+        self.custom_clear_button.setToolTip("恢复封面背景")
+        self.custom_clear_button.setAccessibleName("清除自定义背景")
+        self.custom_clear_button.setEnabled(False)
+        self.custom_clear_button.clicked.connect(self._clear_custom_path)
         self.custom_path_label = QLabel("未选择自定义背景", self.content_widget)
-        self.custom_path_label.setWordWrap(True)
         self.custom_path_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        path_actions = QHBoxLayout()
+        path_actions.setContentsMargins(0, 0, 0, 0)
+        path_actions.setSpacing(6)
+        path_actions.addWidget(self.custom_path_button)
+        path_actions.addWidget(self.custom_clear_button)
         for label, control in (
             ("背景模糊", self._slider_row(self.background_blur_slider, "%")),
             ("背景暗度", self._slider_row(self.background_darkness_slider, "%")),
             ("图片不透明度", self._slider_row(self.background_image_opacity_slider, "%")),
             ("背景透明度", self._slider_row(self.background_transparency_slider, "%")),
-            ("自定义图片", self.custom_path_button),
+            ("自定义图片", path_actions),
             ("图片路径", self.custom_path_label),
         ):
             form.addRow(label, control)
@@ -97,6 +113,15 @@ class LyricsQuickSettingsFloatingPanel(ImmersiveSettingsPanel):
     def is_dirty(self) -> bool:
         return bool(self._session and self._session.is_dirty)
 
+    @property
+    def custom_path(self) -> str:
+        """Return the full selected path, keeping direct-label integrations working."""
+
+        if self._custom_path:
+            return self._custom_path
+        label = self.custom_path_label.text().strip()
+        return "" if label == "未选择自定义背景" else label
+
     def begin_session(self, snapshot: SettingsSnapshot | None = None) -> None:
         if snapshot is None and self._settings_bridge is not None:
             snapshot = self._settings_bridge.read_snapshot()
@@ -118,8 +143,10 @@ class LyricsQuickSettingsFloatingPanel(ImmersiveSettingsPanel):
             appearance_index = self.theme_combo.findData(appearance if appearance != "system" else "")
             if appearance_index >= 0:
                 self.theme_combo.setCurrentIndex(appearance_index)
-            mode = str(values.get("immersive_background_mode", "cover"))
-            mode_value = {"cover": "artwork", "default": "gradient", "translucent": "transparent", "custom": "artwork"}.get(mode, "artwork")
+            mode_value = normalize_immersive_background_visual_mode(
+                values.get("immersive_background_visual_mode"),
+                values.get("immersive_background_mode", "cover"),
+            )
             mode_index = self.background_combo.findData(mode_value)
             if mode_index >= 0:
                 self.background_combo.setCurrentIndex(mode_index)
@@ -133,20 +160,22 @@ class LyricsQuickSettingsFloatingPanel(ImmersiveSettingsPanel):
             ):
                 control.setValue(int(values.get(key, default)))
             path = str(values.get("immersive_background_custom_path", "") or "")
-            self.custom_path_label.setText(path or "未选择自定义背景")
+            self._set_custom_path(path)
         finally:
             self._syncing_session = False
 
     def _setting_values(self) -> dict[str, object]:
         mode = str(self.background_combo.currentData() or "artwork")
-        formal_mode = {"artwork": "cover", "gradient": "default", "solid": "default", "transparent": "translucent"}.get(mode, "cover")
-        path = self.custom_path_label.text()
-        if path == "未选择自定义背景":
-            path = ""
+        if mode not in IMMERSIVE_BACKGROUND_VISUAL_MODES:
+            mode = "artwork"
+        formal_mode = {"artwork": "cover", "gradient": "default", "solid": "default", "transparent": "translucent", "custom": "custom"}[mode]
+        path = self.custom_path
+        has_custom_background = mode == "custom" and bool(path)
         return {
             "appearance_mode": self.theme_combo.currentData() or "system",
             "immersive_auto_hide_ui": self.auto_hide_check.isChecked(),
-            "immersive_background_mode": "custom" if path else formal_mode,
+            "immersive_background_mode": "custom" if has_custom_background else formal_mode,
+            "immersive_background_visual_mode": mode if has_custom_background or mode != "custom" else "artwork",
             "immersive_background_custom_path": path,
             "immersive_background_blur": self.background_blur_slider.value(),
             "immersive_background_darkness": self.background_darkness_slider.value(),
@@ -172,8 +201,38 @@ class LyricsQuickSettingsFloatingPanel(ImmersiveSettingsPanel):
             "图片文件 (*.png *.jpg *.jpeg *.bmp *.webp)",
         )[0]
         if path:
-            self.custom_path_label.setText(str(path))
+            self._set_custom_path(str(path))
+            custom_index = self.background_combo.findData("custom")
+            if custom_index >= 0:
+                previous = self.background_combo.blockSignals(True)
+                self.background_combo.setCurrentIndex(custom_index)
+                self.background_combo.blockSignals(previous)
             self.changed.emit()
+
+    def _set_custom_path(self, path: str) -> None:
+        self._custom_path = str(path or "").strip()
+        if not self._custom_path:
+            self.custom_path_label.setText("未选择自定义背景")
+            self.custom_path_label.setToolTip("")
+        else:
+            available = max(120, self.custom_path_label.width() - 8)
+            text = QFontMetrics(self.custom_path_label.font()).elidedText(
+                self._custom_path,
+                Qt.TextElideMode.ElideMiddle,
+                available,
+            )
+            self.custom_path_label.setText(text)
+            self.custom_path_label.setToolTip(self._custom_path)
+        self.custom_clear_button.setEnabled(bool(self._custom_path))
+
+    def _clear_custom_path(self) -> None:
+        self._set_custom_path("")
+        artwork_index = self.background_combo.findData("artwork")
+        if artwork_index >= 0:
+            previous = self.background_combo.blockSignals(True)
+            self.background_combo.setCurrentIndex(artwork_index)
+            self.background_combo.blockSignals(previous)
+        self.changed.emit()
 
     def cancel_session(self) -> SettingsSnapshot | None:
         if self._session is None:

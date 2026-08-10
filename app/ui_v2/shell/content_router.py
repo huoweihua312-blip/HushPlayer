@@ -135,6 +135,9 @@ class ContentRouter(QStackedWidget):
             theme,
             self,
             playback_enabled=self._playback_enabled,
+            playlists=playlists,
+            online=online,
+            online_discovery=online.discovery,
         )
         self._pages: dict[str, QWidget] = {
             "browse": self.browse_page,
@@ -148,6 +151,9 @@ class ContentRouter(QStackedWidget):
         self.addWidget(self.browse_page)
         self.addWidget(library_page)
         self.browse_page.track_play_requested.connect(self.track_play_requested)
+        self.browse_page.online_search_requested.connect(
+            lambda: self._navigation.set_route("online_search")
+        )
         library_page.track_table.play_requested.connect(
             lambda track_id: self.track_play_requested.emit(
                 library_page.adapter.tracks(), track_id
@@ -388,6 +394,13 @@ class ContentRouter(QStackedWidget):
         return page
 
     def _switch_immersive_mode(self, mode: str) -> None:
+        page = self._pages.get("immersive_lyrics")
+        if isinstance(page, ImmersiveLyricsPage):
+            # These are views inside one cached player workspace.  Changing a
+            # tab must not rewrite navigation state or rebuild the shell.
+            page.set_mode(str(mode))
+            self.setCurrentWidget(page)
+            return
         self._navigation.set_route(
             "immersive_now_playing" if str(mode) == "now_playing" else "immersive_lyrics"
         )

@@ -28,6 +28,8 @@ from app.ui_v2.models.online_track_model import (
 from app.ui_v2.theme.icons import icon, paint_icon
 from app.ui_v2.theme.tokens import Theme
 from app.ui_v2.widgets.track_delegate import RowVisualState
+from app.ui_v2.widgets.artwork_thumbnail import artwork_pixmap_for_track
+from app.ui_v2.widgets.track_display import present_track_identity_values
 
 
 class OnlineResultDelegate(QStyledItemDelegate):
@@ -51,6 +53,14 @@ class OnlineResultDelegate(QStyledItemDelegate):
         playing = bool(index.data(ONLINE_PLAYING_ROLE))
         state = self._state(track, selected, hovered, playing)
         colors = self._theme.colors
+        identity = present_track_identity_values(
+            track.title,
+            track.artist,
+            track.album,
+            is_online=True,
+            availability=track.availability,
+            playback_detail=track.availability_detail,
+        )
         painter.save()
         rect = QRectF(option.rect)
         painter.fillRect(rect, self._background(state))
@@ -74,10 +84,20 @@ class OnlineResultDelegate(QStyledItemDelegate):
             )
         elif column == OnlineColumn.TITLE:
             left = content.left()
+            artwork = artwork_pixmap_for_track(track.as_track(), 32, 32)
+            painter.drawPixmap(
+                int(left),
+                int(content.center().y() - 16),
+                artwork,
+            )
+            left += 42
             if playing:
                 paint_icon(painter, "playing", QRectF(left, content.center().y() - 8, 16, 16), self._theme, "selected")
                 left += 22
-            self._draw_text(painter, QRectF(left, content.top(), content.right() - left, content.height()), track.title, QColor(colors.accent) if playing else text_color, bold=playing)
+            title_rect = QRectF(left, content.top(), content.right() - left, content.height())
+            if track.explicit:
+                title_rect.setRight(max(title_rect.left(), title_rect.right() - 22))
+            self._draw_text(painter, title_rect, identity.title, QColor(colors.accent) if playing else text_color, bold=playing)
             if track.explicit and content.width() > 72:
                 badge = QRectF(content.right() - 18, content.center().y() - 8, 16, 16)
                 painter.setPen(Qt.PenStyle.NoPen)
@@ -89,8 +109,20 @@ class OnlineResultDelegate(QStyledItemDelegate):
             paint_icon(painter, "online", QRectF(content.left(), content.center().y() - 8, 16, 16), self._theme, icon_state)
             self._draw_text(painter, content.adjusted(22, 0, 0, 0), track.source_name, secondary)
         elif column == OnlineColumn.STATUS:
-            color = colors.success if track.availability == "available" else colors.disabled_text
-            self._draw_text(painter, content, index.data(Qt.ItemDataRole.DisplayRole) or "", QColor(color))
+            if identity.availability.is_confirmed_error:
+                color = colors.disabled_text
+            elif identity.availability.is_resolving:
+                color = colors.subtle_text
+            else:
+                color = colors.success
+            status_text = (
+                identity.availability.label
+                if identity.availability.is_visible
+                else "可用"
+                if identity.availability.is_playable
+                else "未解析"
+            )
+            self._draw_text(painter, content, status_text, QColor(color))
         elif column == OnlineColumn.DURATION:
             self._draw_text(painter, content, index.data(Qt.ItemDataRole.DisplayRole) or "", secondary, align=Qt.AlignmentFlag.AlignRight)
         else:
@@ -98,7 +130,15 @@ class OnlineResultDelegate(QStyledItemDelegate):
         painter.restore()
 
     def _state(self, track: OnlineTrack, selected: bool, hovered: bool, playing: bool) -> RowVisualState:
-        if track.availability != "available":
+        identity = present_track_identity_values(
+            track.title,
+            track.artist,
+            track.album,
+            is_online=True,
+            availability=track.availability,
+            playback_detail=track.availability_detail,
+        )
+        if identity.availability.is_confirmed_error and not identity.availability.is_retryable:
             return RowVisualState.DISABLED
         if selected and playing:
             return RowVisualState.SELECTED_PLAYING
@@ -231,8 +271,25 @@ class OnlineResultTable(QTableView):
             return None
         menu = QMenu(self)
         formal = self.adapter.is_formal
+        identity = present_track_identity_values(
+            track.title,
+            track.artist,
+            track.album,
+            is_online=True,
+            availability=track.availability,
+            playback_detail=track.availability_detail,
+        )
         play = menu.addAction(icon("play", self._theme), "播放")
-        play.setEnabled(formal or (track.availability == "available" and not self.adapter.collection.read_only))
+        play.setEnabled(
+            formal
+            or (
+                (
+                    not identity.availability.is_confirmed_error
+                    or identity.availability.is_retryable
+                )
+                and not self.adapter.collection.read_only
+            )
+        )
         play.triggered.connect(lambda: self.adapter.request_play(track.id))
         if not self.adapter.collection.read_only or self.adapter.can_mutate_remote:
             favorite = menu.addAction(icon("favorite", self._theme), "取消收藏" if track.is_favorite else "收藏")
@@ -246,7 +303,7 @@ class OnlineResultTable(QTableView):
             if not formal:
                 download = menu.addAction(icon("local", self._theme), "下载")
                 source = next((item for item in self.adapter.sources() if item.id == track.source_id), None)
-                download.setEnabled(bool(source and source.supports_download and track.availability == "available"))
+                download.setEnabled(bool(source and source.supports_download and identity.availability.is_playable))
                 download.triggered.connect(lambda: self.adapter.request_download(track.id))
         info = menu.addAction(icon("library", self._theme), "查看歌曲信息")
         info.setEnabled(True)

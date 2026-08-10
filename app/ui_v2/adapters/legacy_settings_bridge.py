@@ -20,6 +20,32 @@ from app.ui.theme_manager import normalize_appearance_mode
 from app.ui_v2.models.settings_snapshot import SettingsSnapshot
 
 
+IMMERSIVE_BACKGROUND_VISUAL_MODES = frozenset(
+    {"artwork", "gradient", "solid", "transparent", "custom"}
+)
+_LEGACY_BACKGROUND_TO_VISUAL_MODE = {
+    "cover": "artwork",
+    "default": "solid",
+    "translucent": "transparent",
+    "custom": "custom",
+}
+
+
+def normalize_immersive_background_visual_mode(
+    value: Any,
+    legacy_mode: Any = "cover",
+) -> str:
+    """Resolve the V2 visual mode while preserving the legacy setting key."""
+
+    visual_mode = str(value or "").strip().casefold()
+    if visual_mode in IMMERSIVE_BACKGROUND_VISUAL_MODES:
+        return visual_mode
+    return _LEGACY_BACKGROUND_TO_VISUAL_MODE.get(
+        str(legacy_mode or "cover").strip().casefold(),
+        "artwork",
+    )
+
+
 DEFAULT_SETTINGS: dict[str, Any] = {
     "volume": 65,
     "play_mode": "list_loop",
@@ -37,6 +63,7 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "auto_check_updates_on_startup": False,
     "update_check_delay_seconds": 15,
     "immersive_background_mode": "cover",
+    "immersive_background_visual_mode": "artwork",
     "immersive_background_custom_path": "",
     "immersive_background_blur": 40,
     "immersive_background_darkness": 68,
@@ -91,6 +118,10 @@ def load_settings_document(path: Path) -> dict[str, Any]:
 
     if APPEARANCE_SETTING_KEYS.intersection(result):
         result.update(ImmersiveAppearanceConfig.from_settings(result).to_settings())
+    result["immersive_background_visual_mode"] = normalize_immersive_background_visual_mode(
+        result.get("immersive_background_visual_mode"),
+        result.get("immersive_background_mode", DEFAULT_SETTINGS["immersive_background_mode"]),
+    )
     if "lyrics_timing_offsets_ms" in result:
         result["lyrics_timing_offsets_ms"] = normalize_lyrics_timing_offsets(
             result["lyrics_timing_offsets_ms"]
@@ -160,6 +191,9 @@ class LegacySettingsBridge(QObject):
         mode = document.get("appearance_mode", DEFAULT_SETTINGS["appearance_mode"])
         if mode not in {"system", "light", "dark"}:
             errors["appearance_mode"] = "主题值无效。"
+        visual_mode = document.get("immersive_background_visual_mode")
+        if visual_mode is not None and str(visual_mode).strip().casefold() not in IMMERSIVE_BACKGROUND_VISUAL_MODES:
+            errors["immersive_background_visual_mode"] = "沉浸背景显示模式无效。"
         try:
             opacity = int(document.get("floating_lyrics_opacity", 100))
         except (TypeError, ValueError):

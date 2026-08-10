@@ -70,19 +70,34 @@ class ApprovedShellMigrationTests(unittest.TestCase):
         self.assertEqual(title_bar.forward_button.iconSize(), QSize(16, 16))
         self.assertEqual(title_bar.search_icon.iconSize(), QSize(16, 16))
         for button in (
+            title_bar.back_button,
+            title_bar.forward_button,
+            title_bar.settings_button,
+            title_bar.theme_button,
+            title_bar.minimize_button,
+            title_bar.maximize_button,
+            title_bar.close_button,
+        ):
+            self.assertEqual(button.size(), QSize(32, 32))
+        for button in (
             title_bar.settings_button,
             title_bar.theme_button,
             title_bar.view_options_button,
         ):
             self.assertEqual(button.iconSize(), QSize(18, 18))
+        self.assertIn("border-radius: 8px", title_bar.styleSheet())
         self.assertFalse(title_bar.notifications_button.isVisible())
         self.assertFalse(title_bar.avatar_button.isVisible())
+        self.assertTrue(title_bar.brand.isVisible())
+        self.assertEqual(title_bar.brand_label.text(), "HushPlayer")
         sidebar = self.window.sidebar
         self.assertEqual(sidebar.width(), 220)
         self.assertEqual(sidebar.brand_label.text(), "HushPlayer")
-        self.assertEqual(set(sidebar._items), {"library", "browse", "liked", "settings"})
+        self.assertEqual(
+            set(sidebar._items),
+            {"library", "browse", "online_search", "liked", "settings"},
+        )
         self.assertFalse(sidebar.settings_box.isVisible())
-        self.assertNotIn("online_search", sidebar._items)
 
     def test_browse_sections_cover_cards_and_stable_cover_mapping(self) -> None:
         page = self.window.router.browse_page
@@ -108,6 +123,13 @@ class ApprovedShellMigrationTests(unittest.TestCase):
                         any(marker in visible_label.casefold() for marker in ("mock", "demo", "preview", "fixture")),
                         visible_label,
                     )
+
+    def test_track_selection_uses_surface_and_accent_rail_without_cell_frame(self) -> None:
+        source = inspect.getsource(self.window.library_page.track_table.delegate.__class__)
+        self.assertIn("RenderHint(QPainter.RenderHint.Antialiasing, True)", source)
+        self.assertIn("colors.focus_ring", source)
+        self.assertNotIn("State_HasFocus", source)
+        self.assertNotIn("drawRoundedRect(rect.adjusted(2, 2, -2, -2)", source)
 
     def test_sidebar_uses_qt_elision_and_keeps_playlist_tooltip(self) -> None:
         sidebar = self.window.sidebar
@@ -138,6 +160,7 @@ class ApprovedShellMigrationTests(unittest.TestCase):
         self.assertEqual(sidebar.brand.layout().contentsMargins().left(), 28)
         self.assertEqual(sidebar.brand.height(), 84)
         self.assertEqual(sidebar.library_box.layout().contentsMargins().left(), 18)
+        self.assertEqual(sidebar.library_box.layout().contentsMargins().top(), 20)
         self.assertEqual(sidebar.library_box.layout().contentsMargins().right(), 14)
         self.assertFalse(sidebar.settings_box.isVisible())
         self.assertFalse(sidebar._items["settings"].isVisible())
@@ -146,6 +169,7 @@ class ApprovedShellMigrationTests(unittest.TestCase):
             {
                 "library": sidebar._items["library"].item.icon_name,
                 "browse": sidebar._items["browse"].item.icon_name,
+                "online_search": sidebar._items["online_search"].item.icon_name,
                 "liked": sidebar._items["liked"].item.icon_name,
                 "settings": sidebar._items["settings"].item.icon_name,
                 "more": sidebar.more_playlists_button.item.icon_name,
@@ -153,6 +177,7 @@ class ApprovedShellMigrationTests(unittest.TestCase):
             {
                 "library": "library",
                 "browse": "browse",
+                "online_search": "search",
                 "liked": "favorite",
                 "settings": "settings",
                 "more": "playlist_more",
@@ -161,6 +186,7 @@ class ApprovedShellMigrationTests(unittest.TestCase):
         expected_icon_sizes = {
             "library": QSize(18, 18),
             "browse": QSize(18, 18),
+            "online_search": QSize(17, 17),
             "liked": QSize(18, 18),
             "settings": QSize(18, 18),
         }
@@ -178,8 +204,8 @@ class ApprovedShellMigrationTests(unittest.TestCase):
         unselected_contents = selected.contentsRect()
         selected.set_selected(True)
         self.assertEqual(selected.contentsRect(), unselected_contents)
-        self.assertIn("border-left", selected.styleSheet())
-        self.assertIn(get_theme("dark").colors.accent, selected.styleSheet())
+        self.assertNotIn("border-left", selected.styleSheet())
+        self.assertIn("border: 0", selected.styleSheet())
         source = inspect.getsource(navigation_item_module.NavigationItem)
         self.assertNotIn("def paintEvent", source)
         self.assertNotIn("QPainter", source)
@@ -299,6 +325,7 @@ class ApprovedShellMigrationTests(unittest.TestCase):
         self.assertTrue(sidebar.compact)
         self.assertEqual(sidebar.width(), 76)
         self.assertFalse(sidebar.brand_label.isVisible())
+        self.assertFalse(title_bar.brand_label.isVisible())
         self.assertFalse(sidebar.library_caption.isVisible())
         self.assertFalse(sidebar.playlist_caption.isVisible())
         self.assertEqual(title_bar._sidebar_spacer.width(), 76)
@@ -306,8 +333,9 @@ class ApprovedShellMigrationTests(unittest.TestCase):
             self.assertEqual(item.toolButtonStyle(), Qt.ToolButtonStyle.ToolButtonIconOnly)
         self.assertFalse(sidebar.scroll_area.horizontalScrollBar().isVisible())
         self.assertTrue(all(button.isVisible() for button in (
-            bar.shuffle_button, bar.repeat_button, bar.queue_button, bar.lyrics_button, bar.more_button,
+            bar.shuffle_button, bar.repeat_button, bar.queue_button, bar.lyrics_button,
         )))
+        self.assertFalse(bar.more_button.isVisible())
 
     def test_playerbar_uses_only_the_fixed_local_fluent_manifest(self) -> None:
         manifest_path = PROJECT_ROOT / "app" / "ui_v2" / "assets" / "icons" / "fluent_player" / "MANIFEST.json"
@@ -519,7 +547,7 @@ class ApprovedShellMigrationTests(unittest.TestCase):
             self.assertIs(self.window.library_page.track_table.model, model)
             self.assertIs(self.window.player_bar, player_bar)
         self.assertEqual(self.window.sidebar.brand_label.text(), "HushPlayer")
-        self.assertFalse(player_bar.more_button.isHidden())
+        self.assertTrue(player_bar.more_button.isHidden())
 
     def test_content_safe_area_is_owned_by_the_shared_router_contract(self) -> None:
         expected = get_theme("dark").metrics.player_bar_height + get_theme("dark").metrics.content_safe_bottom

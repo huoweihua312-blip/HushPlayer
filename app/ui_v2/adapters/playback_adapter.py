@@ -33,6 +33,8 @@ class PlaybackAdapter(QObject):
     repeat_mode_changed = Signal(object)
     queue_changed = Signal(object)
     error_occurred = Signal(str)
+    playback_status_changed = Signal(str, str)
+    remote_track_state_changed = Signal(str, str, str, object)
 
     def __init__(
         self,
@@ -60,6 +62,7 @@ class PlaybackAdapter(QObject):
                 self._state,
                 volume=controller.volume,
                 is_muted=controller.is_muted,
+                status=controller.playback_status,
             )
 
     @property
@@ -76,7 +79,7 @@ class PlaybackAdapter(QObject):
 
     @property
     def has_tracks(self) -> bool:
-        return any(not track.is_missing for track in self.queue_tracks)
+        return any(not track.is_missing or track.is_online for track in self.queue_tracks)
 
     @property
     def queue_tracks(self) -> tuple[Track, ...]:
@@ -88,13 +91,47 @@ class PlaybackAdapter(QObject):
             if (track := self._tracks_by_identity.get(item.stable_identity)) is not None
         )
 
-    def set_queue(self, tracks: Iterable[Track]) -> None:
+    @property
+    def display_queue_tracks(self) -> tuple[Track, ...]:
+        """Return a current-context view for the queue surface only.
+
+        The stable queue membership exposed by ``queue_tracks`` remains
+        unchanged.  In the real backend this view follows the controller's
+        sequence/shuffle history so the floating queue shows the actual next
+        playback order without rewriting a playlist.
+        """
+
+        if self._controller is None:
+            tracks = list(self._queue)
+            current = self._state.current_track
+            if current is None:
+                return tuple(tracks)
+            current_index = next(
+                (index for index, track in enumerate(tracks) if track.id == current.id),
+                -1,
+            )
+            if current_index < 0:
+                return tuple(tracks)
+            return tuple(tracks[current_index:] + tracks[:current_index])
+
+        return tuple(
+            track
+            for item in self._controller.queue.presentation_items(self._controller.play_mode)
+            if (track := self._tracks_by_identity.get(item.stable_identity)) is not None
+        )
+
+    def set_queue(
+        self,
+        tracks: Iterable[Track],
+        *,
+        preserve_current_context: bool = False,
+    ) -> None:
         if self._controller is None:
             self._set_mock_queue(tracks)
             return
         values = tuple(tracks)
         self._requested_tracks_by_id = {track.id: track for track in values}
-        playable = tuple(track for track in values if self._is_local_playable_track(track))
+        playable = tuple(track for track in values if self._is_queue_playable_track(track))
         self._tracks_by_identity = {
             track.stable_identity: track for track in playable if track.stable_identity
         }
@@ -111,21 +148,50 @@ class PlaybackAdapter(QObject):
         self._sync_queue_from_controller()
         if current_identity:
             self._sync_current_from_controller()
-        elif self._state.current_track is not None:
+        elif self._state.current_track is not None and not preserve_current_context:
             self._controller.clear()
 
     def update_track(self, updated: Track) -> None:
         if self._controller is None:
             self._queue = [
-                updated if track.id == updated.id else track for track in self._queue
+                updated
+                if track.id == updated.id
+                else track
+                for track in self._queue
             ]
             current = self._state.current_track
             if current is not None and current.id == updated.id:
-                self._state = replace(self._state, current_track=updated)
+                old_duration = current.duration_ms
+                duration = self._state.duration_ms
+                if duration is None and updated.duration_ms is not None:
+                    duration = updated.duration_ms
+                self._state = replace(
+                    self._state,
+                    current_track=updated,
+                    duration_ms=duration,
+                    is_favorite=updated.is_favorite,
+                )
+                self.track_changed.emit(updated)
+                if old_duration != updated.duration_ms and duration == updated.duration_ms:
+                    self.duration_changed.emit(duration)
             return
         if updated.stable_identity in self._tracks_by_identity:
+            current = self._state.current_track
+            was_current = current is not None and current.stable_identity == updated.stable_identity
+            old_duration = current.duration_ms if was_current else None
             self._tracks_by_identity[updated.stable_identity] = updated
-            self._sync_current_from_controller()
+            if was_current:
+                duration = self._state.duration_ms
+                if duration is None and updated.duration_ms is not None:
+                    duration = updated.duration_ms
+                self._set_state(
+                    current_track=updated,
+                    is_favorite=updated.is_favorite,
+                    duration_ms=duration,
+                )
+                self.track_changed.emit(updated)
+                if old_duration != updated.duration_ms and duration == updated.duration_ms:
+                    self.duration_changed.emit(duration)
             self._sync_queue_from_controller()
 
     def play_track(self, track_id: str) -> None:
@@ -138,8 +204,6 @@ class PlaybackAdapter(QObject):
         )
         if track is None:
             rejected = self._requested_tracks_by_id.get(track_id)
-            if rejected is not None and rejected.is_online:
-                self.error_occurred.emit("Online playback is not available in this version.")
             return
         self._controller.play_item(track.stable_identity)
 
@@ -149,7 +213,7 @@ class PlaybackAdapter(QObject):
             return
         if self._state.current_track is None:
             first_available = next(
-                (track for track in self._queue if not track.is_missing), None
+                (track for track in self._queue if self._is_queue_playable_track(track)), None
             )
             if first_available is not None:
                 self._play_mock_track(first_available.id)
@@ -281,6 +345,8 @@ class PlaybackAdapter(QObject):
         controller.muted_changed.connect(self._on_controller_muted_changed)
         controller.play_mode_changed.connect(self._on_controller_play_mode_changed)
         controller.queue_changed.connect(self._on_controller_queue_changed)
+        controller.playback_status_changed.connect(self._on_controller_status_changed)
+        controller.remote_track_state_changed.connect(self._on_controller_remote_track_state_changed)
         controller.error_occurred.connect(self.error_occurred)
 
     @staticmethod
@@ -288,7 +354,43 @@ class PlaybackAdapter(QObject):
         return not track.is_missing and not track.is_online and bool(track.local_path)
 
     @staticmethod
+    def _is_queue_playable_track(track: Track) -> bool:
+        return PlaybackAdapter._is_local_playable_track(track) or track.is_online
+
+    @staticmethod
     def _queue_item_from_track(track: Track) -> PlaybackQueueItem:
+        if track.is_online:
+            payload = dict(track.remote_payload) if isinstance(track.remote_payload, dict) else {}
+            provider_raw = payload.get("raw")
+            payload.update(
+                {
+                    "remoteStableId": track.stable_identity,
+                    "sourceId": track.source_id,
+                    "sourceName": track.source_name,
+                    "id": track.remote_track_id or track.remote_identity or track.id,
+                    "remote_stable_id": track.stable_identity,
+                    "title": track.title,
+                    "artist": track.artist,
+                    "album": track.album,
+                    "duration": (track.duration_ms or 0) / 1000,
+                    "artwork": track.artwork_url or track.artwork_key,
+                    "artworkUrl": track.artwork_url,
+                    "artwork_url": track.artwork_url,
+                    "availability": track.availability,
+                    # Search results already carry the provider's raw item.
+                    # Keep that nested mapping intact; replacing it with the
+                    # whole normalized payload breaks source-specific fields
+                    # such as NetEase quality variants during playback resolve.
+                    "raw": (
+                        dict(provider_raw)
+                        if isinstance(provider_raw, dict)
+                        else dict(track.remote_payload)
+                        if isinstance(track.remote_payload, dict)
+                        else {}
+                    ),
+                }
+            )
+            return PlaybackQueueItem(MediaItem.from_online(payload))
         return PlaybackQueueItem(
             MediaItem.from_local(
                 {
@@ -320,7 +422,7 @@ class PlaybackAdapter(QObject):
             (
                 index
                 for index, track in enumerate(self._queue)
-                if track.id == track_id and not track.is_missing
+                if track.id == track_id and self._is_queue_playable_track(track)
             ),
             -1,
         )
@@ -397,7 +499,10 @@ class PlaybackAdapter(QObject):
         self._play_mock_relative(1)
 
     def _play_mock_relative(self, offset: int) -> None:
-        available = [track for track in self._queue if not track.is_missing]
+        available = [
+            track for track in self._queue
+            if self._is_queue_playable_track(track)
+        ]
         if not available:
             return
         if self._state.current_track is None:
@@ -470,3 +575,21 @@ class PlaybackAdapter(QObject):
 
     def _on_controller_queue_changed(self, _items) -> None:
         self._sync_queue_from_controller()
+
+    def _on_controller_status_changed(self, status: str, detail: str) -> None:
+        self._set_state(status=str(status or "idle"), status_detail=str(detail or ""))
+        self.playback_status_changed.emit(self._state.status, self._state.status_detail)
+
+    def _on_controller_remote_track_state_changed(
+        self,
+        identity: str,
+        state: str,
+        detail: str,
+        payload: object,
+    ) -> None:
+        self.remote_track_state_changed.emit(
+            str(identity or ""),
+            str(state or "not_resolved"),
+            str(detail or ""),
+            payload if payload is not None else {},
+        )

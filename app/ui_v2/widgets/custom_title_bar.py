@@ -2,11 +2,17 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 from PySide6.QtCore import QPoint, QSize, Qt, Signal
-from PySide6.QtWidgets import QFrame, QGridLayout, QHBoxLayout, QLineEdit, QToolButton, QWidget
+from PySide6.QtGui import QPixmap
+from PySide6.QtWidgets import QLabel, QFrame, QGridLayout, QHBoxLayout, QLineEdit, QToolButton, QWidget
 
 from app.ui_v2.theme.icons import fluent_settings_interactive_icon, icon
 from app.ui_v2.theme.tokens import Theme
+
+
+_QUIET_ORBIT_LOGO = Path(__file__).resolve().parents[1] / "assets" / "quiet-orbit-logo.svg"
 
 
 class CustomTitleBar(QFrame):
@@ -18,6 +24,7 @@ class CustomTitleBar(QFrame):
     theme_toggle_requested = Signal()
     view_options_requested = Signal()
     search_text_changed = Signal(str)
+    search_submitted = Signal(str)
 
     def __init__(self, theme: Theme, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -30,6 +37,10 @@ class CustomTitleBar(QFrame):
 
         self.back_button = self._button("back", "返回", self)
         self.forward_button = self._button("forward", "前进", self)
+        self.back_button.setAccessibleName("返回上一页")
+        self.forward_button.setAccessibleName("前进到下一页")
+        self.back_button.setEnabled(False)
+        self.forward_button.setEnabled(False)
         self.back_button.clicked.connect(self.back_requested)
         self.forward_button.clicked.connect(self.forward_requested)
 
@@ -39,6 +50,9 @@ class CustomTitleBar(QFrame):
         self.search_input.setObjectName("titleBarSearchInput")
         self.search_input.setPlaceholderText("搜索")
         self.search_input.textChanged.connect(self.search_text_changed)
+        self.search_input.returnPressed.connect(
+            lambda: self.search_submitted.emit(self.search_input.text())
+        )
         self.search_box = QWidget(self)
         self.search_box.setObjectName("titleBarSearchBox")
         self.search_box.setFixedSize(460, 36)
@@ -59,15 +73,16 @@ class CustomTitleBar(QFrame):
         self.view_options_button = self._button("more", "视图选项（暂不可用）", self)
         self.view_options_button.setAccessibleName("视图选项")
         self.view_options_button.setEnabled(False)
+        self.view_options_button.setVisible(False)
         # Compatibility handles remain available for older shell tests and
-        # integrations, but are not part of the approved Q1 utility surface.
+        # integrations, but the disabled placeholder is not part of the
+        # approved Q1 utility surface.
         self.notifications_button = self._button("notification", "通知", self)
         self.notifications_button.setVisible(False)
         self.avatar_button = self._button("user", "用户", self)
         self.avatar_button.setVisible(False)
         self.settings_button.clicked.connect(self.settings_requested)
         self.theme_button.clicked.connect(self.theme_toggle_requested)
-        self.view_options_button.clicked.connect(self.view_options_requested)
 
         self.minimize_button = self._button("window_minimize", "最小化", self, window_control=True)
         self.maximize_button = self._button("window_maximize", "最大化", self, window_control=True)
@@ -84,19 +99,34 @@ class CustomTitleBar(QFrame):
         history_layout.addWidget(self.back_button)
         history_layout.addWidget(self.forward_button)
 
+        self.brand = QWidget(self)
+        self.brand.setObjectName("titleBarBrand")
+        brand_layout = QHBoxLayout(self.brand)
+        brand_layout.setContentsMargins(22, 0, 12, 0)
+        brand_layout.setSpacing(9)
+        self.brand_mark = QLabel(self.brand)
+        self.brand_mark.setObjectName("titleBarBrandMark")
+        self.brand_mark.setFixedSize(38, 26)
+        self.brand_label = QLabel("HushPlayer", self.brand)
+        self.brand_label.setObjectName("titleBarBrandLabel")
+        self.brand_label.setToolTip("HushPlayer")
+        brand_layout.addWidget(self.brand_mark)
+        brand_layout.addWidget(self.brand_label)
+        brand_layout.addStretch(1)
+
         utility = QWidget(self)
         utility_layout = QHBoxLayout(utility)
         utility_layout.setContentsMargins(0, 0, 0, 0)
-        utility_layout.setSpacing(2)
         utility_layout.setSpacing(4)
+        utility_layout.setAlignment(Qt.AlignmentFlag.AlignVCenter)
         utility_layout.addWidget(self.settings_button)
         utility_layout.addWidget(self.theme_button)
-        utility_layout.addWidget(self.view_options_button)
 
         window_controls = QWidget(self)
         controls_layout = QHBoxLayout(window_controls)
-        controls_layout.setContentsMargins(0, 0, 0, 0)
-        controls_layout.setSpacing(0)
+        controls_layout.setContentsMargins(0, 0, 8, 0)
+        controls_layout.setSpacing(4)
+        controls_layout.setAlignment(Qt.AlignmentFlag.AlignVCenter)
         controls_layout.addWidget(self.minimize_button)
         controls_layout.addWidget(self.maximize_button)
         controls_layout.addWidget(self.close_button)
@@ -105,17 +135,19 @@ class CustomTitleBar(QFrame):
         self._layout.setContentsMargins(0, 0, 0, 0)
         self._layout.setHorizontalSpacing(0)
         self._layout.setVerticalSpacing(0)
-        self._sidebar_spacer = QWidget(self)
+        # The first grid column aligns with the Sidebar and carries the one
+        # visible Quiet Orbit brand lockup.
+        self._sidebar_spacer = self.brand
         self._sidebar_spacer.setFixedWidth(theme.metrics.sidebar_width)
-        self._layout.addWidget(self._sidebar_spacer, 0, 0)
+        self._layout.addWidget(self.brand, 0, 0)
         self._layout.addWidget(history, 0, 1)
         self._layout.addWidget(self.search_box, 0, 3, Qt.AlignmentFlag.AlignCenter)
         self._layout.addWidget(utility, 0, 5)
         self._layout.addWidget(window_controls, 0, 6)
         self._layout.setColumnMinimumWidth(1, 64)
         self._layout.setColumnMinimumWidth(3, 460)
-        self._layout.setColumnMinimumWidth(5, 60)
-        self._layout.setColumnMinimumWidth(6, 84)
+        self._layout.setColumnMinimumWidth(5, 68)
+        self._layout.setColumnMinimumWidth(6, 104)
         self._layout.setColumnStretch(2, 13)
         self._layout.setColumnStretch(4, 10)
         self.set_theme(theme)
@@ -126,12 +158,15 @@ class CustomTitleBar(QFrame):
         self.setFixedHeight(theme.metrics.title_bar_height)
         self.setStyleSheet(
             f"QFrame#customTitleBar {{ background: {c.titlebar_background}; border: 0; border-bottom: 1px solid {c.divider}; }}"
-            f"QToolButton#titleBarButton {{ border: 0; border-radius: 5px; background: transparent; color: {c.text_secondary}; }}"
-            f"QToolButton#titleBarButton:hover {{ background: {c.surface_hover}; color: {c.text_primary}; }}"
-            f"QToolButton#titleBarButton:disabled {{ background: transparent; color: {c.text_disabled}; }}"
-            f"QToolButton#titleBarWindowControl {{ border: 0; background: transparent; color: {c.text_secondary}; }}"
-            f"QToolButton#titleBarWindowControl:hover {{ background: {c.surface_hover}; color: {c.text_primary}; }}"
+            f"QToolButton#titleBarButton, QToolButton#titleBarWindowControl, QToolButton#titleBarClose {{ border: 0; border-radius: 8px; background: transparent; color: {c.text_secondary}; }}"
+            f"QToolButton#titleBarButton:hover, QToolButton#titleBarWindowControl:hover {{ background: {c.surface_hover}; color: {c.text_primary}; }}"
+            f"QToolButton#titleBarButton:pressed, QToolButton#titleBarWindowControl:pressed {{ background: {c.surface_pressed}; color: {c.text_primary}; }}"
+            f"QToolButton#titleBarButton:disabled, QToolButton#titleBarWindowControl:disabled {{ background: transparent; color: {c.text_disabled}; }}"
             f"QToolButton#titleBarClose:hover {{ background: {c.danger}; color: {c.text_primary}; }}"
+            f"QToolButton#titleBarClose:pressed {{ background: {c.accent_pressed}; color: {c.text_primary}; }}"
+            f"QWidget#titleBarBrand {{ background: transparent; }}"
+            f"QLabel#titleBarBrandMark {{ background: transparent; }}"
+            f"QLabel#titleBarBrandLabel {{ color: {c.text_primary}; font-size: 17px; font-weight: 600; }}"
             f"QWidget#titleBarSearchBox {{ border-radius: 9px; background: {c.surface_secondary}; border: 1px solid {c.divider}; }}"
             f"QLineEdit#titleBarSearchInput {{ border: 0; background: transparent; color: {c.text_primary}; font-size: {theme.fonts.body}px; }}"
             f"QLineEdit#titleBarSearchInput:focus {{ border: 0; }}"
@@ -153,6 +188,14 @@ class CustomTitleBar(QFrame):
         self.theme_button.setIconSize(QSize(18, 18))
         self.view_options_button.setIcon(icon("more", theme))
         self.view_options_button.setIconSize(QSize(18, 18))
+        logo = QPixmap(str(_QUIET_ORBIT_LOGO))
+        self.brand_mark.setPixmap(
+            logo.scaled(
+                self.brand_mark.size(),
+                Qt.AspectRatioMode.KeepAspectRatio,
+                Qt.TransformationMode.SmoothTransformation,
+            )
+        )
         target = "浅色模式" if theme.mode == "dark" else "深色模式"
         self.theme_button.setToolTip(f"切换到{target}")
 
@@ -164,8 +207,22 @@ class CustomTitleBar(QFrame):
         self._sidebar_spacer.setFixedWidth(
             self._theme.metrics.compact_sidebar_width if compact else self._theme.metrics.sidebar_width
         )
+        self.brand_mark.setFixedSize(32 if compact else 38, 22 if compact else 26)
+        self.brand.layout().setContentsMargins(
+            20 if compact else 22,
+            0,
+            20 if compact else 12,
+            0,
+        )
+        self.brand_label.setVisible(not compact)
         self.search_box.setFixedSize(340 if compact else 460, 36)
         self._layout.setColumnMinimumWidth(3, 340 if compact else 460)
+
+    def set_navigation_state(self, can_go_back: bool, can_go_forward: bool) -> None:
+        """Reflect the real route history without leaving inert arrow buttons."""
+
+        self.back_button.setEnabled(bool(can_go_back))
+        self.forward_button.setEnabled(bool(can_go_forward))
 
     def mousePressEvent(self, event) -> None:  # noqa: N802
         if event.button() == Qt.MouseButton.LeftButton and not self._window().isMaximized():
@@ -199,7 +256,7 @@ class CustomTitleBar(QFrame):
         button.setObjectName("titleBarWindowControl" if window_control else "titleBarButton")
         button.setToolTip(tooltip)
         button.setAutoRaise(True)
-        button.setFixedSize(28, self._theme.metrics.title_bar_height if window_control else 28)
+        button.setFixedSize(32, 32)
         button.setIcon(icon(icon_name, self._theme))
         icon_size = self._icon_size(icon_name)
         button.setIconSize(QSize(icon_size, icon_size))

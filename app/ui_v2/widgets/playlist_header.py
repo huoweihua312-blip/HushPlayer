@@ -68,6 +68,9 @@ class PlaylistHeader(QWidget):
         self.favorite_button.setCheckable(True)
         self.favorite_button.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
         self.favorite_button.toggled.connect(self.favorite_requested)
+        # Playlist-level favourite state has no formal persistence contract;
+        # keep the compatibility handle but do not expose a local-only action.
+        self.favorite_button.setVisible(False)
         self.more_button = QToolButton(self)
         self.more_button.setObjectName("playlistHeroMore")
         self.more_button.setText("")
@@ -98,7 +101,6 @@ class PlaylistHeader(QWidget):
         actions.setSpacing(8)
         actions.addWidget(self.play_button)
         actions.addWidget(self.shuffle_button)
-        actions.addWidget(self.favorite_button)
         actions.addWidget(self.more_button)
         actions.addStretch(1)
 
@@ -124,8 +126,8 @@ class PlaylistHeader(QWidget):
 
     def set_read_only(self, value: bool) -> None:
         self._read_only = bool(value)
-        self.favorite_button.setVisible(not self._read_only)
-        self.favorite_button.setEnabled(not self._read_only)
+        self.favorite_button.setVisible(False)
+        self.favorite_button.setEnabled(False)
         self.favorite_button.setToolTip(
             "只读模式不可修改歌单收藏" if self._read_only else "收藏歌单"
         )

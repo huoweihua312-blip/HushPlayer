@@ -14,8 +14,10 @@ class ElidedLabel(QLabel):
         self._max_lines = max(1, int(max_lines))
         self.setTextFormat(Qt.TextFormat.PlainText)
         self.setWordWrap(self._max_lines > 1)
-        if self._max_lines > 1:
-            self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)
+        self.setSizePolicy(
+            QSizePolicy.Policy.Expanding,
+            QSizePolicy.Policy.Minimum if self._max_lines > 1 else QSizePolicy.Policy.Preferred,
+        )
 
     @property
     def full_text(self) -> str:

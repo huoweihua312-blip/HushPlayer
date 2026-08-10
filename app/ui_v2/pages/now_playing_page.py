@@ -17,7 +17,7 @@ from app.ui_v2.theme.icons import fluent_icon, icon
 from app.ui_v2.theme.tokens import Theme
 from app.ui_v2.widgets.artwork_thumbnail import ArtworkThumbnail
 from app.ui_v2.widgets.elided_label import ElidedLabel
-from app.ui_v2.widgets.track_display import display_track_text
+from app.ui_v2.widgets.track_display import present_track_identity
 
 
 class NowPlayingPage(QFrame):
@@ -108,6 +108,7 @@ class NowPlayingPage(QFrame):
         self.playback.track_changed.connect(self._on_track_changed)
         self.playback.favorite_changed.connect(self._on_favorite_changed)
         self.playback.playing_changed.connect(self._on_playing_changed)
+        self.playback.playback_status_changed.connect(self._on_playback_status_changed)
         self.playback.error_occurred.connect(self._on_playback_error)
         self._on_track_changed(self.playback.state.current_track)
         self._on_favorite_changed(self.playback.state.is_favorite)
@@ -171,14 +172,24 @@ class NowPlayingPage(QFrame):
     def _on_track_changed(self, track: Track | None) -> None:
         self.error_label.hide()
         self.artwork.set_track(track)
-        title, artist, album = display_track_text(track) if track else ("未选择歌曲", "选择一首歌曲开始播放", "")
-        self.title_label.set_full_text(title)
-        self.artist_label.set_full_text(artist)
-        self.album_label.set_full_text(album)
+        if track is None:
+            self.title_label.set_full_text("未选择歌曲")
+            self.artist_label.set_full_text("选择一首歌曲开始播放")
+            self.album_label.set_full_text("")
+        else:
+            identity = present_track_identity(track)
+            self.title_label.set_full_text(identity.title)
+            self.artist_label.set_full_text(identity.artist)
+            self.album_label.set_full_text(identity.album)
+            if identity.availability.is_visible:
+                self.album_label.setToolTip(
+                    f"{identity.metadata}\n状态: {identity.availability.label}\n"
+                    f"{identity.availability.tooltip}"
+                )
         if track is None:
             self.detail_label.setText("选择一首歌曲开始播放")
         else:
-            self.detail_label.setText(f"{format_duration(track.duration_ms)} · {'播放中' if self.playback.state.is_playing else '已暂停'}")
+            self._refresh_playback_detail()
         enabled = track is not None
         self.favorite_button.setEnabled(enabled)
         self.queue_button.setEnabled(True)
@@ -190,9 +201,26 @@ class NowPlayingPage(QFrame):
         self.favorite_button.setToolTip("取消收藏" if favorite else "收藏")
 
     def _on_playing_changed(self, _playing: bool) -> None:
+        self._refresh_playback_detail()
+
+    def _on_playback_status_changed(self, _status: str, _detail: str) -> None:
+        self._refresh_playback_detail()
+
+    def _refresh_playback_detail(self) -> None:
         track = self.playback.state.current_track
-        if track is not None:
-            self.detail_label.setText(f"{format_duration(track.duration_ms)} · {'播放中' if self.playback.state.is_playing else '已暂停'}")
+        if track is None:
+            return
+        state = self.playback.state
+        label = {
+            "resolving": "准备播放",
+            "buffering": "缓冲中",
+            "unavailable": "来源不可用",
+            "error": "播放失败",
+            "playing": "播放中",
+            "paused": "已暂停",
+        }.get(state.status, "播放中" if state.is_playing else "已暂停")
+        self.detail_label.setText(f"{format_duration(track.duration_ms)} · {label}")
+        self.detail_label.setToolTip(state.status_detail or label)
 
     def _on_playback_error(self, message: str) -> None:
         detail = str(message or "播放失败，请检查音频文件或输出设备")

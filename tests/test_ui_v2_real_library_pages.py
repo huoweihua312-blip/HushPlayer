@@ -195,6 +195,7 @@ class RealLibraryPageTests(unittest.TestCase):
         self.assertEqual(self.window.data_mode, "real")
         self.assertTrue(self.window.library_collection.read_only)
         self.assertTrue(self.window.playlist_adapter.read_only)
+        self.assertTrue(self.window.playlist_adapter.can_mutate)
         self.assertEqual(self.window.library_page.track_table.model.rowCount(), 3)
         self.assertEqual(len(adapter.tracks()), 3)
 
@@ -219,7 +220,7 @@ class RealLibraryPageTests(unittest.TestCase):
         playlist_page = self.window.router.page_for_route("playlist:commute")
         self.assertEqual([track.title for track in playlist_page.adapter.tracks()], ["Beta", "Alpha", "Remote"])
         self.assertIs(playlist_page, self.window.router.page_for_route("playlist:commute"))
-        self.assertTrue(playlist_page.playlist_header.more_button.isHidden())
+        self.assertFalse(playlist_page.playlist_header.more_button.isHidden())
 
     def test_search_and_sort_reuse_mapped_tracks_without_refreshing_repository(self) -> None:
         adapter = self.window.real_library_adapter
@@ -239,7 +240,7 @@ class RealLibraryPageTests(unittest.TestCase):
         self.assertEqual(tuple(track.id for track in adapter.tracks()), original)
         self.assertEqual(adapter.state, "loaded")
 
-    def test_real_mode_hides_or_rejects_every_library_write_entry(self) -> None:
+    def test_real_mode_keeps_library_read_only_and_allows_playlist_management(self) -> None:
         library_table = self.window.library_page.track_table
         menu = library_table.build_context_menu(library_table.model.index(0, 0))
         self.assertIsNotNone(menu)
@@ -250,15 +251,19 @@ class RealLibraryPageTests(unittest.TestCase):
         menu.deleteLater()
         self.assertTrue(self.window.player_bar.favorite_button.isHidden())
         self.assertTrue(self.window.library_page.track_table.isColumnHidden(int(TrackColumn.FAVORITE)))
-        self.assertTrue(self.window.sidebar.new_playlist_button.isHidden())
-        self.assertNotIn("online_search", self.window.sidebar._items)
+        self.assertFalse(self.window.sidebar.new_playlist_button.isHidden())
+        self.assertIn("online_search", self.window.sidebar._items)
         first = self.window.library_collection.tracks()[0]
         self.assertFalse(self.window.library_collection.set_favorite(first.id, not first.is_favorite))
-        self.assertIsNone(self.window.playlist_adapter.create_playlist("不可写"))
-        self.assertFalse(self.window.playlist_adapter.rename_playlist("commute", "不可写"))
-        self.assertFalse(self.window.playlist_adapter.delete_playlist("commute"))
-        self.assertEqual(self.window.playlist_adapter.add_tracks("commute", (first.id,)), 0)
-        self.assertFalse(self.window.playlist_adapter.remove_track("commute", first.id))
+        created = self.window.playlist_adapter.create_playlist("可写歌单")
+        self.assertIsNotNone(created)
+        assert created is not None
+        self.assertTrue(self.window.playlist_adapter.rename_playlist(created.id, "可写歌单已重命名"))
+        self.assertEqual(self.window.playlist_adapter.add_tracks(created.id, (first.id,)), 1)
+        self.assertTrue(self.window.playlist_adapter.remove_track(created.id, first.id))
+        self.assertTrue(self.window.playlist_adapter.delete_playlist(created.id))
+        self.assertFalse(self.window.playlist_adapter.rename_playlist("liked", "不可修改"))
+        self.assertFalse(self.window.playlist_adapter.delete_playlist("liked"))
         playlist_page = self.window.router.page_for_route("playlist:commute")
         self.assertTrue(playlist_page.playlist_header.favorite_button.isHidden())
         self.assertTrue(playlist_page.track_table.isColumnHidden(int(TrackColumn.FAVORITE)))
@@ -310,14 +315,13 @@ class RealLibraryPageTests(unittest.TestCase):
         self.assertEqual(self.window.data_mode, "mock")
         self.assertIsNone(self.window.real_library_adapter)
         self.assertEqual(len(self.window.library_collection.tracks()), 1000)
-        # Low-frequency routes remain available to the router but are not
-        # permanently surfaced in the approved compact sidebar.
+        # Online discovery is an approved read-only navigation surface.
         self.assertIn(
             "online_search",
             tuple(item.route_id for item in self.window.navigation_adapter.items()),
         )
-        self.assertNotIn("online_search", self.window.sidebar._items)
-        self.assertTrue(self.window.sidebar.new_playlist_button.isHidden())
+        self.assertIn("online_search", self.window.sidebar._items)
+        self.assertFalse(self.window.sidebar.new_playlist_button.isHidden())
 
 
 if __name__ == "__main__":
