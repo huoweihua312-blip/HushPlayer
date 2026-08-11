@@ -141,6 +141,15 @@ class SettingsOverlayIntegrationTests(unittest.TestCase):
         self.assertFalse(overlay.close_button.icon().isNull())
         self.assertEqual(overlay.close_button.iconSize(), QSize(18, 18))
 
+    def test_online_sources_management_is_available_from_settings(self) -> None:
+        overlay = self.open_overlay()
+        self.assertEqual(overlay.online_sources_button.text(), "管理在线来源")
+        self.assertEqual(overlay.online_sources_button.accessibleName(), "管理在线来源")
+        overlay.online_sources_button.click()
+        self.app.processEvents()
+        self.assertEqual(self.window.navigation_adapter.route, "online_sources")
+        self.assertFalse(overlay.isVisible())
+
     def test_dismiss_hover_is_neutral_and_keeps_32px_geometry(self) -> None:
         overlay = self.open_overlay()
         button = overlay.close_button

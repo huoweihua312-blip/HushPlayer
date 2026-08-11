@@ -704,11 +704,25 @@ class MainWindow(QMainWindow):
                 parent=self.body,
             )
             self.settings_overlay.saved.connect(self._on_settings_saved)
+            self.settings_overlay.online_sources_requested.connect(
+                self._open_online_sources_from_settings
+            )
         elif self.settings_overlay.isVisible():
             self.settings_overlay.raise_()
             return
         self.settings_overlay.open()
         self.settings_overlay.raise_()
+
+    def _open_online_sources_from_settings(self) -> None:
+        """Open the canonical source manager without discarding dirty settings."""
+
+        overlay = self.settings_overlay
+        if overlay is not None and overlay.is_dirty:
+            overlay.request_close()
+            return
+        if overlay is not None:
+            overlay.request_close()
+        self.navigation_adapter.set_route("online_sources")
 
     def _set_update_status(self, message: str, *, state: str = "success") -> None:
         """Reflect asynchronous update service feedback in the settings surface."""

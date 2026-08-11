@@ -148,11 +148,11 @@ class PlayerBar(QFrame):
         self._refresh_metadata_width()
 
     def _refresh_metadata_width(self) -> None:
-        if not all(hasattr(self, name) for name in ("metadata", "artwork", "favorite_button")):
+        if not all(hasattr(self, name) for name in ("metadata", "artwork")):
             return
         base_width = 118 if self._compact else 154
         region_width = max(0, self.track_region.width() - 32)
-        fixed_width = self.artwork.width() + self.favorite_button.width() + 24
+        fixed_width = self.artwork.width() + 24
         available = max(base_width, region_width - fixed_width)
         width = min(260, available)
         self.metadata.setFixedWidth(width)
@@ -242,14 +242,8 @@ class PlayerBar(QFrame):
         metadata_layout.addWidget(self.artist_label)
         identity_layout.addWidget(self.metadata)
         identity_layout.addWidget(self.availability_label)
-        self.favorite_button = PlayerIconButton(
-            "favorite", "收藏", self._theme, self.track_inner, size=32, icon_canvas_size=18,
-            asset_family="fluent_player",
-        )
-        self.favorite_button.clicked.connect(self.adapter.toggle_favorite)
         track_inner_layout.addWidget(self.artwork)
         track_inner_layout.addWidget(self.identity_stack)
-        track_inner_layout.addWidget(self.favorite_button)
         # The outer region owns the complete left grid column.  Its two equal
         # stretches center this natural-width group without anchoring artwork
         # or favourite controls to either column edge.
@@ -275,6 +269,13 @@ class PlayerBar(QFrame):
         transport_layout.setContentsMargins(0, 0, 0, 0)
         transport_layout.setSpacing(12)
         transport_layout.addStretch(1)
+        # Keep the favorite action in the transport rail so long track
+        # metadata cannot cover it. This is the leftmost control in the rail.
+        self.favorite_button = PlayerIconButton(
+            "favorite", "收藏", self._theme, self.transport_row, size=32, icon_canvas_size=18,
+            asset_family="fluent_player",
+        )
+        self.favorite_button.clicked.connect(self.adapter.toggle_favorite)
         self.shuffle_button = PlayerIconButton(
             "shuffle", "随机播放", self._theme, self.transport_row, size=32, icon_canvas_size=18,
             asset_family="fluent_player",
@@ -300,8 +301,13 @@ class PlayerBar(QFrame):
         self.play_button.clicked.connect(self.adapter.toggle_playback)
         self.next_button.clicked.connect(self.adapter.play_next)
         self.repeat_button.clicked.connect(self.adapter.cycle_repeat_mode)
+        transport_layout.addWidget(self.favorite_button)
         for button in (self.shuffle_button, self.previous_button, self.play_button, self.next_button, self.repeat_button):
             transport_layout.addWidget(button)
+        # The new leftmost favorite control adds 44px (button plus gap) to
+        # the control group. Match that width on the right so the play button
+        # stays on the bar's optical centre.
+        transport_layout.addSpacing(44)
         transport_layout.addStretch(1)
 
         self.progress_row = QWidget(self.center_region)

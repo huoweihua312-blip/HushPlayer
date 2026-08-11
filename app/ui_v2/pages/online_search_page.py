@@ -2,13 +2,12 @@
 
 from __future__ import annotations
 
-from PySide6.QtCore import QSize, Signal
-from PySide6.QtWidgets import QHBoxLayout, QLabel, QToolButton, QVBoxLayout, QWidget
+from PySide6.QtCore import Signal
+from PySide6.QtWidgets import QHBoxLayout, QLabel, QVBoxLayout, QWidget
 
 from app.ui_v2.adapters.online_adapter import OnlineAdapter
 from app.ui_v2.adapters.playlist_adapter import PlaylistAdapter
 from app.ui_v2.models.online_search_state import OnlineSearchState
-from app.ui_v2.theme.icons import icon
 from app.ui_v2.theme.styles import build_stylesheet
 from app.ui_v2.theme.tokens import Theme
 from app.ui_v2.widgets.online_result_table import OnlineResultTable
@@ -41,29 +40,9 @@ class OnlineSearchPage(QWidget):
         self.query_context_label.setObjectName("onlineSearchQueryContext")
         self.scope_label = QLabel("范围：在线来源", self)
         self.scope_label.setObjectName("onlineSearchScope")
-        self.manage_sources_button = QToolButton(self)
-        self.manage_sources_button.setText("管理来源")
-        self.manage_sources_button.setAccessibleName("管理在线来源")
-        self.manage_sources_button.setToolTip("查看、添加或管理在线来源")
-        self.manage_sources_button.clicked.connect(self.source_management_requested)
         self.search_bar = OnlineSearchBar(theme, self)
         self.source_selector = SourceSelector(adapter, theme, self)
         self.source_summary_label = QLabel(self)
-        self.recommendation_label = QLabel("推荐搜索", self)
-        self.recommendation_widget = QWidget(self)
-        recommendation_layout = QHBoxLayout(self.recommendation_widget)
-        recommendation_layout.setContentsMargins(0, 0, 0, 0)
-        recommendation_layout.setSpacing(6)
-        recommendation_layout.addWidget(self.recommendation_label)
-        self.recommendation_buttons: list[QToolButton] = []
-        for query in ("夜航", "Paper Moon", "中文 English", "长标题"):
-            button = QToolButton(self.recommendation_widget)
-            button.setText(query)
-            button.setToolTip(query)
-            button.clicked.connect(lambda checked=False, value=query: self._search_history(value))
-            recommendation_layout.addWidget(button)
-            self.recommendation_buttons.append(button)
-        recommendation_layout.addStretch(1)
         # The shell title bar is the single production query input. Keep this
         # control as a compatibility handle for deterministic tests.
         self.search_bar.setVisible(False)
@@ -83,7 +62,6 @@ class OnlineSearchPage(QWidget):
         query_context.addWidget(self.query_context_label)
         query_context.addWidget(self.scope_label)
         query_context.addStretch(1)
-        query_context.addWidget(self.manage_sources_button)
         layout.addLayout(query_context)
         source_context = QHBoxLayout()
         source_context.setContentsMargins(0, 0, 0, 0)
@@ -92,7 +70,6 @@ class OnlineSearchPage(QWidget):
         source_context.addStretch(1)
         source_context.addWidget(self.source_selector)
         layout.addLayout(source_context)
-        layout.addWidget(self.recommendation_widget)
         layout.addWidget(self.result_toolbar)
         layout.addWidget(self.history_view, 1)
         layout.addWidget(self.state_view, 1)
@@ -139,17 +116,6 @@ class OnlineSearchPage(QWidget):
             f"color: {theme.colors.subtle_text}; font-size: {theme.fonts.caption}px;"
         )
         self.source_summary_label.setStyleSheet(f"color: {theme.colors.subtle_text};")
-        self.recommendation_label.setStyleSheet(f"color: {theme.colors.secondary_text};")
-        recommendation_style = (
-            f"QToolButton {{ min-height: {theme.metrics.control_height}px; padding: 0 {theme.metrics.spacing_sm}px; "
-            f"border: 0; border-radius: {theme.metrics.radius_sm}px; color: {theme.colors.secondary_text}; }}"
-            f"QToolButton:hover {{ color: {theme.colors.primary_text}; background: {theme.colors.hover_background}; }}"
-        )
-        for button in self.recommendation_buttons:
-            button.setStyleSheet(recommendation_style)
-        self.manage_sources_button.setIcon(icon("online", theme))
-        self.manage_sources_button.setIconSize(QSize(16, 16))
-        self.manage_sources_button.setStyleSheet(recommendation_style)
         self.search_bar.set_theme(theme)
         self.source_selector.set_theme(theme)
         self.result_toolbar.set_theme(theme)
@@ -162,7 +128,6 @@ class OnlineSearchPage(QWidget):
         self.detail_label.setVisible(not narrow)
         self.source_summary_label.setVisible(not narrow)
         self.scope_label.setVisible(not narrow)
-        self.manage_sources_button.setText("管理" if narrow else "管理来源")
         self.source_selector.set_compact(narrow)
         self.result_table.set_responsive_reference_width(width)
         self.result_toolbar.set_compact(narrow)
@@ -178,7 +143,6 @@ class OnlineSearchPage(QWidget):
     def _sync_state(self, state: OnlineSearchState) -> None:
         has_results = bool(self.adapter.results())
         self.history_view.setVisible(state.phase == "idle")
-        self.recommendation_widget.setVisible(state.phase == "idle")
         self.result_table.setVisible(state.phase == "results" and has_results)
         self.result_toolbar.setVisible(state.phase == "results" and has_results)
         self.state_view.setVisible(not (state.phase == "results" and has_results))

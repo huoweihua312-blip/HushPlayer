@@ -287,7 +287,10 @@ class OnlineSearchPageTests(unittest.TestCase):
 
     def test_recommended_query_and_return_to_history(self) -> None:
         page = self._search_page()
-        page.recommendation_buttons[0].click()
+        self.assertFalse(hasattr(page, "recommendation_buttons"))
+        self.assertFalse(hasattr(page, "manage_sources_button"))
+        page.search_bar.set_text("夜航")
+        page.search_bar.search_requested.emit()
         self.assertEqual(page.search_bar.line_edit.text(), "夜航")
         self.window.online_adapter.complete_for_test()
         self.window.online_adapter.load_mock_scenario("empty")

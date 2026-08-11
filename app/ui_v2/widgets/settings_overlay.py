@@ -135,6 +135,7 @@ class SettingsOverlay(QWidget):
 
     closed = Signal()
     saved = Signal(object)
+    online_sources_requested = Signal()
 
     def __init__(
         self,
@@ -368,6 +369,17 @@ class SettingsOverlay(QWidget):
         section.add_row(self._toggle_row("auto_scan_music_folders_on_startup", "启动时自动扫描这些文件夹", "启动时扫描已保存的音乐文件夹。"))
         section.add_row(self._toggle_row("floating_lyrics_auto_open", "启动时自动打开桌面歌词", "播放启动时自动打开现有桌面歌词窗口。"))
         layout.addWidget(section)
+
+        online_section = self._track_section(
+            self._section("在线来源", "在设置中添加、启用、禁用和管理在线搜索来源。")
+        )
+        self.online_sources_button = SettingsActionButton("管理在线来源", self._theme, self)
+        self.online_sources_button.setAccessibleName("管理在线来源")
+        self.online_sources_button.setToolTip("打开在线来源管理，添加或重新启用来源")
+        self.online_sources_button.clicked.connect(self.online_sources_requested)
+        self._aux_controls.append(self.online_sources_button)
+        online_section.add_widget(self.online_sources_button)
+        layout.addWidget(online_section)
 
     def _build_appearance(self, layout: QVBoxLayout) -> None:
         section = self._track_section(self._section("主题", "沿用当前正式 Theme，不创建第二套壳层。"))

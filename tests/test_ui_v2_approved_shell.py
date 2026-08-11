@@ -474,6 +474,11 @@ class ApprovedShellMigrationTests(unittest.TestCase):
         self.assertIs(bar.utility_region.parentWidget(), bar)
         self.assertIs(bar.transport_row.parentWidget(), bar.center_region)
         self.assertIs(bar.progress_row.parentWidget(), bar.center_region)
+        self.assertIs(bar.favorite_button.parentWidget(), bar.transport_row)
+        self.assertLess(
+            bar.favorite_button.mapTo(bar, bar.favorite_button.rect().center()).x(),
+            bar.shuffle_button.mapTo(bar, bar.shuffle_button.rect().center()).x(),
+        )
         self.assertNotEqual(bar.track_region.parentWidget(), bar.transport_row)
         self.assertNotEqual(bar.utility_region.parentWidget(), bar.transport_row)
         self.assertEqual(bar.track_region.height(), bar.contentsRect().height())
