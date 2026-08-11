@@ -179,6 +179,7 @@ class OnlineSearchPageTests(unittest.TestCase):
 
     def test_page_states_model_reuse_history_and_context_menu(self) -> None:
         page = self._search_page()
+        self.assertFalse(page.history_view.isVisible())
         model = page.result_table.model
         self._complete_search(page)
         self.assertTrue(page.result_table.isVisible())
@@ -207,7 +208,9 @@ class OnlineSearchPageTests(unittest.TestCase):
     def test_result_filter_sort_and_source_selector_status(self) -> None:
         page = self._search_page()
         model = page.result_table.model
-        self._complete_search(page, "筛选排序")
+        self._complete_search(page, "Paper Moon")
+        self.assertEqual(page.result_toolbar.sort_selector.currentData(), "relevance")
+        self.assertIn("paper moon", model.tracks()[0].title.casefold())
         source_index = page.result_toolbar.source_filter.findData("archive")
         page.result_toolbar.source_filter.setCurrentIndex(source_index)
         self.assertIs(page.result_table.model, model)

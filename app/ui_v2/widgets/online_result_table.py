@@ -355,9 +355,40 @@ class OnlineResultTable(QTableView):
                 )
             )
         else:
-            tracks.sort(key=lambda track: track.result_rank)
+            tracks.sort(key=self._relevance_key)
         self.model.set_tracks(tracks)
         self.model.set_playing_track(self.adapter.playing_track_id)
+
+    def _relevance_key(self, track: OnlineTrack) -> tuple[int, int]:
+        """Prefer metadata matching the query while keeping ties stable."""
+        query = " ".join(str(self.adapter.query or "").casefold().split())
+        if not query:
+            return (0, track.result_rank)
+        terms = tuple(dict.fromkeys(query.split()))
+        title = " ".join(str(track.title or "").casefold().split())
+        artist = " ".join(str(track.artist or "").casefold().split())
+        album = " ".join(str(track.album or "").casefold().split())
+
+        def field_score(value: str, weight: int) -> int:
+            if not value:
+                return 0
+            if value == query:
+                return weight
+            if query in value:
+                return weight - 10
+            matched = sum(1 for term in terms if term and term in value)
+            if matched == len(terms) and matched:
+                return weight - 20
+            if matched:
+                return weight - 40 + matched
+            return 0
+
+        score = max(
+            field_score(title, 100),
+            field_score(artist, 70),
+            field_score(album, 55),
+        )
+        return (-score, track.result_rank)
 
     def _apply_column_widths(self) -> None:
         width = max(1, self.viewport().width() - 12)
