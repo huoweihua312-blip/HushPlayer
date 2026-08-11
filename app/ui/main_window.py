@@ -56,7 +56,10 @@ from app.ui.theme_manager import (
     get_theme_tokens,
     normalize_appearance_mode,
 )
-from app.ui.settings_dialog import SettingsDialog
+from app.ui.settings_dialog import (
+    SettingsDialog,
+    normalize_update_check_delay_seconds,
+)
 from app.ui.immersive_appearance import (
     APPEARANCE_SETTING_KEYS,
     ImmersiveAppearanceConfig,
