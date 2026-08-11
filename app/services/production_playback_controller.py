@@ -76,6 +76,11 @@ class ProductionPlaybackController(QObject):
         self._online_recovery_attempted = False
         self._online_cache_key = ""
         self._switching_item = False
+        self._deferred_online_cache: tuple[int, str, MediaItem, dict] | None = None
+        self._online_cache_timer = QTimer(self)
+        self._online_cache_timer.setSingleShot(True)
+        self._online_cache_timer.setInterval(250)
+        self._online_cache_timer.timeout.connect(self._flush_deferred_online_cache)
 
         self.media_devices = media_devices or QMediaDevices(self)
         self.default_audio_output_sync_timer = QTimer(self)
@@ -429,6 +434,8 @@ class ProductionPlaybackController(QObject):
             return
         self._closed = True
         self._cancel_online_resolution()
+        self._online_cache_timer.stop()
+        self._deferred_online_cache = None
         self.default_audio_output_sync_timer.stop()
         self.media_player.stop()
         self.media_player.setSource(QUrl())
@@ -474,6 +481,8 @@ class ProductionPlaybackController(QObject):
         if resolver is not None:
             resolver.cancel_active()
         self._pending_online_token = 0
+        self._online_cache_timer.stop()
+        self._deferred_online_cache = None
 
     def _valid_online_cache(self, media_item: MediaItem) -> dict | None:
         cache = self._online_audio_cache
@@ -529,8 +538,31 @@ class ProductionPlaybackController(QObject):
         cache = self._online_audio_cache
         if cache is None or not self._online_cache_is_allowed(media_item):
             return
+        self._deferred_online_cache = (
+            self._generation,
+            media_item.stable_identity,
+            media_item,
+            dict(resolution),
+        )
+        self._online_cache_timer.start()
+
+    def _flush_deferred_online_cache(self) -> None:
+        pending = self._deferred_online_cache
+        self._deferred_online_cache = None
+        if pending is None or self._closed:
+            return
+        generation, identity, media_item, resolution = pending
+        current = self._current_item
+        if (
+            generation != self._generation
+            or current is None
+            or current.kind != "remote"
+            or current.stable_identity != identity
+            or self._online_audio_cache is None
+        ):
+            return
         try:
-            cache.start_cache(media_item, resolution)
+            self._online_audio_cache.start_cache(media_item, resolution)
         except (OSError, RuntimeError, TypeError, ValueError):
             return
 

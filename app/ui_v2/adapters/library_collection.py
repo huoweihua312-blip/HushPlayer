@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import replace
 from datetime import datetime, timedelta
-from typing import Iterable
+from collections.abc import Callable, Iterable
 
 from PySide6.QtCore import QObject, Signal
 
@@ -36,11 +36,26 @@ class LibraryCollectionAdapter(QObject):
         self._playing_track_id = ""
         self._clock = datetime(2026, 1, 1, 12, 0)
         self._read_only = bool(read_only)
+        self._favorite_mutation_backend: Callable[[Track, bool], bool] | None = None
         self.set_tracks(tracks, emit=False)
 
     @property
     def read_only(self) -> bool:
         return self._read_only
+
+    @property
+    def can_mutate_favorites(self) -> bool:
+        """Whether the current shell can persist favorite membership changes."""
+
+        return not self._read_only or self._favorite_mutation_backend is not None
+
+    def set_favorite_mutation_backend(
+        self,
+        backend: Callable[[Track, bool], bool] | None,
+    ) -> None:
+        """Attach the existing persistence bridge used by the real library."""
+
+        self._favorite_mutation_backend = backend
 
     def tracks(self) -> tuple[Track, ...]:
         return tuple(self._tracks)
@@ -98,11 +113,13 @@ class LibraryCollectionAdapter(QObject):
             self.tracks_changed.emit()
 
     def set_favorite(self, track_id: str, value: bool) -> bool:
-        if self._read_only:
-            return False
         track = self.track_for_id(track_id)
         if track is None or track.is_favorite == bool(value):
             return False
+        if self._read_only:
+            backend = self._favorite_mutation_backend
+            if backend is None or not backend(track, bool(value)):
+                return False
         updated = replace(track, is_favorite=bool(value))
         index = next(index for index, item in enumerate(self._tracks) if item.id == track.id)
         self._tracks[index] = updated

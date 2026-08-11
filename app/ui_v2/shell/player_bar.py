@@ -90,6 +90,7 @@ class PlayerBar(QFrame):
         self._compact = False
         self._read_only = False
         self._transport_available = False
+        self._favorite_available = True
         self._track_availability = None
         self.setObjectName("playerBar")
         self.setFixedHeight(theme.metrics.player_bar_height)
@@ -158,13 +159,20 @@ class PlayerBar(QFrame):
         if hasattr(self, "identity_stack"):
             self.identity_stack.setFixedWidth(width)
 
-    def set_read_only(self, read_only: bool, *, allow_playback: bool = False) -> None:
+    def set_read_only(
+        self,
+        read_only: bool,
+        *,
+        allow_playback: bool = False,
+        allow_favorite: bool = False,
+    ) -> None:
         """Keep writes disabled while allowing a formal local playback backend."""
 
         self._read_only = bool(read_only)
         self._transport_available = bool(allow_playback)
-        self.favorite_button.setVisible(not self._read_only)
-        self.favorite_button.setEnabled(not self._read_only)
+        self._favorite_available = not self._read_only or bool(allow_favorite)
+        self.favorite_button.setVisible(self._favorite_available)
+        self.favorite_button.setEnabled(self._favorite_available)
         self._set_track_controls_enabled(self.adapter.state.current_track is not None)
 
     def _build_layout(self) -> None:
@@ -588,7 +596,7 @@ class PlayerBar(QFrame):
         navigation_enabled = bool(enabled) or self._read_only
         for button in (self.lyrics_button, self.queue_button, self.more_button):
             button.setEnabled(navigation_enabled)
-        self.favorite_button.setEnabled(bool(enabled) and not self._read_only)
+        self.favorite_button.setEnabled(bool(enabled) and self._favorite_available)
         self.progress_slider.setEnabled(
             transport_enabled and (self.adapter.state.duration_ms or 0) > 0
         )

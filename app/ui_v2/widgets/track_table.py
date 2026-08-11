@@ -218,7 +218,7 @@ class TrackTable(QTableView):
             if (
                 track is not None
                 and not track.is_missing
-                and not self.adapter.collection.read_only
+                and self.adapter.collection.can_mutate_favorites
             ):
                 next_value = not track.is_favorite
                 self.adapter.toggle_favorite(track.id)
@@ -319,7 +319,7 @@ class TrackTable(QTableView):
         if not self._playback_enabled:
             play_action.setToolTip("真实模式尚未接入播放")
         play_action.triggered.connect(lambda: self._request_play(track))
-        if not self.adapter.collection.read_only:
+        if self.adapter.collection.can_mutate_favorites:
             favorite_action = menu.addAction("取消收藏" if track.is_favorite else "添加到我喜欢")
             favorite_action.setEnabled(not track.is_missing)
             favorite_action.triggered.connect(lambda: self._toggle_from_menu(track))
@@ -327,7 +327,7 @@ class TrackTable(QTableView):
             playlist_action.triggered.connect(
                 lambda: self.mock_action_requested.emit("add_to_playlist", track.id)
             )
-        if self._playlist_remove_callback is not None and not self.adapter.collection.read_only:
+        if self._playlist_remove_callback is not None:
             remove_action = menu.addAction("从当前歌单移除")
             remove_action.triggered.connect(
                 lambda: self._playlist_remove_callback(track.id)
@@ -401,7 +401,7 @@ class TrackTable(QTableView):
         self._column_profile = ResponsiveColumnPolicy.profile_for_width(profile_width).name
         self.setColumnHidden(
             int(TrackColumn.FAVORITE),
-            self._column_profile == "narrow" or self.adapter.collection.read_only,
+            self._column_profile == "narrow" or not self.adapter.collection.can_mutate_favorites,
         )
         self.setColumnHidden(int(TrackColumn.ALBUM), self._column_profile == "narrow")
         self.setColumnHidden(int(TrackColumn.SOURCE), self._column_profile != "wide")

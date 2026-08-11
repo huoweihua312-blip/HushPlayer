@@ -246,15 +246,16 @@ class RealLibraryPageTests(unittest.TestCase):
         self.assertIsNotNone(menu)
         self.assertEqual(
             [action.text() for action in menu.actions()],
-            ["播放", "查看歌曲信息"],
+            ["播放", "取消收藏", "添加到歌单", "查看歌曲信息"],
         )
         menu.deleteLater()
-        self.assertTrue(self.window.player_bar.favorite_button.isHidden())
-        self.assertTrue(self.window.library_page.track_table.isColumnHidden(int(TrackColumn.FAVORITE)))
+        self.assertFalse(self.window.player_bar.favorite_button.isHidden())
+        library_table.set_responsive_reference_width(1200)
+        self.assertFalse(self.window.library_page.track_table.isColumnHidden(int(TrackColumn.FAVORITE)))
         self.assertFalse(self.window.sidebar.new_playlist_button.isHidden())
         self.assertIn("online_search", self.window.sidebar._items)
         first = self.window.library_collection.tracks()[0]
-        self.assertFalse(self.window.library_collection.set_favorite(first.id, not first.is_favorite))
+        self.assertTrue(self.window.library_collection.set_favorite(first.id, not first.is_favorite))
         created = self.window.playlist_adapter.create_playlist("可写歌单")
         self.assertIsNotNone(created)
         assert created is not None
@@ -266,7 +267,15 @@ class RealLibraryPageTests(unittest.TestCase):
         self.assertFalse(self.window.playlist_adapter.delete_playlist("liked"))
         playlist_page = self.window.router.page_for_route("playlist:commute")
         self.assertTrue(playlist_page.playlist_header.favorite_button.isHidden())
-        self.assertTrue(playlist_page.track_table.isColumnHidden(int(TrackColumn.FAVORITE)))
+        playlist_page.track_table.set_responsive_reference_width(1200)
+        self.assertFalse(playlist_page.track_table.isColumnHidden(int(TrackColumn.FAVORITE)))
+        playlist_menu = playlist_page.track_table.build_context_menu(
+            playlist_page.track_table.model.index(0, 0)
+        )
+        self.assertIsNotNone(playlist_menu)
+        assert playlist_menu is not None
+        self.assertIn("从当前歌单移除", [action.text() for action in playlist_menu.actions()])
+        playlist_menu.deleteLater()
 
     def test_real_browse_uses_read_only_local_sections_without_playback_writes(self) -> None:
         browse = self.window.router.browse_page

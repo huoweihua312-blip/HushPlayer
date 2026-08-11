@@ -54,7 +54,7 @@ from app.ui_v2.mock.track_factory import create_mock_tracks
 from app.ui_v2.pages.all_songs_page import AllSongsPage
 from app.ui_v2.models.immersive_lyrics_options import ImmersiveLyricsOptions
 from app.ui_v2.models.settings_snapshot import SettingsSnapshot
-from app.ui_v2.models.track import artwork_url_from_payload
+from app.ui_v2.models.track import Track, artwork_url_from_payload
 from app.ui_v2.shell.content_router import ContentRouter
 from app.ui_v2.shell.navigation_sidebar import NavigationSidebar
 from app.ui_v2.shell.player_bar import PlayerBar
@@ -194,6 +194,9 @@ class MainWindow(QMainWindow):
             # the formal playlists.json contract; the library projection stays
             # read-only and keeps its existing playback semantics.
             self.playlist_adapter.set_mutation_backend(self.online_discovery.bridge)
+            self.library_collection.set_favorite_mutation_backend(
+                self._persist_favorite_membership
+            )
         self.online_adapter = OnlineAdapter(
             self.library_collection,
             self.playlist_adapter,
@@ -266,6 +269,7 @@ class MainWindow(QMainWindow):
         self.player_bar.set_read_only(
             is_real_library,
             allow_playback=self.playback_adapter.has_real_backend,
+            allow_favorite=self.library_collection.can_mutate_favorites,
         )
         self.real_library_adapter = (
             RealLibraryAdapter(
@@ -1011,9 +1015,40 @@ class MainWindow(QMainWindow):
         if current is not None and current.id == track_id:
             self.playback_adapter.set_current_favorite(favorite)
 
+    def _persist_favorite_membership(self, track: Track, favorite: bool) -> bool:
+        """Persist local and remote favorites through the existing bridge."""
+
+        discovery = self.online_discovery
+        if discovery is None or not isinstance(track, Track):
+            return False
+        bridge = discovery.bridge
+        if track.is_online:
+            payload = dict(track.remote_payload)
+            payload.update(
+                {
+                    "id": track.remote_track_id or track.remote_identity or track.id,
+                    "remote_id": track.remote_track_id or track.remote_identity or track.id,
+                    "source_id": track.source_id,
+                    "sourceId": track.source_id,
+                    "title": track.title,
+                    "artist": track.artist,
+                    "album": track.album,
+                }
+            )
+            return bool(bridge.set_favorite(payload, bool(favorite)))
+        member = self.playlist_adapter._track_member(track.id)
+        if member is None:
+            return False
+        method_name = "add_playlist_members" if favorite else "remove_playlist_members"
+        method = getattr(bridge, method_name, None)
+        if not callable(method):
+            return False
+        try:
+            return bool(method("liked", (member,)))
+        except Exception:
+            return False
+
     def _sync_favorite_from_player(self, favorite: bool) -> None:
-        if self.library_collection.read_only:
-            return
         current = self.playback_adapter.state.current_track
         if current is not None:
             self.library_collection.set_favorite(current.id, favorite)
