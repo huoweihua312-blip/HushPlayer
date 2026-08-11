@@ -20,6 +20,7 @@ from app.ui_v2.mock.track_factory import create_mock_tracks
 from app.ui_v2.pages.library_page import LibraryPage
 from app.ui_v2.theme.tokens import get_theme
 from app.ui_v2.widgets.track_delegate import RowVisualState
+from app.ui_v2.models.track_table_model import TrackColumn
 
 
 class UiV2LibraryPageTests(unittest.TestCase):
@@ -55,6 +56,37 @@ class UiV2LibraryPageTests(unittest.TestCase):
         self.assertEqual(requested, [self.page.track_table.model.track_at(index.row()).id])
         menu = self.page.track_table.build_context_menu(index)
         self.assertEqual([action.text() for action in menu.actions()], ["播放", "添加到我喜欢", "添加到歌单", "查看歌曲信息"])
+        menu.deleteLater()
+
+    def test_missing_favorite_can_be_removed_but_not_added(self) -> None:
+        model = self.page.track_table.model
+        missing_favorite_row = next(
+            row
+            for row, track in enumerate(model.tracks())
+            if track.is_missing and track.is_favorite
+        )
+        missing_row = next(
+            row
+            for row, track in enumerate(model.tracks())
+            if track.is_missing and not track.is_favorite
+        )
+
+        menu = self.page.track_table.build_context_menu(
+            model.index(missing_favorite_row, int(TrackColumn.MORE))
+        )
+        favorite_action = next(action for action in menu.actions() if action.text() == "取消收藏")
+        self.assertTrue(favorite_action.isEnabled())
+        self.assertFalse(next(action for action in menu.actions() if action.text() == "播放").isEnabled())
+        favorite_action.trigger()
+        self.app.processEvents()
+        self.assertFalse(self.page.adapter.collection.track_for_id(model.track_at(missing_favorite_row).id).is_favorite)
+        menu.deleteLater()
+
+        menu = self.page.track_table.build_context_menu(
+            model.index(missing_row, int(TrackColumn.MORE))
+        )
+        favorite_action = next(action for action in menu.actions() if action.text() == "添加到我喜欢")
+        self.assertFalse(favorite_action.isEnabled())
         menu.deleteLater()
 
     def test_empty_loading_error_and_content_states(self) -> None:

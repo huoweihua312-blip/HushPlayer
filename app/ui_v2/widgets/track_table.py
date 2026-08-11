@@ -217,7 +217,7 @@ class TrackTable(QTableView):
             track = self.model.track_at(index.row())
             if (
                 track is not None
-                and not track.is_missing
+                and self._can_change_favorite(track)
                 and self.adapter.collection.can_mutate_favorites
             ):
                 next_value = not track.is_favorite
@@ -321,7 +321,7 @@ class TrackTable(QTableView):
         play_action.triggered.connect(lambda: self._request_play(track))
         if self.adapter.collection.can_mutate_favorites:
             favorite_action = menu.addAction("取消收藏" if track.is_favorite else "添加到我喜欢")
-            favorite_action.setEnabled(not track.is_missing)
+            favorite_action.setEnabled(self._can_change_favorite(track))
             favorite_action.triggered.connect(lambda: self._toggle_from_menu(track))
             playlist_action = menu.addAction("添加到歌单")
             playlist_action.triggered.connect(
@@ -338,6 +338,12 @@ class TrackTable(QTableView):
             artist_action = menu.addAction("查看艺人")
             artist_action.triggered.connect(lambda: self.artist_requested.emit(track.artist))
         return menu
+
+    @staticmethod
+    def _can_change_favorite(track: Track) -> bool:
+        """Allow removing stale favorites while keeping invalid additions blocked."""
+
+        return not track.is_missing or track.is_favorite
 
     def _show_context_menu(self, position) -> None:
         index = self.indexAt(position)
