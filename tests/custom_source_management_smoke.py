@@ -135,7 +135,12 @@ def main() -> int:
             assert registry.get_source(first_id)["name"] == "Renamed Open Source"
             page.toggle_selected_source()
             assert registry.get_source(first_id)["enabled"] is False
-            registry.set_enabled(first_id, True)
+            page.url_input.setPlainText(js_url)
+            page.confirm_checkbox.setChecked(True)
+            page.start_batch_import()
+            assert registry.get_source(first_id)["enabled"] is True
+            assert page._reenabled_count == 1
+            assert "重新启用 1 个来源" in page.status_label.text()
 
             selected_runtime = dict(registry.get_source(first_id))
             selected_runtime.update({"fileExists": True, "scanError": ""})

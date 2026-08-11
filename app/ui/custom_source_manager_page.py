@@ -55,6 +55,9 @@ class CustomSourceManagerPage(QFrame):
         self._active_entry: dict | None = None
         self._completed_count = 0
         self._skipped_count = 0
+        self._reenabled_count = 0
+        self._reenable_errors: list[str] = []
+        self._disabled_duplicate_ids: list[str] = []
         self._failed_messages: list[str] = []
         self._build_ui()
         self.client.sourceListReceived.connect(self.on_source_list_received)
@@ -207,6 +210,7 @@ class CustomSourceManagerPage(QFrame):
         errors: list[str] = []
         duplicate_count = 0
         seen: set[str] = set()
+        self._disabled_duplicate_ids = []
         for line_number, raw_line in enumerate(str(text or "").splitlines(), start=1):
             value = raw_line.strip()
             if not value:
@@ -226,10 +230,34 @@ class CustomSourceManagerPage(QFrame):
                 continue
             if normalized in seen or existing is not None:
                 duplicate_count += 1
+                if (
+                    existing is not None
+                    and not bool(existing.get("enabled", True))
+                    and str(existing.get("id") or "")
+                ):
+                    self._disabled_duplicate_ids.append(str(existing["id"]))
                 continue
             seen.add(normalized)
             urls.append(normalized)
         return urls, errors, duplicate_count
+
+    def _reenable_disabled_duplicates(self) -> int:
+        source_ids = list(dict.fromkeys(self._disabled_duplicate_ids))
+        self._disabled_duplicate_ids = []
+        self._reenable_errors = []
+        reenabled = 0
+        for source_id in source_ids:
+            try:
+                self.registry.set_enabled(source_id, True)
+            except SourceRegistryError as error:
+                self._reenable_errors.append(str(error))
+                continue
+            reenabled += 1
+        self._reenabled_count = reenabled
+        if reenabled:
+            self.client.reload_sources(timeout_ms=10000)
+            self.sourcesChanged.emit("")
+        return reenabled
 
     def start_batch_import(self) -> None:
         if self._active_reply is not None or self._import_queue:
@@ -242,11 +270,34 @@ class CustomSourceManagerPage(QFrame):
         if errors:
             self.status_label.setText("；".join(errors[:4]))
             return
+        reenabled_count = self._reenable_disabled_duplicates()
+        if self._reenable_errors:
+            self.status_label.setText(
+                "；".join(
+                    [
+                        f"有 {len(self._reenable_errors)} 个已禁用来源无法重新启用",
+                        *self._reenable_errors[:3],
+                    ]
+                )
+            )
+            if not urls:
+                self.refresh_sources()
+                return
         if not urls:
             if duplicate_count:
-                self.status_label.setText("输入的来源均已注册，没有重复安装。")
+                if reenabled_count:
+                    self.status_label.setText(
+                        f"已重新启用 {reenabled_count} 个来源。"
+                    )
+                else:
+                    self.status_label.setText("输入的来源均已注册，没有重复安装。")
             else:
                 self.status_label.setText("请输入至少一个 .js 或 .json URL。")
+            if reenabled_count:
+                self.refresh_sources()
+                self.status_label.setText(
+                    f"已重新启用 {reenabled_count} 个来源。"
+                )
             return
         policy = str(self.policy_combo.currentData() or "")
         self._import_queue = [
@@ -254,7 +305,7 @@ class CustomSourceManagerPage(QFrame):
         ]
         self._completed_count = 0
         self._skipped_count = duplicate_count
-        self._failed_messages = []
+        self._failed_messages = list(self._reenable_errors)
         self._start_next_download()
 
     def update_selected_source(self) -> None:
@@ -380,6 +431,8 @@ class CustomSourceManagerPage(QFrame):
         parts = [f"成功 {self._completed_count} 个"]
         if self._skipped_count:
             parts.append(f"未变化或重复 {self._skipped_count} 个")
+        if self._reenabled_count:
+            parts.append(f"重新启用 {self._reenabled_count} 个")
         if self._failed_messages:
             parts.append(f"失败 {len(self._failed_messages)} 个")
         self.status_label.setText("来源处理完成：" + "，".join(parts) + "。")

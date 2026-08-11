@@ -5104,6 +5104,9 @@ class MainWindow(QMainWindow):
         self.online_search_page = search_page
         self.unified_search_panel = search_page.online_results
         search_page.backRequested.connect(self.return_to_library_view)
+        search_page.sourceManagementRequested.connect(
+            self.show_custom_source_manager_page
+        )
         search_page.localOnlyChanged.connect(self.on_unified_local_only_toggled)
         search_page.localBrowseRequested.connect(self.browse_media_item)
         search_page.localPlayRequested.connect(self.play_media_item)
@@ -5248,13 +5251,13 @@ class MainWindow(QMainWindow):
         print(f"[startup] 初始状态 UI 更新：{(time.perf_counter() - initial_ui_started_at) * 1000:.1f} ms")
 
         self.schedule_startup_task(350, "恢复上次播放信息", self.restore_playback_session)
-        self.schedule_startup_task(0, "设置按钮挂钩", self.install_settings_button_hook)
-        self.schedule_startup_task(0, "桌面歌词功能初始化", self.install_floating_lyrics_feature)
-        self.schedule_startup_task(0, "底部桌面歌词状态初始化", self.install_floating_lyrics_button)
-        self.schedule_startup_task(0, "Windows 深色标题栏", self.apply_windows_dark_title_bar)
+        self.schedule_startup_task(250, "设置按钮挂钩", self.install_settings_button_hook)
+        self.schedule_startup_task(450, "桌面歌词功能初始化", self.install_floating_lyrics_feature)
+        self.schedule_startup_task(650, "底部桌面歌词状态初始化", self.install_floating_lyrics_button)
+        self.schedule_startup_task(350, "Windows 深色标题栏", self.apply_windows_dark_title_bar)
         if self.playlists_migration_pending:
             self.schedule_startup_task(
-                0,
+                800,
                 "旧歌单加入时间迁移持久化",
                 self.persist_pending_playlist_migration,
             )
@@ -5287,6 +5290,13 @@ class MainWindow(QMainWindow):
 
         try:
             callback()
+        except RuntimeError as error:
+            # Delayed startup callbacks can outlive short-lived offscreen test
+            # windows.  PySide raises this specific error after their C++
+            # object has already been destroyed; there is nothing left to do.
+            if "already deleted" not in str(error):
+                raise
+            print(f"[startup] 延迟任务/{label}：窗口已关闭，跳过")
         finally:
             elapsed_ms = (time.perf_counter() - started_at) * 1000
             print(f"[startup] 延迟任务/{label}：{elapsed_ms:.1f} ms")
@@ -6170,6 +6180,30 @@ class MainWindow(QMainWindow):
         if service is None or not self.online_source_allows_audio_cache(media_item):
             return False
         return bool(service.start_cache(media_item, resolution))
+
+    def schedule_online_audio_cache(
+        self,
+        media_item: MediaItem,
+        resolution: dict,
+        playback_generation: int,
+        identity: str,
+    ) -> None:
+        """Let playback establish its buffer before starting a second download."""
+        target_identity = str(identity or media_item.stable_identity)
+
+        def start_cache_when_idle() -> None:
+            current = getattr(self, "current_media_item", None)
+            if (
+                playback_generation != self.playback_generation
+                or target_identity != self.current_queue_identity
+                or not isinstance(current, MediaItem)
+                or current.media_type != "online"
+                or current.stable_identity != media_item.stable_identity
+            ):
+                return
+            self.start_online_audio_cache(media_item, resolution)
+
+        QTimer.singleShot(1500, start_cache_when_idle)
 
     def on_online_audio_cache_failed(self, cache_key: str, message: str) -> None:
         key_text = str(cache_key or "")[:10]
@@ -8639,7 +8673,6 @@ class MainWindow(QMainWindow):
             self.current_online_cache_key = str(cache_key or "")
             self.pending_restore_position = max(0, int(restore_position or 0))
             self.media_loading_generation = playback_generation
-            self.media_player.stop()
             self.media_player.setSource(source)
             self.media_player.play()
             self.set_online_status_message(
@@ -8676,7 +8709,6 @@ class MainWindow(QMainWindow):
             "正在从本地音频缓存播放…" if cache_key else "正在加载在线歌曲…"
         )
         self.media_loading_generation = playback_generation
-        self.media_player.stop()
         self.media_player.setSource(source)
         self.progress_slider.setValue(0)
         self.media_player.play()
@@ -8910,7 +8942,12 @@ class MainWindow(QMainWindow):
             if preserve_session:
                 self.finish_online_resume_failure("在线播放地址刷新结果已过期。")
             return
-        self.start_online_audio_cache(media_item, resolved_media)
+        self.schedule_online_audio_cache(
+            media_item,
+            resolved_media,
+            pending_generation,
+            pending_identity or media_item.stable_identity,
+        )
 
     def request_online_download(self, track: dict) -> None:
         if not isinstance(track, dict):
@@ -9526,6 +9563,9 @@ class MainWindow(QMainWindow):
         page.importFolderRequested.connect(self.import_music_folder)
         page.randomPlayRequested.connect(self.play_random_library_song)
         page.removeSelectedRequested.connect(self.remove_selected_song)
+        page.removeFromCurrentPlaylistRequested.connect(
+            self.remove_current_song_from_current_playlist
+        )
         page.cleanMissingRequested.connect(self.clean_missing_songs)
         page.trackBrowsed.connect(self.browse_media_item)
         page.trackPlayRequested.connect(self.play_media_item)
@@ -11022,7 +11062,9 @@ class MainWindow(QMainWindow):
                     continue
                 visible_song_data.append(data)
         tracks = [
-            self.media_item_from_song_data(data).to_dict()
+            dict(data)
+            if isinstance(data, dict) and data.get("recordKind") != "remote"
+            else self.media_item_from_song_data(data).to_dict()
             for data in visible_song_data
         ]
         view_titles = {

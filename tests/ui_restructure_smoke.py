@@ -114,6 +114,11 @@ def test_lazy_library_grouping(app: QApplication) -> None:
     page = LibraryPage()
     page.set_scope("全部歌曲", tracks, "fixture:1")
     assert page.artist_view.group_list.count() == 0
+    page.show_mode("tracks")
+    assert not page.favorite_button.isHidden()
+    assert page.remove_playlist_button.isHidden()
+    page.set_scope("我喜欢", tracks, "liked:1")
+    assert not page.remove_playlist_button.isHidden()
     page.show_mode("artists")
     for _ in range(5):
         app.processEvents()

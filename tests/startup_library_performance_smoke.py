@@ -764,7 +764,7 @@ def assert_benchmark_results(results: dict[int, dict]) -> None:
         counts = result["counts"]
         assert counts == {
             "create_item": song_count,
-            "dict_conversion": song_count,
+            "dict_conversion": 0,
             "filter": 1,
             "identity_rebuild": 0,
             "library_reads": 1,

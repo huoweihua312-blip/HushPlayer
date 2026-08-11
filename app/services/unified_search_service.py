@@ -271,14 +271,15 @@ class UnifiedSearchService(QObject):
                 not source_id
                 or not source.get("userInstalled")
                 or not source.get("sourceUrl")
-                or not source.get("enabled")
             ):
                 continue
             source_name = str(source.get("name") or source_id)
             capabilities = source.get("capabilities")
             capabilities = capabilities if isinstance(capabilities, dict) else {}
             unavailable_reason = ""
-            if source.get("scanError"):
+            if not bool(source.get("enabled", True)):
+                unavailable_reason = "已禁用，请在来源管理中启用"
+            elif source.get("scanError"):
                 unavailable_reason = "能力检测失败"
             elif not source.get("fileExists", True):
                 unavailable_reason = "来源文件不可用"
@@ -340,7 +341,9 @@ class UnifiedSearchService(QObject):
             if selectable_ids:
                 self.statusChanged.emit("请至少选择一个搜索来源。")
             elif catalog:
-                self.statusChanged.emit("没有可搜索的在线来源；部分来源当前不可用。")
+                self.statusChanged.emit(
+                    "没有可搜索的在线来源；请在来源管理中启用可搜索来源。"
+                )
             else:
                 self.statusChanged.emit("没有已启用且支持搜索的自定义来源。")
             self._emit_results(final=True)

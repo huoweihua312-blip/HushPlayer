@@ -236,6 +236,7 @@ class SearchSourceSelector(QToolButton):
 
 class SearchPage(QFrame):
     backRequested = Signal()
+    sourceManagementRequested = Signal()
     localOnlyChanged = Signal(bool)
     localBrowseRequested = Signal(dict)
     localPlayRequested = Signal(dict)
@@ -290,6 +291,13 @@ class SearchPage(QFrame):
         self.source_selector.selectionChanged.connect(
             self._on_source_selection_changed
         )
+        self.source_management_button = QPushButton("管理来源")
+        self.source_management_button.setObjectName("secondaryButton")
+        self.source_management_button.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.source_management_button.setToolTip("打开自定义来源管理")
+        self.source_management_button.clicked.connect(
+            self.sourceManagementRequested
+        )
         self.back_button = QPushButton("返回音乐库")
         self.back_button.setObjectName("secondaryButton")
         self.back_button.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -298,6 +306,7 @@ class SearchPage(QFrame):
         header.addStretch()
         header.addWidget(self.source_selector_label)
         header.addWidget(self.source_selector)
+        header.addWidget(self.source_management_button)
         header.addWidget(self.local_only_checkbox)
         header.addWidget(self.back_button)
 
@@ -420,6 +429,7 @@ class SearchPage(QFrame):
             online and self._responsive_mode != "narrow"
         )
         self.source_selector.setVisible(online)
+        self.source_management_button.setVisible(online)
         self.source_selector.setEnabled(
             online
             and not self.local_only_checkbox.isChecked()

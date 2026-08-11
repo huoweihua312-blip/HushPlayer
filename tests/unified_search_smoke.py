@@ -188,6 +188,7 @@ def test_selected_sources_and_empty_selection() -> None:
     service.set_selected_source_ids(["source_b"], restart=False)
     service.schedule_search("selected")
     list_request = stop_debounce_and_start(service)
+    disabled = source_fixture("source_disabled", "Disabled", enabled=False)
     unavailable = source_fixture("source_unavailable", "Unavailable")
     unavailable["scanError"] = "fixture"
     client.answer_sources(
@@ -195,6 +196,7 @@ def test_selected_sources_and_empty_selection() -> None:
         [
             source_fixture("source_a", "A"),
             source_fixture("source_b", "B"),
+            disabled,
             unavailable,
         ],
     )
@@ -202,8 +204,14 @@ def test_selected_sources_and_empty_selection() -> None:
     assert [source["id"] for source in catalogs[-1][0]] == [
         "source_a",
         "source_b",
+        "source_disabled",
         "source_unavailable",
     ]
+    disabled_catalog = next(
+        source for source in catalogs[-1][0] if source["id"] == "source_disabled"
+    )
+    assert disabled_catalog["selectable"] is False
+    assert disabled_catalog["reason"] == "已禁用，请在来源管理中启用"
     assert catalogs[-1][0][-1]["selectable"] is False
     assert catalogs[-1][0][-1]["reason"] == "能力检测失败"
     active = dict(client.search_requests)

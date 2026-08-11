@@ -388,6 +388,7 @@ class LibraryPage(QFrame):
     trackPlayRequested = Signal(dict)
     trackContextRequested = Signal(dict, object)
     trackLikeToggleRequested = Signal(dict)
+    removeFromCurrentPlaylistRequested = Signal()
     viewChanged = Signal(str)
 
     def __init__(self, parent: QWidget | None = None) -> None:
@@ -397,6 +398,7 @@ class LibraryPage(QFrame):
         self.current_mode = "tracks"
         self._scope_tracks: list[dict] = []
         self._scope_cache_key = ""
+        self._scope_is_playlist = False
         self._build_ui()
 
     def _build_ui(self) -> None:
@@ -428,6 +430,21 @@ class LibraryPage(QFrame):
         self.random_button.setObjectName("secondaryButton")
         self.random_button.setCursor(Qt.CursorShape.PointingHandCursor)
         self.random_button.clicked.connect(self.randomPlayRequested)
+        self.favorite_button = QPushButton("♡")
+        self.favorite_button.setObjectName("libraryFavoriteButton")
+        self.favorite_button.setFixedSize(38, 34)
+        self.favorite_button.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.favorite_button.setToolTip("收藏当前选中歌曲")
+        self.favorite_button.setAccessibleName("收藏当前选中歌曲")
+        self.favorite_button.setEnabled(False)
+        self.favorite_button.clicked.connect(self._toggle_current_favorite)
+        self.remove_playlist_button = QPushButton("从歌单移除")
+        self.remove_playlist_button.setObjectName("libraryRemovePlaylistButton")
+        self.remove_playlist_button.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.remove_playlist_button.clicked.connect(
+            self.removeFromCurrentPlaylistRequested
+        )
+        self.remove_playlist_button.setVisible(False)
         self.more_button = QPushButton("更多")
         self.more_button.setObjectName("secondaryButton")
         self.more_button.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -457,6 +474,14 @@ class LibraryPage(QFrame):
 
         title_row.addLayout(title_box, 1)
         title_row.addWidget(self.switcher, alignment=Qt.AlignmentFlag.AlignVCenter)
+        title_row.addWidget(
+            self.favorite_button,
+            alignment=Qt.AlignmentFlag.AlignVCenter,
+        )
+        title_row.addWidget(
+            self.remove_playlist_button,
+            alignment=Qt.AlignmentFlag.AlignVCenter,
+        )
         title_row.addWidget(self.random_button, alignment=Qt.AlignmentFlag.AlignVCenter)
         title_row.addWidget(self.more_button, alignment=Qt.AlignmentFlag.AlignVCenter)
         title_row.addWidget(self.folder_button, alignment=Qt.AlignmentFlag.AlignVCenter)
@@ -468,6 +493,12 @@ class LibraryPage(QFrame):
             object_name="libraryTrackView",
             empty_text="音乐库还是空的\n导入本地音乐后，就可以在这里浏览和播放。",
             selection_mode=QAbstractItemView.SelectionMode.ExtendedSelection,
+        )
+        self.track_view.list_widget.currentItemChanged.connect(
+            lambda _current, _previous: self._update_scope_action_buttons()
+        )
+        self.track_view.list_widget.itemSelectionChanged.connect(
+            self._update_scope_action_buttons
         )
         self.track_view.list_widget.likeToggleRequested.connect(
             self.trackLikeToggleRequested
@@ -493,6 +524,12 @@ class LibraryPage(QFrame):
             f"QPushButton#libraryViewSwitchButton {{ background: transparent; color: {t['text_muted']}; border: none; border-radius: {UI_RADII['control']}px; padding: 7px 12px; font-weight: 650; }}"
             f"QPushButton#libraryViewSwitchButton:hover {{ background: {t['hover']}; color: {t['text']}; }}"
             f"QPushButton#libraryViewSwitchButton[active='true'] {{ background: {t['accent_soft']}; color: {t['accent_hover']}; }}"
+            f"QPushButton#libraryFavoriteButton {{ background: transparent; color: {t['text_muted']}; border: 1px solid {t['border']}; border-radius: {UI_RADII['control']}px; font-size: 20px; font-weight: 700; }}"
+            f"QPushButton#libraryFavoriteButton:hover {{ background: {t['hover']}; color: {t['danger']}; border-color: {t['border_strong']}; }}"
+            f"QPushButton#libraryFavoriteButton[liked='true'] {{ color: {t['danger']}; }}"
+            f"QPushButton#libraryFavoriteButton:disabled {{ color: {t['text_disabled']}; border-color: {t['border']}; }}"
+            f"QPushButton#libraryRemovePlaylistButton {{ background: transparent; color: {t['text_secondary']}; border: 1px solid {t['border']}; border-radius: {UI_RADII['control']}px; padding: 7px 12px; font-weight: 650; }}"
+            f"QPushButton#libraryRemovePlaylistButton:hover {{ background: {t['hover']}; color: {t['text']}; border-color: {t['border_strong']}; }}"
         )
         for group_view in (self.artist_view, self.album_view):
             group_view.apply_theme()
@@ -513,18 +550,29 @@ class LibraryPage(QFrame):
     def set_scope(self, title: str, tracks: list[dict], cache_key: str) -> None:
         self.page_title.setText(str(title or "音乐库"))
         self._scope_tracks = [
-            dict(item)
-            if isinstance(item, dict)
-            and {"track_id", "media_type", "source_id"}.issubset(item)
-            else MediaItem.from_mapping(item).to_dict()
+            self._scope_track_value(item)
             for item in tracks
         ]
         self.page_subtitle.setText(f"{len(self._scope_tracks)} 首歌曲")
         self._scope_cache_key = str(cache_key or "")
+        self._scope_is_playlist = self._scope_cache_key.startswith(
+            ("liked:", "playlist:")
+        )
+        self._update_scope_action_buttons()
         if self.current_mode == "artists":
             self.artist_view.set_tracks(self._scope_tracks, self._scope_cache_key + ":artist")
         elif self.current_mode == "albums":
             self.album_view.set_tracks(self._scope_tracks, self._scope_cache_key + ":album")
+
+    @staticmethod
+    def _scope_track_value(item: dict) -> dict:
+        """Keep local list rows lazy; grouped views normalize them on demand."""
+        if isinstance(item, dict):
+            if item.get("recordKind") != "remote":
+                return dict(item)
+            if {"track_id", "media_type", "source_id"}.issubset(item):
+                return dict(item)
+        return MediaItem.from_mapping(item).to_dict()
 
     def set_playing_key_provider(self, provider) -> None:
         self.artist_view.set_playing_key_provider(provider)
@@ -534,15 +582,18 @@ class LibraryPage(QFrame):
         self.track_view.set_like_state_provider(provider)
         self.artist_view.set_like_state_provider(provider)
         self.album_view.set_like_state_provider(provider)
+        self._update_scope_action_buttons()
 
     def refresh_like_identity(self, identity: str) -> int:
-        return sum(
+        refreshed = sum(
             (
                 self.track_view.refresh_like_identity(identity),
                 self.artist_view.refresh_like_identity(identity),
                 self.album_view.refresh_like_identity(identity),
             )
         )
+        self._update_scope_action_buttons()
+        return refreshed
 
     def remove_visible_group_detail_identity(self, identity: str) -> int:
         return (
@@ -559,16 +610,60 @@ class LibraryPage(QFrame):
             mode = "tracks"
         self.current_mode = mode
         self.switcher.set_current(mode)
+        self._update_scope_action_buttons()
         if mode == "tracks":
             self.content_stack.setCurrentWidget(self.track_view)
         elif mode == "artists":
-            self.artist_view.set_tracks(self._scope_tracks, self._scope_cache_key + ":artist")
+            self.artist_view.set_tracks(
+                self._scope_tracks,
+                self._scope_cache_key + ":artist",
+            )
             self.content_stack.setCurrentWidget(self.artist_view)
         else:
-            self.album_view.set_tracks(self._scope_tracks, self._scope_cache_key + ":album")
+            self.album_view.set_tracks(
+                self._scope_tracks,
+                self._scope_cache_key + ":album",
+            )
             self.content_stack.setCurrentWidget(self.album_view)
         self.scroll_current_view_to_top()
         self.viewChanged.emit(mode)
+
+    def _current_track_for_action(self) -> dict | None:
+        if self.current_mode != "tracks":
+            return None
+        current = self.track_view.list_widget.currentItem()
+        if current is None:
+            selected = self.track_view.list_widget.selectedItems()
+            current = selected[0] if selected else None
+        value = current.data(Qt.ItemDataRole.UserRole) if current is not None else None
+        return dict(value) if isinstance(value, dict) else None
+
+    def _update_scope_action_buttons(self) -> None:
+        track = self._current_track_for_action()
+        liked = False
+        if track is not None:
+            try:
+                liked = self.track_view.list_widget.is_value_liked(track)
+            except Exception:
+                liked = False
+        self.favorite_button.setVisible(self.current_mode == "tracks")
+        self.favorite_button.setEnabled(track is not None)
+        self.favorite_button.setText("♥" if liked else "♡")
+        self.favorite_button.setToolTip("从我喜欢移除" if liked else "添加到我喜欢")
+        self.favorite_button.setAccessibleName(
+            "从我喜欢移除" if liked else "添加到我喜欢"
+        )
+        self.favorite_button.setProperty("liked", bool(liked))
+        self.favorite_button.style().unpolish(self.favorite_button)
+        self.favorite_button.style().polish(self.favorite_button)
+        self.remove_playlist_button.setVisible(
+            self.current_mode == "tracks" and self._scope_is_playlist
+        )
+
+    def _toggle_current_favorite(self) -> None:
+        track = self._current_track_for_action()
+        if track is not None:
+            self.trackLikeToggleRequested.emit(track)
 
     def scroll_current_view_to_top(self) -> None:
         if self.current_mode == "tracks":
