@@ -109,6 +109,7 @@ FLUENT_SETTINGS_ASSETS: dict[str, str] = {
     "playback": "play_circle_20_regular.svg",
     "lyrics": "subtitles_20_regular.svg",
     "library": "library_20_regular.svg",
+    "online_sources": "cloud_20_regular.svg",
     "cache": "database_20_regular.svg",
     "updates": "arrow_sync_20_regular.svg",
     "about": "info_20_regular.svg",

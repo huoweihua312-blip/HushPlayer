@@ -200,6 +200,7 @@ class SettingsPage(QWidget):
         self._add_category_page("lyrics", self._build_lyrics)
         self._add_category_page("immersive", self._build_immersive)
         self._add_category_page("library", self._build_library)
+        self._add_category_page("online_sources", self._build_online_sources)
         self._add_category_page("cache", self._build_cache)
         self._add_category_page("updates", self._build_updates)
         self._add_category_page("about", self._build_about)
@@ -336,6 +337,14 @@ class SettingsPage(QWidget):
         section.add_row(self._combo_row("library.import_mode", "导入模式", "决定发现新歌曲后的处理方式。", (("先审核", "review"), ("直接导入", "direct"))))
         section.add_row(self._slider_row("library.ignore_short_tracks_seconds", "忽略短音频", "短于此时长的曲目会被忽略。", 0, 60, " 秒"))
         section.add_row(self._switch_row("library.watch_folder_changes", "监视文件夹变化", "音乐文件夹内容变化时自动更新。"))
+        layout.addWidget(section)
+
+    def _build_online_sources(self, layout: QVBoxLayout) -> None:
+        section = self._section("在线来源", "在线来源管理由主窗口的来源服务提供。")
+        message = QLabel("请使用正式在线来源管理界面添加、启用或禁用来源。", self)
+        message.setWordWrap(True)
+        self._themed_widgets.append(message)
+        section.add_row(self._custom_row("online_sources.management", "来源管理", "保留设置分类的兼容入口。", message))
         layout.addWidget(section)
 
     def _build_cache(self, layout: QVBoxLayout) -> None:

@@ -31,6 +31,11 @@
       "variant": "regular"
     },
     {
+      "feature": "online_sources",
+      "filename": "cloud_20_regular.svg",
+      "variant": "regular"
+    },
+    {
       "feature": "cache",
       "filename": "database_20_regular.svg",
       "variant": "regular"

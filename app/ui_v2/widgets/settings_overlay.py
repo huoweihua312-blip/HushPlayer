@@ -29,10 +29,12 @@ from app.ui_v2.adapters.legacy_settings_bridge import (
     SettingsBridgeError,
     normalize_immersive_background_visual_mode,
 )
+from app.ui_v2.adapters.online_source_adapter import OnlineSourceAdapter
 from app.core.version import APP_NAME, APP_VERSION
 from app.ui_v2.models.settings_category import SETTINGS_CATEGORIES, category_for_key
 from app.ui_v2.models.settings_edit_session import SettingsEditSession
 from app.ui_v2.models.settings_snapshot import SettingsSnapshot
+from app.ui_v2.pages.online_source_page import OnlineSourcePage
 from app.ui_v2.theme.icons import fluent_settings_icon, fluent_settings_interactive_icon
 from app.ui_v2.theme.tokens import Theme
 from app.ui_v2.widgets.settings_control_factory import (
@@ -135,13 +137,13 @@ class SettingsOverlay(QWidget):
 
     closed = Signal()
     saved = Signal(object)
-    online_sources_requested = Signal()
 
     def __init__(
         self,
         bridge: LegacySettingsBridge,
         theme: Theme,
         *,
+        online_sources: OnlineSourceAdapter | None = None,
         preview_callback: Callable[[dict[str, Any]], None] | None = None,
         path_chooser: Callable[[str], str] | None = None,
         folder_chooser: Callable[[], str] | None = None,
@@ -150,6 +152,7 @@ class SettingsOverlay(QWidget):
         super().__init__(parent)
         self.bridge = bridge
         self._theme = theme
+        self._online_sources = online_sources
         self._preview_callback = preview_callback
         self._path_chooser = path_chooser
         self._folder_chooser = folder_chooser
@@ -269,6 +272,11 @@ class SettingsOverlay(QWidget):
             "about": self._build_about,
         }
         for category in SETTINGS_CATEGORIES:
+            if category.key == "online_sources":
+                page = self._build_online_sources_page()
+                self._category_pages[category.key] = page
+                self.content_stack.addWidget(page)
+                continue
             page = QWidget(self.content_stack)
             page.setObjectName(f"settingsCategory_{category.key}")
             outer = QVBoxLayout(page)
@@ -290,6 +298,21 @@ class SettingsOverlay(QWidget):
             self._category_pages[category.key] = page
             self._category_scrolls[category.key] = scroll
             self.content_stack.addWidget(page)
+
+    def _build_online_sources_page(self) -> QWidget:
+        """Embed the production source manager as one settings category."""
+
+        if self._online_sources is None:
+            page = QWidget(self.content_stack)
+            message = QLabel("在线来源服务当前不可用。", page)
+            message.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            layout = QVBoxLayout(page)
+            layout.addWidget(message)
+            return page
+        page = OnlineSourcePage(self._online_sources, self._theme, self.content_stack)
+        page.setObjectName("settingsCategory_online_sources")
+        page.back_button.hide()
+        return page
 
     def _wire_state(self) -> None:
         self.sidebar.category_requested.connect(self.set_category)
@@ -369,17 +392,6 @@ class SettingsOverlay(QWidget):
         section.add_row(self._toggle_row("auto_scan_music_folders_on_startup", "启动时自动扫描这些文件夹", "启动时扫描已保存的音乐文件夹。"))
         section.add_row(self._toggle_row("floating_lyrics_auto_open", "启动时自动打开桌面歌词", "播放启动时自动打开现有桌面歌词窗口。"))
         layout.addWidget(section)
-
-        online_section = self._track_section(
-            self._section("在线来源", "在设置中添加、启用、禁用和管理在线搜索来源。")
-        )
-        self.online_sources_button = SettingsActionButton("管理在线来源", self._theme, self)
-        self.online_sources_button.setAccessibleName("管理在线来源")
-        self.online_sources_button.setToolTip("打开在线来源管理，添加或重新启用来源")
-        self.online_sources_button.clicked.connect(self.online_sources_requested)
-        self._aux_controls.append(self.online_sources_button)
-        online_section.add_widget(self.online_sources_button)
-        layout.addWidget(online_section)
 
     def _build_appearance(self, layout: QVBoxLayout) -> None:
         section = self._track_section(self._section("主题", "沿用当前正式 Theme，不创建第二套壳层。"))
@@ -795,6 +807,11 @@ class SettingsOverlay(QWidget):
         self.sidebar.set_compact(compact)
         for row in self._rows:
             row.set_compact(compact)
+        online_sources_page = self._category_pages.get("online_sources")
+        if online_sources_page is not None and hasattr(
+            online_sources_page, "set_responsive_reference_width"
+        ):
+            online_sources_page.set_responsive_reference_width(int(width))
 
     def keyPressEvent(self, event: QKeyEvent) -> None:  # noqa: N802
         if event.key() == Qt.Key.Key_Escape:
@@ -887,7 +904,10 @@ class SettingsOverlay(QWidget):
             self.update_status.setStyleSheet(
                 f"font-size: {theme.fonts.caption}px; color: {c.secondary_text};"
             )
-        for page in self._category_pages.values():
-            page.setStyleSheet(f"background: {c.content_background};")
+        for key, page in self._category_pages.items():
+            if key == "online_sources" and hasattr(page, "set_theme"):
+                page.set_theme(theme)
+            else:
+                page.setStyleSheet(f"background: {c.content_background};")
         for scroll in self._category_scrolls.values():
             scroll.setStyleSheet(f"QScrollArea {{ border: 0; background: {c.content_background}; }} QAbstractScrollArea::viewport {{ background: {c.content_background}; }} QScrollBar:vertical {{ width: 9px; background: transparent; }} QScrollBar::handle:vertical {{ min-height: 32px; border-radius: 4px; background: {c.border_strong}; }} QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{ height: 0; }}")

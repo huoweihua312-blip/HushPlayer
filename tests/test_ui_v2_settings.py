@@ -25,6 +25,7 @@ from app.ui_v2.adapters.legacy_settings_bridge import (
 from app.ui_v2.models.settings_category import SETTINGS_CATEGORIES
 from app.ui_v2.models.settings_edit_session import SettingsEditSession
 from app.ui_v2.models.settings_snapshot import SettingsSnapshot
+from app.ui_v2.pages.online_source_page import OnlineSourcePage
 from app.ui_v2.shell.main_window import MainWindow
 from app.ui_v2.theme.icons import FLUENT_SETTINGS_ASSETS
 
@@ -110,13 +111,14 @@ class SettingsOverlayIntegrationTests(unittest.TestCase):
             "playback": "play_circle_20_regular.svg",
             "lyrics": "subtitles_20_regular.svg",
             "library": "library_20_regular.svg",
+            "online_sources": "cloud_20_regular.svg",
             "cache": "database_20_regular.svg",
             "updates": "arrow_sync_20_regular.svg",
             "about": "info_20_regular.svg",
         }
         category_names = [item.icon_name for item in SETTINGS_CATEGORIES]
-        self.assertEqual(len(category_names), 8)
-        self.assertEqual(len(set(category_names)), 8)
+        self.assertEqual(len(category_names), 9)
+        self.assertEqual(len(set(category_names)), 9)
         self.assertEqual({name: FLUENT_SETTINGS_ASSETS[name] for name in category_names}, expected_assets)
         self.assertEqual(FLUENT_SETTINGS_ASSETS["dismiss"], "dismiss_20_regular.svg")
         self.assertTrue(all(name in FLUENT_SETTINGS_ASSETS for name in category_names))
@@ -141,14 +143,18 @@ class SettingsOverlayIntegrationTests(unittest.TestCase):
         self.assertFalse(overlay.close_button.icon().isNull())
         self.assertEqual(overlay.close_button.iconSize(), QSize(18, 18))
 
-    def test_online_sources_management_is_available_from_settings(self) -> None:
+    def test_online_sources_is_an_embedded_settings_page(self) -> None:
         overlay = self.open_overlay()
-        self.assertEqual(overlay.online_sources_button.text(), "管理在线来源")
-        self.assertEqual(overlay.online_sources_button.accessibleName(), "管理在线来源")
-        overlay.online_sources_button.click()
+        overlay.set_category("online_sources")
         self.app.processEvents()
-        self.assertEqual(self.window.navigation_adapter.route, "online_sources")
-        self.assertFalse(overlay.isVisible())
+        page = overlay._category_pages["online_sources"]
+        self.assertIsInstance(page, OnlineSourcePage)
+        self.assertTrue(page.isVisible())
+        self.assertTrue(page.add_source_button.isVisible())
+        self.assertTrue(page.select_all_button.isVisible())
+        self.assertTrue(page.clear_button.isVisible())
+        self.assertTrue(page.back_button.isHidden())
+        self.assertEqual(self.window.navigation_adapter.route, "browse")
 
     def test_dismiss_hover_is_neutral_and_keeps_32px_geometry(self) -> None:
         overlay = self.open_overlay()
@@ -177,11 +183,11 @@ class SettingsOverlayIntegrationTests(unittest.TestCase):
         for forbidden in ("HushPlayer UI V2", "设置 3A", "mock", "demo", "preview", "fixture"):
             self.assertNotIn(forbidden.casefold(), visible_text.casefold())
 
-    def test_formal_eight_categories_and_settings_does_not_change_route(self) -> None:
+    def test_formal_settings_categories_and_settings_does_not_change_route(self) -> None:
         overlay = self.open_overlay()
         self.assertEqual(tuple(item.key for item in SETTINGS_CATEGORIES), (
             "general", "appearance", "playback", "lyrics",
-            "library", "cache", "updates", "about",
+            "library", "online_sources", "cache", "updates", "about",
         ))
         self.assertNotIn("immersive", overlay.sidebar._buttons)
         self.assertEqual(self.window.navigation_adapter.route, "browse")
