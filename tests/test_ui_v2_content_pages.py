@@ -90,6 +90,22 @@ class UiV2ContentPageTests(unittest.TestCase):
             Qt.ScrollBarPolicy.ScrollBarAsNeeded,
         )
 
+    def test_browse_refresh_signals_are_coalesced(self) -> None:
+        page = self.window.router.page_for_route("browse")
+        self.app.processEvents()
+        calls: list[str] = []
+        original_refresh = page.refresh_cards
+        page.refresh_cards = lambda: calls.append("refresh")
+        try:
+            page._schedule_refresh()
+            page._schedule_refresh()
+            self.assertTrue(page._refresh_scheduled)
+            page._flush_scheduled_refresh()
+            self.assertEqual(calls, ["refresh"])
+            self.assertFalse(page._refresh_scheduled)
+        finally:
+            page.refresh_cards = original_refresh
+
     def test_track_table_uses_status_favorite_more_columns_and_neutral_playing_state(self) -> None:
         table = self.window.library_page.track_table
         self.assertEqual(table.model.headerData(0, Qt.Orientation.Horizontal), "#")

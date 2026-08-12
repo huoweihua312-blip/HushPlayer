@@ -136,6 +136,24 @@ class TrackIdentityPresentationTests(unittest.TestCase):
         bar.deleteLater()
         adapter.deleteLater()
 
+    def test_player_bar_controls_have_stable_accessible_names(self) -> None:
+        adapter = PlaybackAdapter(timer_enabled=False)
+        bar = PlayerBar(adapter, LIGHT_THEME)
+
+        self.assertEqual(bar.favorite_button.accessibleName(), "收藏")
+        self.assertEqual(bar.progress_slider.accessibleName(), "播放进度")
+        self.assertEqual(bar.volume_slider.accessibleName(), "音量大小")
+        self.assertEqual(bar.play_button.focusPolicy(), Qt.FocusPolicy.TabFocus)
+        self.assertEqual(bar.favorite_button.focusPolicy(), Qt.FocusPolicy.TabFocus)
+
+        bar._on_playing_changed(True)
+        bar._on_favorite_changed(True)
+        self.assertEqual(bar.play_button.accessibleName(), "暂停")
+        self.assertEqual(bar.favorite_button.accessibleName(), "取消收藏")
+
+        bar.deleteLater()
+        adapter.deleteLater()
+
     def test_online_track_conversion_preserves_availability_for_presentation(self) -> None:
         remote = OnlineTrack(
             id="online:fixture:blocked",

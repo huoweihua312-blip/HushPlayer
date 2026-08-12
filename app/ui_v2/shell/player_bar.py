@@ -427,6 +427,7 @@ class PlayerBar(QFrame):
             self.play_button, self.next_button, self.repeat_button,
             self.lyrics_button, self.queue_button, self.volume_button, self.more_button,
         )
+        self._configure_accessibility()
         for widget in (
             self.track_inner,
             self.artwork,
@@ -444,6 +445,32 @@ class PlayerBar(QFrame):
                 self.track_open_requested.emit()
                 return True
         return super().eventFilter(watched, event)
+
+    def _configure_accessibility(self) -> None:
+        """Give the fixed player rail stable keyboard and screen-reader labels."""
+
+        labels = (
+            (self.favorite_button, "收藏"),
+            (self.shuffle_button, "随机播放"),
+            (self.previous_button, "上一首"),
+            (self.play_button, "播放"),
+            (self.next_button, "下一首"),
+            (self.repeat_button, "循环模式"),
+            (self.queue_button, "播放队列"),
+            (self.lyrics_button, "歌词"),
+            (self.volume_button, "音量"),
+            (self.more_button, "更多"),
+        )
+        for button, label in labels:
+            button.setAccessibleName(label)
+            button.setAccessibleDescription(f"播放器：{label}")
+            button.setFocusPolicy(Qt.FocusPolicy.TabFocus)
+        self.progress_slider.setAccessibleName("播放进度")
+        self.progress_slider.setAccessibleDescription("调整当前歌曲的播放位置")
+        self.volume_slider.setAccessibleName("音量大小")
+        self.volume_slider.setAccessibleDescription("调整播放器音量")
+        self.track_inner.setAccessibleName("当前播放歌曲")
+        self.track_inner.setAccessibleDescription("打开当前歌曲详情")
 
     def _constrain_side_inner_widths(self) -> None:
         """Keep side content at its intrinsic width inside its grid column."""
@@ -494,11 +521,14 @@ class PlayerBar(QFrame):
         self.availability_label.setToolTip("")
         self.availability_label.setVisible(False)
         self.artist_label.setToolTip("")
+        self.track_inner.setToolTip(f"{title}\n{metadata}\n点击查看详情")
         self._set_track_controls_enabled(track is not None)
 
     def _on_playing_changed(self, is_playing: bool) -> None:
         self.play_button.set_icon_name("pause" if is_playing else "play")
-        self.play_button.setToolTip("暂停" if is_playing else "播放")
+        action = "暂停" if is_playing else "播放"
+        self.play_button.setToolTip(action)
+        self.play_button.setAccessibleName(action)
 
     def _on_playback_status_changed(self, status: str, detail: str) -> None:
         track = self.adapter.state.current_track
@@ -556,16 +586,22 @@ class PlayerBar(QFrame):
         self._refresh_volume_icon()
 
     def _refresh_volume_icon(self) -> None:
+        is_muted = self.adapter.state.is_muted or self.adapter.state.volume == 0
         self.volume_button.set_icon_name(
             "volume_mute"
-            if self.adapter.state.is_muted or self.adapter.state.volume == 0
+            if is_muted
             else "volume"
         )
+        action = "取消静音" if is_muted else "静音"
+        self.volume_button.setToolTip(action)
+        self.volume_button.setAccessibleName(action)
 
     def _on_favorite_changed(self, is_favorite: bool) -> None:
         self.favorite_button.set_icon_name("favorite_filled" if is_favorite else "favorite")
         self.favorite_button.set_active(is_favorite)
-        self.favorite_button.setToolTip("取消收藏" if is_favorite else "收藏")
+        action = "取消收藏" if is_favorite else "收藏"
+        self.favorite_button.setToolTip(action)
+        self.favorite_button.setAccessibleName(action)
 
     def _on_shuffle_changed(self, enabled: bool) -> None:
         self.shuffle_button.set_active(enabled)
@@ -583,7 +619,9 @@ class PlayerBar(QFrame):
             RepeatMode.ALL: "列表循环",
             RepeatMode.ONE: "单曲循环",
         }
-        self.repeat_button.setToolTip(labels[self.adapter.state.repeat_mode])
+        label = labels[self.adapter.state.repeat_mode]
+        self.repeat_button.setToolTip(label)
+        self.repeat_button.setAccessibleName(label)
 
     def _set_track_controls_enabled(self, enabled: bool) -> None:
         transport_enabled = bool(enabled) and (

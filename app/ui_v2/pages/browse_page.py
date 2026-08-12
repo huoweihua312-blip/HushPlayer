@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import hashlib
 
-from PySide6.QtCore import QSize, Qt, Signal
+from PySide6.QtCore import QTimer, QSize, Qt, Signal
 from PySide6.QtWidgets import (
     QFrame,
     QHBoxLayout,
@@ -179,6 +179,8 @@ class BrowsePage(QWidget):
         )
         self._reference_width = 1200
         self._content_safe_bottom = theme.metrics.player_bar_height + theme.metrics.content_safe_bottom
+        self._refresh_scheduled = False
+        self._is_shutdown = False
         self.setObjectName("browsePage")
 
         self.scroll_area = QScrollArea(self)
@@ -219,8 +221,8 @@ class BrowsePage(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
         layout.addWidget(self.scroll_area)
-        self.collection.tracks_changed.connect(self.refresh_cards)
-        self.collection.recent_changed.connect(self.refresh_cards)
+        self.collection.tracks_changed.connect(self._schedule_refresh)
+        self.collection.recent_changed.connect(self._schedule_refresh)
         recommended = self.sections["recommended"]
         if self.discovery_adapter is not None:
             recommended.refresh_button.setVisible(True)
@@ -270,8 +272,25 @@ class BrowsePage(QWidget):
         )
 
     def shutdown(self) -> None:
+        self._is_shutdown = True
+        self._refresh_scheduled = False
         if self.discovery_adapter is not None:
             self.discovery_adapter.shutdown()
+
+    def _schedule_refresh(self) -> None:
+        """Coalesce same-turn library signals into one landing-page refresh."""
+
+        if self._is_shutdown or self._refresh_scheduled:
+            return
+        self._refresh_scheduled = True
+        QTimer.singleShot(0, self._flush_scheduled_refresh)
+
+    def _flush_scheduled_refresh(self) -> None:
+        if not self._refresh_scheduled:
+            return
+        self._refresh_scheduled = False
+        if not self._is_shutdown:
+            self.refresh_cards()
 
     def set_responsive_reference_width(self, width: int) -> None:
         width = max(1, int(width))
@@ -283,6 +302,10 @@ class BrowsePage(QWidget):
         self.refresh_cards()
 
     def refresh_cards(self) -> None:
+        # A direct refresh (resize, initial render, or explicit retry) makes a
+        # queued signal refresh unnecessary.  The queued callback checks this
+        # flag and exits without rebuilding the cards a second time.
+        self._refresh_scheduled = False
         if self.discovery_adapter is not None:
             self.discovery_adapter.set_maximum(self.target_card_count)
             self.discovery_adapter.refresh()
