@@ -9,11 +9,21 @@ import tempfile
 
 from PySide6.QtCore import QEvent, QPoint, QRect, Qt, QTimer
 from PySide6.QtGui import QColor, QGuiApplication, QMouseEvent, QPalette
-from PySide6.QtWidgets import QApplication, QHBoxLayout, QMainWindow, QVBoxLayout, QWidget
+from PySide6.QtWidgets import (
+    QApplication,
+    QHBoxLayout,
+    QMainWindow,
+    QMessageBox,
+    QVBoxLayout,
+    QWidget,
+)
 
 from app.core.app_paths import AppPaths
+from app.core.version import APP_VERSION
 from app.services.library_repository import LibraryRepository
 from app.services.remote_track_store import RemoteTrackStore
+from app.services.app_update_service import AppUpdateService, UpdateManifest
+from app.ui.update_dialog import UpdateDialog
 from app.ui_v2.adapters.library_adapter import LibraryAdapter
 from app.ui_v2.adapters.library_collection import LibraryCollectionAdapter
 from app.ui_v2.adapters.lyrics_adapter import LyricsAdapter
@@ -85,9 +95,16 @@ class MainWindow(QMainWindow):
             )
         else:
             resolved_settings_path = AppPaths.resolve().data_dir / "settings.json"
+        self.update_service = AppUpdateService(self)
+        self.update_service.updateAvailable.connect(self._on_update_available)
+        self.update_service.noUpdate.connect(self._on_update_no_update)
+        self.update_service.checkFailed.connect(self._on_update_check_failed)
+        self.update_service.installerLaunched.connect(self._on_update_process_started)
+        self.update_service.updaterLaunched.connect(self._on_update_process_started)
         self.settings_bridge = LegacySettingsBridge(
             settings_path=resolved_settings_path,
             apply_callback=self._apply_settings_snapshot,
+            action_callbacks={"check_updates": lambda: self._check_for_updates(manual=True)},
             parent=self,
         )
         self._settings_snapshot = self.settings_bridge.read_snapshot()
@@ -262,7 +279,38 @@ class MainWindow(QMainWindow):
         controller = self.playback_adapter.controller
         if controller is not None:
             controller.shutdown()
+        self.update_service.shutdown()
         super().closeEvent(event)
+
+    def _check_for_updates(self, *, manual: bool) -> bool:
+        if self.update_service.is_checking or self.update_service.is_downloading:
+            if manual:
+                QMessageBox.information(self, "应用更新", "当前已有更新检查或下载正在进行。")
+            return False
+        return self.update_service.check_for_updates(manual=manual)
+
+    def _on_update_available(self, manifest: object, _manual: bool) -> None:
+        if not isinstance(manifest, UpdateManifest):
+            return
+        dialog = UpdateDialog(self.update_service, manifest, self)
+        dialog.exec()
+        dialog.deleteLater()
+
+    def _on_update_no_update(self, manual: bool) -> None:
+        if manual:
+            QMessageBox.information(
+                self,
+                "应用更新",
+                f"当前已是最新版本（{APP_VERSION}）。",
+            )
+
+    def _on_update_check_failed(self, message: str, manual: bool) -> None:
+        if manual:
+            QMessageBox.warning(self, "检查更新失败", message)
+
+    def _on_update_process_started(self, path: str) -> None:
+        print("更新进程已启动，HushPlayer 将安全退出：", path)
+        self.close()
 
     def eventFilter(self, watched, event) -> bool:  # noqa: N802
         """Provide native-feeling edge resizing for the frameless approved shell."""
