@@ -153,6 +153,9 @@ def main() -> None:
     current_release_document = dict(current_document)
     current_release_document["version"] = current_version
     current_release_document["numeric_version"] = current_numeric_version
+    current_release_document["package_filename"] = (
+        f"HushPlayer-{current_version}-win-x64-update.zip"
+    )
     current_release_document = helper.synchronize_manifest_document(
         current_release_document,
         current_releases,
