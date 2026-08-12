@@ -138,6 +138,9 @@ class MainWindow(QMainWindow):
         self.update_service.installerLaunched.connect(
             self._on_update_installer_launched
         )
+        self.update_service.updaterLaunched.connect(
+            self._on_update_installer_launched
+        )
         self.settings_bridge = LegacySettingsBridge(
             settings_path=resolved_settings_path,
             apply_callback=self._apply_settings_snapshot,

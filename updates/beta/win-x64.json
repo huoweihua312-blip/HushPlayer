@@ -1,16 +1,18 @@
 {
     "schema_version": 1,
     "channel": "beta",
-    "version": "0.6.0-beta.2",
-    "numeric_version": "0.6.0.2",
+    "version": "0.6.0-beta.3",
+    "numeric_version": "0.6.0.3",
     "architecture": "win-x64",
     "mandatory": false,
-    "setup_url": "https://api.gitcode.com/api/v5/repos/gcw_iPVB8B5g/HushPlayer-updates/raw/installers/HushPlayer-0.6.0-beta.2-win-x64-setup.exe?ref=main",
-    "setup_size": 68335256,
-    "sha256": "08d0eb7d884d1bb5a504fd7fba236baff906f5b6d1a6db224e691647899862ff",
+    "setup_url": "https://gitcode.com/gcw_iPVB8B5g/HushPlayer-updates/releases/download/v0.6.0-beta.3/HushPlayer-0.6.0-beta.3-win-x64-setup.exe",
+    "setup_size": 74815375,
+    "sha256": "7225c77c2408c13f581849b3f9e00c10e7ee0fdf5f96fca68937683aa51865b3",
     "release_notes": [
-        "修复 Quiet Orbit 设置页“检查更新”按钮被错误禁用的问题。",
-        "将设置页检查更新操作接入真实更新服务，并显示检查结果与更新提示。"
+        "修复在线歌曲播放失败后无法从我喜欢或歌单中再次查找并播放对应歌曲的问题。",
+        "支持选定在线版本后，仅替换播放来源并保留原歌曲的收藏关系与歌单位置。",
+        "支持在应用内下载并校验 portable 更新包，更新完成后自动重启，无需手动运行安装程序。",
+        "保留旧安装包更新方式，兼容没有 portable 更新包的历史版本和更新清单。"
     ],
     "release_history": [
         {
@@ -123,6 +125,21 @@
                 "修复 Quiet Orbit 设置页“检查更新”按钮被错误禁用的问题。",
                 "将设置页检查更新操作接入真实更新服务，并显示检查结果与更新提示。"
             ]
+        },
+        {
+            "version": "0.6.0-beta.3",
+            "numeric_version": "0.6.0.3",
+            "release_date": "2026-08-12",
+            "notes": [
+                "修复在线歌曲播放失败后无法从我喜欢或歌单中再次查找并播放对应歌曲的问题。",
+                "支持选定在线版本后，仅替换播放来源并保留原歌曲的收藏关系与歌单位置。",
+                "支持在应用内下载并校验 portable 更新包，更新完成后自动重启，无需手动运行安装程序。",
+                "保留旧安装包更新方式，兼容没有 portable 更新包的历史版本和更新清单。"
+            ]
         }
-    ]
+    ],
+    "package_url": "https://gitcode.com/gcw_iPVB8B5g/HushPlayer-updates/releases/download/v0.6.0-beta.3/HushPlayer-0.6.0-beta.3-win-x64-update.zip",
+    "package_size": 105097272,
+    "package_sha256": "5e2087105b6c5cd557d35cd61fc575063d9867116deb3d03ed1be562de45c179",
+    "package_filename": "HushPlayer-0.6.0-beta.3-win-x64-update.zip"
 }

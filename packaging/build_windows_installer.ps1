@@ -68,6 +68,16 @@ $VersionOutputDir = Join-Path $ProjectRoot "build\version"
 $VersionJson = @(& $Python $VersionMetadataHelper --output-dir $VersionOutputDir)
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 $VersionMetadata = ($VersionJson -join [Environment]::NewLine) | ConvertFrom-Json
+$UpdatePackage = Join-Path $ProjectRoot (
+    "dist\updates\HushPlayer-{0}-{1}-update.zip" -f
+    $VersionMetadata.app_version,
+    $VersionMetadata.architecture
+)
+if (-not (Test-Path -LiteralPath $UpdatePackage -PathType Leaf)) {
+    $UpdatePackage = $null
+} else {
+    $UpdatePackage = Get-Item -LiteralPath $UpdatePackage
+}
 
 $AppVersionDefine = '/DMyAppVersion=' + [string]$VersionMetadata.app_version
 $NumericVersionDefine = '/DMyAppNumericVersion=' + [string]$VersionMetadata.numeric_version
@@ -86,14 +96,29 @@ if (-not (Test-Path -LiteralPath $InstallerPath -PathType Leaf)) {
 $InstallerItem = Get-Item -LiteralPath $InstallerPath
 $InstallerSha256 = (Get-FileHash -LiteralPath $InstallerPath -Algorithm SHA256).Hash.ToLowerInvariant()
 $ReleaseManifest = Join-Path $ProjectRoot "build\release-manifest\win-x64.json"
-& $Python $UpdateManifestHelper `
-    --manifest $UpdateManifest `
-    --stage-installer $InstallerPath `
-    --output $ReleaseManifest
+if ($null -ne $UpdatePackage) {
+    & $Python $UpdateManifestHelper `
+        --manifest $UpdateManifest `
+        --stage-installer $InstallerPath `
+        --package $UpdatePackage.FullName `
+        --output $ReleaseManifest
+} else {
+    & $Python $UpdateManifestHelper `
+        --manifest $UpdateManifest `
+        --stage-installer $InstallerPath `
+        --output $ReleaseManifest
+}
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-& $Python $UpdateManifestHelper `
-    --manifest $ReleaseManifest `
-    --final-installer $InstallerPath
+if ($null -ne $UpdatePackage) {
+    & $Python $UpdateManifestHelper `
+        --manifest $ReleaseManifest `
+        --final-installer $InstallerPath `
+        --package $UpdatePackage.FullName
+} else {
+    & $Python $UpdateManifestHelper `
+        --manifest $ReleaseManifest `
+        --final-installer $InstallerPath
+}
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 Write-Host "Installer build complete."
 Write-Host "AppVersion=$($VersionMetadata.app_version)"

@@ -3,8 +3,13 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import os
 import re
+import shutil
+import stat
+import sys
 import time
+import zipfile
 from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import date
@@ -42,6 +47,10 @@ SUPPORTED_MANIFEST_SCHEMA = 1
 MAX_MANIFEST_BYTES = 128 * 1024
 MIN_SETUP_BYTES = 1024
 MAX_SETUP_BYTES = 512 * 1024 * 1024
+MIN_PACKAGE_BYTES = 1024
+MAX_PACKAGE_BYTES = 1024 * 1024 * 1024
+MAX_PACKAGE_MEMBERS = 20_000
+MAX_PACKAGE_UNCOMPRESSED_BYTES = 2 * 1024 * 1024 * 1024
 MAX_RELEASE_HISTORY_ENTRIES = 50
 MAX_RELEASE_NOTES = 50
 
@@ -54,6 +63,10 @@ _VERSION_PATTERN = re.compile(
 _UPDATE_FILENAME_PATTERN = re.compile(
     r"^HushPlayer-[0-9A-Za-z.-]+-win-x64-setup\.exe(?:\..+)?$"
 )
+_PACKAGE_FILENAME_PATTERN = re.compile(
+    r"^HushPlayer-[0-9A-Za-z.-]+-win-x64-update\.zip$"
+)
+_UPDATER_COPY_PATTERN = re.compile(r"^HushPlayerUpdater-\d+-\d+\.exe$")
 _LOGGER = logging.getLogger(__name__)
 
 
@@ -86,6 +99,10 @@ class UpdateManifest:
     sha256: str
     release_notes: tuple[str, ...]
     release_history: tuple[UpdateReleaseNotesSection, ...]
+    package_url: str | None = None
+    package_size: int | None = None
+    package_sha256: str | None = None
+    package_filename: str | None = None
 
     @property
     def is_newer(self) -> bool:
@@ -94,6 +111,34 @@ class UpdateManifest:
     @property
     def installer_filename(self) -> str:
         return f"HushPlayer-{self.version}-{self.architecture}-setup.exe"
+
+    @property
+    def has_in_app_package(self) -> bool:
+        return all(
+            value is not None
+            for value in (
+                self.package_url,
+                self.package_size,
+                self.package_sha256,
+                self.package_filename,
+            )
+        )
+
+    @property
+    def download_url(self) -> str:
+        return self.package_url if self.has_in_app_package else self.setup_url  # type: ignore[return-value]
+
+    @property
+    def download_size(self) -> int:
+        return self.package_size if self.has_in_app_package else self.setup_size  # type: ignore[return-value]
+
+    @property
+    def download_sha256(self) -> str:
+        return self.package_sha256 if self.has_in_app_package else self.sha256  # type: ignore[return-value]
+
+    @property
+    def download_filename(self) -> str:
+        return self.package_filename if self.has_in_app_package else self.installer_filename  # type: ignore[return-value]
 
 
 def validate_update_url(
@@ -327,6 +372,53 @@ def parse_update_manifest(
         channel=channel,
     )
 
+    package_fields = (
+        "package_url",
+        "package_size",
+        "package_sha256",
+        "package_filename",
+    )
+    package_present = [field for field in package_fields if field in document]
+    package_url: str | None = None
+    package_size: int | None = None
+    package_sha256: str | None = None
+    package_filename: str | None = None
+    if package_present:
+        if len(package_present) != len(package_fields):
+            raise UpdateValidationError(
+                "应用内更新包字段必须同时提供 package_url、package_size、"
+                "package_sha256 和 package_filename。"
+            )
+        package_url = validate_update_url(
+            document["package_url"],
+            allow_insecure_localhost=allow_insecure_localhost,
+        )
+        package_size_value = document["package_size"]
+        if (
+            isinstance(package_size_value, bool)
+            or not isinstance(package_size_value, int)
+            or not MIN_PACKAGE_BYTES <= package_size_value <= MAX_PACKAGE_BYTES
+        ):
+            raise UpdateValidationError(
+                "应用内更新包大小必须在 1 KB 到 1 GB 之间。"
+            )
+        package_size = package_size_value
+        package_sha256_value = str(document["package_sha256"] or "").strip().casefold()
+        if _SHA256_PATTERN.fullmatch(package_sha256_value) is None:
+            raise UpdateValidationError("应用内更新包 SHA-256 必须是 64 位十六进制。")
+        package_sha256 = package_sha256_value
+        package_filename_value = str(document["package_filename"] or "").strip()
+        expected_package_filename = (
+            f"HushPlayer-{version}-{architecture}-update.zip"
+        )
+        if package_filename_value != expected_package_filename or not _PACKAGE_FILENAME_PATTERN.fullmatch(
+            package_filename_value
+        ):
+            raise UpdateValidationError(
+                "应用内更新包文件名与当前版本或架构不一致。"
+            )
+        package_filename = package_filename_value
+
     return UpdateManifest(
         schema_version=SUPPORTED_MANIFEST_SCHEMA,
         channel=channel,
@@ -340,6 +432,10 @@ def parse_update_manifest(
         sha256=sha256,
         release_notes=release_notes,
         release_history=release_history,
+        package_url=package_url,
+        package_size=package_size,
+        package_sha256=package_sha256,
+        package_filename=package_filename,
     )
 
 
@@ -398,6 +494,75 @@ def verify_installer_file(path: str | Path, manifest: UpdateManifest) -> None:
         raise UpdateValidationError("安装包 SHA-256 校验失败，文件可能已损坏。")
 
 
+def verify_update_package(path: str | Path, manifest: UpdateManifest) -> None:
+    if not manifest.has_in_app_package:
+        raise UpdateValidationError("当前更新清单没有可用的应用内更新包。")
+    candidate = Path(path)
+    try:
+        if not candidate.is_file():
+            raise UpdateValidationError("已下载的应用内更新包不存在。")
+        actual_size = candidate.stat().st_size
+    except OSError as error:
+        raise UpdateValidationError(f"无法读取已下载的应用内更新包：{error}") from error
+    if actual_size != manifest.package_size:
+        raise UpdateValidationError(
+            f"应用内更新包大小校验失败：应为 {manifest.package_size} 字节，"
+            f"实际为 {actual_size} 字节。"
+        )
+
+    digest = hashlib.sha256()
+    try:
+        with candidate.open("rb") as file:
+            for chunk in iter(lambda: file.read(1024 * 1024), b""):
+                digest.update(chunk)
+    except OSError as error:
+        raise UpdateValidationError(
+            f"无法校验已下载的应用内更新包：{error}"
+        ) from error
+    if digest.hexdigest().casefold() != manifest.package_sha256:
+        raise UpdateValidationError("应用内更新包 SHA-256 校验失败，文件可能已损坏。")
+
+    try:
+        with zipfile.ZipFile(candidate) as archive:
+            members = archive.infolist()
+            if len(members) > MAX_PACKAGE_MEMBERS:
+                raise UpdateValidationError("应用内更新包包含过多文件。")
+            total_uncompressed = 0
+            names: set[str] = set()
+            for member in members:
+                name = str(member.filename or "")
+                normalized = name.replace("\\", "/").rstrip("/")
+                path_parts = normalized.split("/")
+                if (
+                    not normalized
+                    or "\x00" in normalized
+                    or normalized.startswith("/")
+                    or Path(normalized).drive
+                    or any(part in {"", ".", ".."} for part in path_parts)
+                    or normalized in names
+                ):
+                    raise UpdateValidationError(
+                        "应用内更新包包含不安全或重复的文件路径。"
+                    )
+                names.add(normalized)
+                mode = (member.external_attr >> 16) & 0o170000
+                if member.create_system == 3 and mode == stat.S_IFLNK:
+                    raise UpdateValidationError("应用内更新包不允许包含符号链接。")
+                total_uncompressed += max(0, int(member.file_size))
+                if total_uncompressed > MAX_PACKAGE_UNCOMPRESSED_BYTES:
+                    raise UpdateValidationError("应用内更新包解压后超过安全大小限制。")
+            required = {"HushPlayer.exe", "HushPlayerUpdater.exe"}
+            if not required.issubset(names):
+                missing = ", ".join(sorted(required - names))
+                raise UpdateValidationError(
+                    f"应用内更新包缺少必要文件：{missing}。"
+                )
+    except zipfile.BadZipFile as error:
+        raise UpdateValidationError("应用内更新包不是有效的 ZIP 文件。") from error
+    except OSError as error:
+        raise UpdateValidationError(f"无法读取应用内更新包：{error}") from error
+
+
 def _start_detached_installer(path: str, arguments: list[str]):
     return QProcess.startDetached(path, arguments)
 
@@ -422,6 +587,7 @@ class AppUpdateService(QObject):
     downloadVerified = Signal(object, str)
     installerLaunchFailed = Signal(str)
     installerLaunched = Signal(str)
+    updaterLaunched = Signal(str)
 
     CHECK_TRANSFER_TIMEOUT_MS = 8_000
     # Leave a small guard interval after Qt's transfer timeout so the two
@@ -445,6 +611,8 @@ class AppUpdateService(QObject):
         updates_dir: str | Path | None = None,
         allow_insecure_localhost: bool = False,
         installer_launcher: Callable[[str, list[str]], object] | None = None,
+        updater_launcher: Callable[[str, list[str]], object] | None = None,
+        application_dir: str | Path | None = None,
     ) -> None:
         super().__init__(parent)
         configured_sources: Sequence[object]
@@ -474,6 +642,12 @@ class AppUpdateService(QObject):
             / "updates"
         )
         self._installer_launcher = installer_launcher or _start_detached_installer
+        self._updater_launcher = updater_launcher or _start_detached_installer
+        self._application_dir_override = (
+            Path(application_dir).expanduser().resolve()
+            if application_dir is not None
+            else None
+        )
         self._check_timer = QTimer(self)
         self._check_timer.setSingleShot(True)
         self._check_timer.timeout.connect(self._on_check_timeout)
@@ -499,6 +673,10 @@ class AppUpdateService(QObject):
         self._download_hash = hashlib.sha256()
         self._download_prefix = bytearray()
         self._download_written = 0
+        self._download_kind = ""
+        self._download_expected_size = 0
+        self._download_expected_sha256 = ""
+        self._download_expected_prefix = b""
         self._download_failure = ""
         self._download_cancel_requested = False
         self._verified_manifest: UpdateManifest | None = None
@@ -720,10 +898,10 @@ class AppUpdateService(QObject):
             return False
         try:
             validate_update_url(
-                manifest.setup_url,
+                manifest.download_url,
                 allow_insecure_localhost=self.allow_insecure_localhost,
             )
-            target = self._prepare_download_target(manifest)
+            target = self._prepare_download_target(manifest.download_filename)
         except (OSError, UpdateValidationError) as error:
             self.downloadFailed.emit(f"无法准备更新下载：{error}")
             return False
@@ -735,7 +913,7 @@ class AppUpdateService(QObject):
             _dispose_save_file(save_file)
             return False
 
-        request = QNetworkRequest(QUrl(manifest.setup_url))
+        request = QNetworkRequest(QUrl(manifest.download_url))
         request.setAttribute(
             QNetworkRequest.Attribute.RedirectPolicyAttribute,
             QNetworkRequest.RedirectPolicy.NoLessSafeRedirectPolicy,
@@ -751,6 +929,10 @@ class AppUpdateService(QObject):
         self._download_hash = hashlib.sha256()
         self._download_prefix.clear()
         self._download_written = 0
+        self._download_kind = "package" if manifest.has_in_app_package else "installer"
+        self._download_expected_size = manifest.download_size
+        self._download_expected_sha256 = manifest.download_sha256
+        self._download_expected_prefix = b"PK" if manifest.has_in_app_package else b"MZ"
         self._download_failure = ""
         self._download_cancel_requested = False
         self._verified_manifest = None
@@ -771,16 +953,19 @@ class AppUpdateService(QObject):
         self.downloadStarted.emit(str(target))
         return True
 
-    def _prepare_download_target(self, manifest: UpdateManifest) -> Path:
+    def _prepare_download_target(self, filename: str) -> Path:
         root = self.updates_dir.expanduser().resolve()
         root.mkdir(parents=True, exist_ok=True)
         self.cleanup_stale_updates()
-        target = (root / manifest.installer_filename).resolve()
+        target = (root / filename).resolve()
         try:
             target.relative_to(root)
         except ValueError as error:
             raise UpdateValidationError("更新文件路径超出专用临时目录。") from error
-        if not _UPDATE_FILENAME_PATTERN.fullmatch(target.name):
+        if not (
+            _UPDATE_FILENAME_PATTERN.fullmatch(target.name)
+            or _PACKAGE_FILENAME_PATTERN.fullmatch(target.name)
+        ):
             raise UpdateValidationError("程序生成的安装包文件名不安全。")
         if target.exists():
             target.unlink()
@@ -795,7 +980,11 @@ class AppUpdateService(QObject):
         for candidate in root.iterdir():
             if (
                 not candidate.is_file()
-                or not _UPDATE_FILENAME_PATTERN.fullmatch(candidate.name)
+                or not (
+                    _UPDATE_FILENAME_PATTERN.fullmatch(candidate.name)
+                    or _PACKAGE_FILENAME_PATTERN.fullmatch(candidate.name)
+                    or _UPDATER_COPY_PATTERN.fullmatch(candidate.name)
+                )
                 or candidate == self._verified_path
             ):
                 continue
@@ -836,9 +1025,8 @@ class AppUpdateService(QObject):
                 declared_size = int(content_length)
             except ValueError:
                 declared_size = -1
-            manifest = self._download_manifest
-            if manifest is not None and declared_size != manifest.setup_size:
-                self._download_failure = "服务器返回的安装包大小与更新清单不一致。"
+            if declared_size != self._download_expected_size:
+                self._download_failure = "服务器返回的更新文件大小与更新清单不一致。"
                 reply.abort()
                 return
         content_type = bytes(reply.rawHeader("Content-Type")).decode(
@@ -849,16 +1037,15 @@ class AppUpdateService(QObject):
             "application/json",
             "application/xhtml+xml",
         }:
-            self._download_failure = "服务器返回的不是安装程序内容。"
+            self._download_failure = "服务器返回的不是有效更新文件。"
             reply.abort()
 
     def _read_download_data(self, reply: QNetworkReply) -> None:
         if reply is not self._download_reply or self._download_failure:
             return
         self._validate_download_response(reply)
-        manifest = self._download_manifest
         save_file = self._download_file
-        if self._download_failure or manifest is None or save_file is None:
+        if self._download_failure or save_file is None:
             return
         data = bytes(reply.readAll())
         if not data:
@@ -866,12 +1053,15 @@ class AppUpdateService(QObject):
         if len(self._download_prefix) < 2:
             needed = 2 - len(self._download_prefix)
             self._download_prefix.extend(data[:needed])
-            if len(self._download_prefix) == 2 and self._download_prefix != b"MZ":
-                self._download_failure = "下载内容不是有效的 Windows 安装程序。"
+            if (
+                len(self._download_prefix) == 2
+                and self._download_prefix != self._download_expected_prefix
+            ):
+                self._download_failure = "下载内容不是有效的 HushPlayer 更新文件。"
                 reply.abort()
                 return
-        if self._download_written + len(data) > manifest.setup_size:
-            self._download_failure = "下载内容超过更新清单声明的安装包大小。"
+        if self._download_written + len(data) > self._download_expected_size:
+            self._download_failure = "下载内容超过更新清单声明的大小。"
             reply.abort()
             return
         written = save_file.write(data)
@@ -890,14 +1080,18 @@ class AppUpdateService(QObject):
     ) -> None:
         if reply is not self._download_reply or self._download_failure:
             return
-        manifest = self._download_manifest
-        if manifest is None:
+        if not self._download_expected_size:
             return
-        if received > manifest.setup_size or total > MAX_SETUP_BYTES:
-            self._download_failure = "安装包下载大小超过安全限制。"
+        max_allowed = (
+            MAX_PACKAGE_BYTES
+            if self._download_kind == "package"
+            else MAX_SETUP_BYTES
+        )
+        if received > self._download_expected_size or total > max_allowed:
+            self._download_failure = "更新文件下载大小超过安全限制。"
             reply.abort()
             return
-        self.downloadProgress.emit(max(0, int(received)), manifest.setup_size)
+        self.downloadProgress.emit(max(0, int(received)), self._download_expected_size)
 
     def cancel_download(self) -> bool:
         reply = self._download_reply
@@ -911,7 +1105,7 @@ class AppUpdateService(QObject):
         reply = self._download_reply
         if reply is None:
             return
-        self._download_failure = "安装包下载超时，请稍后重试。"
+        self._download_failure = "更新文件下载超时，请稍后重试。"
         reply.abort()
 
     def _finish_download(self, reply: QNetworkReply) -> None:
@@ -932,15 +1126,15 @@ class AppUpdateService(QObject):
             and not failure
             and reply.error() != QNetworkReply.NetworkError.NoError
         ):
-            failure = f"安装包下载失败：{reply.errorString()}"
+            failure = f"更新文件下载失败：{reply.errorString()}"
         if not cancelled and not failure and manifest is not None:
-            if self._download_written != manifest.setup_size:
+            if self._download_written != self._download_expected_size:
                 failure = (
-                    f"安装包大小校验失败：应为 {manifest.setup_size} 字节，"
+                    f"更新文件大小校验失败：应为 {self._download_expected_size} 字节，"
                     f"实际为 {self._download_written} 字节。"
                 )
-            elif self._download_hash.hexdigest().casefold() != manifest.sha256:
-                failure = "安装包 SHA-256 校验失败，已删除损坏文件。"
+            elif self._download_hash.hexdigest().casefold() != self._download_expected_sha256:
+                failure = "更新文件 SHA-256 校验失败，已删除损坏文件。"
 
         self._download_reply = None
         self._download_file = None
@@ -948,6 +1142,11 @@ class AppUpdateService(QObject):
         self._download_target = None
         self._download_failure = ""
         self._download_cancel_requested = False
+        download_kind = self._download_kind
+        self._download_kind = ""
+        self._download_expected_size = 0
+        self._download_expected_sha256 = ""
+        self._download_expected_prefix = b""
         reply.deleteLater()
 
         if cancelled or failure or manifest is None or save_file is None or target is None:
@@ -959,7 +1158,7 @@ class AppUpdateService(QObject):
             if cancelled:
                 self.downloadCancelled.emit()
             else:
-                self.downloadFailed.emit(failure or "安装包下载未能完成。")
+                self.downloadFailed.emit(failure or "更新文件下载未能完成。")
             return
 
         if not save_file.commit():
@@ -971,7 +1170,10 @@ class AppUpdateService(QObject):
             return
         _dispose_save_file(save_file)
         try:
-            verify_installer_file(target, manifest)
+            if download_kind == "package":
+                verify_update_package(target, manifest)
+            else:
+                verify_installer_file(target, manifest)
         except UpdateValidationError as error:
             self._delete_update_file(target)
             if not self._shutting_down:
@@ -981,6 +1183,71 @@ class AppUpdateService(QObject):
         self._verified_path = target
         if not self._shutting_down:
             self.downloadVerified.emit(manifest, str(target))
+
+    def _application_install_dir(self) -> Path:
+        if self._application_dir_override is not None:
+            return self._application_dir_override
+        if getattr(sys, "frozen", False):
+            return Path(sys.executable).resolve().parent
+        return Path(__file__).resolve().parents[2]
+
+    def launch_verified_update(self) -> bool:
+        manifest = self._verified_manifest
+        path = self._verified_path
+        if manifest is None or path is None:
+            self.installerLaunchFailed.emit("更新文件尚未完成校验，不能启动更新。")
+            return False
+        if not manifest.has_in_app_package:
+            return self.launch_verified_installer()
+        helper_copy: Path | None = None
+        try:
+            verify_update_package(path, manifest)
+            install_dir = self._application_install_dir()
+            helper_source = install_dir / "HushPlayerUpdater.exe"
+            if not helper_source.is_file():
+                raise UpdateValidationError(
+                    "当前程序缺少应用内更新助手，请改用安装包方式更新。"
+                )
+            self.updates_dir.mkdir(parents=True, exist_ok=True)
+            helper_copy = self.updates_dir / (
+                f"HushPlayerUpdater-{os.getpid()}-{time.time_ns()}.exe"
+            )
+            shutil.copy2(helper_source, helper_copy)
+            arguments = [
+                "--parent-pid",
+                str(os.getpid()),
+                "--install-dir",
+                str(install_dir),
+                "--package",
+                str(path),
+                "--restart-exe",
+                str(install_dir / "HushPlayer.exe"),
+                "--cleanup-helper",
+                str(helper_copy),
+            ]
+            result = self._updater_launcher(str(helper_copy), arguments)
+            started = bool(result[0]) if isinstance(result, tuple) else bool(result)
+        except (OSError, UpdateValidationError) as error:
+            if helper_copy is not None:
+                self._delete_update_file(helper_copy)
+            self.installerLaunchFailed.emit(str(error))
+            return False
+        except Exception as error:
+            if helper_copy is not None:
+                self._delete_update_file(helper_copy)
+            self.installerLaunchFailed.emit(f"无法启动应用内更新助手：{error}")
+            return False
+        if not started:
+            try:
+                helper_copy.unlink(missing_ok=True)
+            except OSError:
+                pass
+            self.installerLaunchFailed.emit(
+                "Windows 未能启动应用内更新助手，HushPlayer 将继续运行。"
+            )
+            return False
+        self.updaterLaunched.emit(str(helper_copy))
+        return True
 
     def launch_verified_installer(self) -> bool:
         manifest = self._verified_manifest
@@ -1039,6 +1306,10 @@ class AppUpdateService(QObject):
         self._delete_update_file(self._download_target)
         self._download_manifest = None
         self._download_target = None
+        self._download_kind = ""
+        self._download_expected_size = 0
+        self._download_expected_sha256 = ""
+        self._download_expected_prefix = b""
 
     def _response_failure(
         self,
@@ -1072,7 +1343,11 @@ class AppUpdateService(QObject):
             root = self.updates_dir.expanduser().resolve()
             candidate = path.resolve()
             candidate.relative_to(root)
-            if _UPDATE_FILENAME_PATTERN.fullmatch(candidate.name) and candidate.is_file():
+            if (
+                _UPDATE_FILENAME_PATTERN.fullmatch(candidate.name)
+                or _PACKAGE_FILENAME_PATTERN.fullmatch(candidate.name)
+                or _UPDATER_COPY_PATTERN.fullmatch(candidate.name)
+            ) and candidate.is_file():
                 candidate.unlink()
         except (OSError, ValueError):
             return
