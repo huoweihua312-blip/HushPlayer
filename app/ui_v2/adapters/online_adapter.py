@@ -436,6 +436,57 @@ class OnlineAdapter(QObject):
             self.remote_collection_changed.emit()
         return result
 
+    def set_playback_source(self, old_track: Track, replacement: OnlineTrack) -> str:
+        """Persist a source override without changing playlist membership."""
+
+        if not self.is_formal or not isinstance(old_track, Track) or not isinstance(
+            replacement, OnlineTrack
+        ):
+            return "not_found"
+        if not old_track.is_online:
+            # Missing local-file recovery remains playable for the current
+            # session, but there is no remote record to attach a source to.
+            return "not_found"
+        old_identifier = str(
+            old_track.remote_identity
+            or old_track.stable_identity
+            or old_track.remote_track_id
+            or old_track.id
+        ).strip()
+        if not old_identifier:
+            return "failed"
+        result = self.discovery.bridge.set_playback_source(
+            ("remote", old_identifier),
+            self._payload_for_track(replacement),
+        )
+        if result == "source_updated":
+            self.remote_collection_changed.emit()
+        return result
+
+    def build_playback_source_track(
+        self,
+        old_track: Track,
+        replacement: OnlineTrack,
+    ) -> Track | None:
+        """Keep the old Track identity while routing its queue item to a source."""
+
+        if not isinstance(old_track, Track) or not isinstance(replacement, OnlineTrack):
+            return None
+        if not self._can_request_play(replacement):
+            return None
+        self.register_recommendation_tracks((replacement,))
+        payload = dict(old_track.remote_payload)
+        payload["playback_source"] = self._payload_for_track(replacement)
+        return replace(
+            old_track,
+            source_type="online",
+            is_missing=False,
+            local_path="",
+            availability="playable",
+            availability_detail="",
+            remote_payload=payload,
+        )
+
     def load_mock_scenario(self, name: str) -> None:
         if self.is_formal:
             return
@@ -1210,7 +1261,7 @@ class OnlineAdapter(QObject):
         for track in self.collection.tracks():
             if not track.is_online:
                 continue
-            source = self._source_for_id(track.source_id)
+            source = self._source_for_id(self._playback_source_id(track))
             if self._source_is_blocked(source) and track.availability not in {
                 "resolve_failed",
                 "resolve-failed",
@@ -1256,6 +1307,18 @@ class OnlineAdapter(QObject):
                 or source.status in {"failed", "disabled"}
             )
         )
+
+    @staticmethod
+    def _playback_source_id(track: Track) -> str:
+        payload = track.remote_payload if isinstance(track.remote_payload, dict) else {}
+        override = payload.get("playback_source")
+        if isinstance(override, dict):
+            return str(
+                override.get("source_id")
+                or override.get("sourceId")
+                or track.source_id
+            ).strip()
+        return str(track.source_id or "").strip()
 
     def _track_for_id(self, track_id: str) -> OnlineTrack | None:
         normalized = str(track_id or "")

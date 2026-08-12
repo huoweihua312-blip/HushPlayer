@@ -297,6 +297,12 @@ class RealLibraryAdapter(QObject):
                 "playback-error",
             }
             remote_payload = RemoteTrackStore.to_online_track(track_id, record)
+            playback_source = record.get("playback_source")
+            if isinstance(playback_source, dict) and playback_source:
+                remote_payload["playback_source"] = dict(playback_source)
+                # A selected source is immediately eligible for the normal
+                # queue path; the resolver will still report a later failure.
+                availability = "playable"
             artwork_url = artwork_url_from_payload(remote_payload) or artwork_url_from_payload(record)
             track = Track(
                 id=track_id,

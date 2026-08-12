@@ -361,22 +361,45 @@ class PlaybackAdapter(QObject):
     def _queue_item_from_track(track: Track) -> PlaybackQueueItem:
         if track.is_online:
             payload = dict(track.remote_payload) if isinstance(track.remote_payload, dict) else {}
-            provider_raw = payload.get("raw")
+            playback_source = payload.get("playback_source")
+            effective_payload = dict(payload)
+            if isinstance(playback_source, dict) and playback_source:
+                effective_payload.update(playback_source)
+            provider_raw = effective_payload.get("raw")
+            duration = (
+                effective_payload.get("duration")
+                if isinstance(playback_source, dict) and playback_source
+                else (track.duration_ms or 0) / 1000
+            )
             payload.update(
                 {
                     "remoteStableId": track.stable_identity,
-                    "sourceId": track.source_id,
-                    "sourceName": track.source_name,
-                    "id": track.remote_track_id or track.remote_identity or track.id,
+                    "sourceId": effective_payload.get("source_id")
+                    or effective_payload.get("sourceId")
+                    or track.source_id,
+                    "sourceName": effective_payload.get("source_name")
+                    or effective_payload.get("sourceName")
+                    or track.source_name,
+                    "id": effective_payload.get("remote_id")
+                    or effective_payload.get("remoteId")
+                    or effective_payload.get("id")
+                    or track.remote_track_id
+                    or track.remote_identity
+                    or track.id,
                     "remote_stable_id": track.stable_identity,
-                    "title": track.title,
-                    "artist": track.artist,
-                    "album": track.album,
-                    "duration": (track.duration_ms or 0) / 1000,
-                    "artwork": track.artwork_url or track.artwork_key,
-                    "artworkUrl": track.artwork_url,
-                    "artwork_url": track.artwork_url,
-                    "availability": track.availability,
+                    "title": effective_payload.get("title") or track.title,
+                    "artist": effective_payload.get("artist") or track.artist,
+                    "album": effective_payload.get("album") or track.album,
+                    "duration": duration,
+                    "artwork": effective_payload.get("artwork")
+                    or track.artwork_url
+                    or track.artwork_key,
+                    "artworkUrl": effective_payload.get("artworkUrl")
+                    or track.artwork_url,
+                    "artwork_url": effective_payload.get("artwork_url")
+                    or track.artwork_url,
+                    "availability": effective_payload.get("availability")
+                    or track.availability,
                     # Search results already carry the provider's raw item.
                     # Keep that nested mapping intact; replacing it with the
                     # whole normalized payload breaks source-specific fields

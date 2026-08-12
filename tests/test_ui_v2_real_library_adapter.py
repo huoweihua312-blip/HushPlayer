@@ -326,6 +326,33 @@ class RealLibraryAdapterTests(unittest.TestCase):
             ),
         )
 
+    def test_playback_source_projection_keeps_original_library_and_playlist_identity(self) -> None:
+        snapshot = self.repository.load_snapshot()
+        remote_tracks = self.remote_store.load_tracks()
+        remote_tracks["remote_fixture_001"]["playback_source"] = {
+            "stable_id": "remote_new_source",
+            "source_id": "new-source",
+            "source_name": "新来源",
+            "remote_id": "new-remote-id",
+            "title": "Remote",
+            "artist": "Artist C",
+            "album": "Album C",
+            "duration": 203_000,
+            "raw": {"provider": "new-source"},
+        }
+
+        projected = RealLibraryAdapter.map_snapshot(snapshot, remote_tracks)
+        remote = projected.tracks_by_id["remote_fixture_001"]
+
+        self.assertEqual(remote.id, "remote_fixture_001")
+        self.assertEqual(remote.stable_id, "remote_fixture_001")
+        self.assertEqual(remote.availability, "playable")
+        self.assertEqual(
+            remote.remote_payload["playback_source"]["remote_id"],
+            "new-remote-id",
+        )
+        self.assertIn("remote_fixture_001", projected.playlist_track_ids["commute"])
+
     def test_load_runs_repository_and_mapping_off_the_ui_thread(self) -> None:
         repository = _CountingRepository((_snapshot_with_title("Background"),))
         remote = _MemoryRemoteTrackStore()

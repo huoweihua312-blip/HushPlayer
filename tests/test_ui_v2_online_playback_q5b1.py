@@ -428,6 +428,35 @@ class OnlinePlaybackQ5B1Tests(unittest.TestCase):
         )
         self.assertEqual(payload["raw"]["id"], remote.remote_track_id)
 
+    def test_playback_source_override_keeps_original_queue_identity(self) -> None:
+        remote = _remote_track("original", source_id="old-source")
+        remote = replace(
+            remote,
+            remote_payload={
+                "id": remote.remote_track_id,
+                "sourceId": remote.source_id,
+                "playback_source": {
+                    "source_id": "new-source",
+                    "source_name": "新来源",
+                    "remote_id": "new-remote-id",
+                    "title": remote.title,
+                    "artist": remote.artist,
+                    "album": remote.album,
+                    "duration": remote.duration_ms,
+                    "raw": {"provider": "new-source"},
+                },
+            },
+        )
+
+        queue_item = PlaybackAdapter._queue_item_from_track(remote)
+        payload = queue_item.media_item.to_legacy_online()
+
+        self.assertEqual(queue_item.stable_identity, remote.stable_identity)
+        self.assertEqual(payload["remoteStableId"], remote.stable_identity)
+        self.assertEqual(payload["sourceId"], "new-source")
+        self.assertEqual(payload["id"], "new-remote-id")
+        self.assertEqual(payload["raw"]["provider"], "new-source")
+
     def test_resolve_timeout_closes_the_remote_state(self) -> None:
         remote = _remote_track("timeout")
         self.adapter.set_queue((remote,))

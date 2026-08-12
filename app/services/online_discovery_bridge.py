@@ -19,6 +19,7 @@ class OnlineDiscoveryBridge(QObject):
     """Persist remote discovery actions without owning a second data store."""
 
     REPLACED = "replaced"
+    SOURCE_UPDATED = "source_updated"
     NOT_FOUND = "not_found"
     FAILED = "failed"
 
@@ -151,6 +152,73 @@ class OnlineDiscoveryBridge(QObject):
             return self.FAILED
         self.action_succeeded.emit("replace", "已将失效歌曲替换为在线版本。")
         return self.REPLACED
+
+    def set_playback_source(
+        self,
+        old_member: tuple[str, str],
+        replacement_track: dict,
+    ) -> str:
+        """Persist a new playback source without changing memberships.
+
+        The original remote-track record remains the library and playlist
+        identity.  The selected online source is stored as a nested override
+        so playback can use it while favorites and playlist positions remain
+        attached to the original record.
+        """
+
+        old_key = self._normalize_member_key(old_member)
+        if (
+            old_key is None
+            or old_key[0] != PlaylistMembership.REMOTE
+            or not isinstance(replacement_track, dict)
+        ):
+            return self.NOT_FOUND
+        try:
+            tracks_before = self.remote_tracks.load_tracks()
+            old_record = tracks_before.get(old_key[1])
+            if not isinstance(old_record, dict):
+                return self.NOT_FOUND
+            source_url = str(
+                replacement_track.get("source_url")
+                or replacement_track.get("sourceUrl")
+                or ""
+            ).strip()
+            if not source_url and self._source_url_resolver is not None:
+                source_url = str(
+                    self._source_url_resolver(
+                        str(
+                            replacement_track.get("source_id")
+                            or replacement_track.get("sourceId")
+                            or ""
+                        ).strip()
+                    )
+                    or ""
+                ).strip()
+            source_stable_id, source_record = RemoteTrackStore.build_record(
+                replacement_track,
+                source_url,
+            )
+            source_record["stable_id"] = source_stable_id
+            source_record["source_name"] = str(
+                replacement_track.get("source_name")
+                or replacement_track.get("sourceName")
+                or source_record.get("source_id")
+                or ""
+            ).strip()
+            updated_record = dict(old_record)
+            updated_record["playback_source"] = source_record
+            # Records written by the previous membership-replacement flow can
+            # be made visible again once the user selects a source-only fix.
+            updated_record.pop("replaced_by", None)
+            updated_record.pop("replaced_at", None)
+            updated_tracks = dict(tracks_before)
+            updated_tracks[old_key[1]] = updated_record
+            self.remote_tracks.save_tracks(updated_tracks)
+        except Exception as error:
+            self.action_failed.emit("playback_source", str(error))
+            return self.FAILED
+        self.action_succeeded.emit("playback_source", "已更新在线播放来源。")
+        return self.SOURCE_UPDATED
 
     def playlist_choices(self) -> tuple[tuple[str, str], ...]:
         records = self.repository.load_playlist_records()

@@ -1019,19 +1019,20 @@ class MainWindow(QMainWindow):
     def _play_recovery_candidate(self, source, track) -> None:
         if track is None:
             return
-        replacement = self.online_adapter.replace_track_memberships(source, track)
-        if replacement == "failed":
-            self._show_recovery_message("替换歌单歌曲失败，已取消播放。")
+        source_update = self.online_adapter.set_playback_source(source, track)
+        if source_update == "failed":
+            self._show_recovery_message("保存在线播放来源失败，已取消播放。")
             return
-        self.online_adapter.register_recommendation_tracks((track,))
-        if self.online_adapter.request_play(track.id):
-            if replacement == "replaced":
-                message = f"已替换为 {track.source_name} 的在线版本，正在播放。"
-            else:
-                message = f"已找到 {track.source_name} 的在线版本，正在播放。"
-            self._show_recovery_message(message)
-        else:
+        playback_track = self.online_adapter.build_playback_source_track(source, track)
+        if playback_track is None:
             self._show_recovery_message("在线版本暂时无法播放。")
+            return
+        self._play_online_track(playback_track)
+        if source_update == "source_updated":
+            message = f"已更换为 {track.source_name} 的播放来源，正在播放。"
+        else:
+            message = f"已找到 {track.source_name} 的在线版本，正在播放。"
+        self._show_recovery_message(message)
 
     def _on_recovery_failed(self, generation: int, message: str) -> None:
         self._pending_recovery_tracks.pop(int(generation), None)

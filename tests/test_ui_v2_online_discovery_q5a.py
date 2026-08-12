@@ -442,6 +442,71 @@ class OnlineDiscoveryQ5ATests(unittest.TestCase):
             self.assertNotIn(old_id, projected.tracks_by_id)
             self.assertIn(new_id, projected.tracks_by_id)
 
+    def test_formal_bridge_updates_playback_source_without_membership_changes(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            playlists_path = root / "playlists.json"
+            playlists_path.write_text(
+                json.dumps(
+                    {
+                        "liked": {
+                            "name": "我喜欢",
+                            "members": [{"kind": "remote", "id": "old-id", "added_at": 11}],
+                            "fixed": True,
+                        },
+                        "playlist-1": {
+                            "name": "测试歌单",
+                            "members": [{"kind": "remote", "id": "old-id", "added_at": 22}],
+                        },
+                    },
+                    ensure_ascii=False,
+                ),
+                encoding="utf-8",
+            )
+            playlists_before = playlists_path.read_bytes()
+            repository = LibraryRepository(
+                root / "library.json",
+                playlists_path,
+                root / "stats.json",
+            )
+            remote_store = RemoteTrackStore(root / "remote_tracks.json")
+            old_payload = {
+                "source_id": "old-source",
+                "remote_id": "old-remote-id",
+                "title": "原歌曲",
+                "artist": "原歌手",
+                "album": "原专辑",
+                "duration": 180_000,
+            }
+            old_id, old_record = RemoteTrackStore.build_record(old_payload)
+            remote_store.save_tracks({old_id: old_record})
+            replacement = {
+                "source_id": "new-source",
+                "remote_id": "new-remote-id",
+                "source_name": "新来源",
+                "title": old_payload["title"],
+                "artist": old_payload["artist"],
+                "album": old_payload["album"],
+                "duration": old_payload["duration"],
+                "raw": {"provider": "new-source"},
+            }
+            bridge = OnlineDiscoveryBridge(repository, remote_store)
+
+            result = bridge.set_playback_source(("remote", old_id), replacement)
+
+            self.assertEqual(result, OnlineDiscoveryBridge.SOURCE_UPDATED)
+            self.assertEqual(playlists_path.read_bytes(), playlists_before)
+            stored = remote_store.load_tracks()
+            self.assertEqual(tuple(stored), (old_id,))
+            self.assertEqual(
+                stored[old_id]["playback_source"]["source_id"],
+                "new-source",
+            )
+            self.assertEqual(
+                stored[old_id]["playback_source"]["remote_id"],
+                "new-remote-id",
+            )
+
     def test_rapid_query_generation_replacement_100_cycles(self) -> None:
         previous_generation = 0
         for index in range(100):
