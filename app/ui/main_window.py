@@ -4943,6 +4943,9 @@ class MainWindow(QMainWindow):
         self.update_service.installerLaunched.connect(
             self.on_update_installer_launched
         )
+        self.update_service.updaterLaunched.connect(
+            self.on_update_installer_launched
+        )
         self.update_dialog: UpdateDialog | None = None
         self.current_volume = int(settings.get("volume", 65))
         self.play_mode = settings.get("play_mode", "list_loop")

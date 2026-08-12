@@ -37,8 +37,15 @@ if (-not (Test-Path -LiteralPath $RequirementsLock -PathType Leaf)) {
     throw "The reproducible Windows dependency lock is missing: $RequirementsLock"
 }
 $Spec = Join-Path $ProjectRoot "packaging\HushPlayer.release.spec"
+$UpdaterSpec = Join-Path $ProjectRoot "packaging\HushPlayer.updater.spec"
+$PayloadBuilder = Join-Path $ProjectRoot "packaging\build_update_payload.py"
 if (-not (Test-Path -LiteralPath $Spec -PathType Leaf)) {
     throw "The PyInstaller spec is missing: $Spec"
+}
+foreach ($RequiredBuildInput in @($UpdaterSpec, $PayloadBuilder)) {
+    if (-not (Test-Path -LiteralPath $RequiredBuildInput -PathType Leaf)) {
+        throw "Required in-app update build input is missing: $RequiredBuildInput"
+    }
 }
 $VersionMetadataHelper = Join-Path $ProjectRoot "packaging\prepare_version_metadata.py"
 if (-not (Test-Path -LiteralPath $VersionMetadataHelper -PathType Leaf)) {
@@ -110,12 +117,28 @@ Write-Host "UpdateArchitecture=$($VersionMetadata.architecture)"
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
 $OutputRoot = Join-Path $ProjectRoot "dist\HushPlayer"
+$UpdaterDistRoot = Join-Path $ProjectRoot "build\updater-dist"
+$UpdaterWorkRoot = Join-Path $ProjectRoot "build\pyinstaller-updater"
+$UpdaterExe = Join-Path $UpdaterDistRoot "HushPlayerUpdater.exe"
+$PayloadPath = Join-Path $ProjectRoot (
+    "dist\updates\HushPlayer-{0}-{1}-update.zip" -f
+    $VersionMetadata.app_version,
+    $VersionMetadata.architecture
+)
+$env:HUSHPLAYER_VERSION_INFO = $VersionInfoFile
+& $Python -m PyInstaller --noconfirm --clean --workpath $UpdaterWorkRoot --distpath $UpdaterDistRoot $UpdaterSpec
+if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+if (-not (Test-Path -LiteralPath $UpdaterExe -PathType Leaf)) {
+    throw "In-app update helper output is missing: $UpdaterExe"
+}
+Copy-Item -LiteralPath $UpdaterExe -Destination (Join-Path $OutputRoot "HushPlayerUpdater.exe") -Force
 $SupportRoot = Join-Path $OutputRoot "_internal"
 $ExePath = Join-Path $OutputRoot "HushPlayer.exe"
 $BundledNode = Join-Path $SupportRoot "runtime\node\node.exe"
 $Runner = Join-Path $SupportRoot "source_runtime\runner.js"
 $RequiredFiles = @(
     $ExePath,
+    (Join-Path $OutputRoot "HushPlayerUpdater.exe"),
     $BundledNode,
     $Runner,
     (Join-Path $SupportRoot "source_runtime\plugin_host.js"),
@@ -186,9 +209,17 @@ $RuntimeInfo = @(
 Copy-Item -LiteralPath (Join-Path $ProjectRoot "packaging\NODE_RUNTIME_NOTICE.txt") -Destination (Join-Path $SupportRoot "runtime\node\NODE_RUNTIME_NOTICE.txt") -Force
 Copy-Item -LiteralPath $NodeRuntime.LicensePath -Destination (Join-Path $SupportRoot "runtime\node\LICENSE") -Force
 
+$PayloadJson = @(& $Python $PayloadBuilder --source-dir $OutputRoot --output $PayloadPath)
+if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+$PayloadMetadata = ($PayloadJson -join [Environment]::NewLine) | ConvertFrom-Json
+
 $TotalBytes = (Get-ChildItem -LiteralPath $OutputRoot -Recurse -File | Measure-Object -Property Length -Sum).Sum
 $TotalMiB = [Math]::Round($TotalBytes / 1MB, 2)
+$PayloadItem = Get-Item -LiteralPath $PayloadPath
 Write-Host "Build complete."
 Write-Host "BuildVariant=Release"
 Write-Host "Executable=$ExePath"
 Write-Host "OutputSizeMiB=$TotalMiB"
+Write-Host "UpdatePayload=$PayloadPath"
+Write-Host "UpdatePayloadSize=$($PayloadItem.Length)"
+Write-Host "UpdatePayloadSha256=$($PayloadMetadata.sha256)"

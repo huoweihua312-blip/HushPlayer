@@ -253,10 +253,21 @@ def expected_installer_filename() -> str:
     return f"HushPlayer-{APP_VERSION}-{UPDATE_ARCHITECTURE}-setup.exe"
 
 
+def expected_package_filename() -> str:
+    return f"HushPlayer-{APP_VERSION}-{UPDATE_ARCHITECTURE}-update.zip"
+
+
 def default_staged_setup_url() -> str:
     return (
         f"{RELEASE_DOWNLOAD_BASE_URL}/v{APP_VERSION}/"
         f"{expected_installer_filename()}"
+    )
+
+
+def default_staged_package_url() -> str:
+    return (
+        f"{RELEASE_DOWNLOAD_BASE_URL}/v{APP_VERSION}/"
+        f"{expected_package_filename()}"
     )
 
 
@@ -286,6 +297,37 @@ def _validate_manifest_transport_fields(document: dict[str, Any]) -> None:
     sha256 = document.get("sha256")
     if not isinstance(sha256, str) or _SHA256_PATTERN.fullmatch(sha256) is None:
         raise ChangelogValidationError("更新清单 sha256 格式无效。")
+    package_fields = (
+        "package_url",
+        "package_size",
+        "package_sha256",
+        "package_filename",
+    )
+    package_present = [field for field in package_fields if field in document]
+    if package_present:
+        if len(package_present) != len(package_fields):
+            raise ChangelogValidationError(
+                "应用内更新包字段必须同时提供四个 package_* 字段。"
+            )
+        _validate_https_url(document.get("package_url"))
+        package_size = document.get("package_size")
+        if (
+            not isinstance(package_size, int)
+            or isinstance(package_size, bool)
+            or package_size <= 0
+            or package_size > 1024 * 1024 * 1024
+        ):
+            raise ChangelogValidationError("更新清单 package_size 超出安全范围。")
+        package_sha256 = document.get("package_sha256")
+        if not isinstance(package_sha256, str) or _SHA256_PATTERN.fullmatch(package_sha256) is None:
+            raise ChangelogValidationError("更新清单 package_sha256 格式无效。")
+        expected_package = (
+            f"HushPlayer-{document.get('version')}-{document.get('architecture')}-update.zip"
+        )
+        if document.get("package_filename") != expected_package:
+            raise ChangelogValidationError(
+                "更新清单 package_filename 与版本或架构不一致。"
+            )
 
 
 def _manifest_release_identity(
@@ -420,6 +462,8 @@ def build_staged_manifest(
     releases: tuple[ChangelogRelease, ...],
     installer_path: str | Path,
     setup_url: str | None = None,
+    package_path: str | Path | None = None,
+    package_url: str | None = None,
 ) -> dict[str, Any]:
     """Build an untracked final manifest from a verified installer artifact."""
 
@@ -447,6 +491,33 @@ def build_staged_manifest(
             "sha256": _file_sha256(installer),
         }
     )
+    for field in (
+        "package_url",
+        "package_size",
+        "package_sha256",
+        "package_filename",
+    ):
+        staged.pop(field, None)
+    if package_path is not None:
+        package = Path(package_path)
+        if not package.is_file():
+            raise ChangelogValidationError(f"应用内更新包不存在：{package}")
+        if package.name != expected_package_filename():
+            raise ChangelogValidationError(
+                "应用内更新包文件名与当前版本或架构不一致。"
+            )
+        staged.update(
+            {
+                "package_url": _validate_https_url(
+                    package_url
+                    if package_url is not None
+                    else default_staged_package_url()
+                ),
+                "package_size": package.stat().st_size,
+                "package_sha256": _file_sha256(package),
+                "package_filename": package.name,
+            }
+        )
     return synchronize_manifest_document(staged, releases)
 
 
@@ -454,6 +525,7 @@ def validate_final_manifest(
     document: dict[str, Any],
     releases: tuple[ChangelogRelease, ...],
     installer_path: str | Path,
+    package_path: str | Path | None = None,
 ) -> None:
     """Require a current manifest whose installer metadata matches the file."""
 
@@ -479,6 +551,28 @@ def validate_final_manifest(
         raise ChangelogValidationError("更新清单 setup_size 与安装包实际大小不一致。")
     if document["sha256"].lower() != _file_sha256(installer):
         raise ChangelogValidationError("更新清单 sha256 与安装包实际文件不一致。")
+    package_fields = (
+        "package_url",
+        "package_size",
+        "package_sha256",
+        "package_filename",
+    )
+    if any(field in document for field in package_fields):
+        if package_path is None:
+            raise ChangelogValidationError(
+                "更新清单包含应用内更新包，但未提供 package_path 校验。"
+            )
+        package = Path(package_path)
+        if not package.is_file() or package.name != expected_package_filename():
+            raise ChangelogValidationError("应用内更新包文件名或文件不存在。")
+        if document["package_size"] != package.stat().st_size:
+            raise ChangelogValidationError(
+                "更新清单 package_size 与应用内更新包实际大小不一致。"
+            )
+        if document["package_sha256"].lower() != _file_sha256(package):
+            raise ChangelogValidationError(
+                "更新清单 package_sha256 与应用内更新包实际文件不一致。"
+            )
 
 
 def _load_manifest(path: Path) -> dict[str, Any]:
@@ -519,6 +613,15 @@ def main() -> None:
     parser.add_argument(
         "--setup-url",
         help="暂存清单使用的 HTTPS 安装包下载地址。",
+    )
+    parser.add_argument(
+        "--package",
+        type=Path,
+        help="应用内更新 portable ZIP 文件。",
+    )
+    parser.add_argument(
+        "--package-url",
+        help="暂存清单使用的 HTTPS 应用内更新包下载地址。",
     )
     parser.add_argument(
         "--output",
@@ -574,8 +677,15 @@ def main() -> None:
             releases,
             arguments.stage_installer,
             arguments.setup_url,
+            arguments.package,
+            arguments.package_url,
         )
-        validate_final_manifest(staged, releases, arguments.stage_installer)
+        validate_final_manifest(
+            staged,
+            releases,
+            arguments.stage_installer,
+            arguments.package,
+        )
         arguments.output.parent.mkdir(parents=True, exist_ok=True)
         arguments.output.write_text(
             json.dumps(staged, ensure_ascii=False, indent=4) + "\n",
@@ -587,7 +697,12 @@ def main() -> None:
         )
         return
     if arguments.final_installer:
-        validate_final_manifest(document, releases, arguments.final_installer)
+        validate_final_manifest(
+            document,
+            releases,
+            arguments.final_installer,
+            arguments.package,
+        )
         print(
             "final update manifest validation: OK "
             f"({arguments.manifest}, {document['version']})"

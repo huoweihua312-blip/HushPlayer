@@ -86,7 +86,11 @@ class UpdateDialog(QDialog):
         layout.addWidget(notes_title)
         layout.addWidget(self.notes, 1)
 
-        self.status_label = QLabel("可以下载安装包。校验完成前不会允许安装。")
+        self.status_label = QLabel(
+            "可以下载应用内更新包。校验完成前不会允许更新。"
+            if manifest.has_in_app_package
+            else "可以下载安装包。校验完成前不会允许安装。"
+        )
         self.status_label.setObjectName("settingsHint")
         self.status_label.setWordWrap(True)
         layout.addWidget(self.status_label)
@@ -106,14 +110,18 @@ class UpdateDialog(QDialog):
 
         button_row = QHBoxLayout()
         button_row.setSpacing(UI_SPACING["sm"])
-        self.download_button = QPushButton("下载安装包")
+        self.download_button = QPushButton(
+            "下载应用内更新" if manifest.has_in_app_package else "下载安装包"
+        )
         self.download_button.setObjectName("settingsPrimaryButton")
         self.download_button.clicked.connect(self.start_download)
         self.cancel_button = QPushButton("取消下载")
         self.cancel_button.setObjectName("settingsSecondaryButton")
         self.cancel_button.clicked.connect(self.service.cancel_download)
         self.cancel_button.setEnabled(False)
-        self.install_button = QPushButton("立即安装")
+        self.install_button = QPushButton(
+            "立即更新" if manifest.has_in_app_package else "立即安装"
+        )
         self.install_button.setObjectName("settingsPrimaryButton")
         self.install_button.setEnabled(False)
         self.install_button.clicked.connect(self.install_now)
@@ -175,11 +183,12 @@ class UpdateDialog(QDialog):
         )
 
     def on_download_started(self, _path: str) -> None:
-        self.status_label.setText("正在下载并校验完整安装包…")
+        download_name = "应用内更新包" if self.manifest.has_in_app_package else "完整安装包"
+        self.status_label.setText(f"正在下载并校验{download_name}…")
         self.progress_bar.setValue(0)
         self.progress_bar.show()
         self.progress_label.setText(
-            f"0 B / {self.format_bytes(self.manifest.setup_size)}"
+            f"0 B / {self.format_bytes(self.manifest.download_size)}"
         )
         self.progress_label.show()
         self.download_button.setEnabled(False)
@@ -187,7 +196,7 @@ class UpdateDialog(QDialog):
         self.install_button.setEnabled(False)
 
     def on_download_progress(self, received: int, total: int) -> None:
-        expected = max(1, int(total or self.manifest.setup_size))
+        expected = max(1, int(total or self.manifest.download_size))
         percent = max(0, min(100, int(received * 100 / expected)))
         self.progress_bar.setValue(percent)
         self.progress_label.setText(
@@ -195,7 +204,7 @@ class UpdateDialog(QDialog):
         )
 
     def on_download_failed(self, message: str) -> None:
-        self.status_label.setText("下载或校验失败。未保留可执行安装包。")
+        self.status_label.setText("下载或校验失败。未保留可用的更新文件。")
         self.download_button.setEnabled(True)
         self.cancel_button.setEnabled(False)
         self.install_button.setEnabled(False)
@@ -210,14 +219,19 @@ class UpdateDialog(QDialog):
     def on_download_verified(self, manifest: object, path: str) -> None:
         if manifest != self.manifest:
             return
-        self.status_label.setText(
-            "安装包大小和 SHA-256 已校验，可以立即安装或稍后安装。"
-        )
+        if self.manifest.has_in_app_package:
+            self.status_label.setText(
+                "应用内更新包大小和 SHA-256 已校验，更新完成后 HushPlayer 会自动重启。"
+            )
+        else:
+            self.status_label.setText(
+                "安装包大小和 SHA-256 已校验，可以立即安装或稍后安装。"
+            )
         self.progress_bar.setValue(100)
         self.progress_bar.show()
         self.progress_label.setText(
-            f"{self.format_bytes(self.manifest.setup_size)} / "
-            f"{self.format_bytes(self.manifest.setup_size)}"
+            f"{self.format_bytes(self.manifest.download_size)} / "
+            f"{self.format_bytes(self.manifest.download_size)}"
         )
         self.progress_label.show()
         self.download_button.setEnabled(False)
@@ -225,21 +239,40 @@ class UpdateDialog(QDialog):
         self.install_button.setEnabled(bool(path))
 
     def install_now(self) -> None:
+        if self.manifest.has_in_app_package:
+            title = "立即应用更新"
+            message = (
+                "HushPlayer 将关闭当前窗口，由更新助手替换程序文件并自动重启。\n"
+                "用户数据和音乐库不会被删除。是否继续？"
+            )
+        else:
+            title = "立即安装更新"
+            message = (
+                "将启动可见的安装向导。确认启动成功后，HushPlayer 会保存状态并安全退出。"
+            )
         answer = QMessageBox.question(
             self,
-            "立即安装更新",
-            "将启动可见的安装向导。确认启动成功后，HushPlayer 会保存状态并安全退出。",
+            title,
+            message,
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
             QMessageBox.StandardButton.No,
         )
         if answer != QMessageBox.StandardButton.Yes:
             return
-        self.status_label.setText("正在重新校验并启动安装程序…")
+        self.status_label.setText(
+            "正在重新校验并启动应用内更新助手…"
+            if self.manifest.has_in_app_package
+            else "正在重新校验并启动安装程序…"
+        )
         self.install_button.setEnabled(False)
-        self.service.launch_verified_installer()
+        self.service.launch_verified_update()
 
     def on_installer_launch_failed(self, message: str) -> None:
-        self.status_label.setText("安装程序未能启动，HushPlayer 将继续运行。")
+        self.status_label.setText(
+            "应用内更新助手未能启动，HushPlayer 将继续运行。"
+            if self.manifest.has_in_app_package
+            else "安装程序未能启动，HushPlayer 将继续运行。"
+        )
         self.install_button.setEnabled(
             self.service.verified_manifest == self.manifest
             and self.service.verified_path is not None
