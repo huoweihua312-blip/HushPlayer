@@ -28,7 +28,7 @@ class SourceRow(QFrame):
         self.error_label = QLabel(self)
         self.badge = SourceStatusBadge(theme, self)
         self.enabled_button = QToolButton(self)
-        self.enabled_button.setAccessibleName("切换来源状态")
+        self.enabled_button.setObjectName("sourceToggleButton")
         self.enabled_button.clicked.connect(self._toggle)
         self.retry_button = QToolButton(self)
         self.retry_button.setText("重试")
@@ -67,9 +67,14 @@ class SourceRow(QFrame):
         self.error_label.setText(source.last_error)
         self.error_label.setVisible(bool(source.last_error))
         self.badge.set_source(source)
-        self.enabled_button.setText("禁用" if source.enabled else "启用")
+        self.enabled_button.setText("停用" if source.enabled else "启用")
         self.enabled_button.setToolTip(
-            f"禁用 {source.name}，不会删除来源"
+            f"停用 {source.name}；来源仍会保留，可再次启用"
+            if source.enabled
+            else f"启用 {source.name}"
+        )
+        self.enabled_button.setAccessibleName(
+            f"停用 {source.name}（不会删除来源）"
             if source.enabled
             else f"启用 {source.name}"
         )
@@ -106,6 +111,8 @@ class OnlineSourcePage(QWidget):
         self.adapter = adapter
         self._theme = theme
         self._rows: dict[str, SourceRow] = {}
+        self.setObjectName("onlineSourcePage")
+        self.setAccessibleName("在线来源管理")
         self.title_label = QLabel("在线来源", self)
         self.detail_label = QLabel("查看已注册在线来源的能力与当前状态。", self)
         self.back_button = QToolButton(self)
@@ -136,8 +143,11 @@ class OnlineSourcePage(QWidget):
         header.addWidget(self.clear_button)
         header.addWidget(self.back_button)
         self.scroll_area = QScrollArea(self)
+        self.scroll_area.setObjectName("onlineSourceScrollArea")
+        self.scroll_area.setAccessibleName("已注册在线来源列表")
         self.scroll_area.setWidgetResizable(True)
         self.scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         self.content = QWidget(self.scroll_area)
         self.content_layout = QVBoxLayout(self.content)
         self.content_layout.setContentsMargins(0, 0, 0, 0)
@@ -191,6 +201,13 @@ class OnlineSourcePage(QWidget):
             f"font-size: {theme.fonts.page_title}px; font-weight: 600; color: {theme.colors.primary_text};"
         )
         self.detail_label.setStyleSheet(f"color: {theme.colors.secondary_text};")
+        self.scroll_area.setStyleSheet(
+            f"QScrollArea#onlineSourceScrollArea {{ border: 0; background: transparent; }}"
+            f"QScrollArea#onlineSourceScrollArea QScrollBar:vertical {{ width: 10px; margin: 4px 2px; background: transparent; }}"
+            f"QScrollArea#onlineSourceScrollArea QScrollBar::handle:vertical {{ min-height: 32px; border-radius: 5px; background: {theme.colors.border_strong}; }}"
+            f"QScrollArea#onlineSourceScrollArea QScrollBar::handle:vertical:hover {{ background: {theme.colors.text_tertiary}; }}"
+            f"QScrollArea#onlineSourceScrollArea QScrollBar::add-line:vertical, QScrollArea#onlineSourceScrollArea QScrollBar::sub-line:vertical {{ height: 0; }}"
+        )
         for button in (
             self.add_source_button,
             self.back_button,

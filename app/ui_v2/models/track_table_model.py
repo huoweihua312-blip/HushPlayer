@@ -89,9 +89,9 @@ class TrackTableModel(QAbstractTableModel):
     def flags(self, index: QModelIndex) -> Qt.ItemFlag:
         if not index.isValid():
             return Qt.ItemFlag.NoItemFlags
-        track = self._tracks[index.row()]
-        if track.is_missing:
-            return Qt.ItemFlag.NoItemFlags
+        # A missing track is still a library/playlist member.  Keep it
+        # selectable so the user can open its context menu and recover it
+        # online; playback availability is enforced by TrackTable instead.
         return Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable
 
     def track_at(self, row: int) -> Track | None:

@@ -18,6 +18,8 @@ class SourceSelector(QToolButton):
         self.adapter = adapter
         self._theme = theme
         self._compact = False
+        self.setAccessibleName("在线来源筛选")
+        self.setAccessibleDescription("选择在线搜索时使用的来源")
         self.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
         self._menu = QMenu(self)
         self.setMenu(self._menu)

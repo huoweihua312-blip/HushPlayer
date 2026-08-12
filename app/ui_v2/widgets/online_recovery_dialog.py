@@ -79,8 +79,11 @@ class OnlineRecoveryCandidateDialog(QDialog):
         self.list_widget.setAccessibleName("在线候选歌曲")
         self.list_widget.setAccessibleDescription("使用方向键选择版本，按 Enter 替换播放来源并播放")
         self.list_widget.setAlternatingRowColors(False)
+        self.list_widget.setSelectionMode(QListWidget.SelectionMode.SingleSelection)
         self.list_widget.setSpacing(4)
-        self.list_widget.itemDoubleClicked.connect(lambda _item: self._accept_selected())
+        # itemActivated covers both a double-click and keyboard Enter, so the
+        # same explicit action works for mouse and keyboard users.
+        self.list_widget.itemActivated.connect(lambda _item: self._accept_selected())
         for track in self._candidates:
             item = QListWidgetItem()
             item.setData(Qt.ItemDataRole.UserRole, track)
@@ -93,6 +96,9 @@ class OnlineRecoveryCandidateDialog(QDialog):
             self.list_widget.setCurrentRow(0)
         else:
             self.list_widget.setEnabled(False)
+        self.selection_label = ElidedLabel(self)
+        self.selection_label.setAccessibleName("当前选中的在线版本")
+        self.selection_label.setMinimumHeight(24)
         cancel = QPushButton("取消", self)
         cancel.setAccessibleName("取消在线版本选择")
         cancel.clicked.connect(self.reject)
@@ -113,8 +119,11 @@ class OnlineRecoveryCandidateDialog(QDialog):
         layout.addWidget(title)
         layout.addWidget(detail)
         layout.addWidget(self.list_widget, 1)
+        layout.addWidget(self.selection_label)
         layout.addLayout(buttons)
-        cancel.setFocus()
+        self.list_widget.currentRowChanged.connect(self._sync_selection_label)
+        self._sync_selection_label(self.list_widget.currentRow())
+        self.list_widget.setFocus()
 
     @staticmethod
     def _label_for(track: OnlineTrack) -> str:
@@ -127,3 +136,13 @@ class OnlineRecoveryCandidateDialog(QDialog):
         if isinstance(track, OnlineTrack):
             self.selected_track = track
             self.accept()
+
+    def _sync_selection_label(self, row: int) -> None:
+        if not (0 <= int(row) < len(self._candidates)):
+            self.selection_label.set_full_text("没有可用的在线版本")
+            self.selection_label.setToolTip("")
+            return
+        track = self._candidates[int(row)]
+        text = f"已选择：{track.title} · {track.source_name} · {format_duration(track.duration_ms)}"
+        self.selection_label.set_full_text(text)
+        self.selection_label.setToolTip(text)

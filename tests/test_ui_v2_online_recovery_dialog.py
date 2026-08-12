@@ -70,6 +70,8 @@ class OnlineRecoveryCandidateDialogTests(unittest.TestCase):
                 self.assertIn(get_theme(mode).colors.primary_text, dialog.styleSheet())
                 self.assertIn("一首非常长的歌曲标题", dialog.list_widget.item(1).toolTip())
                 self.assertGreaterEqual(dialog.list_widget.item(0).sizeHint().height(), 56)
+                self.assertIn("已选择：夜航 0", dialog.selection_label.full_text)
+                self.assertTrue(dialog.list_widget.hasFocus())
             finally:
                 dialog.close()
                 dialog.deleteLater()
@@ -96,6 +98,17 @@ class OnlineRecoveryCandidateDialogTests(unittest.TestCase):
             dialog._accept_selected()
             self.assertIs(dialog.selected_track, dialog._candidates[2])
             self.assertEqual(dialog.result(), dialog.DialogCode.Accepted)
+        finally:
+            dialog.close()
+            dialog.deleteLater()
+            self.app.processEvents()
+
+    def test_keyboard_activation_uses_the_same_selected_candidate(self) -> None:
+        dialog = self._dialog("dark", 2)
+        try:
+            dialog.list_widget.setCurrentRow(1)
+            dialog.list_widget.itemActivated.emit(dialog.list_widget.currentItem())
+            self.assertIs(dialog.selected_track, dialog._candidates[1])
         finally:
             dialog.close()
             dialog.deleteLater()

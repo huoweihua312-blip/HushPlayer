@@ -327,12 +327,17 @@ class TrackTable(QTableView):
             (not track.is_missing or track.is_online)
             and self._playback_enabled
         )
-        if not self._playback_enabled:
+        if track.is_missing:
+            play_action.setToolTip("当前播放来源不可用，请选择“在线寻找并播放”")
+            play_action.setStatusTip("当前播放来源不可用")
+        elif not self._playback_enabled:
             play_action.setToolTip("真实模式尚未接入播放")
         play_action.triggered.connect(lambda: self._request_play(track))
         if track.needs_online_recovery:
             recover_action = menu.addAction("在线寻找并播放")
             recover_action.setEnabled(self._playback_enabled)
+            recover_action.setToolTip("保留当前歌单位置和收藏关系，只更换播放来源")
+            recover_action.setStatusTip("只更换播放来源，不替换歌曲成员")
             recover_action.triggered.connect(lambda: self.online_recovery_requested.emit(track))
         if self.adapter.collection.can_mutate_favorites:
             favorite_action = menu.addAction("取消收藏" if track.is_favorite else "添加到我喜欢")

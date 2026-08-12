@@ -30,6 +30,8 @@ class RowVisualState(str, Enum):
     SELECTED_PLAYING = "selected_playing"
     SELECTED_PAUSED = "selected_paused"
     DISABLED = "disabled"
+    SELECTED_DISABLED = "selected_disabled"
+    HOVER_DISABLED = "hover_disabled"
     CURRENT_PLAYING = "playing"
     CURRENT_PAUSED = "paused"
 
@@ -66,7 +68,11 @@ class TrackDelegate(QStyledItemDelegate):
         painter.fillRect(rect, self.background_color(state))
 
         column = TrackColumn(index.column())
-        disabled = state == RowVisualState.DISABLED
+        disabled = state in {
+            RowVisualState.DISABLED,
+            RowVisualState.SELECTED_DISABLED,
+            RowVisualState.HOVER_DISABLED,
+        }
         text_color = QColor(colors.disabled_text if disabled else colors.primary_text)
         secondary_color = QColor(colors.disabled_text if disabled else colors.secondary_text)
         icon_state = "disabled" if disabled else "selected" if playing else "hover" if hovered else "normal"
@@ -175,6 +181,10 @@ class TrackDelegate(QStyledItemDelegate):
         playback_active: bool = True,
     ) -> RowVisualState:
         """Resolve row presentation in the documented, stable priority order."""
+        if track.is_missing and selected:
+            return RowVisualState.SELECTED_DISABLED
+        if track.is_missing and hovered:
+            return RowVisualState.HOVER_DISABLED
         if track.is_missing:
             return RowVisualState.DISABLED
         if playing and not playback_active and selected:
@@ -202,6 +212,8 @@ class TrackDelegate(QStyledItemDelegate):
             RowVisualState.SELECTED_PLAYING: colors.selected_background,
             RowVisualState.SELECTED_PAUSED: colors.selected_background,
             RowVisualState.DISABLED: colors.content_background,
+            RowVisualState.SELECTED_DISABLED: colors.selected_background,
+            RowVisualState.HOVER_DISABLED: colors.hover_background,
         }
         return QColor(values[state])
 

@@ -104,6 +104,7 @@ class UiV2LibraryPageTests(unittest.TestCase):
         )
         recovery = next(action for action in menu.actions() if action.text() == "在线寻找并播放")
         self.assertTrue(recovery.isEnabled())
+        self.assertIn("只更换播放来源", recovery.toolTip())
         recovery.trigger()
         self.assertEqual(requested, [track])
         menu.deleteLater()
