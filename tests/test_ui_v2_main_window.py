@@ -4,7 +4,10 @@ import importlib
 import os
 import sys
 import unittest
+from dataclasses import replace
 from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import Mock
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
@@ -119,6 +122,72 @@ class UiV2MainWindowTests(unittest.TestCase):
         self.assertNotEqual(self.window.playback_adapter.state.is_favorite, original)
         self.window.library_adapter.set_favorite(track_id, original)
         self.assertEqual(self.window.playback_adapter.state.is_favorite, original)
+
+    def test_confirmed_library_failure_starts_one_automatic_recovery(self) -> None:
+        source = next(
+            track for track in self.window.library_collection.tracks() if track.is_online
+        )
+        failed = replace(source, availability="playback_error", is_missing=True)
+        self.window.library_collection.update_runtime_track(failed)
+        self.window.playback_adapter.set_queue((failed,))
+        self.window.playback_adapter.play_track(failed.id)
+        self.app.processEvents()
+
+        original_online_adapter = self.window.online_adapter
+        try:
+            apply_remote_state = Mock(return_value=failed)
+            self.window.online_adapter = SimpleNamespace(
+                is_formal=True,
+                apply_remote_state=apply_remote_state,
+            )
+            request_recovery = Mock()
+            self.window._request_online_recovery = request_recovery
+
+            self.window._on_remote_track_state_changed(
+                failed.stable_identity,
+                "playback_error",
+                "媒体无效",
+                {},
+            )
+            self.window._on_remote_track_state_changed(
+                failed.stable_identity,
+                "playback_error",
+                "媒体无效",
+                {},
+            )
+
+            self.assertEqual(apply_remote_state.call_count, 2)
+            request_recovery.assert_called_once_with(failed)
+        finally:
+            self.window.online_adapter = original_online_adapter
+
+    def test_unresolved_library_track_does_not_start_automatic_recovery(self) -> None:
+        source = next(
+            track for track in self.window.library_collection.tracks() if track.is_online
+        )
+        current = replace(source, availability="not_resolved", is_missing=False)
+        self.window.library_collection.update_runtime_track(current)
+        self.window.playback_adapter.set_queue((current,))
+        self.window.playback_adapter.play_track(current.id)
+        self.app.processEvents()
+
+        original_online_adapter = self.window.online_adapter
+        try:
+            self.window.online_adapter = SimpleNamespace(
+                is_formal=True,
+                apply_remote_state=Mock(return_value=current),
+            )
+            request_recovery = Mock()
+            self.window._request_online_recovery = request_recovery
+            self.window._on_remote_track_state_changed(
+                current.stable_identity,
+                "not_resolved",
+                "",
+                {},
+            )
+            request_recovery.assert_not_called()
+        finally:
+            self.window.online_adapter = original_online_adapter
 
     def test_responsive_modes_keep_navigation_and_model_instances(self) -> None:
         self.window.navigation_adapter.set_route("library")

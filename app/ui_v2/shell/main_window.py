@@ -71,6 +71,14 @@ from app.ui_v2.theme.tokens import Theme, get_theme
 _DWMWA_WINDOW_CORNER_PREFERENCE = 33
 _DWMWCP_DEFAULT = 0
 _DWMWCP_ROUND = 2
+_AUTO_RECOVERY_FAILURE_STATES = frozenset(
+    {
+        "source_unavailable",
+        "resolve_failed",
+        "permission_denied",
+        "playback_error",
+    }
+)
 
 
 class ShellPresentationMode(str, Enum):
@@ -289,6 +297,7 @@ class MainWindow(QMainWindow):
         self.settings_overlay: SettingsOverlay | None = None
         self._update_dialog: UpdateDialog | None = None
         self._pending_recovery_tracks: dict[int, Track] = {}
+        self._automatic_recovery_identities: set[str] = set()
         QApplication.instance().installEventFilter(self)
         self._connect_state()
         self.setWindowTitle("HushPlayer UI V2")
@@ -995,6 +1004,11 @@ class MainWindow(QMainWindow):
         if recovery is None:
             self._show_recovery_message("当前运行模式没有可用的在线恢复服务。")
             return
+        if isinstance(track, Track) and track.stable_identity:
+            # Manual recovery also counts as the one automatic attempt for
+            # this playback context, preventing a failed replacement from
+            # starting an endless recovery loop.
+            self._automatic_recovery_identities.add(track.stable_identity)
         generation = recovery.request(track)
         if isinstance(track, Track):
             self._pending_recovery_tracks[int(generation)] = track
@@ -1055,6 +1069,11 @@ class MainWindow(QMainWindow):
         track_id = track.id if track is not None else ""
         self.library_collection.set_playing_track(track_id)
         self.router.set_playing_track(track_id)
+        current_identity = track.stable_identity if isinstance(track, Track) else ""
+        if current_identity:
+            self._automatic_recovery_identities.intersection_update({current_identity})
+        else:
+            self._automatic_recovery_identities.clear()
         if track is not None:
             self.library_collection.record_play(track.id)
 
@@ -1065,12 +1084,31 @@ class MainWindow(QMainWindow):
         detail: str,
         payload: object,
     ) -> None:
-        self.online_adapter.apply_remote_state(
+        updated = self.online_adapter.apply_remote_state(
             identity,
             state,
             detail,
             payload if isinstance(payload, dict) else {},
         )
+        if not self.online_adapter.is_formal or not isinstance(updated, Track):
+            return
+        normalized_state = str(state or "").strip().casefold().replace("-", "_")
+        if normalized_state not in _AUTO_RECOVERY_FAILURE_STATES:
+            return
+        library_track = self.library_collection.track_for_id(updated.id)
+        current_track = self.playback_adapter.state.current_track
+        if (
+            library_track is None
+            or not library_track.is_online
+            or current_track is None
+            or current_track.stable_identity != library_track.stable_identity
+        ):
+            return
+        recovery_identity = library_track.stable_identity
+        if not recovery_identity or recovery_identity in self._automatic_recovery_identities:
+            return
+        self._automatic_recovery_identities.add(recovery_identity)
+        self._request_online_recovery(library_track)
 
     def _on_playback_duration_changed(self, duration_ms: int | None) -> None:
         if duration_ms is None or int(duration_ms) <= 0:
