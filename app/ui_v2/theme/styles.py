@@ -234,6 +234,14 @@ def build_dialog_stylesheet(theme: Theme) -> str:
             background: {c.selected_background};
             color: {c.primary_text};
         }}
+        QDialog QListWidget#onlineRecoveryCandidateList::item:hover {{
+            background: {c.surface_secondary};
+            color: {c.primary_text};
+        }}
+        QDialog QListWidget#onlineRecoveryCandidateList::item:selected:hover {{
+            background: {c.selected_background};
+            color: {c.primary_text};
+        }}
         QDialog QPushButton, QDialog QToolButton {{
             min-height: {m.control_height}px;
             min-width: 80px;
@@ -251,6 +259,7 @@ def build_dialog_stylesheet(theme: Theme) -> str:
             background: {c.surface_pressed};
         }}
         QDialog QPushButton:focus, QDialog QToolButton:focus {{
+            outline: 0;
             border-color: {c.focus_ring};
         }}
         QDialog QPushButton:disabled, QDialog QToolButton:disabled {{

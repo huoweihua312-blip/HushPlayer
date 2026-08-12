@@ -63,6 +63,10 @@ class OnlineRecoveryCandidateDialogTests(unittest.TestCase):
                 self.assertTrue(primary.isEnabled())
                 self.assertEqual(primary.property("role"), "primary")
                 self.assertIn("QDialog QListWidget", dialog.styleSheet())
+                self.assertIn(
+                    "QDialog QListWidget#onlineRecoveryCandidateList::item:hover",
+                    dialog.styleSheet(),
+                )
                 self.assertIn(get_theme(mode).colors.primary_text, dialog.styleSheet())
                 self.assertIn("一首非常长的歌曲标题", dialog.list_widget.item(1).toolTip())
                 self.assertGreaterEqual(dialog.list_widget.item(0).sizeHint().height(), 56)
