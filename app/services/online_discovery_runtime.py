@@ -20,6 +20,7 @@ from app.services.online_discovery_bridge import OnlineDiscoveryBridge
 from app.services.remote_track_store import RemoteTrackStore
 from app.services.source_registry import SourceRegistryManager
 from app.services.unified_search_service import UnifiedSearchService
+from app.services.online_track_recovery import OnlineTrackRecoveryService
 
 
 class OnlineDiscoveryRuntime(QObject):
@@ -60,6 +61,11 @@ class OnlineDiscoveryRuntime(QObject):
         # separate generation coordinator, so they cannot overwrite the
         # user's active Online Search query.
         self.recommendation_search_service = UnifiedSearchService(self.client, self)
+        self.recovery_search_service = UnifiedSearchService(self.client, self, debounce_ms=300)
+        self.track_recovery = OnlineTrackRecoveryService(
+            search_service=self.recovery_search_service,
+            parent=self,
+        )
         self.playback_resolver = OnlineMediaResolver(
             self.client,
             self,
@@ -126,6 +132,7 @@ class OnlineDiscoveryRuntime(QObject):
         self.source_importer.shutdown()
         self.playback_resolver.shutdown()
         self.recommendation_search_service.shutdown()
+        self.track_recovery.shutdown()
         self.search_service.shutdown()
         self.artwork_service.cancel()
         self.online_audio_cache.shutdown()

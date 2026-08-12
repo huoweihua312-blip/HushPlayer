@@ -126,6 +126,7 @@ class TrackTable(QTableView):
     """View/controller boundary for selection, playback, favorites, and menus."""
 
     play_requested = Signal(str)
+    online_recovery_requested = Signal(object)
     favorite_toggled = Signal(str, bool)
     mock_action_requested = Signal(str, str)
     artist_requested = Signal(str)
@@ -238,6 +239,16 @@ class TrackTable(QTableView):
                 return
         super().mouseReleaseEvent(event)
 
+    def mouseDoubleClickEvent(self, event) -> None:  # noqa: N802
+        index = self.indexAt(event.position().toPoint())
+        track = self.model.track_at(index.row()) if index.isValid() else None
+        if track is not None and track.is_missing and not track.is_online:
+            if self._playback_enabled:
+                self.online_recovery_requested.emit(track)
+            event.accept()
+            return
+        super().mouseDoubleClickEvent(event)
+
     def mouseMoveEvent(self, event) -> None:  # noqa: N802
         index = self.indexAt(event.position().toPoint())
         self._set_hovered_row(index.row() if index.isValid() else -1)
@@ -319,6 +330,10 @@ class TrackTable(QTableView):
         if not self._playback_enabled:
             play_action.setToolTip("真实模式尚未接入播放")
         play_action.triggered.connect(lambda: self._request_play(track))
+        if track.is_missing and not track.is_online:
+            recover_action = menu.addAction("在线寻找并播放")
+            recover_action.setEnabled(self._playback_enabled)
+            recover_action.triggered.connect(lambda: self.online_recovery_requested.emit(track))
         if self.adapter.collection.can_mutate_favorites:
             favorite_action = menu.addAction("取消收藏" if track.is_favorite else "添加到我喜欢")
             favorite_action.setEnabled(self._can_change_favorite(track))
@@ -355,6 +370,10 @@ class TrackTable(QTableView):
 
     def _on_double_clicked(self, index: QModelIndex) -> None:
         track = self.model.track_at(index.row())
+        if track is not None and track.is_missing and not track.is_online:
+            if self._playback_enabled:
+                self.online_recovery_requested.emit(track)
+            return
         if (
             track is not None
             and (not track.is_missing or track.is_online)
@@ -368,6 +387,11 @@ class TrackTable(QTableView):
             index = self.currentIndex()
             track = self.model.track_at(index.row()) if index.isValid() else None
             if track is not None:
+                if track.is_missing and not track.is_online:
+                    if self._playback_enabled:
+                        self.online_recovery_requested.emit(track)
+                    event.accept()
+                    return
                 self._request_play(track)
                 event.accept()
                 return

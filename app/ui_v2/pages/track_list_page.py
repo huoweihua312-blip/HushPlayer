@@ -19,6 +19,7 @@ class TrackListPage(QWidget):
     """Preserves one TrackTable model and one view-local adapter state per route."""
 
     track_play_requested = Signal(object, str)
+    track_recovery_requested = Signal(object)
     queue_requested = Signal(object, bool)
     browse_library_requested = Signal()
 
@@ -64,6 +65,7 @@ class TrackListPage(QWidget):
         self.toolbar.play_all_requested.connect(lambda: self._request_queue(False))
         self.toolbar.shuffle_requested.connect(lambda: self._request_queue(True))
         self.track_table.play_requested.connect(self._request_track)
+        self.track_table.online_recovery_requested.connect(self.track_recovery_requested)
         self.empty_state.action_requested.connect(self.browse_library_requested)
         adapter.tracks_reset.connect(self._on_tracks_reset)
         self.set_theme(theme)

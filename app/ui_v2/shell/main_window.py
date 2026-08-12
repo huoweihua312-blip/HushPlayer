@@ -23,8 +23,10 @@ from PySide6.QtGui import (
 from PySide6.QtWidgets import (
     QAbstractSlider,
     QApplication,
+    QDialog,
     QHBoxLayout,
     QMainWindow,
+    QToolTip,
     QVBoxLayout,
     QWidget,
 )
@@ -60,6 +62,7 @@ from app.ui_v2.shell.navigation_sidebar import NavigationSidebar
 from app.ui_v2.shell.player_bar import PlayerBar
 from app.ui.update_dialog import UpdateDialog
 from app.ui_v2.widgets.custom_title_bar import CustomTitleBar
+from app.ui_v2.widgets.online_recovery_dialog import OnlineRecoveryCandidateDialog
 from app.ui_v2.widgets.settings_overlay import SettingsOverlay
 from app.ui_v2.theme.styles import build_application_palette, build_stylesheet
 from app.ui_v2.theme.tokens import Theme, get_theme
@@ -629,6 +632,7 @@ class MainWindow(QMainWindow):
         self.router.track_play_requested.connect(self._play_tracks)
         self.router.queue_requested.connect(self._play_queue)
         self.router.online_play_requested.connect(self._play_online_track)
+        self.router.online_recovery_requested.connect(self._request_online_recovery)
         self.router.immersive_fullscreen_requested.connect(
             self.set_immersive_fullscreen
         )
@@ -674,6 +678,12 @@ class MainWindow(QMainWindow):
             self.online_discovery.artwork_service.imageReady.connect(
                 self._on_online_artwork_ready
             )
+            recovery = getattr(self.online_discovery, "track_recovery", None)
+            if recovery is not None:
+                recovery.status_changed.connect(self._on_recovery_status)
+                recovery.match_found.connect(self._on_recovery_match)
+                recovery.candidates_found.connect(self._on_recovery_candidates)
+                recovery.failed.connect(self._on_recovery_failed)
         self.library_collection.favorite_changed.connect(self._sync_favorite_from_library)
         self.playback_adapter.favorite_changed.connect(self._sync_favorite_from_player)
         self._sync_immersive_shell(self.navigation_adapter.route)
@@ -974,6 +984,59 @@ class MainWindow(QMainWindow):
             preserve_current_context=True,
         )
         self.playback_adapter.play_track(track.id)
+
+    @property
+    def recovery_status_message(self) -> str:
+        return getattr(self, "_recovery_status_message", "")
+
+    def _request_online_recovery(self, track) -> None:
+        recovery = getattr(self.online_discovery, "track_recovery", None)
+        if recovery is None:
+            self._show_recovery_message("当前运行模式没有可用的在线恢复服务。")
+            return
+        recovery.request(track)
+
+    def _on_recovery_status(self, _generation: int, message: str) -> None:
+        self._show_recovery_message(str(message or ""))
+
+    def _on_recovery_match(self, _generation: int, track) -> None:
+        self._play_recovery_candidate(track)
+
+    def _on_recovery_candidates(self, _generation: int, candidates) -> None:
+        values = tuple(candidates or ())
+        if not values:
+            self._show_recovery_message("没有找到可靠的在线版本。")
+            return
+        dialog = OnlineRecoveryCandidateDialog(values, self._theme, self)
+        if dialog.exec() == QDialog.DialogCode.Accepted and dialog.selected_track is not None:
+            self._play_recovery_candidate(dialog.selected_track)
+
+    def _play_recovery_candidate(self, track) -> None:
+        if track is None:
+            return
+        self.online_adapter.register_recommendation_tracks((track,))
+        if self.online_adapter.request_play(track.id):
+            self._show_recovery_message(
+                f"已找到 {track.source_name} 的在线版本，正在播放。"
+            )
+        else:
+            self._show_recovery_message("在线版本暂时无法播放。")
+
+    def _on_recovery_failed(self, _generation: int, message: str) -> None:
+        self._show_recovery_message(str(message or "在线恢复失败。"))
+
+    def _show_recovery_message(self, message: str) -> None:
+        text = str(message or "").strip()
+        self._recovery_status_message = text
+        if not text or not self.isVisible():
+            return
+        QToolTip.showText(
+            self.mapToGlobal(QPoint(max(24, self.width() // 2), 72)),
+            text,
+            self,
+            QRect(),
+            3500,
+        )
 
     def _on_playback_track_changed(self, track) -> None:
         track_id = track.id if track is not None else ""

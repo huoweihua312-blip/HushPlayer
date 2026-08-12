@@ -86,6 +86,7 @@ class ContentRouter(QStackedWidget):
     track_play_requested = Signal(object, str)
     queue_requested = Signal(object, bool)
     online_play_requested = Signal(object)
+    online_recovery_requested = Signal(object)
     immersive_fullscreen_requested = Signal(bool)
     immersive_transparency_requested = Signal(bool)
 
@@ -116,6 +117,7 @@ class ContentRouter(QStackedWidget):
         self._collection = collection
         self._playlists = playlists
         self._online_adapter = online
+        self._online_adapter.play_requested.connect(self.online_play_requested)
         self._lyrics_adapter = lyrics
         self._playback_adapter = playback
         self._immersive_options = immersive_options
@@ -298,6 +300,8 @@ class ContentRouter(QStackedWidget):
             page.set_playback_enabled(self._playback_enabled)
         page.track_play_requested.connect(self.track_play_requested)
         page.queue_requested.connect(self.queue_requested)
+        if hasattr(page, "track_recovery_requested"):
+            page.track_recovery_requested.connect(self.online_recovery_requested)
         page.browse_library_requested.connect(lambda: self._navigation.set_route("library"))
         return page
 
@@ -360,7 +364,6 @@ class ContentRouter(QStackedWidget):
         page.source_management_requested.connect(
             lambda: self._navigation.set_route("online_sources")
         )
-        self._online_adapter.play_requested.connect(self.online_play_requested)
         return page
 
     def _create_online_source_page(self) -> OnlineSourcePage:
