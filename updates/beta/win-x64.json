@@ -1,18 +1,16 @@
 {
     "schema_version": 1,
     "channel": "beta",
-    "version": "0.6.0-beta.3",
-    "numeric_version": "0.6.0.3",
+    "version": "0.6.0-beta.4",
+    "numeric_version": "0.6.0.4",
     "architecture": "win-x64",
     "mandatory": false,
-    "setup_url": "https://api.gitcode.com/api/v5/repos/gcw_iPVB8B5g/HushPlayer-updates/releases/v0.6.0-beta.3/attach_files/HushPlayer-0.6.0-beta.3-win-x64-setup.exe/download",
-    "setup_size": 74815375,
-    "sha256": "7225c77c2408c13f581849b3f9e00c10e7ee0fdf5f96fca68937683aa51865b3",
+    "setup_url": "https://gitcode.com/gcw_iPVB8B5g/HushPlayer-updates/releases/download/v0.6.0-beta.4/HushPlayer-0.6.0-beta.4-win-x64-setup.exe",
+    "setup_size": 74820417,
+    "sha256": "f4659d5b18be85ec331f26c2499280dacdaebb70c749a5559f09875bb0766949",
     "release_notes": [
-        "修复在线歌曲播放失败后无法从我喜欢或歌单中再次查找并播放对应歌曲的问题。",
-        "支持选定在线版本后，仅替换播放来源并保留原歌曲的收藏关系与歌单位置。",
-        "支持在应用内下载并校验 portable 更新包，更新完成后自动重启，无需手动运行安装程序。",
-        "保留旧安装包更新方式，兼容没有 portable 更新包的历史版本和更新清单。"
+        "修复旧版安装包更新可能误用历史测试目录的问题，更新会回到当前应用目录。",
+        "保持新版应用内更新与旧版安装包回退更新的安装位置一致。"
     ],
     "release_history": [
         {
@@ -136,10 +134,19 @@
                 "支持在应用内下载并校验 portable 更新包，更新完成后自动重启，无需手动运行安装程序。",
                 "保留旧安装包更新方式，兼容没有 portable 更新包的历史版本和更新清单。"
             ]
+        },
+        {
+            "version": "0.6.0-beta.4",
+            "numeric_version": "0.6.0.4",
+            "release_date": "2026-08-12",
+            "notes": [
+                "修复旧版安装包更新可能误用历史测试目录的问题，更新会回到当前应用目录。",
+                "保持新版应用内更新与旧版安装包回退更新的安装位置一致。"
+            ]
         }
     ],
-    "package_url": "https://api.gitcode.com/api/v5/repos/gcw_iPVB8B5g/HushPlayer-updates/releases/v0.6.0-beta.3/attach_files/HushPlayer-0.6.0-beta.3-win-x64-update.zip/download",
-    "package_size": 105097272,
-    "package_sha256": "5e2087105b6c5cd557d35cd61fc575063d9867116deb3d03ed1be562de45c179",
-    "package_filename": "HushPlayer-0.6.0-beta.3-win-x64-update.zip"
+    "package_url": "https://gitcode.com/gcw_iPVB8B5g/HushPlayer-updates/releases/download/v0.6.0-beta.4/HushPlayer-0.6.0-beta.4-win-x64-update.zip",
+    "package_size": 105099788,
+    "package_sha256": "eabcea31c1a2f489ecc3a05938a4ca590761fa71138c2bf3dc3bc127fbaee06c",
+    "package_filename": "HushPlayer-0.6.0-beta.4-win-x64-update.zip"
 }
