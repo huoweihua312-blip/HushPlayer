@@ -108,6 +108,25 @@ class UiV2LibraryPageTests(unittest.TestCase):
         self.assertEqual(requested, [track])
         menu.deleteLater()
 
+    def test_unplayable_online_track_exposes_online_recovery_action(self) -> None:
+        model = self.page.track_table.model
+        row = next(
+            row
+            for row, track in enumerate(model.tracks())
+            if track.is_missing and track.is_online
+        )
+        track = model.track_at(row)
+        requested = []
+        self.page.track_table.online_recovery_requested.connect(requested.append)
+        menu = self.page.track_table.build_context_menu(
+            model.index(row, int(TrackColumn.MORE))
+        )
+        recovery = next(action for action in menu.actions() if action.text() == "在线寻找并播放")
+        self.assertTrue(recovery.isEnabled())
+        recovery.trigger()
+        self.assertEqual(requested, [track])
+        menu.deleteLater()
+
     def test_empty_loading_error_and_content_states(self) -> None:
         self.adapter.clear()
         self.app.processEvents()

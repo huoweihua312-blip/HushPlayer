@@ -21,6 +21,16 @@ _ARTWORK_URL_KEYS = (
     "image",
 )
 
+_RECOVERABLE_AVAILABILITY_STATES = frozenset(
+    {
+        "unavailable",
+        "source_unavailable",
+        "resolve_failed",
+        "permission_denied",
+        "playback_error",
+    }
+)
+
 
 def artwork_url_from_payload(payload: dict | None) -> str:
     """Extract a real artwork URL without treating provider keys as images."""
@@ -83,6 +93,15 @@ class Track:
     @property
     def is_online(self) -> bool:
         return self.source_type == "online"
+
+    @property
+    def needs_online_recovery(self) -> bool:
+        """Whether a failed track can be rematched against enabled sources."""
+
+        if self.is_missing:
+            return True
+        state = str(self.availability or "").strip().casefold().replace("-", "_")
+        return state in _RECOVERABLE_AVAILABILITY_STATES
 
 
 def format_duration(duration_ms: int | None) -> str:

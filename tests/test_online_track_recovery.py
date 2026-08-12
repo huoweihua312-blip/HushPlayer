@@ -139,6 +139,20 @@ class OnlineTrackRecoveryTests(unittest.TestCase):
         self.assertEqual(len(ranked), 1)
         self.assertEqual(ranked[0].track.remote_id, "remote:playback")
 
+    def test_online_track_with_playback_error_can_be_recovered(self) -> None:
+        source = _missing_track(
+            id="remote:broken",
+            source_id="catalog",
+            source_name="开放目录",
+            source_type="online",
+            is_missing=True,
+            availability="playback_error",
+            stable_identity="remote:broken",
+        )
+        service = OnlineTrackRecoveryService()
+        self.assertTrue(source.needs_online_recovery)
+        self.assertEqual(service.build_query(source), "123木头人 黑Girl")
+
 
 if __name__ == "__main__":
     unittest.main()

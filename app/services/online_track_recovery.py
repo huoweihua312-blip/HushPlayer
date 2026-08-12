@@ -1,4 +1,4 @@
-"""One-shot online recovery matching for unavailable local tracks."""
+"""One-shot online recovery matching for unavailable tracks."""
 
 from __future__ import annotations
 
@@ -55,7 +55,7 @@ class OnlineTrackRecoveryService(QObject):
         self.cancel()
         self._generation += 1
         generation = self._generation
-        if not isinstance(track, Track) or not track.is_missing or track.is_online:
+        if not isinstance(track, Track) or not track.needs_online_recovery:
             self.failed.emit(generation, "这首歌曲当前不需要在线恢复。")
             return generation
         query = self.build_query(track)

@@ -242,7 +242,7 @@ class TrackTable(QTableView):
     def mouseDoubleClickEvent(self, event) -> None:  # noqa: N802
         index = self.indexAt(event.position().toPoint())
         track = self.model.track_at(index.row()) if index.isValid() else None
-        if track is not None and track.is_missing and not track.is_online:
+        if track is not None and track.needs_online_recovery:
             if self._playback_enabled:
                 self.online_recovery_requested.emit(track)
             event.accept()
@@ -330,7 +330,7 @@ class TrackTable(QTableView):
         if not self._playback_enabled:
             play_action.setToolTip("真实模式尚未接入播放")
         play_action.triggered.connect(lambda: self._request_play(track))
-        if track.is_missing and not track.is_online:
+        if track.needs_online_recovery:
             recover_action = menu.addAction("在线寻找并播放")
             recover_action.setEnabled(self._playback_enabled)
             recover_action.triggered.connect(lambda: self.online_recovery_requested.emit(track))
@@ -370,7 +370,7 @@ class TrackTable(QTableView):
 
     def _on_double_clicked(self, index: QModelIndex) -> None:
         track = self.model.track_at(index.row())
-        if track is not None and track.is_missing and not track.is_online:
+        if track is not None and track.needs_online_recovery:
             if self._playback_enabled:
                 self.online_recovery_requested.emit(track)
             return
@@ -387,7 +387,7 @@ class TrackTable(QTableView):
             index = self.currentIndex()
             track = self.model.track_at(index.row()) if index.isValid() else None
             if track is not None:
-                if track.is_missing and not track.is_online:
+                if track.needs_online_recovery:
                     if self._playback_enabled:
                         self.online_recovery_requested.emit(track)
                     event.accept()
