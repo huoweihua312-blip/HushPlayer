@@ -1,16 +1,15 @@
 {
     "schema_version": 1,
     "channel": "beta",
-    "version": "0.6.0-beta.4",
-    "numeric_version": "0.6.0.4",
+    "version": "0.6.0-beta.5",
+    "numeric_version": "0.6.0.5",
     "architecture": "win-x64",
     "mandatory": false,
-    "setup_url": "https://api.gitcode.com/api/v5/repos/gcw_iPVB8B5g/HushPlayer-updates/releases/v0.6.0-beta.4/attach_files/HushPlayer-0.6.0-beta.4-win-x64-setup.exe/download",
-    "setup_size": 74820417,
-    "sha256": "f4659d5b18be85ec331f26c2499280dacdaebb70c749a5559f09875bb0766949",
+    "setup_url": "https://api.gitcode.com/api/v5/repos/gcw_iPVB8B5g/HushPlayer-updates/releases/v0.6.0-beta.5/attach_files/HushPlayer-0.6.0-beta.5-win-x64-setup.exe/download",
+    "setup_size": 74819049,
+    "sha256": "6b67ecea9de33b39938762a577095c3afea147a37293a6b49b5fdeb56926f31a",
     "release_notes": [
-        "修复旧版安装包更新可能误用历史测试目录的问题，更新会回到当前应用目录。",
-        "保持新版应用内更新与旧版安装包回退更新的安装位置一致。"
+        "修复应用内更新启动后模态更新对话框仍阻塞主进程，导致更新助手无法替换安装目录的问题。"
     ],
     "release_history": [
         {
@@ -143,10 +142,18 @@
                 "修复旧版安装包更新可能误用历史测试目录的问题，更新会回到当前应用目录。",
                 "保持新版应用内更新与旧版安装包回退更新的安装位置一致。"
             ]
+        },
+        {
+            "version": "0.6.0-beta.5",
+            "numeric_version": "0.6.0.5",
+            "release_date": "2026-08-12",
+            "notes": [
+                "修复应用内更新启动后模态更新对话框仍阻塞主进程，导致更新助手无法替换安装目录的问题。"
+            ]
         }
     ],
-    "package_url": "https://api.gitcode.com/api/v5/repos/gcw_iPVB8B5g/HushPlayer-updates/releases/v0.6.0-beta.4/attach_files/HushPlayer-0.6.0-beta.4-win-x64-update.zip/download",
-    "package_size": 105099788,
-    "package_sha256": "eabcea31c1a2f489ecc3a05938a4ca590761fa71138c2bf3dc3bc127fbaee06c",
-    "package_filename": "HushPlayer-0.6.0-beta.4-win-x64-update.zip"
+    "package_url": "https://api.gitcode.com/api/v5/repos/gcw_iPVB8B5g/HushPlayer-updates/releases/v0.6.0-beta.5/attach_files/HushPlayer-0.6.0-beta.5-win-x64-update.zip/download",
+    "package_size": 105097043,
+    "package_sha256": "ffe834d59e2d7ff00464fa4105eb0cf051ecae5091452bd2970320701d5fbdfa",
+    "package_filename": "HushPlayer-0.6.0-beta.5-win-x64-update.zip"
 }

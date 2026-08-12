@@ -12826,7 +12826,16 @@ class MainWindow(QMainWindow):
 
     def on_update_installer_launched(self, path: str) -> None:
         print("更新安装程序已启动，正在进入正式退出流程：", path)
+        # UpdateDialog.exec() owns a nested event loop.  End it explicitly so
+        # the updater can observe that this process has fully exited before
+        # replacing the installation directory.
+        dialog = getattr(self, "update_dialog", None)
+        if dialog is not None:
+            dialog.done(QDialog.DialogCode.Accepted)
         self.close()
+        application = QApplication.instance()
+        if application is not None:
+            application.quit()
 
     def open_settings_dialog(self) -> None:
         self.set_sidebar_active("settings")

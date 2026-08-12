@@ -764,7 +764,16 @@ class MainWindow(QMainWindow):
         self._set_update_status(message, state="failed")
 
     def _on_update_installer_launched(self, _path: str) -> None:
+        # The update dialog runs a nested event loop.  Closing only the main
+        # window leaves that modal loop alive, so the updater still sees the
+        # HushPlayer process holding files in the install directory.
+        dialog = getattr(self, "_update_dialog", None)
+        if dialog is not None:
+            dialog.done(QDialog.DialogCode.Accepted)
         self.close()
+        application = QApplication.instance()
+        if application is not None:
+            application.quit()
 
     def _on_settings_saved(self, snapshot: SettingsSnapshot) -> None:
         """Keep the shell's last persisted snapshot in sync with the overlay."""
