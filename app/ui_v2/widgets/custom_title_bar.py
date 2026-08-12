@@ -48,7 +48,11 @@ class CustomTitleBar(QFrame):
         self.search_icon.setEnabled(False)
         self.search_input = QLineEdit(self)
         self.search_input.setObjectName("titleBarSearchInput")
-        self.search_input.setPlaceholderText("搜索")
+        self.search_input.setPlaceholderText("搜索歌曲、歌手或专辑")
+        self.search_input.setClearButtonEnabled(True)
+        self.search_input.setAccessibleName("全局搜索")
+        self.search_input.setAccessibleDescription("搜索歌曲、歌手或专辑；按 Enter 打开在线搜索")
+        self.search_input.setToolTip("搜索歌曲、歌手或专辑（Enter 打开在线搜索）")
         self.search_input.textChanged.connect(self.search_text_changed)
         self.search_input.returnPressed.connect(
             lambda: self.search_submitted.emit(self.search_input.text())
@@ -223,6 +227,38 @@ class CustomTitleBar(QFrame):
 
         self.back_button.setEnabled(bool(can_go_back))
         self.forward_button.setEnabled(bool(can_go_forward))
+
+    def set_search_context(self, route_id: str) -> None:
+        """Make the shell search affordance explain where a query will apply."""
+
+        route = str(route_id or "").strip()
+        if route == "online_search":
+            placeholder = "搜索在线歌曲"
+            description = "搜索已启用的在线来源；按 Enter 执行搜索"
+        elif route == "library":
+            placeholder = "在音乐库中搜索"
+            description = "搜索本地音乐库中的歌曲、歌手或专辑"
+        elif route == "liked":
+            placeholder = "在我喜欢中搜索"
+            description = "搜索我喜欢歌单中的歌曲"
+        elif route.startswith("playlist:"):
+            placeholder = "在当前歌单中搜索"
+            description = "搜索当前歌单中的歌曲"
+        elif route == "artists":
+            placeholder = "搜索歌手"
+            description = "搜索音乐库中的歌手"
+        elif route == "albums":
+            placeholder = "搜索专辑"
+            description = "搜索音乐库中的专辑"
+        elif route == "lyrics":
+            placeholder = "搜索歌词"
+            description = "搜索歌词内容"
+        else:
+            placeholder = "搜索歌曲、歌手或专辑"
+            description = "搜索歌曲、歌手或专辑；按 Enter 打开在线搜索"
+        self.search_input.setPlaceholderText(placeholder)
+        self.search_input.setAccessibleDescription(description)
+        self.search_input.setToolTip(f"{placeholder}（Enter 执行搜索）")
 
     def mousePressEvent(self, event) -> None:  # noqa: N802
         if event.button() == Qt.MouseButton.LeftButton and not self._window().isMaximized():

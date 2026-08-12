@@ -54,6 +54,7 @@ class NavigationSidebar(QFrame):
         self._playlist_items: dict[str, NavigationItem] = {}
         self._section_labels: list[QLabel] = []
         self.setObjectName("navigationSidebar")
+        self.setAccessibleName("主导航")
         self.setFixedWidth(theme.metrics.sidebar_width)
 
         self.brand = QWidget(self)
@@ -116,6 +117,7 @@ class NavigationSidebar(QFrame):
         playlist_outer.addWidget(self.playlist_caption_row)
         self.scroll_area = QScrollArea(self.playlist_section)
         self.scroll_area.setObjectName("navigationScrollArea")
+        self.scroll_area.setAccessibleName("歌单列表")
         self.scroll_area.setWidgetResizable(True)
         self.scroll_area.setFrameShape(QFrame.Shape.NoFrame)
         self.scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)

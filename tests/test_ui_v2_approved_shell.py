@@ -57,7 +57,9 @@ class ApprovedShellMigrationTests(unittest.TestCase):
         self.assertEqual(title_bar.height(), 59)
         self.assertEqual(self.window.windowTitle(), "HushPlayer UI V2")
         self.assertTrue(self.window.windowFlags() & Qt.WindowType.FramelessWindowHint)
-        self.assertEqual(title_bar.search_input.placeholderText(), "搜索")
+        self.assertEqual(title_bar.search_input.placeholderText(), "搜索歌曲、歌手或专辑")
+        self.assertTrue(title_bar.search_input.isClearButtonEnabled())
+        self.assertEqual(title_bar.search_input.accessibleName(), "全局搜索")
         self.assertEqual(
             {button.toolTip() for button in (
                 title_bar.back_button, title_bar.forward_button, title_bar.settings_button,

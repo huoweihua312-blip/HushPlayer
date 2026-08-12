@@ -183,10 +183,11 @@ class BrowsePage(QWidget):
 
         self.scroll_area = QScrollArea(self)
         self.scroll_area.setObjectName("browseScrollArea")
+        self.scroll_area.setAccessibleName("浏览内容")
         self.scroll_area.setWidgetResizable(True)
         self.scroll_area.setFrameShape(QFrame.Shape.NoFrame)
         self.scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        self.scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         self.content = QWidget(self.scroll_area)
         self.content.setObjectName("browseContent")
         self.content_layout = QVBoxLayout(self.content)
@@ -252,6 +253,10 @@ class BrowsePage(QWidget):
         self.setStyleSheet(
             f"QWidget#browsePage, QScrollArea#browseScrollArea, QWidget#browseContent {{ background: {c.app_background}; }}"
             f"QLabel#browsePageTitle {{ color: {c.text_primary}; font-size: {theme.fonts.page_title}px; font-weight: 700; }}"
+            f"QScrollArea#browseScrollArea QScrollBar:vertical {{ background: transparent; width: 10px; margin: 4px 2px 4px 0; }}"
+            f"QScrollArea#browseScrollArea QScrollBar::handle:vertical {{ background: {c.text_tertiary}; min-height: 36px; border-radius: 5px; }}"
+            f"QScrollArea#browseScrollArea QScrollBar::handle:vertical:hover {{ background: {c.text_secondary}; }}"
+            f"QScrollArea#browseScrollArea QScrollBar::add-line:vertical, QScrollArea#browseScrollArea QScrollBar::sub-line:vertical, QScrollArea#browseScrollArea QScrollBar::add-page:vertical, QScrollArea#browseScrollArea QScrollBar::sub-page:vertical {{ height: 0; background: transparent; }}"
         )
         for section in self.sections.values():
             section.set_theme(theme)

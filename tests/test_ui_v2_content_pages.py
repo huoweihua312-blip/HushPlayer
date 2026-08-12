@@ -81,6 +81,15 @@ class UiV2ContentPageTests(unittest.TestCase):
         self.assertEqual(table.verticalHeader().defaultSectionSize(), 48)
         self.assertEqual(model, table.model)
 
+    def test_browse_scroll_region_is_named_and_reveals_overflow(self) -> None:
+        page = self.window.router.page_for_route("browse")
+        self.app.processEvents()
+        self.assertEqual(page.scroll_area.accessibleName(), "浏览内容")
+        self.assertEqual(
+            page.scroll_area.verticalScrollBarPolicy(),
+            Qt.ScrollBarPolicy.ScrollBarAsNeeded,
+        )
+
     def test_track_table_uses_status_favorite_more_columns_and_neutral_playing_state(self) -> None:
         table = self.window.library_page.track_table
         self.assertEqual(table.model.headerData(0, Qt.Orientation.Horizontal), "#")

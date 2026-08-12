@@ -36,6 +36,8 @@ class NavigationItem(QToolButton):
         self._custom_icon: QIcon | None = None
         self.setText(item.title)
         self.setToolTip(item.title)
+        self.setAccessibleName(item.title)
+        self.setAccessibleDescription(f"打开{item.title}")
         self.setEnabled(True)
         self.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
         self.setIconSize(QSize(16, 16))
@@ -99,6 +101,8 @@ class NavigationItem(QToolButton):
 
     def _refresh_visuals(self) -> None:
         c = self._theme.colors
+        self.setAccessibleName(self._full_title)
+        self.setAccessibleDescription(f"打开{self._full_title}")
         icon_state = "selected" if self._selected else "normal"
         if self._custom_icon is not None:
             self.setIcon(self._custom_icon)

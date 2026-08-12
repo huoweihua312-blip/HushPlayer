@@ -659,6 +659,7 @@ class MainWindow(QMainWindow):
             self.set_immersive_transparency
         )
         self.navigation_adapter.route_changed.connect(self._sync_immersive_shell)
+        self.navigation_adapter.route_changed.connect(self._sync_search_context)
         self.playback_adapter.track_changed.connect(self._on_playback_track_changed)
         self.playback_adapter.playing_changed.connect(self.router.set_playback_state)
         self.playback_adapter.playback_status_changed.connect(
@@ -706,6 +707,7 @@ class MainWindow(QMainWindow):
         self.library_collection.favorite_changed.connect(self._sync_favorite_from_library)
         self.playback_adapter.favorite_changed.connect(self._sync_favorite_from_player)
         self._sync_immersive_shell(self.navigation_adapter.route)
+        self._sync_search_context(self.navigation_adapter.route)
 
     def _submit_global_query(self, text: str) -> None:
         """Submit the shell query through the one online-search route."""
@@ -717,6 +719,11 @@ class MainWindow(QMainWindow):
             self.navigation_adapter.set_route("online_search")
         self.router.set_global_query(query)
         self.online_adapter.search()
+
+    def _sync_search_context(self, route_id: str) -> None:
+        """Keep the one shell search field clear about its current scope."""
+
+        self.title_bar.set_search_context(route_id)
 
     def open_settings_overlay(self) -> None:
         """Show the one cached Settings surface without changing the route."""
