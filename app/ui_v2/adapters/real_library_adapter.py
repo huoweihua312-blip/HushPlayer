@@ -271,6 +271,8 @@ class RealLibraryAdapter(QObject):
         for stable_id, record in remote_tracks.items():
             if not isinstance(record, dict) or not str(stable_id or ""):
                 continue
+            if str(record.get("replaced_by") or "").strip():
+                continue
             track_id = str(stable_id)
             if track_id in tracks_by_id:
                 continue

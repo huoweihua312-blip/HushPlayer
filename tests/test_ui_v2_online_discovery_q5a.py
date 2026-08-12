@@ -19,6 +19,7 @@ from app.services.remote_track_store import RemoteTrackStore
 from app.ui_v2.adapters.library_collection import LibraryCollectionAdapter
 from app.ui_v2.adapters.online_adapter import OnlineAdapter
 from app.ui_v2.adapters.playlist_adapter import PlaylistAdapter
+from app.ui_v2.adapters.real_library_adapter import RealLibraryAdapter
 
 
 class FakeSourceClient(QObject):
@@ -389,6 +390,57 @@ class OnlineDiscoveryQ5ATests(unittest.TestCase):
                 [stable_id],
             )
             self.assertIn(stable_id, remote_store.load_tracks())
+
+    def test_formal_bridge_replaces_library_only_remote_record(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            playlists_path = root / "playlists.json"
+            playlists_path.write_text(
+                json.dumps(
+                    {"liked": {"name": "我喜欢", "songs": [], "remoteSongs": [], "fixed": True}},
+                    ensure_ascii=False,
+                ),
+                encoding="utf-8",
+            )
+            repository = LibraryRepository(
+                root / "library.json",
+                playlists_path,
+                root / "stats.json",
+            )
+            remote_store = RemoteTrackStore(root / "remote_tracks.json")
+            old_payload = {
+                "source_id": "old-source",
+                "remote_id": "old-remote-id",
+                "title": "了了 (Live)",
+                "artist": "翁杰Winjay&加木",
+                "album": "说唱巅峰对决2026",
+                "duration": 235_000,
+            }
+            old_id, old_record = RemoteTrackStore.build_record(old_payload)
+            remote_store.save_tracks({old_id: old_record})
+            replacement = {
+                "source_id": "new-source",
+                "remote_id": "new-remote-id",
+                "title": old_payload["title"],
+                "artist": old_payload["artist"],
+                "album": old_payload["album"],
+                "duration": old_payload["duration"],
+            }
+            new_id = RemoteTrackStore.stable_id_for_track(replacement)
+            bridge = OnlineDiscoveryBridge(repository, remote_store)
+
+            result = bridge.replace_track_memberships(("remote", old_id), replacement)
+
+            self.assertEqual(result, OnlineDiscoveryBridge.REPLACED)
+            stored = remote_store.load_tracks()
+            self.assertEqual(stored[old_id]["replaced_by"], new_id)
+            self.assertIn(new_id, stored)
+            projected = RealLibraryAdapter.map_snapshot(
+                repository.load_snapshot(),
+                stored,
+            )
+            self.assertNotIn(old_id, projected.tracks_by_id)
+            self.assertIn(new_id, projected.tracks_by_id)
 
     def test_rapid_query_generation_replacement_100_cycles(self) -> None:
         previous_generation = 0

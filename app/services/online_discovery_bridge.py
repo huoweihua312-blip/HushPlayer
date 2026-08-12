@@ -114,21 +114,39 @@ class OnlineDiscoveryBridge(QObject):
         if records.load_error:
             return self.FAILED
         playlists = deepcopy(records.playlists)
-        if not any(
+        has_membership = any(
             self._playlist_has_member(playlist, old_key)
             for playlist in playlists.values()
             if isinstance(playlist, dict)
-        ):
+        )
+        remote_tracks_before = self.remote_tracks.load_tracks()
+        has_remote_record = (
+            old_key[0] == PlaylistMembership.REMOTE
+            and old_key[1] in remote_tracks_before
+        )
+        if not has_membership and not has_remote_record:
             return self.NOT_FOUND
 
         try:
             stable_id, _record = self.persist_track(replacement_track)
             new_key = (PlaylistMembership.REMOTE, stable_id)
+            if old_key[0] == PlaylistMembership.REMOTE and old_key[1] != stable_id:
+                remote_tracks_after = self.remote_tracks.load_tracks()
+                old_record = dict(remote_tracks_after.get(old_key[1], {}))
+                if old_record:
+                    old_record["replaced_by"] = stable_id
+                    old_record["replaced_at"] = int(time.time())
+                    remote_tracks_after[old_key[1]] = old_record
+                    self.remote_tracks.save_tracks(remote_tracks_after)
             for playlist in playlists.values():
                 if isinstance(playlist, dict):
                     self._replace_playlist_member(playlist, old_key, new_key)
             self._save_playlists(playlists)
         except Exception as error:
+            try:
+                self.remote_tracks.save_tracks(remote_tracks_before)
+            except Exception:
+                pass
             self.action_failed.emit("replace", str(error))
             return self.FAILED
         self.action_succeeded.emit("replace", "已将失效歌曲替换为在线版本。")
