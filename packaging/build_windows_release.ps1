@@ -82,13 +82,21 @@ Write-Host "NodeSigner=$NodeSigner"
 Write-Host "NodeArchive=$($NodeRuntime.ArchiveUrl)"
 Write-Host "NodeArchiveSha256=$($NodeRuntime.ArchiveSha256)"
 
-function Remove-ProjectOutputDirectory([string]$Name) {
-    if ($Name -notin @("build", "dist")) {
-        throw "Refusing to remove unexpected output directory: $Name"
+function Remove-ProjectGeneratedDirectory([string]$RelativePath) {
+    $AllowedPaths = @(
+        "build\pyinstaller",
+        "build\pyinstaller-updater",
+        "build\updater-dist",
+        "build\version",
+        "build\release-manifest",
+        "dist\HushPlayer"
+    )
+    if ($RelativePath -notin $AllowedPaths) {
+        throw "Refusing to remove unexpected generated directory: $RelativePath"
     }
-    $Target = [System.IO.Path]::GetFullPath((Join-Path $ProjectRoot $Name))
-    $Parent = [System.IO.Path]::GetFullPath((Split-Path -Parent $Target))
-    if ($Parent.TrimEnd("\") -ne $ProjectRoot.TrimEnd("\")) {
+    $Target = [System.IO.Path]::GetFullPath((Join-Path $ProjectRoot $RelativePath))
+    $ProjectRootPrefix = $ProjectRoot.TrimEnd("\") + "\"
+    if (-not $Target.StartsWith($ProjectRootPrefix, [System.StringComparison]::OrdinalIgnoreCase)) {
         throw "Refusing to remove path outside project root: $Target"
     }
     if (Test-Path -LiteralPath $Target) {
@@ -96,8 +104,16 @@ function Remove-ProjectOutputDirectory([string]$Name) {
     }
 }
 
-Remove-ProjectOutputDirectory "build"
-Remove-ProjectOutputDirectory "dist"
+foreach ($GeneratedDirectory in @(
+    "build\pyinstaller",
+    "build\pyinstaller-updater",
+    "build\updater-dist",
+    "build\version",
+    "build\release-manifest",
+    "dist\HushPlayer"
+)) {
+    Remove-ProjectGeneratedDirectory $GeneratedDirectory
+}
 
 $VersionOutputDir = Join-Path $ProjectRoot "build\version"
 $VersionJson = @(& $Python $VersionMetadataHelper --output-dir $VersionOutputDir)

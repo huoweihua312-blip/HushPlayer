@@ -106,6 +106,28 @@ def check_sources() -> None:
     assert "build\\release-manifest\\win-x64.json" in installer_build_source
     assert "--write" not in release_source
     assert "--write" not in installer_build_source
+    assert 'Remove-ProjectOutputDirectory "build"' not in release_source
+    assert 'Remove-ProjectOutputDirectory "dist"' not in release_source
+    assert 'Remove-ProjectOutputDirectory "build"' not in (
+        PROJECT_ROOT / "packaging" / "build_windows_debug.ps1"
+    ).read_text(encoding="utf-8")
+    assert 'Remove-ProjectOutputDirectory "dist"' not in (
+        PROJECT_ROOT / "packaging" / "build_windows_debug.ps1"
+    ).read_text(encoding="utf-8")
+    for generated_path in (
+        '"build\\pyinstaller"',
+        '"build\\version"',
+        '"dist\\HushPlayer"',
+    ):
+        assert generated_path in release_source
+        assert generated_path in (
+            PROJECT_ROOT / "packaging" / "build_windows_debug.ps1"
+        ).read_text(encoding="utf-8")
+    assert '"build\\release-manifest"' in release_source
+    assert '"build\\install-' not in release_source
+    assert '"build\\install-' not in (
+        PROJECT_ROOT / "packaging" / "build_windows_debug.ps1"
+    ).read_text(encoding="utf-8")
 
     installer_source = (
         PROJECT_ROOT / "packaging" / "installer" / "HushPlayer.iss"

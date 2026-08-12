@@ -778,6 +778,7 @@ def manifest_source_fallback_checks(
 
 def service_checks(root: Path, server: FixtureServer, setup: bytes) -> None:
     update_dir = root / "updates"
+    running_install_dir = root / "running-install"
     user_sentinel = root / "user-data-do-not-touch.json"
     user_sentinel.write_text('{"preserved": true}', encoding="utf-8")
     launcher_ok = [False]
@@ -792,6 +793,7 @@ def service_checks(root: Path, server: FixtureServer, setup: bytes) -> None:
         updates_dir=update_dir,
         allow_insecure_localhost=True,
         installer_launcher=launcher,
+        application_dir=running_install_dir,
     )
     available: list[tuple[UpdateManifest, bool]] = []
     no_updates: list[bool] = []
@@ -941,7 +943,11 @@ def service_checks(root: Path, server: FixtureServer, setup: bytes) -> None:
     }
     expected_playback_state = dict(fake_playback_state)
     assert not service.launch_verified_installer()
-    assert launcher_calls and launcher_calls[-1][1] == list(service.INSTALLER_ARGUMENTS)
+    expected_installer_arguments = list(service.INSTALLER_ARGUMENTS)
+    expected_installer_arguments.append(
+        f'/DIR="{running_install_dir.resolve()}"'
+    )
+    assert launcher_calls and launcher_calls[-1][1] == expected_installer_arguments
     assert not launched
     assert exit_probe.close_count == 0
     assert fake_playback_state == expected_playback_state

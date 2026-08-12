@@ -1264,9 +1264,21 @@ class AppUpdateService(QObject):
             self.installerLaunchFailed.emit(str(error))
             return False
         try:
+            installer_arguments = list(self.INSTALLER_ARGUMENTS)
+            # An older packaged build may not contain the in-app updater and
+            # therefore has to fall back to Inno Setup.  Inno Setup normally
+            # reuses the last AppId directory from the registry, which can be
+            # a stale test installation.  Pin the fallback installer to the
+            # directory of the running packaged application instead.
+            if (
+                getattr(sys, "frozen", False)
+                or self._application_dir_override is not None
+            ):
+                install_dir = self._application_install_dir()
+                installer_arguments.append(f'/DIR="{install_dir}"')
             result = self._installer_launcher(
                 str(path),
-                list(self.INSTALLER_ARGUMENTS),
+                installer_arguments,
             )
             started = bool(result[0]) if isinstance(result, tuple) else bool(result)
         except Exception as error:
