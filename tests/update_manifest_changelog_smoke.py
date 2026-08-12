@@ -167,6 +167,13 @@ def main() -> None:
         previous_document = dict(current_document)
         previous_document["version"] = previous_version
         previous_document["numeric_version"] = previous_numeric_version
+        for field in (
+            "package_url",
+            "package_size",
+            "package_sha256",
+            "package_filename",
+        ):
+            previous_document.pop(field, None)
         previous_document = helper.synchronize_manifest_document(
             previous_document,
             current_releases,
@@ -181,6 +188,13 @@ def main() -> None:
         stale_document = dict(current_document)
         stale_document["version"] = stale_version
         stale_document["numeric_version"] = stale_numeric_version
+        for field in (
+            "package_url",
+            "package_size",
+            "package_sha256",
+            "package_filename",
+        ):
+            stale_document.pop(field, None)
         stale_document = helper.synchronize_manifest_document(
             stale_document,
             current_releases,
@@ -205,6 +219,13 @@ def main() -> None:
         stale_document = dict(current_document)
         stale_document["version"] = "0.5.0-beta.6"
         stale_document["numeric_version"] = "0.5.0.6"
+        for field in (
+            "package_url",
+            "package_size",
+            "package_sha256",
+            "package_filename",
+        ):
+            stale_document.pop(field, None)
         stale_document = helper.synchronize_manifest_document(
             stale_document,
             current_releases,
@@ -229,6 +250,13 @@ def main() -> None:
         future_document = dict(current_document)
         future_document["version"] = future_version
         future_document["numeric_version"] = future_numeric_version
+        for field in (
+            "package_url",
+            "package_size",
+            "package_sha256",
+            "package_filename",
+        ):
+            future_document.pop(field, None)
         future_document = helper.synchronize_manifest_document(
             future_document,
             future_releases,
@@ -250,6 +278,13 @@ def main() -> None:
 
     wrong_architecture = dict(current_document)
     wrong_architecture["architecture"] = "win-arm64"
+    for field in (
+        "package_url",
+        "package_size",
+        "package_sha256",
+        "package_filename",
+    ):
+        wrong_architecture.pop(field, None)
     assert_validation_rejected(
         lambda: helper.validate_prebuild_manifest(
             wrong_architecture,
