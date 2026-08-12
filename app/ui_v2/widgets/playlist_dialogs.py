@@ -13,6 +13,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from app.ui_v2.theme.styles import build_dialog_stylesheet
 from app.ui_v2.theme.tokens import Theme
 
 
@@ -81,7 +82,8 @@ class PlaylistNameDialog(QDialog):
         c = theme.colors
         m = theme.metrics
         self.setStyleSheet(
-            f"QDialog#playlistNameDialog {{ background: {c.surface_elevated}; border: 1px solid {c.border_strong}; border-radius: {m.radius_lg}px; }}"
+            build_dialog_stylesheet(theme)
+            + f"QDialog#playlistNameDialog {{ background: {c.surface_elevated}; border: 1px solid {c.border_strong}; border-radius: {m.radius_lg}px; }}"
             f"QLabel#playlistDialogTitle {{ color: {c.primary_text}; font-size: {theme.fonts.section_title}px; font-weight: 600; }}"
             f"QLineEdit#playlistNameInput {{ min-height: {m.control_height}px; padding: 0 {m.spacing_md}px; border: 1px solid {c.border}; border-radius: {m.radius_sm}px; background: {c.input_background}; color: {c.primary_text}; selection-background-color: {c.selected_background}; }}"
             f"QLineEdit#playlistNameInput:focus {{ border: 1px solid {c.accent}; }}"
@@ -159,7 +161,8 @@ class PlaylistConfirmDialog(QDialog):
         c = theme.colors
         m = theme.metrics
         self.setStyleSheet(
-            f"QDialog#playlistConfirmDialog {{ background: {c.surface_elevated}; border: 1px solid {c.border_strong}; border-radius: {m.radius_lg}px; }}"
+            build_dialog_stylesheet(theme)
+            + f"QDialog#playlistConfirmDialog {{ background: {c.surface_elevated}; border: 1px solid {c.border_strong}; border-radius: {m.radius_lg}px; }}"
             f"QLabel#playlistDialogTitle {{ color: {c.primary_text}; font-size: {theme.fonts.section_title}px; font-weight: 600; }}"
             f"QLabel#playlistDialogMessage {{ color: {c.secondary_text}; font-size: {theme.fonts.body}px; }}"
         )

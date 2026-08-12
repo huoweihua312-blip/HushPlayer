@@ -314,6 +314,9 @@ class MainWindow(QMainWindow):
             self.library_page.empty_state.action_requested.connect(
                 self.real_library_adapter.refresh
             )
+            # RealLibraryAdapter already performs the projection on its worker
+            # thread. Start it here so existing startup/load-state contracts
+            # remain immediate while disk work stays off the UI thread.
             self.real_library_adapter.load()
             self.online_adapter.remote_collection_changed.connect(
                 self.real_library_adapter.refresh
@@ -386,7 +389,10 @@ class MainWindow(QMainWindow):
 
     def resizeEvent(self, event) -> None:  # noqa: N802
         super().resizeEvent(event)
-        compact = self.width() <= 960
+        # The centered transport rail needs its compact width before the
+        # window becomes visibly crowded. Keep the favorite action and
+        # utility controls inside their own regions at common 1024px widths.
+        compact = self.width() <= 1080
         self.sidebar.set_compact(compact)
         self.player_bar.set_compact(compact)
         self.title_bar.set_compact(compact)

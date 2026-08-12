@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
+    QApplication,
     QDialog,
     QFrame,
     QHBoxLayout,
@@ -22,6 +23,8 @@ from app.services.app_update_service import (
     select_update_release_notes,
 )
 from app.ui.design_system import UI_SPACING
+from app.ui_v2.theme.styles import build_dialog_stylesheet
+from app.ui_v2.theme.tokens import get_theme
 
 
 class UpdateDialog(QDialog):
@@ -38,6 +41,10 @@ class UpdateDialog(QDialog):
         self.setObjectName("updateDialog")
         self.setMinimumSize(560, 430)
         self.setModal(True)
+        app = QApplication.instance()
+        if app is not None and app.property("hushUiFlavor") == "ui-v2":
+            theme_mode = str(app.property("hushUiV2ThemeMode") or "dark")
+            self.setStyleSheet(build_dialog_stylesheet(get_theme(theme_mode)))
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(24, 20, 24, 20)
@@ -114,6 +121,8 @@ class UpdateDialog(QDialog):
             "下载应用内更新" if manifest.has_in_app_package else "下载安装包"
         )
         self.download_button.setObjectName("settingsPrimaryButton")
+        self.download_button.setProperty("role", "primary")
+        self.download_button.setAccessibleName("下载更新")
         self.download_button.clicked.connect(self.start_download)
         self.cancel_button = QPushButton("取消下载")
         self.cancel_button.setObjectName("settingsSecondaryButton")
@@ -123,6 +132,8 @@ class UpdateDialog(QDialog):
             "立即更新" if manifest.has_in_app_package else "立即安装"
         )
         self.install_button.setObjectName("settingsPrimaryButton")
+        self.install_button.setProperty("role", "primary")
+        self.install_button.setAccessibleName("立即更新" if manifest.has_in_app_package else "立即安装")
         self.install_button.setEnabled(False)
         self.install_button.clicked.connect(self.install_now)
         close_button = QPushButton("稍后")

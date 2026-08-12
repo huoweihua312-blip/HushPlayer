@@ -288,6 +288,23 @@ class OnlineSearchPageTests(unittest.TestCase):
         self.assertEqual(page.result_toolbar.sort_selector.width(), 104)
         self.assertFalse(page.result_table.horizontalScrollBar().isVisible())
 
+    def test_results_promote_table_and_keep_source_controls_in_toolbar(self) -> None:
+        page = self._search_page()
+        self._complete_search(page, "Paper Moon")
+        self.assertTrue(page.result_table.isVisible())
+        self.assertFalse(page.detail_label.isVisible())
+        self.assertFalse(page.scope_label.isVisible())
+        self.assertFalse(page.source_summary_label.isVisible())
+        self.assertTrue(page.result_toolbar.isVisible())
+        self.assertTrue(page.result_toolbar.source_filter.isVisible())
+        self.assertTrue(page.result_toolbar.sort_selector.isVisible())
+        self.assertGreaterEqual(page.result_table.minimumHeight(), 220)
+
+        self.window.online_adapter.load_mock_scenario("empty")
+        self._complete_search(page, "没有结果")
+        self.assertFalse(page.result_table.isVisible())
+        self.assertTrue(page.detail_label.isVisible())
+
     def test_recommended_query_and_return_to_history(self) -> None:
         page = self._search_page()
         self.assertFalse(hasattr(page, "recommendation_buttons"))

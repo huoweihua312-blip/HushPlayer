@@ -14,6 +14,7 @@ from PySide6.QtWidgets import (
 )
 
 from app.services.online_source_importer import OnlineSourceImporter
+from app.ui_v2.theme.styles import build_dialog_stylesheet
 from app.ui_v2.theme.tokens import Theme
 from app.ui_v2.widgets.settings_control_factory import SettingsControlFactory, SettingsToggle
 
@@ -105,7 +106,8 @@ class SourceImportDialog(QDialog):
         c = theme.colors
         m = theme.metrics
         self.setStyleSheet(
-            f"QDialog#sourceImportDialog {{ background: {c.surface_elevated}; border: 1px solid {c.border_strong}; border-radius: {m.radius_lg}px; }}"
+            build_dialog_stylesheet(theme)
+            + f"QDialog#sourceImportDialog {{ background: {c.surface_elevated}; border: 1px solid {c.border_strong}; border-radius: {m.radius_lg}px; }}"
             f"QLabel {{ color: {c.primary_text}; }}"
             f"QPlainTextEdit#sourceImportUrls {{ min-height: 112px; padding: 10px; border: 1px solid {c.border}; border-radius: {m.radius_sm}px; background: {c.input_background}; color: {c.primary_text}; }}"
             f"QPlainTextEdit#sourceImportUrls:focus {{ border-color: {c.focus_ring}; }}"
@@ -222,7 +224,8 @@ class SourceRemoveConfirmDialog(QDialog):
         self._theme = theme
         c = theme.colors
         self.setStyleSheet(
-            f"QDialog#sourceRemoveConfirmDialog {{ background: {c.surface_elevated}; border: 1px solid {c.border_strong}; border-radius: {theme.metrics.radius_lg}px; }}"
+            build_dialog_stylesheet(theme)
+            + f"QDialog#sourceRemoveConfirmDialog {{ background: {c.surface_elevated}; border: 1px solid {c.border_strong}; border-radius: {theme.metrics.radius_lg}px; }}"
             f"QLabel#sourceRemoveTitle {{ color: {c.primary_text}; font-size: {theme.fonts.section_title}px; font-weight: 600; }}"
             f"QLabel {{ color: {c.secondary_text}; font-size: {theme.fonts.body}px; }}"
         )

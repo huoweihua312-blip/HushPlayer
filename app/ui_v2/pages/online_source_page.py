@@ -28,12 +28,15 @@ class SourceRow(QFrame):
         self.error_label = QLabel(self)
         self.badge = SourceStatusBadge(theme, self)
         self.enabled_button = QToolButton(self)
+        self.enabled_button.setAccessibleName("切换来源状态")
         self.enabled_button.clicked.connect(self._toggle)
         self.retry_button = QToolButton(self)
         self.retry_button.setText("重试")
+        self.retry_button.setAccessibleName("重试在线来源")
         self.retry_button.clicked.connect(self.retry_requested)
         self.remove_button = QToolButton(self)
         self.remove_button.setText("移除")
+        self.remove_button.setAccessibleName("移除在线来源")
         self.remove_button.clicked.connect(lambda: self.remove_requested.emit(self.source_id))
         text = QVBoxLayout()
         text.setContentsMargins(0, 0, 0, 0)
@@ -65,6 +68,11 @@ class SourceRow(QFrame):
         self.error_label.setVisible(bool(source.last_error))
         self.badge.set_source(source)
         self.enabled_button.setText("禁用" if source.enabled else "启用")
+        self.enabled_button.setToolTip(
+            f"禁用 {source.name}，不会删除来源"
+            if source.enabled
+            else f"启用 {source.name}"
+        )
         self.enabled_button.setEnabled(source.status != "searching")
         self.retry_button.setVisible(source.status in {"failed", "warning"})
 
@@ -102,6 +110,7 @@ class OnlineSourcePage(QWidget):
         self.detail_label = QLabel("查看已注册在线来源的能力与当前状态。", self)
         self.back_button = QToolButton(self)
         self.back_button.setText("返回搜索")
+        self.back_button.setAccessibleName("返回在线搜索")
         self.back_button.clicked.connect(self.back_requested)
         self.add_source_button = QToolButton(self)
         self.add_source_button.setText("添加来源")
@@ -112,9 +121,11 @@ class OnlineSourcePage(QWidget):
         self.add_source_button.clicked.connect(self._open_import_dialog)
         self.select_all_button = QToolButton(self)
         self.select_all_button.setText("全选")
+        self.select_all_button.setAccessibleName("启用全部在线来源")
         self.select_all_button.clicked.connect(adapter.select_all)
         self.clear_button = QToolButton(self)
         self.clear_button.setText("清空")
+        self.clear_button.setAccessibleName("停用全部在线来源")
         self.clear_button.clicked.connect(adapter.clear_selection)
         header = QHBoxLayout()
         header.setContentsMargins(0, 0, 0, 0)
@@ -186,10 +197,16 @@ class OnlineSourcePage(QWidget):
             self.select_all_button,
             self.clear_button,
         ):
+            primary = button is self.add_source_button
             button.setStyleSheet(
                 f"QToolButton {{ min-height: {theme.metrics.control_height}px; padding: 0 {theme.metrics.spacing_sm}px; "
-                f"border: 0; border-radius: {theme.metrics.radius_sm}px; color: {theme.colors.secondary_text}; }}"
-                f"QToolButton:hover {{ color: {theme.colors.primary_text}; background: {theme.colors.hover_background}; }}"
+                f"border: 1px solid {'transparent' if primary else theme.colors.border}; border-radius: {theme.metrics.radius_sm}px; "
+                f"background: {theme.colors.accent if primary else theme.colors.surface_secondary}; "
+                f"color: {theme.colors.content_background if primary else theme.colors.secondary_text}; "
+                f"font-weight: {'600' if primary else '400'}; }}"
+                f"QToolButton:hover {{ color: {theme.colors.content_background if primary else theme.colors.primary_text}; "
+                f"background: {theme.colors.accent_hover if primary else theme.colors.hover_background}; }}"
+                f"QToolButton:disabled {{ color: {theme.colors.disabled_text}; background: {theme.colors.surface_pressed}; }}"
             )
         for row in self._rows.values():
             row.set_theme(theme)

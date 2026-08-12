@@ -337,6 +337,16 @@ class ApprovedShellMigrationTests(unittest.TestCase):
         )))
         self.assertFalse(bar.more_button.isVisible())
 
+    def test_player_bar_enters_compact_mode_before_1024px_layout_is_crowded(self) -> None:
+        self.window.resize(1024, 700)
+        self.app.processEvents()
+        bar = self.window.player_bar
+        self.assertTrue(bar.compact)
+        self.assertTrue(bar.favorite_button.isVisible())
+        self.assertLessEqual(
+            bar.favorite_button.geometry().right(), bar.transport_row.width()
+        )
+
     def test_playerbar_uses_only_the_fixed_local_fluent_manifest(self) -> None:
         manifest_path = PROJECT_ROOT / "app" / "ui_v2" / "assets" / "icons" / "fluent_player" / "MANIFEST.json"
         manifest = json.loads(manifest_path.read_text(encoding="utf-8"))

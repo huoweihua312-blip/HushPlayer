@@ -152,3 +152,150 @@ def build_stylesheet(theme: Theme) -> str:
         QScrollBar::handle:horizontal:hover {{ background: {c.text_tertiary}; }}
         QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {{ width: 0; }}
     """
+
+
+def build_dialog_stylesheet(theme: Theme) -> str:
+    """Return the complete themed control surface used by V2 dialogs.
+
+    Page styling intentionally stays lightweight, but a modal dialog must not
+    fall back to the native palette for its buttons and list rows.  Keeping
+    this sheet separate lets small custom dialog rules extend it without
+    accidentally changing normal page controls.
+    """
+
+    c = theme.colors
+    m = theme.metrics
+    return f"""
+        QDialog {{
+            background: {c.surface_elevated};
+            color: {c.primary_text};
+            font-family: {font_family_qss()};
+        }}
+        QDialog QLabel {{ color: {c.primary_text}; background: transparent; }}
+        QDialog QLabel#settingsDialogTitle {{
+            color: {c.primary_text};
+            font-size: {theme.fonts.page_title}px;
+            font-weight: 600;
+        }}
+        QDialog QLabel#settingsDialogSubtitle {{
+            color: {c.secondary_text};
+            font-size: {theme.fonts.secondary}px;
+        }}
+        QDialog QLabel#settingsCardTitle {{
+            color: {c.primary_text};
+            font-size: {theme.fonts.section_title}px;
+            font-weight: 600;
+        }}
+        QDialog QLabel#settingsHint {{
+            color: {c.secondary_text};
+            font-size: {theme.fonts.secondary}px;
+        }}
+        QDialog QFrame#settingsCard {{
+            background: {c.surface_secondary};
+            border: 1px solid {c.border};
+            border-radius: {m.radius_md}px;
+        }}
+        QDialog QLineEdit, QDialog QPlainTextEdit {{
+            min-height: {m.control_height}px;
+            padding: 0 {m.spacing_sm}px;
+            border: 1px solid {c.border};
+            border-radius: {m.radius_sm}px;
+            background: {c.input_background};
+            color: {c.primary_text};
+            selection-background-color: {c.accent};
+            selection-color: {c.content_background};
+        }}
+        QDialog QLineEdit:focus, QDialog QPlainTextEdit:focus {{
+            border-color: {c.focus_ring};
+        }}
+        QDialog QLineEdit:disabled, QDialog QPlainTextEdit:disabled {{
+            background: {c.surface_pressed};
+            color: {c.disabled_text};
+            border-color: {c.border};
+        }}
+        QDialog QListWidget {{
+            padding: {m.spacing_xs}px;
+            border: 1px solid {c.border};
+            border-radius: {m.radius_sm}px;
+            background: {c.input_background};
+            color: {c.primary_text};
+            outline: 0;
+            selection-background-color: {c.selected_background};
+            selection-color: {c.primary_text};
+        }}
+        QDialog QListWidget::item {{
+            min-height: 52px;
+            padding: {m.spacing_sm}px {m.spacing_md}px;
+            border-radius: {m.radius_sm}px;
+            color: {c.primary_text};
+        }}
+        QDialog QListWidget::item:hover {{ background: {c.hover_background}; }}
+        QDialog QListWidget::item:selected {{
+            background: {c.selected_background};
+            color: {c.primary_text};
+        }}
+        QDialog QPushButton, QDialog QToolButton {{
+            min-height: {m.control_height}px;
+            min-width: 80px;
+            padding: 0 {m.spacing_md}px;
+            border: 1px solid {c.border};
+            border-radius: {m.radius_sm}px;
+            background: {c.surface_secondary};
+            color: {c.primary_text};
+        }}
+        QDialog QPushButton:hover, QDialog QToolButton:hover {{
+            background: {c.hover_background};
+            border-color: {c.border_strong};
+        }}
+        QDialog QPushButton:pressed, QDialog QToolButton:pressed {{
+            background: {c.surface_pressed};
+        }}
+        QDialog QPushButton:focus, QDialog QToolButton:focus {{
+            border-color: {c.focus_ring};
+        }}
+        QDialog QPushButton:disabled, QDialog QToolButton:disabled {{
+            background: {c.surface_pressed};
+            color: {c.disabled_text};
+            border-color: {c.border};
+        }}
+        QDialog QPushButton[role="primary"], QDialog QToolButton[role="primary"] {{
+            border-color: transparent;
+            background: {c.accent};
+            color: {c.content_background};
+            font-weight: 600;
+        }}
+        QDialog QPushButton[role="primary"]:hover, QDialog QToolButton[role="primary"]:hover {{
+            background: {c.accent_hover};
+            color: {c.content_background};
+        }}
+        QDialog QPushButton[role="primary"]:disabled, QDialog QToolButton[role="primary"]:disabled {{
+            background: {c.surface_pressed};
+            color: {c.disabled_text};
+        }}
+        QDialog QProgressBar {{
+            min-height: 16px;
+            max-height: 16px;
+            border: 0;
+            border-radius: 8px;
+            background: {c.progress_track};
+            color: {c.primary_text};
+            text-align: center;
+        }}
+        QDialog QProgressBar::chunk {{
+            border-radius: 8px;
+            background: {c.accent};
+        }}
+        QDialog QScrollBar:vertical {{
+            width: 8px;
+            border: 0;
+            background: transparent;
+            margin: 4px 2px;
+        }}
+        QDialog QScrollBar::handle:vertical {{
+            min-height: 28px;
+            border-radius: 4px;
+            background: {c.border_strong};
+        }}
+        QDialog QScrollBar::handle:vertical:hover {{ background: {c.text_tertiary}; }}
+        QDialog QScrollBar::add-line:vertical, QDialog QScrollBar::sub-line:vertical {{ height: 0; }}
+    """

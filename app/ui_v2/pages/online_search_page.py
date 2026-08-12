@@ -33,6 +33,7 @@ class OnlineSearchPage(QWidget):
         super().__init__(parent)
         self.adapter = adapter
         self._theme = theme
+        self._responsive_width: int | None = None
         self.setObjectName("onlineSearchPage")
         self.title_label = QLabel("在线搜索", self)
         self.detail_label = QLabel("从已启用的在线来源聚合结果。", self)
@@ -69,6 +70,7 @@ class OnlineSearchPage(QWidget):
         layout.addWidget(self.history_view)
         layout.addWidget(self.state_view, 1)
         layout.addWidget(self.result_table, 1)
+        self.result_table.setMinimumHeight(220)
         self.search_bar.query_changed.connect(adapter.set_query)
         self.search_bar.search_requested.connect(self._search)
         self.history_view.query_requested.connect(self._search_history)
@@ -119,14 +121,13 @@ class OnlineSearchPage(QWidget):
         self.state_view.set_theme(theme)
 
     def set_responsive_reference_width(self, width: int) -> None:
+        self._responsive_width = max(1, int(width))
         narrow = width < 950
-        self.detail_label.setVisible(not narrow)
-        self.source_summary_label.setVisible(not narrow)
-        self.scope_label.setVisible(not narrow)
         self.source_selector.set_compact(narrow)
         self.result_table.set_responsive_reference_width(width)
         self.result_toolbar.set_compact(narrow)
         self.result_toolbar.sources_button.setText("来源" if narrow else "来源状态")
+        self._sync_header_visibility()
 
     def _search(self) -> None:
         self.adapter.search()
@@ -145,6 +146,18 @@ class OnlineSearchPage(QWidget):
         self.state_view.set_state(state)
         self.result_toolbar.set_summary(len(self.adapter.results()), state.message)
         self._sync_query_context()
+        self._sync_header_visibility(has_results)
+
+    def _sync_header_visibility(self, has_results: bool | None = None) -> None:
+        """Give the result table priority once a search has completed."""
+
+        if has_results is None:
+            has_results = bool(self.adapter.results()) and self.adapter.state.phase == "results"
+        narrow = (self._responsive_width or 1200) < 950
+        show_context = not bool(has_results)
+        self.detail_label.setVisible(show_context and not narrow)
+        self.scope_label.setVisible(show_context and not narrow)
+        self.source_summary_label.setVisible(show_context and not narrow)
 
     def _sync_sources(self, sources) -> None:
         enabled = [source for source in sources if source.enabled]

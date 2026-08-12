@@ -15,7 +15,7 @@ from PySide6.QtGui import QColor
 from PySide6.QtWidgets import QApplication
 
 from app.ui_v2.theme.icons import favorite, icon, online, search
-from app.ui_v2.theme.styles import build_stylesheet
+from app.ui_v2.theme.styles import build_dialog_stylesheet, build_stylesheet
 from app.ui_v2.theme.tokens import ThemeColors, ThemeFonts, ThemeMetrics, get_theme
 
 
@@ -53,6 +53,10 @@ class UiV2ThemeTests(unittest.TestCase):
         theme = get_theme("dark")
         stylesheet = build_stylesheet(theme)
         self.assertIn(theme.colors.accent, stylesheet)
+        dialog_stylesheet = build_dialog_stylesheet(theme)
+        self.assertIn('QDialog QPushButton[role="primary"]', dialog_stylesheet)
+        self.assertIn("QDialog QFrame#settingsCard", dialog_stylesheet)
+        self.assertIn("QDialog QProgressBar::chunk", dialog_stylesheet)
         self.assertFalse(favorite(theme).isNull())
         self.assertFalse(online(theme, "hover").isNull())
         self.assertFalse(search(theme, "disabled").isNull())
