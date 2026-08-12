@@ -55,6 +55,13 @@ class OnlineDiscoveryBridge(QObject):
             source_url,
             existing_tracks.get(RemoteTrackStore.stable_id_for_track(payload)),
         )
+        previous = existing_tracks.get(stable_id)
+        if isinstance(previous, dict):
+            # Keep compatibility metadata when an ordinary favorite or
+            # playlist action re-p persists an existing remote record.
+            for key in ("playback_source", "replaced_by", "replaced_at"):
+                if key in previous:
+                    record[key] = deepcopy(previous[key])
         if existing_tracks.get(stable_id) != record:
             updated = dict(existing_tracks)
             updated[stable_id] = record
@@ -111,6 +118,11 @@ class OnlineDiscoveryBridge(QObject):
         old_key = self._normalize_member_key(old_member)
         if old_key is None or not isinstance(replacement_track, dict):
             return self.FAILED
+        if old_key[0] == PlaylistMembership.REMOTE:
+            # Remote tracks are user-facing identities.  Keep the historical
+            # method safe for older callers by routing it to the source-only
+            # persistence path instead of rewriting playlist membership.
+            return self.set_playback_source(old_key, replacement_track)
         records = self.repository.load_playlist_records()
         if records.load_error:
             return self.FAILED
@@ -207,10 +219,6 @@ class OnlineDiscoveryBridge(QObject):
             ).strip()
             updated_record = dict(old_record)
             updated_record["playback_source"] = source_record
-            # Records written by the previous membership-replacement flow can
-            # be made visible again once the user selects a source-only fix.
-            updated_record.pop("replaced_by", None)
-            updated_record.pop("replaced_at", None)
             updated_tracks = dict(tracks_before)
             updated_tracks[old_key[1]] = updated_record
             self.remote_tracks.save_tracks(updated_tracks)
@@ -331,17 +339,54 @@ class OnlineDiscoveryBridge(QObject):
         playlist = records.playlists.get(target)
         if records.load_error or not isinstance(playlist, dict):
             return 0
+        remote_tracks = self.remote_tracks.load_tracks()
+        current = {
+            (
+                str(item.get("kind") or "").strip().casefold(),
+                str(item.get("id") or "").strip(),
+            )
+            for item in playlist.get("members", ())
+            if isinstance(item, dict)
+        }
+        resolved: list[dict[str, str]] = []
+        resolved_keys: set[tuple[str, str]] = set()
+        for item in normalized:
+            kind = str(item["kind"]).strip().casefold()
+            identifier = str(item["id"]).strip()
+            candidates = (
+                self._legacy_equivalent_remote_ids(identifier, remote_tracks)
+                if kind == PlaylistMembership.REMOTE
+                else (identifier,)
+            )
+            existing = [
+                candidate
+                for candidate in candidates
+                if (kind, candidate) in current
+            ]
+            if present:
+                if existing:
+                    continue
+                resolved.append({"kind": kind, "id": identifier})
+                current.add((kind, identifier))
+            else:
+                for candidate in existing:
+                    if (kind, candidate) not in resolved_keys:
+                        resolved.append({"kind": kind, "id": candidate})
+                        resolved_keys.add((kind, candidate))
+                    current.discard((kind, candidate))
+        if not resolved:
+            return 0
         if present:
             result = PlaylistMembership.add_members(
                 playlist,
-                normalized,
+                resolved,
                 LibraryRepository.normalize_song_path,
                 assume_normalized=True,
             )
         else:
             result = PlaylistMembership.remove_members(
                 playlist,
-                normalized,
+                resolved,
                 LibraryRepository.normalize_song_path,
                 assume_normalized=True,
             )
@@ -364,25 +409,47 @@ class OnlineDiscoveryBridge(QObject):
         playlist = playlists.get(playlist_id)
         if not isinstance(playlist, dict):
             raise RuntimeError("目标歌单不存在。")
-        member = (kind, str(identifier or "").strip())
+        member = self._normalize_member_key((kind, identifier))
+        if member is None:
+            return False
         current = {
-            (str(item.get("kind") or ""), str(item.get("id") or ""))
+            (
+                str(item.get("kind") or "").strip().casefold(),
+                str(item.get("id") or "").strip(),
+            )
             for item in playlist.get("members", [])
             if isinstance(item, dict)
         }
-        if (member in current) == bool(present):
+        remote_tracks = self.remote_tracks.load_tracks()
+        candidates = (
+            self._legacy_equivalent_remote_ids(member[1], remote_tracks)
+            if member[0] == PlaylistMembership.REMOTE
+            else (member[1],)
+        )
+        existing = next(
+            (
+                candidate
+                for candidate in candidates
+                if (member[0], candidate) in current
+            ),
+            None,
+        )
+        if present and existing is not None:
             return False
+        if not present and existing is None:
+            return False
+        target_member = (member[0], existing or member[1])
         if present:
             result = PlaylistMembership.add_members(
                 playlist,
-                [member],
+                [target_member],
                 LibraryRepository.normalize_song_path,
                 assume_normalized=True,
             )
         else:
             result = PlaylistMembership.remove_members(
                 playlist,
-                [member],
+                [target_member],
                 LibraryRepository.normalize_song_path,
                 assume_normalized=True,
             )
@@ -390,6 +457,38 @@ class OnlineDiscoveryBridge(QObject):
             return False
         self._save_playlists(playlists)
         return True
+
+    @staticmethod
+    def _legacy_equivalent_remote_ids(
+        identifier: str,
+        remote_tracks: dict[str, dict],
+    ) -> tuple[str, ...]:
+        """Return an old remote ID and any replacement IDs linked to it."""
+
+        first = str(identifier or "").strip()
+        if not first:
+            return ()
+        values: list[str] = []
+        pending = [first]
+        seen: set[str] = set()
+        while pending:
+            current = str(pending.pop(0)).strip()
+            if not current or current in seen:
+                continue
+            seen.add(current)
+            values.append(current)
+            record = remote_tracks.get(current)
+            if isinstance(record, dict):
+                target = str(record.get("replaced_by") or "").strip()
+                if target and target not in seen:
+                    pending.append(target)
+            for old_id, old_record in remote_tracks.items():
+                if not isinstance(old_record, dict):
+                    continue
+                target = str(old_record.get("replaced_by") or "").strip()
+                if target == current and str(old_id) not in seen:
+                    pending.append(str(old_id))
+        return tuple(values)
 
     @classmethod
     def _normalize_member_key(cls, member) -> tuple[str, str] | None:

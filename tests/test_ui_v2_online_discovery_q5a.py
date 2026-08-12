@@ -391,7 +391,7 @@ class OnlineDiscoveryQ5ATests(unittest.TestCase):
             )
             self.assertIn(stable_id, remote_store.load_tracks())
 
-    def test_formal_bridge_replaces_library_only_remote_record(self) -> None:
+    def test_formal_bridge_keeps_original_identity_for_legacy_remote_replacement(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             playlists_path = root / "playlists.json"
@@ -431,16 +431,20 @@ class OnlineDiscoveryQ5ATests(unittest.TestCase):
 
             result = bridge.replace_track_memberships(("remote", old_id), replacement)
 
-            self.assertEqual(result, OnlineDiscoveryBridge.REPLACED)
+            self.assertEqual(result, OnlineDiscoveryBridge.SOURCE_UPDATED)
             stored = remote_store.load_tracks()
-            self.assertEqual(stored[old_id]["replaced_by"], new_id)
-            self.assertIn(new_id, stored)
+            self.assertNotIn("replaced_by", stored[old_id])
+            self.assertNotIn(new_id, stored)
             projected = RealLibraryAdapter.map_snapshot(
                 repository.load_snapshot(),
                 stored,
             )
-            self.assertNotIn(old_id, projected.tracks_by_id)
-            self.assertIn(new_id, projected.tracks_by_id)
+            self.assertIn(old_id, projected.tracks_by_id)
+            self.assertNotIn(new_id, projected.tracks_by_id)
+            self.assertEqual(
+                projected.tracks_by_id[old_id].remote_payload["playback_source"]["remote_id"],
+                replacement["remote_id"],
+            )
 
     def test_formal_bridge_updates_playback_source_without_membership_changes(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -506,6 +510,67 @@ class OnlineDiscoveryQ5ATests(unittest.TestCase):
                 stored[old_id]["playback_source"]["remote_id"],
                 "new-remote-id",
             )
+
+    def test_legacy_remote_aliases_keep_favorite_and_playlist_actions_on_original_id(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            playlists_path = root / "playlists.json"
+            old_payload = {
+                "source_id": "old-source",
+                "remote_id": "old-remote-id",
+                "title": "原歌曲",
+                "artist": "原歌手",
+                "album": "原专辑",
+            }
+            replacement = {
+                "source_id": "new-source",
+                "remote_id": "new-remote-id",
+                "title": old_payload["title"],
+                "artist": old_payload["artist"],
+                "album": old_payload["album"],
+            }
+            old_id, old_record = RemoteTrackStore.build_record(old_payload)
+            new_id, new_record = RemoteTrackStore.build_record(replacement)
+            old_record["replaced_by"] = new_id
+            playlists_path.write_text(
+                json.dumps(
+                    {
+                        "liked": {
+                            "name": "我喜欢",
+                            "remoteSongs": [new_id],
+                            "members": [{"kind": "remote", "id": new_id, "added_at": 11}],
+                            "fixed": True,
+                        },
+                        "road": {
+                            "name": "通勤",
+                            "remoteSongs": [new_id],
+                            "members": [{"kind": "remote", "id": new_id, "added_at": 22}],
+                            "fixed": False,
+                        },
+                    },
+                    ensure_ascii=False,
+                ),
+                encoding="utf-8",
+            )
+            repository = LibraryRepository(
+                root / "library.json",
+                playlists_path,
+                root / "stats.json",
+            )
+            remote_store = RemoteTrackStore(root / "remote_tracks.json")
+            remote_store.save_tracks({old_id: old_record, new_id: new_record})
+            bridge = OnlineDiscoveryBridge(repository, remote_store)
+
+            self.assertTrue(bridge.set_favorite(old_payload, False))
+            self.assertEqual(
+                bridge.remove_playlist_members("road", [("remote", old_id)]),
+                1,
+            )
+            document = json.loads(playlists_path.read_text(encoding="utf-8"))
+            self.assertEqual(document["liked"]["remoteSongs"], [])
+            self.assertEqual(document["liked"]["members"], [])
+            self.assertEqual(document["road"]["remoteSongs"], [])
+            self.assertEqual(document["road"]["members"], [])
 
     def test_rapid_query_generation_replacement_100_cycles(self) -> None:
         previous_generation = 0

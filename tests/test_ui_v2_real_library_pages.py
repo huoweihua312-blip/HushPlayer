@@ -246,7 +246,7 @@ class RealLibraryPageTests(unittest.TestCase):
         self.assertIsNotNone(menu)
         self.assertEqual(
             [action.text() for action in menu.actions()],
-            ["播放", "在线寻找并播放", "取消收藏", "添加到歌单", "查看歌曲信息"],
+            ["播放", "取消收藏", "添加到歌单", "查看歌曲信息"],
         )
         menu.deleteLater()
         self.assertFalse(self.window.player_bar.favorite_button.isHidden())

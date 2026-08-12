@@ -23,8 +23,6 @@ _ARTWORK_URL_KEYS = (
 
 _RECOVERABLE_AVAILABILITY_STATES = frozenset(
     {
-        "unknown",
-        "not_resolved",
         "unavailable",
         "source_unavailable",
         "resolve_failed",
@@ -100,7 +98,7 @@ class Track:
     def needs_online_recovery(self) -> bool:
         """Whether a failed track can be rematched against enabled sources."""
 
-        if self.is_missing:
+        if self.is_missing and not self.is_online:
             return True
         state = str(self.availability or "").strip().casefold().replace("-", "_")
         return state in _RECOVERABLE_AVAILABILITY_STATES

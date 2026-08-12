@@ -222,7 +222,9 @@ class RealLibraryAdapter(QObject):
     ) -> RealLibraryData:
         """Pure worker-side mapping with one-time membership and stats indexes."""
 
-        favorite_members = _favorite_members(snapshot)
+        legacy_aliases = _legacy_remote_aliases(remote_tracks)
+        legacy_target_ids = set(legacy_aliases)
+        favorite_members = _favorite_members(snapshot, legacy_aliases)
         stats_by_path = snapshot.song_stats
         tracks: list[Track] = []
         local_ids_by_path: dict[str, list[str]] = defaultdict(list)
@@ -271,7 +273,7 @@ class RealLibraryAdapter(QObject):
         for stable_id, record in remote_tracks.items():
             if not isinstance(record, dict) or not str(stable_id or ""):
                 continue
-            if str(record.get("replaced_by") or "").strip():
+            if stable_id in legacy_target_ids:
                 continue
             track_id = str(stable_id)
             if track_id in tracks_by_id:
@@ -298,10 +300,17 @@ class RealLibraryAdapter(QObject):
             }
             remote_payload = RemoteTrackStore.to_online_track(track_id, record)
             playback_source = record.get("playback_source")
+            legacy_target = str(record.get("replaced_by") or "").strip()
+            if not playback_source and legacy_target and legacy_target in remote_tracks:
+                playback_source = _legacy_playback_source(
+                    legacy_target,
+                    remote_tracks.get(legacy_target),
+                )
             if isinstance(playback_source, dict) and playback_source:
                 remote_payload["playback_source"] = dict(playback_source)
-                # A selected source is immediately eligible for the normal
-                # queue path; the resolver will still report a later failure.
+                # A selected or legacy replacement source is eligible for the
+                # normal queue path; a later resolver failure can still open
+                # the explicit recovery action.
                 availability = "playable"
             artwork_url = artwork_url_from_payload(remote_payload) or artwork_url_from_payload(record)
             track = Track(
@@ -342,6 +351,7 @@ class RealLibraryAdapter(QObject):
             snapshot,
             tracks_by_id,
             local_ids_by_path,
+            legacy_aliases,
         )
         artists, artist_track_ids, albums, album_track_ids = _map_entities(tracks)
         favorites = tuple(
@@ -443,7 +453,10 @@ class RealLibraryAdapter(QObject):
         return RealLibraryData((), (), (), (), (), (), {}, {}, {}, {})
 
 
-def _favorite_members(snapshot: LibrarySnapshot) -> dict[tuple[str, str], int]:
+def _favorite_members(
+    snapshot: LibrarySnapshot,
+    legacy_aliases: dict[str, str] | None = None,
+) -> dict[tuple[str, str], int]:
     liked = snapshot.playlists.playlists.get("liked", {})
     members = liked.get("members", ()) if isinstance(liked, dict) else ()
     result: dict[tuple[str, str], int] = {}
@@ -453,6 +466,8 @@ def _favorite_members(snapshot: LibrarySnapshot) -> dict[tuple[str, str], int]:
         kind = str(member.get("kind") or "")
         identifier = str(member.get("id") or "")
         if kind in {"local", "remote"} and identifier:
+            if kind == "remote" and legacy_aliases:
+                identifier = legacy_aliases.get(identifier, identifier)
             result[(kind, identifier)] = _nonnegative_int(member.get("added_at"))
     return result
 
@@ -461,6 +476,7 @@ def _map_playlists(
     snapshot: LibrarySnapshot,
     tracks_by_id: dict[str, Track],
     local_ids_by_path: dict[str, list[str]],
+    legacy_aliases: dict[str, str] | None = None,
 ) -> tuple[tuple[Playlist, ...], dict[str, tuple[str, ...]]]:
     values: list[Playlist] = []
     track_ids_by_playlist: dict[str, tuple[str, ...]] = {}
@@ -474,6 +490,8 @@ def _map_playlists(
                 continue
             kind = str(member.get("kind") or "")
             identifier = str(member.get("id") or "")
+            if kind == "remote" and legacy_aliases:
+                identifier = legacy_aliases.get(identifier, identifier)
             member_ids = (
                 local_ids_by_path.get(identifier, ())
                 if kind == "local"
@@ -503,6 +521,31 @@ def _map_playlists(
             entry.track_id for entry in entries
         )
     return tuple(values), track_ids_by_playlist
+
+
+def _legacy_remote_aliases(remote_tracks: dict[str, dict]) -> dict[str, str]:
+    """Map historical replacement targets back to their original identity."""
+
+    aliases: dict[str, str] = {}
+    for original_id, record in remote_tracks.items():
+        if not isinstance(record, dict):
+            continue
+        target_id = str(record.get("replaced_by") or "").strip()
+        if not target_id or target_id not in remote_tracks or target_id == original_id:
+            continue
+        aliases.setdefault(target_id, str(original_id))
+    return aliases
+
+
+def _legacy_playback_source(stable_id: str, record: dict | None) -> dict:
+    """Convert an old replacement target into a source-only payload."""
+
+    if not isinstance(record, dict):
+        return {}
+    nested = record.get("playback_source")
+    if isinstance(nested, dict) and nested:
+        return dict(nested)
+    return RemoteTrackStore.to_online_track(stable_id, record)
 
 
 def _map_entities(

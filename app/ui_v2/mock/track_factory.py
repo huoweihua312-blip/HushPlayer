@@ -75,6 +75,7 @@ def create_mock_tracks(count: int = 1000) -> list[Track]:
                 added_at=start + timedelta(hours=index * 7),
                 is_favorite=index % 9 == 0,
                 is_missing=index % 37 == 0,
+                availability="unavailable" if index % 37 == 0 else "available",
                 is_loading=index % 41 == 0,
                 artwork_path=None,
                 stable_identity=f"{source_id}:{index % 120}",

@@ -157,9 +157,10 @@ class TrackIdentityPresentationTests(unittest.TestCase):
         )
         self.assertEqual(remote.as_track().availability, "unavailable")
 
-    def test_unresolved_online_track_can_request_recovery(self) -> None:
-        self.assertTrue(_track(availability="not_resolved").needs_online_recovery)
-        self.assertTrue(_track(availability="unknown").needs_online_recovery)
+    def test_unresolved_online_track_uses_normal_playback_until_a_failure(self) -> None:
+        self.assertFalse(_track(availability="not_resolved").needs_online_recovery)
+        self.assertFalse(_track(availability="unknown").needs_online_recovery)
+        self.assertTrue(_track(availability="playback_error").needs_online_recovery)
 
 
 if __name__ == "__main__":
