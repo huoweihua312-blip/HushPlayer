@@ -23,6 +23,8 @@ _ARTWORK_URL_KEYS = (
 
 _RECOVERABLE_AVAILABILITY_STATES = frozenset(
     {
+        "unknown",
+        "not_resolved",
         "unavailable",
         "source_unavailable",
         "resolve_failed",
