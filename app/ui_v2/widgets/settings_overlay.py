@@ -470,6 +470,12 @@ class SettingsOverlay(QWidget):
         self.setFocus()
         self.sync_geometry(self.parentWidget().rect() if self.parentWidget() is not None else None)
 
+    def open_category(self, category: str) -> None:
+        """Open this cached overlay and select one existing settings category."""
+
+        self.open()
+        self.set_category(category)
+
     def request_close(self) -> None:
         if self.is_dirty:
             self.confirmation_bar.show()

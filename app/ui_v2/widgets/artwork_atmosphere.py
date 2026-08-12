@@ -113,6 +113,8 @@ class ArtworkAtmosphere(QWidget):
         # whole shell into a saturated cover.  Foreground identity and lyrics
         # remain the visual focus at the approved default.
         self._opacity = 42
+        self._blur = 40
+        self._transparency = 0
         self._overlay_strength = 52
         self.setObjectName("immersiveArtworkAtmosphere")
         self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
@@ -146,6 +148,16 @@ class ArtworkAtmosphere(QWidget):
         self._opacity = max(0, min(100, int(value)))
         self.update()
 
+    def set_blur(self, value: int) -> None:
+        """Adjust the inexpensive painted field rather than adding realtime blur."""
+
+        self._blur = max(0, min(40, int(value)))
+        self.update()
+
+    def set_transparency(self, value: int) -> None:
+        self._transparency = max(0, min(85, int(value)))
+        self.update()
+
     def set_overlay_strength(self, value: int) -> None:
         self._overlay_strength = max(15, min(85, int(value)))
         self.update()
@@ -154,37 +166,47 @@ class ArtworkAtmosphere(QWidget):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         colors = self._palette.colors
+        background_alpha = round(255 * (100 - self._transparency) / 100)
         if self._mode == "transparent":
             painter.fillRect(
                 self.rect(),
                 _color(
                     "#101923" if self._theme.mode == "dark" else "#edf4f6",
-                    round(12 * self._opacity / 100),
+                    round(12 * self._opacity * (100 - self._transparency) / 10_000),
                 ),
             )
         elif self._mode == "solid":
-            painter.fillRect(self.rect(), _mix(colors[0], "#15212d" if self._theme.mode == "dark" else "#e9f3f7", 0.42))
+            surface = _mix(colors[0], "#15212d" if self._theme.mode == "dark" else "#e9f3f7", 0.42)
+            surface.setAlpha(background_alpha)
+            painter.fillRect(self.rect(), surface)
         else:
             base_left = "#111b28" if self._theme.mode == "dark" else "#e8f4f6"
             base_right = "#1c2b38" if self._theme.mode == "dark" else "#f5ece8"
             field = QLinearGradient(0, 0, self.width(), self.height())
-            field.setColorAt(0.0, _mix(base_left, colors[0], 0.40 if self._mode == "artwork" else 0.30))
-            field.setColorAt(0.53, _mix(base_right, colors[1], 0.34 if self._mode == "artwork" else 0.26))
-            field.setColorAt(1.0, _mix(base_left, colors[2], 0.30 if self._mode == "artwork" else 0.22))
+            stops = (
+                (0.0, _mix(base_left, colors[0], 0.40 if self._mode == "artwork" else 0.30)),
+                (0.53, _mix(base_right, colors[1], 0.34 if self._mode == "artwork" else 0.26)),
+                (1.0, _mix(base_left, colors[2], 0.30 if self._mode == "artwork" else 0.22)),
+            )
+            for stop, color in stops:
+                color.setAlpha(background_alpha)
+                field.setColorAt(stop, color)
             painter.fillRect(self.rect(), field)
         alpha_factor = self._opacity / 100
+        blur_scale = 0.74 + self._blur * 0.0075
         for center, radius, color, alpha in (
             (QPointF(self.width() * 0.14, self.height() * 0.19), self.width() * 0.48, colors[0], 88),
             (QPointF(self.width() * 0.79, self.height() * 0.25), self.width() * 0.56, colors[1], 78),
             (QPointF(self.width() * 0.55, self.height() * 0.93), self.width() * 0.54, colors[2], 64),
         ):
-            glow = QRadialGradient(center, radius)
+            glow = QRadialGradient(center, radius * blur_scale)
             glow.setColorAt(0.0, _color(color, round(alpha * alpha_factor)))
             glow.setColorAt(0.58, _color(color, round(alpha * 0.24 * alpha_factor)))
             glow.setColorAt(1.0, _color(color, 0))
             painter.setPen(Qt.PenStyle.NoPen)
             painter.setBrush(glow)
-            painter.drawEllipse(QRectF(center.x() - radius, center.y() - radius, radius * 2, radius * 2))
+            extent = radius * blur_scale
+            painter.drawEllipse(QRectF(center.x() - extent, center.y() - extent, extent * 2, extent * 2))
 
 
 class ReadabilityOverlay(QWidget):

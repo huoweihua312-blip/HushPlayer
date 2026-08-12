@@ -75,6 +75,8 @@ class PlayerBar(QFrame):
     """One stable 102px player with full-height side regions and a two-row centre."""
 
     mock_action_requested = Signal(str)
+    queue_requested = Signal()
+    lyrics_requested = Signal()
     track_open_requested = Signal()
 
     def __init__(
@@ -339,8 +341,8 @@ class PlayerBar(QFrame):
             "more", "更多", self._theme, self.utility_inner, size=32, icon_canvas_size=18,
             asset_family="fluent_player",
         )
-        self.lyrics_button.clicked.connect(lambda: self.mock_action_requested.emit("lyrics"))
-        self.queue_button.clicked.connect(lambda: self.mock_action_requested.emit("queue"))
+        self.lyrics_button.clicked.connect(self.lyrics_requested)
+        self.queue_button.clicked.connect(self.queue_requested)
         self.more_button.clicked.connect(lambda: self.mock_action_requested.emit("more"))
         self.volume_button.clicked.connect(self._toggle_mute)
         self.volume_group = QWidget(self.utility_inner)

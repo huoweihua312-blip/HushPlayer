@@ -128,7 +128,9 @@ class UiV2ImmersiveLyricsTests(unittest.TestCase):
         self.assertEqual(immersive.header_back_button.toolTip(), "返回普通页面")
         self.assertTrue(immersive.controls.play_button.styleSheet())
         self.assertEqual(len(immersive.controls.findChildren(QSlider)), 2)
-        self.assertIs(immersive.controls.parentWidget(), immersive.identity_column)
+        self.assertIs(immersive.controls.parentWidget(), immersive)
+        self.assertIs(immersive._controls_slot.parentWidget(), immersive.identity_column)
+        self.assertEqual(immersive._identity_layout.indexOf(immersive.controls), -1)
         self.assertEqual(immersive._content_layout.itemAt(0).widget(), immersive.identity_column)
         self.assertEqual(immersive._content_layout.itemAt(1).widget(), immersive.canvas)
         controls_rect = QRect(immersive.controls.mapTo(immersive.content, QPoint(0, 0)), immersive.controls.size())
@@ -292,9 +294,11 @@ class UiV2ImmersiveLyricsTests(unittest.TestCase):
         self.assertFalse(immersive.lyric_protection.is_row_bound)
         self.assertEqual((id(immersive.canvas), id(immersive.controls), id(immersive.settings_panel)), core_ids)
 
-    def test_settings_panel_allocates_content_space_and_restores_it(self) -> None:
+    def test_settings_panel_floats_without_allocating_content_space(self) -> None:
         self._play_track()
         immersive = self._immersive_page()
+        self.window.resize(1200, 800)
+        self.app.processEvents()
         immersive.canvas.repaint()
         self.app.processEvents()
         canvas_id = id(immersive.canvas)
@@ -304,12 +308,14 @@ class UiV2ImmersiveLyricsTests(unittest.TestCase):
         immersive.canvas.repaint()
         self.app.processEvents()
         self.assertEqual(id(immersive.canvas), canvas_id)
-        self.assertLess(immersive.content.geometry().right(), immersive.settings_panel.geometry().left())
+        self.assertEqual(immersive.content.geometry(), closed_content)
+        self.assertIs(immersive.settings_panel.parentWidget(), immersive.overlay_layer)
+        self.assertFalse(immersive.settings_panel.geometry().intersects(immersive.header.geometry()))
         active = immersive.lyrics_adapter.active_line
         self.assertIsNotNone(active)
         active_rect = immersive.canvas._line_rects[active.id]
         active_origin = immersive.canvas.mapTo(immersive, active_rect.topLeft())
-        self.assertFalse(immersive.settings_panel.geometry().intersects(QRect(active_origin, active_rect.size())))
+        self.assertTrue(immersive.settings_panel.geometry().intersects(QRect(active_origin, active_rect.size())))
         immersive.hide_settings_panel()
         self.app.processEvents()
         self.assertEqual(immersive.content.geometry(), closed_content)
@@ -371,7 +377,7 @@ class UiV2ImmersiveLyricsTests(unittest.TestCase):
         self.assertEqual(metrics["active_line_elided"], 0)
         self.assertEqual(metrics["active_highlight_line_count"], metrics["active_line_count"])
 
-    def test_identity_title_uses_at_most_two_lines_and_compact_sheet_has_no_overlap(self) -> None:
+    def test_identity_title_uses_at_most_two_lines_and_settings_panel_floats(self) -> None:
         immersive = self._immersive_page()
         title = "A long quiet title that belongs on two natural lines before it ever elides"
         immersive.identity.title_label.set_full_text(title)
@@ -384,11 +390,9 @@ class UiV2ImmersiveLyricsTests(unittest.TestCase):
         self.window.resize(900, 600)
         immersive.show_settings_panel()
         self.app.processEvents()
-        self.assertFalse(immersive.content.isVisible())
+        self.assertTrue(immersive.content.isVisible())
         self.assertLessEqual(immersive.settings_panel.width(), round(immersive.width() * 0.88))
-        # The compact settings sheet deliberately hides the complete content
-        # region; no left-column controls remain behind it.
-        self.assertFalse(immersive.controls.isVisible())
+        self.assertTrue(immersive.controls.isVisible())
         self.assertEqual((id(immersive.canvas), id(immersive.identity), id(immersive.controls), id(immersive.settings_panel)), core_ids)
 
     def test_presentation_mode_removes_shell_columns_and_restores_them_without_drift(self) -> None:

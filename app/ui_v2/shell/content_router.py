@@ -6,6 +6,7 @@ from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import QLabel, QStackedWidget, QVBoxLayout, QWidget
 
 from app.ui_v2.adapters.albums_adapter import AlbumsAdapter
+from app.ui_v2.adapters.legacy_settings_bridge import LegacySettingsBridge
 from app.ui_v2.adapters.artists_adapter import (
     ArtistsAdapter,
     artist_identity,
@@ -85,6 +86,7 @@ class ContentRouter(QStackedWidget):
     online_play_requested = Signal(object)
     immersive_fullscreen_requested = Signal(bool)
     immersive_transparency_requested = Signal(bool)
+    lyrics_settings_requested = Signal()
 
     ROUTE_METADATA = {
         "online_search": ("在线搜索", "search"),
@@ -103,6 +105,8 @@ class ContentRouter(QStackedWidget):
         immersive_options: ImmersiveLyricsOptions,
         theme: Theme,
         parent: QWidget | None = None,
+        settings_bridge: LegacySettingsBridge | None = None,
+        settings_preview_callback=None,
     ) -> None:
         super().__init__(parent)
         self._theme = theme
@@ -113,6 +117,8 @@ class ContentRouter(QStackedWidget):
         self._lyrics_adapter = lyrics
         self._playback_adapter = playback
         self._immersive_options = immersive_options
+        self._settings_bridge = settings_bridge
+        self._settings_preview_callback = settings_preview_callback
         self._immersive_return_route = "lyrics"
         self._last_normal_route = navigation.route if not navigation.route.startswith("immersive") else "browse"
         self._content_safe_bottom = 0
@@ -345,7 +351,9 @@ class ContentRouter(QStackedWidget):
             self._playback_adapter,
             self._theme,
             self._immersive_options,
-            self,
+            settings_bridge=self._settings_bridge,
+            settings_preview_callback=self._settings_preview_callback,
+            parent=self,
         )
         page.immersive_exit_requested.connect(self._return_from_immersive)
         page.fullscreen_requested.connect(self.immersive_fullscreen_requested)
@@ -357,9 +365,17 @@ class ContentRouter(QStackedWidget):
         return page
 
     def _switch_immersive_mode(self, mode: str) -> None:
-        self._navigation.set_route(
-            "immersive_now_playing" if str(mode) == "now_playing" else "immersive_lyrics"
+        target_route = (
+            "immersive_now_playing"
+            if str(mode) == "now_playing"
+            else "immersive_lyrics"
         )
+        if self._navigation.route == target_route:
+            page = self._pages.get("immersive_lyrics")
+            if page is not None and hasattr(page, "set_mode"):
+                page.set_mode(mode)
+            return
+        self._navigation.set_route(target_route)
 
     def apply_immersive_options(self, options: ImmersiveLyricsOptions) -> None:
         page = self._pages.get("immersive_lyrics")

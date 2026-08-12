@@ -38,7 +38,7 @@ class LyricsStateView(QWidget):
         self.set_state(LyricsState())
         self.set_theme(theme)
 
-    def set_state(self, state: LyricsState) -> None:
+    def set_state(self, state: LyricsState, *, track_title: str = "") -> None:
         values = {
             "idle": ("还没有正在播放的歌曲", "选择一首歌曲开始播放。"),
             "loading": ("正在加载歌词", "请稍候。"),
@@ -47,6 +47,8 @@ class LyricsStateView(QWidget):
             "instrumental": ("纯音乐", "这首歌曲没有人声歌词。"),
         }
         title, detail = values.get(state.phase, ("歌词", state.message))
+        if state.phase == "empty" and track_title:
+            title = f"{track_title} 暂无歌词"
         self.title_label.setText(title)
         self.detail_label.setText(detail)
         self.retry_button.setVisible(state.phase in {"empty", "failed"})

@@ -162,7 +162,9 @@ class MainWindow(QMainWindow):
             self.playback_adapter,
             self.immersive_lyrics_options,
             self._theme,
-            self,
+            parent=self,
+            settings_bridge=self.settings_bridge,
+            settings_preview_callback=self._apply_settings_snapshot,
         )
         self.player_bar = PlayerBar(self.playback_adapter, self._theme, self)
         self.player_bar.set_read_only(
@@ -394,6 +396,8 @@ class MainWindow(QMainWindow):
         self.playback_adapter.position_changed.connect(self.lyrics_adapter.set_position)
         self.lyrics_adapter.set_track(self.playback_adapter.state.current_track)
         self.lyrics_adapter.seek_requested.connect(self.playback_adapter.seek)
+        self.player_bar.queue_requested.connect(self._on_player_bar_queue_requested)
+        self.player_bar.lyrics_requested.connect(self._on_player_bar_lyrics_requested)
         self.player_bar.mock_action_requested.connect(self._on_player_bar_action)
         self.player_bar.track_open_requested.connect(self._open_now_playing)
         self.library_collection.track_updated.connect(self.playback_adapter.update_track)
@@ -401,11 +405,9 @@ class MainWindow(QMainWindow):
         self.playback_adapter.favorite_changed.connect(self._sync_favorite_from_player)
         self._sync_immersive_shell(self.navigation_adapter.route)
 
-    def open_settings_overlay(self) -> None:
+    def open_settings_overlay(self, *, category: str = "general") -> None:
         """Show the one cached Settings surface without changing the route."""
 
-        if self._presentation_mode is not ShellPresentationMode.NORMAL:
-            return
         if self.settings_overlay is None:
             self.settings_overlay = SettingsOverlay(
                 self.settings_bridge,
@@ -414,9 +416,11 @@ class MainWindow(QMainWindow):
                 parent=self.body,
             )
         elif self.settings_overlay.isVisible():
+            self.settings_overlay.set_category(category)
             self.settings_overlay.raise_()
             return
         self.settings_overlay.open()
+        self.settings_overlay.set_category(category)
 
     def _apply_settings_values(self, values: dict[str, object]) -> None:
         """Apply persisted settings to the small set of V2 runtime models."""
@@ -442,6 +446,21 @@ class MainWindow(QMainWindow):
             )
         except (TypeError, ValueError):
             self.immersive_lyrics_options.global_font_scale = 100
+        for key, minimum, maximum, attribute, default in (
+            ("immersive_background_blur", 0, 40, "background_blur", 40),
+            ("immersive_background_darkness", 0, 90, "background_darkness", 68),
+            ("immersive_background_image_opacity", 20, 100, "background_image_opacity", 100),
+            ("immersive_background_transparency", 0, 85, "background_transparency", 38),
+        ):
+            try:
+                value = int(values.get(key, default))
+            except (TypeError, ValueError):
+                value = default
+            setattr(self.immersive_lyrics_options, attribute, max(minimum, min(maximum, value)))
+        self.immersive_lyrics_options.background_opacity = self.immersive_lyrics_options.background_image_opacity
+        self.immersive_lyrics_options.overlay_strength = max(
+            15, min(85, self.immersive_lyrics_options.background_darkness)
+        )
 
     def _apply_settings_snapshot(self, values: dict[str, object]) -> None:
         """Preview or apply a Settings snapshot without creating another shell."""
@@ -659,13 +678,21 @@ class MainWindow(QMainWindow):
         )
 
     def _on_player_bar_action(self, action: str) -> None:
-        if action == "lyrics":
-            self.navigation_adapter.set_route("immersive_lyrics")
-        elif action == "queue":
-            self.navigation_adapter.set_route("immersive_now_playing")
+        return
+
+    def _on_player_bar_lyrics_requested(self) -> None:
+        self.navigation_adapter.set_route("immersive_lyrics")
+
+    def _on_player_bar_queue_requested(self) -> None:
+        if self.navigation_adapter.route in {"immersive_lyrics", "immersive_now_playing"}:
             page = self.router._pages.get("immersive_lyrics")
-            if page is not None and hasattr(page, "show_queue_panel"):
-                page.show_queue_panel()
+            if page is not None and hasattr(page, "toggle_queue_panel"):
+                page.toggle_queue_panel()
+            return
+        self.navigation_adapter.set_route("immersive_now_playing")
+        page = self.router._pages.get("immersive_lyrics")
+        if page is not None and hasattr(page, "show_queue_panel"):
+            page.show_queue_panel()
 
     def _open_now_playing(self) -> None:
         self.navigation_adapter.set_route("immersive_now_playing")

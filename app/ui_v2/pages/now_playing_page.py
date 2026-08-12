@@ -76,6 +76,8 @@ class NowPlayingPage(QFrame):
         actions.addWidget(self.queue_button)
         actions.addStretch(1)
         meta_layout.addLayout(actions)
+        self._meta_layout = meta_layout
+        self._actions_layout = actions
 
         layout = QHBoxLayout(self)
         layout.setContentsMargins(24, 20, 24, 20)
@@ -84,6 +86,7 @@ class NowPlayingPage(QFrame):
         layout.addWidget(self.artwork, 0, Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(self._meta_group, 0, Qt.AlignmentFlag.AlignVCenter)
         layout.addStretch(1)
+        self._layout = layout
 
         self.favorite_button.clicked.connect(self.playback.toggle_favorite)
         self.playback.track_changed.connect(self._on_track_changed)
@@ -129,6 +132,22 @@ class NowPlayingPage(QFrame):
         else:
             extent = 420
             meta_min, meta_max = 420, 500
+        compact_height = height is not None and 0 < int(height) < 260
+        if compact_height:
+            extent = min(extent, max(140, min(190, int(height) - 34)))
+            self._layout.setContentsMargins(14, 8, 14, 8)
+            self._layout.setSpacing(18)
+            self._meta_layout.setSpacing(4)
+            self._actions_layout.setContentsMargins(0, 4, 0, 0)
+            self.detail_label.hide()
+            self.album_label.hide()
+        else:
+            self._layout.setContentsMargins(24, 20, 24, 20)
+            self._layout.setSpacing(56)
+            self._meta_layout.setSpacing(10)
+            self._actions_layout.setContentsMargins(0, 10, 0, 0)
+            self.detail_label.show()
+            self.album_label.show()
         self._meta_group.setMinimumWidth(meta_min)
         self._meta_group.setMaximumWidth(max(meta_min, meta_max))
         self._artwork_extent = extent
