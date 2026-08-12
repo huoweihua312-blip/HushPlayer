@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import time
+from copy import deepcopy
 from pathlib import Path
 from typing import Callable, Iterable
 
@@ -16,6 +17,10 @@ from app.services.remote_track_store import RemoteTrackStore
 
 class OnlineDiscoveryBridge(QObject):
     """Persist remote discovery actions without owning a second data store."""
+
+    REPLACED = "replaced"
+    NOT_FOUND = "not_found"
+    FAILED = "failed"
 
     action_succeeded = Signal(str, str)
     action_failed = Signal(str, str)
@@ -94,6 +99,40 @@ class OnlineDiscoveryBridge(QObject):
             return True
         self.action_succeeded.emit("playlist", "在线歌曲已加入歌单。")
         return True
+
+    def replace_track_memberships(
+        self,
+        old_member: tuple[str, str],
+        replacement_track: dict,
+    ) -> str:
+        """Replace one track member in every playlist while preserving order."""
+
+        old_key = self._normalize_member_key(old_member)
+        if old_key is None or not isinstance(replacement_track, dict):
+            return self.FAILED
+        records = self.repository.load_playlist_records()
+        if records.load_error:
+            return self.FAILED
+        playlists = deepcopy(records.playlists)
+        if not any(
+            self._playlist_has_member(playlist, old_key)
+            for playlist in playlists.values()
+            if isinstance(playlist, dict)
+        ):
+            return self.NOT_FOUND
+
+        try:
+            stable_id, _record = self.persist_track(replacement_track)
+            new_key = (PlaylistMembership.REMOTE, stable_id)
+            for playlist in playlists.values():
+                if isinstance(playlist, dict):
+                    self._replace_playlist_member(playlist, old_key, new_key)
+            self._save_playlists(playlists)
+        except Exception as error:
+            self.action_failed.emit("replace", str(error))
+            return self.FAILED
+        self.action_succeeded.emit("replace", "已将失效歌曲替换为在线版本。")
+        return self.REPLACED
 
     def playlist_choices(self) -> tuple[tuple[str, str], ...]:
         records = self.repository.load_playlist_records()
@@ -264,6 +303,109 @@ class OnlineDiscoveryBridge(QObject):
         if not result.get("changed"):
             return False
         self._save_playlists(playlists)
+        return True
+
+    @classmethod
+    def _normalize_member_key(cls, member) -> tuple[str, str] | None:
+        if not isinstance(member, (tuple, list)) or len(member) < 2:
+            return None
+        kind = str(member[0] or "").strip().casefold()
+        identifier = str(member[1] or "").strip()
+        if kind == PlaylistMembership.LOCAL:
+            identifier = LibraryRepository.normalize_song_path(identifier)
+        if kind not in {PlaylistMembership.LOCAL, PlaylistMembership.REMOTE} or not identifier:
+            return None
+        return kind, identifier
+
+    @staticmethod
+    def _playlist_has_member(playlist: dict, key: tuple[str, str]) -> bool:
+        return any(
+            isinstance(member, dict)
+            and (
+                str(member.get("kind") or "").strip().casefold(),
+                str(member.get("id") or "").strip(),
+            )
+            == key
+            for member in playlist.get("members", ())
+        )
+
+    @classmethod
+    def _replace_playlist_member(
+        cls,
+        playlist: dict,
+        old_key: tuple[str, str],
+        new_key: tuple[str, str],
+    ) -> bool:
+        members = [member for member in playlist.get("members", ()) if isinstance(member, dict)]
+        old_indexes = [
+            index
+            for index, member in enumerate(members)
+            if (
+                str(member.get("kind") or "").strip().casefold(),
+                str(member.get("id") or "").strip(),
+            )
+            == old_key
+        ]
+        if not old_indexes:
+            return False
+        if old_key == new_key:
+            return True
+        new_present = any(
+            (
+                str(member.get("kind") or "").strip().casefold(),
+                str(member.get("id") or "").strip(),
+            )
+            == new_key
+            for member in members
+        )
+        first_old_index = old_indexes[0]
+        if not new_present:
+            replacement = dict(members[first_old_index])
+            replacement.update({"kind": new_key[0], "id": new_key[1]})
+            members[first_old_index] = replacement
+            for index in reversed(old_indexes[1:]):
+                del members[index]
+        else:
+            members = [
+                member
+                for member in members
+                if (
+                    str(member.get("kind") or "").strip().casefold(),
+                    str(member.get("id") or "").strip(),
+                )
+                != old_key
+            ]
+        playlist["members"] = members
+
+        old_kind, old_id = old_key
+        new_kind, new_id = new_key
+        if old_kind == PlaylistMembership.LOCAL:
+            playlist["songs"] = [
+                value
+                for value in playlist.get("songs", ())
+                if LibraryRepository.normalize_song_path(value) != old_id
+            ]
+        else:
+            playlist["remoteSongs"] = [
+                value for value in playlist.get("remoteSongs", ()) if str(value) != old_id
+            ]
+        if new_key != old_key and not new_present:
+            if new_kind == PlaylistMembership.REMOTE:
+                remote_values = [str(value) for value in playlist.get("remoteSongs", ())]
+                if new_id not in remote_values:
+                    remote_before = sum(
+                        1
+                        for member in members[:first_old_index]
+                        if str(member.get("kind") or "").strip().casefold()
+                        == PlaylistMembership.REMOTE
+                    )
+                    remote_values.insert(min(remote_before, len(remote_values)), new_id)
+                    playlist["remoteSongs"] = remote_values
+            else:
+                songs = list(playlist.get("songs", ()))
+                if new_id not in songs:
+                    songs.append(new_id)
+                playlist["songs"] = songs
         return True
 
     def _save_playlists(self, playlists: dict) -> None:

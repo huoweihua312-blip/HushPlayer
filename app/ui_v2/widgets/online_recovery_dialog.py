@@ -31,7 +31,7 @@ class OnlineRecoveryCandidateDialog(QDialog):
         title.setStyleSheet(
             f"font-size: {theme.fonts.section_title}px; font-weight: 600; color: {theme.colors.primary_text};"
         )
-        detail = QLabel("请选择要播放的歌曲；原歌单歌曲不会被替换。", self)
+        detail = QLabel("选择后将替换原失效歌曲，并保留歌单位置与收藏关系。", self)
         detail.setStyleSheet(f"color: {theme.colors.secondary_text};")
         self.list_widget = QListWidget(self)
         self.list_widget.setAccessibleName("在线候选歌曲")
@@ -44,7 +44,7 @@ class OnlineRecoveryCandidateDialog(QDialog):
             self.list_widget.setCurrentRow(0)
         cancel = QPushButton("取消", self)
         cancel.clicked.connect(self.reject)
-        play = QPushButton("播放选中", self)
+        play = QPushButton("替换并播放", self)
         play.setDefault(True)
         play.clicked.connect(self._accept_selected)
         buttons = QHBoxLayout()

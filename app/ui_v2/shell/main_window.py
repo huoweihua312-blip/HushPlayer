@@ -288,6 +288,7 @@ class MainWindow(QMainWindow):
         self._build_shell()
         self.settings_overlay: SettingsOverlay | None = None
         self._update_dialog: UpdateDialog | None = None
+        self._pending_recovery_tracks: dict[int, Track] = {}
         QApplication.instance().installEventFilter(self)
         self._connect_state()
         self.setWindowTitle("HushPlayer UI V2")
@@ -994,35 +995,46 @@ class MainWindow(QMainWindow):
         if recovery is None:
             self._show_recovery_message("当前运行模式没有可用的在线恢复服务。")
             return
-        recovery.request(track)
+        generation = recovery.request(track)
+        if isinstance(track, Track):
+            self._pending_recovery_tracks[int(generation)] = track
 
     def _on_recovery_status(self, _generation: int, message: str) -> None:
         self._show_recovery_message(str(message or ""))
 
-    def _on_recovery_match(self, _generation: int, track) -> None:
-        self._play_recovery_candidate(track)
+    def _on_recovery_match(self, generation: int, track) -> None:
+        source = self._pending_recovery_tracks.pop(int(generation), None)
+        self._play_recovery_candidate(source, track)
 
-    def _on_recovery_candidates(self, _generation: int, candidates) -> None:
+    def _on_recovery_candidates(self, generation: int, candidates) -> None:
         values = tuple(candidates or ())
+        source = self._pending_recovery_tracks.pop(int(generation), None)
         if not values:
             self._show_recovery_message("没有找到可靠的在线版本。")
             return
         dialog = OnlineRecoveryCandidateDialog(values, self._theme, self)
         if dialog.exec() == QDialog.DialogCode.Accepted and dialog.selected_track is not None:
-            self._play_recovery_candidate(dialog.selected_track)
+            self._play_recovery_candidate(source, dialog.selected_track)
 
-    def _play_recovery_candidate(self, track) -> None:
+    def _play_recovery_candidate(self, source, track) -> None:
         if track is None:
+            return
+        replacement = self.online_adapter.replace_track_memberships(source, track)
+        if replacement == "failed":
+            self._show_recovery_message("替换歌单歌曲失败，已取消播放。")
             return
         self.online_adapter.register_recommendation_tracks((track,))
         if self.online_adapter.request_play(track.id):
-            self._show_recovery_message(
-                f"已找到 {track.source_name} 的在线版本，正在播放。"
-            )
+            if replacement == "replaced":
+                message = f"已替换为 {track.source_name} 的在线版本，正在播放。"
+            else:
+                message = f"已找到 {track.source_name} 的在线版本，正在播放。"
+            self._show_recovery_message(message)
         else:
             self._show_recovery_message("在线版本暂时无法播放。")
 
-    def _on_recovery_failed(self, _generation: int, message: str) -> None:
+    def _on_recovery_failed(self, generation: int, message: str) -> None:
+        self._pending_recovery_tracks.pop(int(generation), None)
         self._show_recovery_message(str(message or "在线恢复失败。"))
 
     def _show_recovery_message(self, message: str) -> None:

@@ -305,6 +305,91 @@ class OnlineDiscoveryQ5ATests(unittest.TestCase):
             document = json.loads(playlists_path.read_text(encoding="utf-8"))
             self.assertEqual(document["liked"]["remoteSongs"], [])
 
+    def test_formal_bridge_replaces_track_memberships_everywhere(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            old_path = (root / "missing.mp3").resolve()
+            replacement = {
+                "source_id": "north",
+                "remote_id": "replacement-id",
+                "title": "替代歌曲",
+                "artist": "在线歌手",
+                "album": "在线专辑",
+                "duration": 180_000,
+            }
+            stable_id = RemoteTrackStore.stable_id_for_track(replacement)
+            playlists_path = root / "playlists.json"
+            playlists_path.write_text(
+                json.dumps(
+                    {
+                        "liked": {
+                            "name": "我喜欢",
+                            "songs": [str(old_path)],
+                            "remoteSongs": [],
+                            "members": [
+                                {"kind": "local", "id": str(old_path), "added_at": 300}
+                            ],
+                            "membershipVersion": 1,
+                            "fixed": True,
+                        },
+                        "road": {
+                            "name": "通勤",
+                            "songs": [str(old_path), "other.mp3"],
+                            "remoteSongs": [],
+                            "members": [
+                                {"kind": "local", "id": str(old_path), "added_at": 500},
+                                {"kind": "local", "id": "other.mp3", "added_at": 400},
+                            ],
+                            "membershipVersion": 1,
+                            "fixed": False,
+                            "vendorExtension": {"keep": True},
+                        },
+                        "already": {
+                            "name": "已有在线版本",
+                            "songs": [str(old_path)],
+                            "remoteSongs": [stable_id],
+                            "members": [
+                                {"kind": "local", "id": str(old_path), "added_at": 700},
+                                {"kind": "remote", "id": stable_id, "added_at": 200},
+                            ],
+                            "membershipVersion": 1,
+                            "fixed": False,
+                        },
+                    },
+                    ensure_ascii=False,
+                ),
+                encoding="utf-8",
+            )
+            repository = LibraryRepository(
+                root / "library.json",
+                playlists_path,
+                root / "stats.json",
+            )
+            remote_store = RemoteTrackStore(root / "remote_tracks.json")
+            bridge = OnlineDiscoveryBridge(repository, remote_store)
+
+            result = bridge.replace_track_memberships(("local", str(old_path)), replacement)
+
+            self.assertEqual(result, OnlineDiscoveryBridge.REPLACED)
+            document = json.loads(playlists_path.read_text(encoding="utf-8"))
+            self.assertEqual(document["liked"]["songs"], [])
+            self.assertEqual(document["liked"]["remoteSongs"], [stable_id])
+            self.assertEqual(
+                document["liked"]["members"],
+                [{"kind": "remote", "id": stable_id, "added_at": 300}],
+            )
+            self.assertEqual(document["road"]["songs"], ["other.mp3"])
+            self.assertEqual(document["road"]["remoteSongs"], [stable_id])
+            self.assertEqual(document["road"]["members"][0]["id"], stable_id)
+            self.assertEqual(document["road"]["members"][0]["added_at"], 500)
+            self.assertEqual(document["road"]["vendorExtension"], {"keep": True})
+            self.assertEqual(document["already"]["remoteSongs"], [stable_id])
+            self.assertEqual(
+                [member["id"] for member in document["already"]["members"]],
+                [stable_id],
+            )
+            self.assertIn(stable_id, remote_store.load_tracks())
+
     def test_rapid_query_generation_replacement_100_cycles(self) -> None:
         previous_generation = 0
         for index in range(100):

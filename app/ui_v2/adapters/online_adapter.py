@@ -412,6 +412,30 @@ class OnlineAdapter(QObject):
         self.add_to_playlist_requested.emit(track_id, playlist_id)
         return True
 
+    def replace_track_memberships(self, old_track: Track, replacement: OnlineTrack) -> str:
+        """Replace an old playlist/favorite member with one online track."""
+
+        if not self.is_formal or not isinstance(old_track, Track) or not isinstance(
+            replacement, OnlineTrack
+        ):
+            return "not_found"
+        old_identifier = str(
+            old_track.remote_identity
+            or old_track.remote_track_id
+            or old_track.stable_identity
+            or old_track.id
+        ).strip() if old_track.is_online else str(old_track.local_path or old_track.id).strip()
+        old_kind = "remote" if old_track.is_online else "local"
+        if not old_identifier:
+            return "failed"
+        result = self.discovery.bridge.replace_track_memberships(
+            (old_kind, old_identifier),
+            self._payload_for_track(replacement),
+        )
+        if result == "replaced":
+            self.remote_collection_changed.emit()
+        return result
+
     def load_mock_scenario(self, name: str) -> None:
         if self.is_formal:
             return
