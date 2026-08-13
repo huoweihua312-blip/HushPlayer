@@ -61,6 +61,15 @@ class ElidedLabel(QLabel):
                 self.setText("")
             return
         remaining = self._full_text.strip()
+        if metrics.horizontalAdvance(remaining) <= available:
+            if self.text() != remaining:
+                self.setText(remaining)
+            line_height = metrics.lineSpacing()
+            if self.minimumHeight() != line_height + 2:
+                self.setMinimumHeight(line_height + 2)
+            if self.maximumHeight() != line_height + 4:
+                self.setMaximumHeight(line_height + 4)
+            return
         lines: list[str] = []
         for line_index in range(self._max_lines):
             if not remaining:

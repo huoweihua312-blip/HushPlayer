@@ -529,7 +529,11 @@ class ApprovedShellMigrationTests(unittest.TestCase):
         self.assertEqual(metadata_layout.count(), 2)
         self.assertEqual(metadata_layout.stretch(0), 0)
         self.assertEqual(metadata_layout.stretch(1), 0)
-        self.assertEqual(bar.metadata.height(), 40)
+        self.assertEqual(bar.metadata.height(), 64)
+        self.assertEqual(bar.artist_label._max_lines, 2)
+        bar.artist_label.set_full_text("短艺术家 · 短专辑")
+        self.app.processEvents()
+        self.assertEqual(bar.artist_label.text(), "短艺术家 · 短专辑")
         self.assertIs(bar.title_label.parentWidget(), bar.metadata)
         self.assertIs(bar.artist_label.parentWidget(), bar.metadata)
         self.window.playback_adapter.play()
@@ -543,7 +547,7 @@ class ApprovedShellMigrationTests(unittest.TestCase):
             self.assertLessEqual(abs(metadata_center - track_center), 2)
             self.assertGreaterEqual(artist_top - title_bottom, 1)
             self.assertLessEqual(artist_top - title_bottom, 4)
-            self.assertEqual(bar.metadata.height(), 40)
+            self.assertEqual(bar.metadata.height(), 64)
 
     def test_player_empty_artwork_and_repeat_states_are_explicit(self) -> None:
         bar = self.window.player_bar

@@ -153,7 +153,7 @@ class PlayerBar(QFrame):
     def _refresh_metadata_width(self) -> None:
         if not all(hasattr(self, name) for name in ("metadata", "artwork")):
             return
-        base_width = 132 if self._compact else 196
+        base_width = 160 if self._compact else 196
         region_width = max(0, self.track_region.width() - 32)
         fixed_width = self.artwork.width() + 24
         available = max(base_width, region_width - fixed_width)
@@ -202,12 +202,12 @@ class PlayerBar(QFrame):
         self.artwork = ArtworkThumbnail(self._theme, self.track_inner, size=56)
         self.title_label = ElidedLabel(self.track_inner)
         self.title_label.setObjectName("playerTitle")
-        self.artist_label = ElidedLabel(self.track_inner)
+        self.artist_label = ElidedLabel(self.track_inner, max_lines=2)
         self.artist_label.setObjectName("playerArtist")
         self.identity_stack = QWidget(self.track_inner)
         self.identity_stack.setObjectName("playerIdentityStack")
         self.identity_stack.setFixedWidth(154)
-        self.identity_stack.setFixedHeight(60)
+        self.identity_stack.setFixedHeight(76)
         identity_layout = QVBoxLayout(self.identity_stack)
         identity_layout.setContentsMargins(0, 0, 0, 0)
         identity_layout.setSpacing(4)
@@ -221,7 +221,7 @@ class PlayerBar(QFrame):
         # fixed vertical rhythm instead of letting the two labels consume the
         # full-height side region independently.
         self.metadata.setFixedWidth(154)
-        self.metadata.setFixedHeight(40)
+        self.metadata.setFixedHeight(64)
         self.metadata.setSizePolicy(
             QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed
         )
@@ -233,9 +233,8 @@ class PlayerBar(QFrame):
         self.title_label.setSizePolicy(
             QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed
         )
-        self.artist_label.setFixedHeight(17)
         self.artist_label.setSizePolicy(
-            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed
+            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred
         )
         self.availability_label.setFixedHeight(16)
         self.availability_label.setSizePolicy(
@@ -523,7 +522,8 @@ class PlayerBar(QFrame):
         self.availability_label.clear()
         self.availability_label.setToolTip("")
         self.availability_label.setVisible(False)
-        self.artist_label.setToolTip("")
+        self.identity_stack.setFixedHeight(76)
+        self.artist_label.setToolTip(metadata)
         self.track_inner.setToolTip(f"{title}\n{metadata}\n点击查看详情")
         self._set_track_controls_enabled(track is not None)
 
@@ -548,6 +548,7 @@ class PlayerBar(QFrame):
             self.availability_label.setText(identity.availability.label)
             self.availability_label.setToolTip(identity.availability.tooltip)
             self.availability_label.setVisible(True)
+            self.identity_stack.setFixedHeight(86)
             self.artist_label.setToolTip(
                 f"{identity.metadata}\n状态: {identity.availability.label}\n"
                 f"{identity.availability.tooltip}"
@@ -556,7 +557,8 @@ class PlayerBar(QFrame):
             self.availability_label.clear()
             self.availability_label.setToolTip("")
             self.availability_label.setVisible(False)
-            self.artist_label.setToolTip("")
+            self.identity_stack.setFixedHeight(76)
+            self.artist_label.setToolTip(identity.metadata)
 
     def _on_duration_changed(self, duration_ms: int | None) -> None:
         duration = max(0, int(duration_ms or 0))
