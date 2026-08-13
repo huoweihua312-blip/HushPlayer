@@ -204,14 +204,14 @@ class TrackDelegate(QStyledItemDelegate):
     def background_color(self, state: RowVisualState) -> QColor:
         colors = self._theme.colors
         values = {
-            RowVisualState.NORMAL: colors.content_background,
+            RowVisualState.NORMAL: colors.surface_primary,
             RowVisualState.HOVER: colors.hover_background,
             RowVisualState.SELECTED: colors.selected_background,
             RowVisualState.PLAYING: self._playing_surface(),
             RowVisualState.PAUSED: self._paused_surface(),
             RowVisualState.SELECTED_PLAYING: colors.selected_background,
             RowVisualState.SELECTED_PAUSED: colors.selected_background,
-            RowVisualState.DISABLED: colors.content_background,
+            RowVisualState.DISABLED: colors.surface_primary,
             RowVisualState.SELECTED_DISABLED: colors.selected_background,
             RowVisualState.HOVER_DISABLED: colors.hover_background,
         }

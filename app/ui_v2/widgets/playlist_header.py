@@ -117,10 +117,11 @@ class PlaylistHeader(QWidget):
         details.addStretch(1)
 
         layout = QHBoxLayout(self)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(20)
+        layout.setContentsMargins(24, 20, 24, 20)
+        layout.setSpacing(22)
         layout.addWidget(self.artwork, 0, Qt.AlignmentFlag.AlignTop)
         layout.addLayout(details, 1)
+        self.setMinimumHeight(200)
         self.set_theme(theme)
         self.set_playlist(None, ())
 
@@ -184,6 +185,10 @@ class PlaylistHeader(QWidget):
         colors = theme.colors
         self.artwork.set_theme(theme)
         apply_menu_theme(self._more_menu, theme)
+        self.setStyleSheet(
+            f"QWidget#playlistHero {{ background: {colors.surface_primary}; border: 1px solid {colors.border}; "
+            f"border-radius: {metrics.radius_lg}px; }}"
+        )
         self.eyebrow_label.setStyleSheet(
             f"font-size: {theme.fonts.caption}px; font-weight: 600; color: {colors.accent};"
         )

@@ -63,9 +63,26 @@ def build_stylesheet(theme: Theme) -> str:
             background: {c.app_background};
             color: {c.text_primary};
         }}
-        QWidget#uiV2Body, QWidget#uiV2ContentContainer,
-        QStackedWidget#uiV2ContentRouter, QWidget#libraryPage {{
+        QWidget#uiV2Body {{
             background: {c.app_background};
+        }}
+        QWidget#uiV2ContentContainer, QStackedWidget#uiV2ContentRouter,
+        QWidget#libraryPage, QWidget#trackListPage, QWidget#onlineSearchPage {{
+            background: {c.content_background};
+        }}
+        QWidget#libraryWorkSurface, QWidget#trackListWorkSurface {{
+            background: {c.surface_primary};
+            border: 1px solid {c.border};
+            border-radius: {m.radius_lg}px;
+        }}
+        QWidget#collectionActionRow, QWidget#sectionToolbar {{
+            background: {c.surface_primary};
+            border: 1px solid {c.border};
+            border-radius: {m.radius_md}px;
+        }}
+        QWidget#libraryWorkSurface QTableView#trackTable,
+        QWidget#trackListWorkSurface QTableView#trackTable {{
+            background: transparent;
         }}
         QLineEdit#searchInput, QLineEdit#titleBarSearchInput {{
             min-height: {m.control_height}px;
@@ -106,7 +123,7 @@ def build_stylesheet(theme: Theme) -> str:
         }}
         QTableView#trackTable {{
             border: 0;
-            background: {c.app_background};
+            background: {c.surface_primary};
             gridline-color: transparent;
             outline: 0;
             selection-background-color: transparent;
@@ -116,7 +133,7 @@ def build_stylesheet(theme: Theme) -> str:
             padding: 0 {m.spacing_sm}px;
             border: 0;
             border-bottom: 1px solid {c.divider};
-            background: {c.app_background};
+            background: {c.surface_primary};
             color: {c.text_tertiary};
             font-size: {theme.fonts.card_meta}px;
         }}

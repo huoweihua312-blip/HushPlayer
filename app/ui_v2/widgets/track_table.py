@@ -69,7 +69,7 @@ class TrackHeaderView(QHeaderView):
             if is_hovered
             else colors.elevated_background
             if is_sorted
-            else colors.content_background
+            else colors.surface_primary
         )
         painter.save()
         painter.fillRect(rect, QColor(background))
@@ -195,6 +195,7 @@ class TrackTable(QTableView):
     def _apply_scrollbar_style(self) -> None:
         c = self._theme.colors
         self.setStyleSheet(
+            f"QTableView#trackTable {{ background: {c.surface_primary}; border: 0; }}"
             f"QTableView#trackTable QScrollBar:vertical {{ width: 6px; background: transparent; "
             f"margin: 2px 0; border: 0; }}"
             f"QTableView#trackTable QScrollBar::handle:vertical {{ min-height: 24px; border-radius: 3px; "

@@ -17,18 +17,22 @@ class CollectionActionRow(QWidget):
 
     def __init__(self, theme: Theme, parent: QWidget | None = None) -> None:
         super().__init__(parent)
+        self.setObjectName("collectionActionRow")
+        self.setMinimumHeight(56)
         self.play_button = QToolButton(self)
         self.play_button.setObjectName("collectionPlayButton")
         self.play_button.setText("播放全部")
         self.play_button.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
+        self.play_button.setAccessibleName("播放全部")
         self.play_button.clicked.connect(self.play_requested)
         self.shuffle_button = QToolButton(self)
         self.shuffle_button.setObjectName("collectionShuffleButton")
         self.shuffle_button.setText("随机播放")
         self.shuffle_button.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
+        self.shuffle_button.setAccessibleName("随机播放")
         self.shuffle_button.clicked.connect(self.shuffle_requested)
         layout = QHBoxLayout(self)
-        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setContentsMargins(10, 8, 10, 8)
         layout.setSpacing(8)
         layout.addWidget(self.play_button)
         layout.addWidget(self.shuffle_button)
@@ -39,16 +43,21 @@ class CollectionActionRow(QWidget):
         self._theme = theme
         metrics = theme.metrics
         colors = theme.colors
-        self.play_button.setIcon(icon("play", theme, "selected"))
+        self.setStyleSheet(
+            f"QWidget#collectionActionRow {{ background: {colors.surface_primary}; border: 1px solid {colors.border}; "
+            f"border-radius: {metrics.radius_md}px; }}"
+        )
+        self.play_button.setIcon(icon("play", theme, "inverse"))
         self.play_button.setIconSize(QSize(theme.metrics.icon_sm, theme.metrics.icon_sm))
         self.shuffle_button.setIcon(icon("shuffle", theme, "normal"))
         self.shuffle_button.setIconSize(QSize(theme.metrics.icon_sm, theme.metrics.icon_sm))
         self.play_button.setStyleSheet(
             f"QToolButton {{ min-height: {metrics.control_height}px; padding: 0 {metrics.spacing_md}px; "
-            f"border: 0; border-radius: {metrics.radius_sm}px; color: {colors.content_background}; "
+            f"border: 1px solid transparent; border-radius: {metrics.radius_sm}px; color: {colors.content_background}; "
             f"background: {colors.accent}; font-weight: 600; }}"
             f"QToolButton:hover {{ background: {colors.accent_hover}; }}"
             f"QToolButton:pressed {{ background: {colors.accent_pressed}; }}"
+            f"QToolButton:focus {{ border-color: {colors.focus_ring}; }}"
             f"QToolButton:disabled {{ color: {colors.disabled_text}; background: {colors.surface_secondary}; }}"
         )
         self.shuffle_button.setStyleSheet(
@@ -57,6 +66,7 @@ class CollectionActionRow(QWidget):
             f"background: {colors.surface_secondary}; }}"
             f"QToolButton:hover {{ background: {colors.hover_background}; border-color: {colors.border_strong}; }}"
             f"QToolButton:pressed {{ background: {colors.selected_background}; }}"
+            f"QToolButton:focus {{ border-color: {colors.focus_ring}; }}"
             f"QToolButton:disabled {{ color: {colors.disabled_text}; background: transparent; border-color: {colors.border}; }}"
         )
 

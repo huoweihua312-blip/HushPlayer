@@ -161,7 +161,7 @@ class CustomTitleBar(QFrame):
         c = theme.colors
         self.setFixedHeight(theme.metrics.title_bar_height)
         self.setStyleSheet(
-            f"QFrame#customTitleBar {{ background: {c.titlebar_background}; border: 0; border-bottom: 1px solid {c.divider}; }}"
+            f"QFrame#customTitleBar {{ background: {c.titlebar_background}; border: 0; border-bottom: 1px solid {c.border}; }}"
             f"QToolButton#titleBarButton, QToolButton#titleBarWindowControl, QToolButton#titleBarClose {{ border: 0; border-radius: 8px; background: transparent; color: {c.text_secondary}; }}"
             f"QToolButton#titleBarButton:hover, QToolButton#titleBarWindowControl:hover {{ background: {c.surface_hover}; color: {c.text_primary}; }}"
             f"QToolButton#titleBarButton:pressed, QToolButton#titleBarWindowControl:pressed {{ background: {c.surface_pressed}; color: {c.text_primary}; }}"
@@ -170,8 +170,9 @@ class CustomTitleBar(QFrame):
             f"QToolButton#titleBarClose:pressed {{ background: {c.accent_pressed}; color: {c.text_primary}; }}"
             f"QWidget#titleBarBrand {{ background: transparent; }}"
             f"QLabel#titleBarBrandMark {{ background: transparent; }}"
-            f"QLabel#titleBarBrandLabel {{ color: {c.text_primary}; font-size: 17px; font-weight: 600; }}"
-            f"QWidget#titleBarSearchBox {{ border-radius: 9px; background: {c.surface_secondary}; border: 1px solid {c.divider}; }}"
+            f"QLabel#titleBarBrandLabel {{ color: {c.text_primary}; font-size: 17px; font-weight: 700; }}"
+            f"QWidget#titleBarSearchBox {{ border-radius: {theme.metrics.radius_md}px; background: {c.surface_primary}; border: 1px solid {c.border}; }}"
+            f"QWidget#titleBarSearchBox:hover {{ border-color: {c.border_strong}; }}"
             f"QLineEdit#titleBarSearchInput {{ border: 0; background: transparent; color: {c.text_primary}; font-size: {theme.fonts.body}px; }}"
             f"QLineEdit#titleBarSearchInput:focus {{ border: 0; }}"
         )

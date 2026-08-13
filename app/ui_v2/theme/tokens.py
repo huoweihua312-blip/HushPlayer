@@ -106,11 +106,11 @@ class ThemeMetrics:
     spacing_md: int = 12
     spacing_lg: int = 16
     spacing_xl: int = 24
-    radius_sm: int = 6
-    radius_md: int = 8
-    radius_lg: int = 12
-    page_margin: int = 30
-    control_height: int = 38
+    radius_sm: int = 8
+    radius_md: int = 10
+    radius_lg: int = 16
+    page_margin: int = 32
+    control_height: int = 40
     icon_sm: int = 16
     icon_md: int = 20
     icon_lg: int = 24
@@ -229,14 +229,14 @@ def _colors(
 LIGHT_THEME = Theme(
     mode="light",
     colors=_colors(
-        app="#f7f6f1", sidebar="#e8eee9", content="#fbfaf6", player="#eef2ed",
-        surface="#fbfaf6", surface_secondary="#f1f3ee", elevated="#ffffff",
-        hover="#e7eee9", selected="#dce9e1", playing="#eee4cd", pressed="#d0e0d6", divider="#d7e1da",
-        primary="#1d2925", secondary="#42554c", tertiary="#63766d", disabled="#a0ada6",
-        icon="#52665d", active="#b18d48", progress_track="#b7c5bc", accent="#b18d48",
-        accent_hover="#c09d58", accent_pressed="#9d7b3c", danger="#b7665f",
-        warning="#9a7228", success="#3e805e", shadow="rgba(31, 48, 41, .16)",
-        overlay="rgba(31, 48, 41, .24)",
+        app="#f2f5f1", sidebar="#e8eeea", content="#f6f8f4", player="#edf2ee",
+        surface="#fbfdf9", surface_secondary="#eef2ed", elevated="#ffffff",
+        hover="#e5ece7", selected="#dfe9e2", playing="#f0e7d3", pressed="#d3e0d7", divider="#d5ded7",
+        primary="#172521", secondary="#40544b", tertiary="#63756d", disabled="#9aa8a0",
+        icon="#50665d", active="#af8e4f", progress_track="#adbbb3", accent="#af8e4f",
+        accent_hover="#c09f61", accent_pressed="#92743e", danger="#b5645d",
+        warning="#92702e", success="#3d805e", shadow="rgba(31, 48, 41, .16)",
+        overlay="rgba(31, 48, 41, .26)",
     ),
     fonts=ThemeFonts(),
 )
@@ -245,14 +245,14 @@ LIGHT_THEME = Theme(
 DARK_THEME = Theme(
     mode="dark",
     colors=_colors(
-        app="#101516", sidebar="#0c1012", content="#101516", player="#151c1e",
-        surface="#151a1c", surface_secondary="#151c1e", elevated="#1d2527",
-        hover="#222c2e", selected="#1a211f", playing="#28271f", pressed="#293536", divider="#222c2e",
-        primary="#f1f5f2", secondary="#c7d2ce", tertiary="#899792", disabled="#5e6c68",
-        icon="#d3ded9", active="#d6b879", progress_track="#5e6c68", accent="#d6b879",
-        accent_hover="#e7ca8c", accent_pressed="#b89a5c", danger="#e08f86",
-        warning="#d0a85e", success="#8dc6a2", shadow="rgba(0, 0, 0, .48)",
-        overlay="rgba(0, 0, 0, .42)",
+        app="#0b1112", sidebar="#0d1516", content="#10191a", player="#121d1e",
+        surface="#152123", surface_secondary="#182527", elevated="#1d2a2c",
+        hover="#213032", selected="#1b2928", playing="#292719", pressed="#2a3839", divider="#283638",
+        primary="#f0f4f0", secondary="#bdcac3", tertiary="#85958e", disabled="#65736e",
+        icon="#cbd6d0", active="#c8a667", progress_track="#52625d", accent="#c8a667",
+        accent_hover="#d8b877", accent_pressed="#a78950", danger="#e1887f",
+        warning="#d4ad63", success="#86c49f", shadow="rgba(0, 0, 0, .52)",
+        overlay="rgba(0, 0, 0, .46)",
     ),
     fonts=ThemeFonts(),
 )

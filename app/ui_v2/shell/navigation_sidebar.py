@@ -186,7 +186,7 @@ class NavigationSidebar(QFrame):
         self._theme = theme
         c = theme.colors
         self.setStyleSheet(
-            f"QFrame#navigationSidebar {{ background: {c.sidebar_background}; border-right: 1px solid {c.divider}; }}"
+            f"QFrame#navigationSidebar {{ background: {c.sidebar_background}; border-right: 1px solid {c.border}; }}"
             f"QScrollArea#navigationScrollArea, QAbstractScrollArea#navigationScrollArea::viewport, "
             f"QWidget#navigationViewport, QWidget#navigationContent {{ background: {c.sidebar_background}; border: 0; }}"
             f"QScrollArea#navigationScrollArea QScrollBar:vertical {{ width: 6px; background: transparent; margin: 2px 0; border: 0; }}"
@@ -194,7 +194,7 @@ class NavigationSidebar(QFrame):
             f"QScrollArea#navigationScrollArea QScrollBar::handle:vertical:hover {{ background: {c.secondary_text}; }}"
             f"QScrollArea#navigationScrollArea QScrollBar::add-line:vertical, QScrollArea#navigationScrollArea QScrollBar::sub-line:vertical {{ height: 0; }}"
             f"QScrollArea#navigationScrollArea QScrollBar::add-page:vertical, QScrollArea#navigationScrollArea QScrollBar::sub-page:vertical {{ background: transparent; }}"
-            f"QWidget#navigationSettingsBox {{ border-top: 1px solid {c.divider}; }}"
+            f"QWidget#navigationSettingsBox {{ border-top: 1px solid {c.border}; }}"
             f"QLabel#navigationBrandMark {{ background: transparent; }}"
             f"QLabel#navigationBrandLabel {{ color: {c.text_primary}; font-size: 17px; font-weight: 600; }}"
         )
@@ -208,7 +208,7 @@ class NavigationSidebar(QFrame):
         )
         for label in self._section_labels:
             label.setStyleSheet(
-                f"padding-left: 12px; color: {c.text_tertiary}; font-size: 12px; font-weight: 400;"
+                f"padding-left: 12px; color: {c.text_tertiary}; font-size: 11px; font-weight: 600;"
             )
         for item in (*self._items.values(), *self._playlist_items.values()):
             item.set_theme(theme)
@@ -216,9 +216,9 @@ class NavigationSidebar(QFrame):
         self.playlist_add_button.setIcon(icon("add", theme, "normal"))
         self.playlist_add_button.setIconSize(QSize(17, 17))
         self.playlist_add_button.setStyleSheet(
-            f"QToolButton#playlistAddButton {{ border: 0; border-radius: {theme.metrics.radius_sm}px; "
-            f"background: transparent; color: {c.secondary_text}; }}"
-            f"QToolButton#playlistAddButton:hover {{ background: {c.hover_background}; color: {c.primary_text}; }}"
+            f"QToolButton#playlistAddButton {{ border: 1px solid {c.border}; border-radius: {theme.metrics.radius_sm}px; "
+            f"background: {c.surface_secondary}; color: {c.secondary_text}; }}"
+            f"QToolButton#playlistAddButton:hover {{ background: {c.hover_background}; color: {c.primary_text}; border-color: {c.border_strong}; }}"
             f"QToolButton#playlistAddButton:pressed {{ background: {c.playing_background}; }}"
         )
         self._apply_surface_backgrounds(c.sidebar_background)

@@ -59,7 +59,7 @@ class TrackCollectionHero(QWidget):
         self._details_layout.addLayout(self._actions_layout)
         self._details_layout.addStretch(1)
         self._layout = QHBoxLayout(self)
-        self._layout.setContentsMargins(0, 0, 0, 0)
+        self._layout.setContentsMargins(24, 20, 24, 20)
         self._layout.setSpacing(24)
         self._layout.addWidget(self.artwork, 0, Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
         self._layout.addLayout(self._details_layout, 1)
@@ -93,6 +93,10 @@ class TrackCollectionHero(QWidget):
         self.artwork.set_theme(theme)
         colors = theme.colors
         metrics = theme.metrics
+        self.setStyleSheet(
+            f"QWidget#trackCollectionHero {{ background: {colors.surface_primary}; border: 1px solid {colors.border}; "
+            f"border-radius: {metrics.radius_lg}px; }}"
+        )
         self.eyebrow_label.setStyleSheet(
             f"font-size: {theme.fonts.caption}px; font-weight: 600; color: {colors.accent};"
         )
@@ -157,7 +161,7 @@ class TrackCollectionHero(QWidget):
         self.artwork.setFixedSize(extent, extent)
         self._layout.setDirection(QBoxLayout.Direction.LeftToRight)
         self._layout.setSpacing(13 if reference < 950 else 17 if reference < 1220 else 22)
-        self.setMinimumHeight(extent)
+        self.setMinimumHeight(extent + 40)
 
     def set_responsive_reference_width(self, width: int) -> None:
         """Apply the content-page Hero scale without changing its layout role."""
