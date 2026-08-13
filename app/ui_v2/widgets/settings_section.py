@@ -40,5 +40,5 @@ class SettingsSection(QWidget):
 
     def set_theme(self, theme: Theme) -> None:
         self._theme = theme
-        self.title.setStyleSheet(f"font-size: {theme.fonts.section_title}px; font-weight: 600; color: {theme.colors.primary_text};")
-        self.description.setStyleSheet(f"font-size: {theme.fonts.secondary}px; color: {theme.colors.secondary_text};")
+        self.title.setStyleSheet(f"font-size: {theme.fonts.section_title}px; font-weight: 700; color: {theme.colors.primary_text};")
+        self.description.setStyleSheet(f"font-size: {theme.fonts.secondary}px; font-weight: 500; color: {theme.colors.secondary_text};")

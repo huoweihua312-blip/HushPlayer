@@ -58,6 +58,9 @@ datas = []
 datas += directory_if_present("assets", "assets")
 datas += directory_if_present("app/resources", "app/resources")
 datas += directory_if_present("app/ui_v2/assets", "app/ui_v2/assets")
+changelog_path = PROJECT_ROOT / "CHANGELOG.md"
+if changelog_path.is_file():
+    datas.append((str(changelog_path), "."))
 
 for runtime_name in (
     "runner.js",

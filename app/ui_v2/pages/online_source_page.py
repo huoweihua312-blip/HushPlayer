@@ -24,7 +24,7 @@ class SourceRow(QFrame):
         self._theme = theme
         self.source_id = source.id
         self.setObjectName("onlineSourceRow")
-        self.setMinimumHeight(94)
+        self.setMinimumHeight(106)
         self.name_label = QLabel(self)
         self.detail_label = QLabel(self)
         self.capability_label = QLabel(self)
@@ -43,20 +43,20 @@ class SourceRow(QFrame):
         self.remove_button.clicked.connect(lambda: self.remove_requested.emit(self.source_id))
         text = QVBoxLayout()
         text.setContentsMargins(0, 0, 0, 0)
-        text.setSpacing(3)
+        text.setSpacing(5)
         text.addWidget(self.name_label)
         text.addWidget(self.detail_label)
         text.addWidget(self.capability_label)
         text.addWidget(self.error_label)
         actions = QHBoxLayout()
         actions.setContentsMargins(0, 0, 0, 0)
-        actions.setSpacing(6)
+        actions.setSpacing(8)
         actions.addWidget(self.enabled_button)
         actions.addWidget(self.retry_button)
         actions.addWidget(self.remove_button)
         layout = QHBoxLayout(self)
-        layout.setContentsMargins(16, 12, 14, 12)
-        layout.setSpacing(12)
+        layout.setContentsMargins(18, 14, 18, 14)
+        layout.setSpacing(16)
         layout.addLayout(text, 1)
         layout.addWidget(self.badge, 0, Qt.AlignmentFlag.AlignTop)
         layout.addLayout(actions, 0)
@@ -108,17 +108,21 @@ class SourceRow(QFrame):
             f"QFrame#onlineSourceRow:hover {{ border-color: {colors.border_strong}; background: {colors.surface_secondary}; }}"
         )
         self.name_label.setStyleSheet(f"font-weight: 700; color: {colors.primary_text};")
-        self.detail_label.setStyleSheet(f"font-size: {theme.fonts.caption}px; color: {colors.secondary_text};")
-        self.capability_label.setStyleSheet(
-            f"font-size: {theme.fonts.caption}px; color: {colors.text_tertiary};"
+        self.detail_label.setStyleSheet(
+            f"font-size: {theme.fonts.caption}px; font-weight: 500; color: {colors.secondary_text};"
         )
-        self.error_label.setStyleSheet(f"font-size: {theme.fonts.caption}px; color: {colors.danger};")
+        self.capability_label.setStyleSheet(
+            f"font-size: {theme.fonts.caption}px; font-weight: 500; color: {colors.text_tertiary};"
+        )
+        self.error_label.setStyleSheet(
+            f"font-size: {theme.fonts.caption}px; font-weight: 500; color: {colors.danger};"
+        )
         self.badge.set_theme(theme)
         if self._enabled:
             self.enabled_button.setStyleSheet(
                 f"QToolButton {{ min-height: {metrics.control_height}px; padding: 0 {metrics.spacing_md}px; "
                 f"border: 1px solid {colors.border}; border-radius: {metrics.radius_sm}px; "
-                f"color: {colors.secondary_text}; background: {colors.surface_secondary}; }}"
+                f"color: {colors.secondary_text}; background: {colors.surface_secondary}; font-weight: 500; }}"
                 f"QToolButton:hover {{ color: {colors.primary_text}; background: {colors.hover_background}; border-color: {colors.border_strong}; }}"
             )
         else:
@@ -131,12 +135,12 @@ class SourceRow(QFrame):
         self.retry_button.setStyleSheet(
             f"QToolButton {{ min-height: {metrics.control_height}px; padding: 0 {metrics.spacing_sm}px; "
             f"border: 1px solid {colors.border}; border-radius: {metrics.radius_sm}px; color: {colors.warning}; "
-            f"background: {colors.surface_secondary}; }}"
+            f"background: {colors.surface_secondary}; font-weight: 500; }}"
             f"QToolButton:hover {{ color: {colors.primary_text}; background: {colors.hover_background}; }}"
         )
         self.remove_button.setStyleSheet(
             f"QToolButton {{ min-height: {metrics.control_height}px; padding: 0 {metrics.spacing_sm}px; "
-            f"border: 1px solid transparent; border-radius: {metrics.radius_sm}px; color: {colors.secondary_text}; background: transparent; }}"
+            f"border: 1px solid transparent; border-radius: {metrics.radius_sm}px; color: {colors.secondary_text}; background: transparent; font-weight: 500; }}"
             f"QToolButton:hover {{ color: {colors.danger}; background: {colors.hover_background}; }}"
         )
 
@@ -323,7 +327,7 @@ class OnlineSourcePage(QWidget):
                 f"border: 1px solid {'transparent' if primary else colors.border}; border-radius: {metrics.radius_sm}px; "
                 f"background: {colors.accent if primary else colors.surface_secondary}; "
                 f"color: {colors.content_background if primary else colors.secondary_text}; "
-                f"font-weight: {'600' if primary else '400'}; }}"
+                f"font-weight: {'600' if primary else '500'}; }}"
                 f"QToolButton:hover {{ color: {colors.content_background if primary else colors.primary_text}; "
                 f"background: {colors.accent_hover if primary else colors.hover_background}; border-color: {'transparent' if primary else colors.border_strong}; }}"
                 f"QToolButton:disabled {{ color: {colors.disabled_text}; background: {colors.surface_pressed}; }}"

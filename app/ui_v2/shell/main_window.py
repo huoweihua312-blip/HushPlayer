@@ -9,9 +9,10 @@ import os
 from pathlib import Path
 import tempfile
 
-from PySide6.QtCore import QEvent, QPoint, QRect, QRectF, Qt, QTimer
+from PySide6.QtCore import QEvent, QPoint, QRect, QRectF, QUrl, Qt, QTimer
 from PySide6.QtGui import (
     QColor,
+    QDesktopServices,
     QGuiApplication,
     QKeySequence,
     QMouseEvent,
@@ -144,7 +145,10 @@ class MainWindow(QMainWindow):
         self.settings_bridge = LegacySettingsBridge(
             settings_path=resolved_settings_path,
             apply_callback=self._apply_settings_snapshot,
-            action_callbacks={"check_updates": self._check_for_updates},
+            action_callbacks={
+                "check_updates": self._check_for_updates,
+                "open_settings_path": self._open_settings_path,
+            },
             parent=self,
         )
         self._settings_snapshot = self.settings_bridge.read_snapshot()
@@ -792,6 +796,13 @@ class MainWindow(QMainWindow):
         """Keep the shell's last persisted snapshot in sync with the overlay."""
 
         self._settings_snapshot = SettingsSnapshot.from_mapping(snapshot.to_dict())
+
+    @staticmethod
+    def _open_settings_path(path: str) -> bool:
+        candidate = Path(str(path or "").strip()).expanduser()
+        if not candidate.exists():
+            return False
+        return bool(QDesktopServices.openUrl(QUrl.fromLocalFile(str(candidate.resolve()))))
 
     def _apply_settings_values(self, values: dict[str, object]) -> None:
         """Apply persisted settings to the small set of V2 runtime models."""

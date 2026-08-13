@@ -70,8 +70,8 @@ class SettingsRow(QFrame):
         self._theme = theme
         background = theme.colors.selected_background if self._highlighted else "transparent"
         self.setStyleSheet(f"SettingsRow {{ background: {background}; border-bottom: 1px solid {theme.colors.border}; }}")
-        self.title_label.setStyleSheet(f"font-size: {theme.fonts.body}px; font-weight: 500; color: {theme.colors.primary_text};")
-        self.description_label.setStyleSheet(f"font-size: {theme.fonts.caption}px; color: {theme.colors.secondary_text};")
+        self.title_label.setStyleSheet(f"font-size: {theme.fonts.body}px; font-weight: 600; color: {theme.colors.primary_text};")
+        self.description_label.setStyleSheet(f"font-size: {theme.fonts.caption}px; font-weight: 500; color: {theme.colors.secondary_text};")
 
 
 SettingRow = SettingsRow

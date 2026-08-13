@@ -11,9 +11,11 @@ from PySide6.QtGui import QKeyEvent, QMouseEvent, QPixmap
 from PySide6.QtWidgets import (
     QFrame,
     QHBoxLayout,
+    QGridLayout,
     QLabel,
     QLineEdit,
     QListWidget,
+    QPlainTextEdit,
     QPushButton,
     QScrollArea,
     QStackedWidget,
@@ -55,6 +57,38 @@ from app.ui_v2.widgets.settings_sidebar import SettingsSidebar
 class _PathControl:
     widget: QWidget
     picker: SettingsPathPicker
+
+
+def _published_changelog_text() -> str:
+    """Return user-facing release summaries while hiding development details."""
+
+    changelog_path = Path(__file__).resolve().parents[3] / "CHANGELOG.md"
+    try:
+        lines = changelog_path.read_text(encoding="utf-8").splitlines()
+    except (OSError, UnicodeError):
+        return "暂时无法读取更新日志。"
+    published: list[str] = []
+    version_heading = ""
+    in_summary = False
+    for line in lines:
+        if line.startswith("## "):
+            heading = line.removeprefix("## ").strip()
+            version_heading = line if heading and heading[0].isdigit() else ""
+            in_summary = False
+            if version_heading:
+                published.append(version_heading)
+            continue
+        if line.startswith("### "):
+            in_summary = line.strip() == "### 在线更新摘要" and bool(version_heading)
+            if in_summary:
+                published.append(line)
+            continue
+        if in_summary and not any(
+            token in line.casefold() for token in ("mock", "demo", "fixture", "preview")
+        ):
+            published.append(line)
+    text = "\n".join(published).strip()
+    return text or "暂时没有可用的更新日志。"
 
 
 class _OverlayScrim(QFrame):
@@ -447,15 +481,30 @@ class SettingsOverlay(QWidget):
 
     def _build_cache(self, layout: QVBoxLayout) -> None:
         section = self._track_section(self._section("缓存", "缓存命令不参与 Save/Dirty；仅调用现有服务。"))
+        cache_path_row = self._path_row(
+            "cache_directory",
+            "缓存位置",
+            "留空表示使用系统默认目录；修改后重启 HushPlayer 才会切换。",
+        )
+        cache_path_control = self._path_controls["cache_directory"].picker
+        cache_path_control.clear_button.setText("恢复默认")
+        cache_path_control.clear_button.setToolTip("恢复系统默认缓存目录")
+        section.add_row(cache_path_row)
         self.cache_status = QLabel("缓存统计由正式缓存服务提供。", self)
         self.cache_status.setWordWrap(True)
         section.add_widget(self.cache_status)
-        for text, action in (
+        operations = QWidget(self)
+        operations.setObjectName("settingsCacheOperations")
+        operations_layout = QGridLayout(operations)
+        operations_layout.setContentsMargins(0, 4, 0, 0)
+        operations_layout.setHorizontalSpacing(10)
+        operations_layout.setVerticalSpacing(10)
+        for index, (text, action) in enumerate((
             ("清理封面 / 歌词失败缓存", "clear_missing_cache"),
             ("打开音频缓存目录", "open_audio_cache_directory"),
             ("清理未完成音频缓存", "clear_incomplete_audio_cache"),
             ("清理全部音频缓存", "clear_all_audio_cache"),
-        ):
+        )):
             button = (
                 SettingsActionButton(text, self._theme, self)
                 if action == "open_audio_cache_directory"
@@ -464,7 +513,8 @@ class SettingsOverlay(QWidget):
             self._aux_controls.append(button)
             button.clicked.connect(lambda _checked=False, name=action: self._run_action(name))
             button.setEnabled(self.bridge.has_action(action))
-            section.add_widget(button)
+            operations_layout.addWidget(button, index // 2, index % 2)
+        section.add_widget(operations)
         layout.addWidget(section)
 
     def _build_updates(self, layout: QVBoxLayout) -> None:
@@ -501,6 +551,16 @@ class SettingsOverlay(QWidget):
         section.add_widget(app_name)
         section.add_widget(version)
         layout.addWidget(section)
+
+        changelog = self._track_section(self._section("更新日志", "查看已发布版本的主要变化。"))
+        self.about_changelog = QPlainTextEdit(self)
+        self.about_changelog.setObjectName("settingsAboutChangelog")
+        self.about_changelog.setReadOnly(True)
+        self.about_changelog.setPlainText(_published_changelog_text())
+        self.about_changelog.setMinimumHeight(260)
+        self.about_changelog.setLineWrapMode(QPlainTextEdit.LineWrapMode.WidgetWidth)
+        changelog.add_widget(self.about_changelog)
+        layout.addWidget(changelog)
 
     def _bind_control(self, key: str, control: QWidget, getter, setter, signal) -> None:
         self._controls[key] = control
@@ -549,6 +609,8 @@ class SettingsOverlay(QWidget):
     def _choose_path(self, key: str) -> None:
         if self._path_chooser is not None:
             selected = self._path_chooser(key)
+        elif key == "cache_directory":
+            selected = QFileDialog.getExistingDirectory(self, "选择缓存目录", str(Path.home()))
         else:
             selected = QFileDialog.getOpenFileName(self, "选择背景图片", str(Path.home()))[0]
         if selected:
@@ -741,6 +803,10 @@ class SettingsOverlay(QWidget):
             return False
         self._save_state = "saving"
         self.footer.set_state_message("saving", "正在保存…")
+        cache_directory_changed = (
+            str(self._session.original_snapshot.get("cache_directory", "") or "")
+            != str(self._session.working_snapshot.get("cache_directory", "") or "")
+        )
         try:
             saved = self.bridge.save_snapshot(self._session.working_snapshot)
         except SettingsBridgeError as error:
@@ -753,7 +819,11 @@ class SettingsOverlay(QWidget):
             self._preview_callback(saved.to_dict())
         self.saved.emit(saved)
         self._save_state = "success"
-        self._feedback = "设置已保存"
+        self._feedback = (
+            "设置已保存；缓存位置将在重启后生效"
+            if cache_directory_changed
+            else "设置已保存"
+        )
         self.footer.set_state_message("success", self._feedback)
         QTimer.singleShot(1800, self._clear_success)
         return True
@@ -870,8 +940,8 @@ class SettingsOverlay(QWidget):
             f"QPushButton {{ min-height: {theme.metrics.control_height - 2}px; padding: 0 12px; border: 1px solid {c.border}; border-radius: {theme.metrics.radius_sm}px; background: {c.input_background}; color: {c.primary_text}; }}"
             f"QPushButton:hover {{ background: {c.hover_background}; }}"
         )
-        self.title_label.setStyleSheet(f"font-size: {theme.fonts.page_title}px; font-weight: 650; color: {c.primary_text};")
-        self.subtitle_label.setStyleSheet(f"font-size: {theme.fonts.caption}px; color: {c.secondary_text};")
+        self.title_label.setStyleSheet(f"font-size: {theme.fonts.page_title}px; font-weight: 700; color: {c.primary_text};")
+        self.subtitle_label.setStyleSheet(f"font-size: {theme.fonts.caption}px; font-weight: 500; color: {c.secondary_text};")
         self.header_icon.setIcon(fluent_settings_icon("general", theme, "selected", 20))
         self.header_icon.setIconSize(QSize(20, 20))
         self.header_icon.setStyleSheet(
@@ -902,7 +972,15 @@ class SettingsOverlay(QWidget):
                 control.set_theme(theme)
         if hasattr(self, "update_status"):
             self.update_status.setStyleSheet(
-                f"font-size: {theme.fonts.caption}px; color: {c.secondary_text};"
+                f"font-size: {theme.fonts.caption}px; font-weight: 500; color: {c.secondary_text};"
+            )
+        if hasattr(self, "cache_status"):
+            self.cache_status.setStyleSheet(
+                f"font-size: {theme.fonts.caption}px; font-weight: 500; color: {c.secondary_text};"
+            )
+        if hasattr(self, "about_changelog"):
+            self.about_changelog.setStyleSheet(
+                f"QPlainTextEdit#settingsAboutChangelog {{ min-height: 260px; padding: 12px; border: 1px solid {c.border}; border-radius: {theme.metrics.radius_md}px; background: {c.surface_secondary}; color: {c.primary_text}; selection-background-color: {c.accent}; selection-color: {c.content_background}; font-size: {theme.fonts.body}px; font-weight: 500; }}"
             )
         for key, page in self._category_pages.items():
             if key == "online_sources" and hasattr(page, "set_theme"):

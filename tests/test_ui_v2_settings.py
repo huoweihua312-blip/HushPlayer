@@ -14,8 +14,9 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from PySide6.QtCore import QSize
-from PySide6.QtWidgets import QApplication
+from PySide6.QtWidgets import QApplication, QWidget
 
+from app.core.app_paths import AppPaths
 from app.core.version import APP_NAME, APP_VERSION
 from app.ui_v2.adapters.legacy_settings_bridge import (
     DEFAULT_SETTINGS,
@@ -70,6 +71,49 @@ class SettingsContractTests(unittest.TestCase):
             with self.assertRaises(SettingsBridgeError):
                 bridge.save_snapshot(snapshot)
             self.assertFalse(path.exists())
+
+    def test_bridge_accepts_existing_cache_directory_and_rejects_relative_path(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            settings_path = Path(directory) / "settings.json"
+            cache_path = Path(directory) / "cache"
+            cache_path.mkdir()
+            bridge = LegacySettingsBridge(settings_path)
+            saved = bridge.save_snapshot(
+                bridge.read_snapshot().with_updates({"cache_directory": str(cache_path)})
+            )
+            self.assertEqual(Path(saved.get("cache_directory")), cache_path)
+            with self.assertRaises(SettingsBridgeError):
+                bridge.save_snapshot(
+                    saved.with_updates({"cache_directory": "relative-cache"})
+                )
+
+    def test_app_paths_reads_cache_directory_from_legacy_settings(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            app_data = root / "appdata"
+            custom_cache = root / "custom-cache"
+            custom_cache.mkdir(parents=True)
+            settings = app_data / "data" / "settings.json"
+            settings.parent.mkdir(parents=True)
+            settings.write_text(
+                json.dumps({"cache_directory": str(custom_cache)}),
+                encoding="utf-8",
+            )
+            previous_app_data = os.environ.get("HUSHPLAYER_APP_DATA_DIR")
+            previous_cache = os.environ.get("HUSHPLAYER_CACHE_DIR")
+            os.environ["HUSHPLAYER_APP_DATA_DIR"] = str(app_data)
+            os.environ.pop("HUSHPLAYER_CACHE_DIR", None)
+            try:
+                self.assertEqual(AppPaths.resolve().cache_dir, custom_cache.resolve())
+            finally:
+                if previous_app_data is None:
+                    os.environ.pop("HUSHPLAYER_APP_DATA_DIR", None)
+                else:
+                    os.environ["HUSHPLAYER_APP_DATA_DIR"] = previous_app_data
+                if previous_cache is None:
+                    os.environ.pop("HUSHPLAYER_CACHE_DIR", None)
+                else:
+                    os.environ["HUSHPLAYER_CACHE_DIR"] = previous_cache
 
 
 class SettingsOverlayIntegrationTests(unittest.TestCase):
@@ -182,6 +226,29 @@ class SettingsOverlayIntegrationTests(unittest.TestCase):
         self.assertIn(APP_VERSION, visible_text)
         for forbidden in ("HushPlayer UI V2", "设置 3A", "mock", "demo", "preview", "fixture"):
             self.assertNotIn(forbidden.casefold(), visible_text.casefold())
+
+    def test_about_exposes_published_update_summaries(self) -> None:
+        overlay = self.open_overlay()
+        overlay.set_category("about")
+        self.app.processEvents()
+        changelog = overlay.about_changelog.toPlainText()
+        self.assertIn("0.6.0-beta.5", changelog)
+        self.assertIn("在线更新摘要", changelog)
+        self.assertNotIn("## 未发布", changelog)
+        self.assertNotIn("mock", changelog.casefold())
+
+    def test_cache_directory_uses_two_column_actions_and_restart_feedback(self) -> None:
+        overlay = self.open_overlay()
+        overlay.set_category("cache")
+        self.app.processEvents()
+        self.assertIn("cache_directory", overlay._path_controls)
+        operations = overlay.findChild(QWidget, "settingsCacheOperations")
+        self.assertIsNotNone(operations)
+        with tempfile.TemporaryDirectory() as directory:
+            overlay._path_controls["cache_directory"].picker.set_path(directory)
+            self.assertTrue(overlay.is_dirty)
+            self.assertTrue(overlay.save())
+            self.assertIn("重启后生效", overlay.footer.status_label.text())
 
     def test_formal_settings_categories_and_settings_does_not_change_route(self) -> None:
         overlay = self.open_overlay()

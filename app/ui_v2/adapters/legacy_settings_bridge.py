@@ -7,6 +7,7 @@ callbacks; they never open or write ``settings.json`` themselves.
 from __future__ import annotations
 
 import json
+import os
 from copy import deepcopy
 from pathlib import Path
 from typing import Any, Callable
@@ -62,6 +63,7 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "music_scan_import_mode": "pending",
     "auto_check_updates_on_startup": False,
     "update_check_delay_seconds": 15,
+    "cache_directory": "",
     "immersive_background_mode": "cover",
     "immersive_background_visual_mode": "artwork",
     "immersive_background_custom_path": "",
@@ -227,6 +229,15 @@ class LegacySettingsBridge(QObject):
         folders = document.get("music_scan_folders", [])
         if not isinstance(folders, list) or any(not isinstance(item, str) for item in folders):
             errors["music_scan_folders"] = "音乐文件夹列表无效。"
+        cache_directory = str(document.get("cache_directory", "") or "").strip()
+        if cache_directory:
+            candidate = Path(cache_directory).expanduser()
+            if not candidate.is_absolute():
+                errors["cache_directory"] = "缓存目录必须是绝对路径。"
+            elif not candidate.is_dir():
+                errors["cache_directory"] = "缓存目录不存在，请先选择现有文件夹。"
+            elif not os.access(candidate, os.W_OK):
+                errors["cache_directory"] = "缓存目录不可写，请选择其他文件夹。"
         return errors
 
     def save_snapshot(self, snapshot: SettingsSnapshot) -> SettingsSnapshot:

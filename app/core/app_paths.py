@@ -33,6 +33,25 @@ def _resolved_environment_path(name: str) -> Path | None:
     return Path(value).expanduser().resolve()
 
 
+def _configured_cache_path(application_data_dir: Path) -> Path | None:
+    """Read the optional user-selected cache directory without importing UI settings."""
+
+    settings_path = application_data_dir / "data" / "settings.json"
+    try:
+        document = json.loads(settings_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError, TypeError):
+        return None
+    if not isinstance(document, dict):
+        return None
+    value = str(document.get("cache_directory") or "").strip()
+    if not value:
+        return None
+    candidate = Path(value).expanduser()
+    if not candidate.is_absolute():
+        return None
+    return candidate.resolve()
+
+
 def ensure_qt_application_identity() -> None:
     """Keep QStandardPaths stable in development and frozen runtimes."""
 
@@ -89,6 +108,8 @@ class AppPaths:
             )
 
         cache_dir = _resolved_environment_path("HUSHPLAYER_CACHE_DIR")
+        if cache_dir is None:
+            cache_dir = _configured_cache_path(application_data_dir)
         if cache_dir is None:
             location = QStandardPaths.writableLocation(
                 QStandardPaths.StandardLocation.CacheLocation
