@@ -38,11 +38,11 @@ class BrowseSection(QFrame):
         self._theme = theme
         self._cards: list[CoverCard] = []
         self.setObjectName("browseSection")
-        self.setFixedHeight(244)
+        self.setFixedHeight(284)
 
         self.heading = QWidget(self)
         self.heading.setObjectName("browseSectionHeading")
-        self.heading.setFixedHeight(34)
+        self.heading.setFixedHeight(40)
         heading_layout = QHBoxLayout(self.heading)
         heading_layout.setContentsMargins(0, 0, 0, 0)
         heading_layout.setSpacing(0)
@@ -80,14 +80,18 @@ class BrowseSection(QFrame):
 
         self.row = QWidget(self)
         self.row.setObjectName("browseCardRow")
-        self.row.setFixedHeight(210)
+        self.row.setFixedHeight(CoverCard.CARD_HEIGHT)
         self.row_layout = QHBoxLayout(self.row)
         self.row_layout.setContentsMargins(0, 0, 0, 0)
-        self.row_layout.setSpacing(20)
+        self.row_layout.setSpacing(14)
+        self.empty_label = QLabel("这里还没有可展示的歌曲", self.row)
+        self.empty_label.setObjectName("browseSectionEmpty")
+        self.empty_label.setVisible(False)
+        self.row_layout.addWidget(self.empty_label, 0, Qt.AlignmentFlag.AlignVCenter)
         self.row_layout.addStretch(1)
 
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setContentsMargins(16, 12, 16, 12)
         layout.setSpacing(0)
         layout.addWidget(self.heading)
         layout.addWidget(self.row)
@@ -101,13 +105,14 @@ class BrowseSection(QFrame):
         self._theme = theme
         c = theme.colors
         self.setStyleSheet(
-            f"QFrame#browseSection {{ background: transparent; border: 0; }}"
-            f"QLabel#browseSectionTitle {{ color: {c.text_primary}; font-size: {theme.fonts.section_title}px; font-weight: 600; }}"
-            f"QLabel#browseSectionStatus {{ color: {c.text_secondary}; font-size: {theme.fonts.card_meta}px; }}"
-            f"QToolButton#browseRefreshButton {{ border: 0; padding: 4px; color: {c.text_secondary}; background: transparent; }}"
-            f"QToolButton#browseRefreshButton:hover {{ color: {c.accent}; background: {c.surface_secondary}; border-radius: {theme.metrics.radius_sm}px; }}"
-            f"QToolButton#browseOnlineSearchButton {{ border: 0; padding: 0; color: {c.accent}; font-size: {theme.fonts.card_meta}px; background: transparent; }}"
-            f"QToolButton#browseOnlineSearchButton:hover {{ color: {c.text_primary}; }}"
+            f"QFrame#browseSection {{ background: {c.surface_primary}; border: 1px solid {c.border}; border-radius: {theme.metrics.radius_lg}px; }}"
+            f"QLabel#browseSectionTitle {{ color: {c.text_primary}; font-size: {theme.fonts.section_title}px; font-weight: 700; }}"
+            f"QLabel#browseSectionStatus {{ padding: 3px 8px; border-radius: {theme.metrics.radius_sm}px; background: {c.surface_secondary}; color: {c.text_secondary}; font-size: {theme.fonts.card_meta}px; }}"
+            f"QLabel#browseSectionEmpty {{ color: {c.text_tertiary}; font-size: {theme.fonts.secondary}px; }}"
+            f"QToolButton#browseRefreshButton {{ min-width: 32px; min-height: 32px; border: 1px solid {c.border}; border-radius: {theme.metrics.radius_sm}px; color: {c.text_secondary}; background: {c.surface_secondary}; }}"
+            f"QToolButton#browseRefreshButton:hover {{ color: {c.primary_text}; background: {c.hover_background}; border-color: {c.border_strong}; }}"
+            f"QToolButton#browseOnlineSearchButton {{ min-height: 32px; padding: 0 {theme.metrics.spacing_sm}px; border: 1px solid {c.border}; border-radius: {theme.metrics.radius_sm}px; color: {c.secondary_text}; background: {c.surface_secondary}; font-size: {theme.fonts.card_meta}px; }}"
+            f"QToolButton#browseOnlineSearchButton:hover {{ color: {c.primary_text}; background: {c.hover_background}; border-color: {c.border_strong}; }}"
             f"QToolButton#browseSeeAll {{ border: 0; padding: 0; color: {c.accent}; font-size: {theme.fonts.card_meta}px; background: transparent; }}"
             f"QToolButton#browseSeeAll:hover {{ color: {c.text_primary}; }}"
         )
@@ -128,6 +133,7 @@ class BrowseSection(QFrame):
         interactive: bool,
         inactive_tooltip: str,
     ) -> None:
+        self.empty_label.setVisible(not bool(tracks))
         while len(self._cards) < len(tracks):
             card = CoverCard(self._theme, self.row)
             card.activated.connect(self.track_activated)
@@ -193,27 +199,37 @@ class BrowsePage(QWidget):
         self.content = QWidget(self.scroll_area)
         self.content.setObjectName("browseContent")
         self.content_layout = QVBoxLayout(self.content)
-        self.content_layout.setContentsMargins(30, 26, 40, self._content_safe_bottom)
-        self.content_layout.setSpacing(0)
+        self.content_layout.setContentsMargins(
+            theme.metrics.page_margin,
+            theme.metrics.spacing_xl,
+            theme.metrics.page_margin,
+            self._content_safe_bottom,
+        )
+        self.content_layout.setSpacing(theme.metrics.spacing_md)
 
-        self.title_label = QLabel("浏览", self.content)
+        self.intro_surface = QFrame(self.content)
+        self.intro_surface.setObjectName("browseIntroSurface")
+        self.title_label = QLabel("浏览", self.intro_surface)
         self.title_label.setObjectName("browsePageTitle")
-        self.title_label.setFixedHeight(45)
-        self.content_layout.addWidget(self.title_label)
-        self.content_layout.addSpacing(30)
+        self.detail_label = QLabel("最近添加、再次播放与新的发现，都在这里自然衔接。", self.intro_surface)
+        self.detail_label.setObjectName("browsePageDetail")
+        intro_layout = QVBoxLayout(self.intro_surface)
+        intro_layout.setContentsMargins(20, 18, 20, 18)
+        intro_layout.setSpacing(4)
+        intro_layout.addWidget(self.title_label)
+        intro_layout.addWidget(self.detail_label)
+        self.content_layout.addWidget(self.intro_surface)
 
         self.sections = {
             "recent_added": BrowseSection("最近添加", theme, self.content),
             "recommended": BrowseSection("为你推荐", theme, self.content),
             "recent_played": BrowseSection("最近播放", theme, self.content),
         }
-        for position, section in enumerate(self.sections.values()):
+        for section in self.sections.values():
             section.play_requested.connect(self._request_track_play)
             section.track_activated.connect(self._request_track_play)
             section.context_menu_requested.connect(self._show_track_menu)
             self.content_layout.addWidget(section)
-            if position < len(self.sections) - 1:
-                self.content_layout.addSpacing(30)
         self.content_layout.addStretch(1)
         self.scroll_area.setWidget(self.content)
 
@@ -245,7 +261,13 @@ class BrowsePage(QWidget):
 
         if self._reference_width <= 960:
             return 3
-        if self._reference_width >= 1400:
+        if self._reference_width < 1200:
+            return 4
+        if self._reference_width < 1440:
+            return 5
+        if self._reference_width < 1600:
+            return 6
+        if self._reference_width >= 1600:
             return 7
         return 5
 
@@ -253,8 +275,10 @@ class BrowsePage(QWidget):
         self._theme = theme
         c = theme.colors
         self.setStyleSheet(
-            f"QWidget#browsePage, QScrollArea#browseScrollArea, QWidget#browseContent {{ background: {c.app_background}; }}"
+            f"QWidget#browsePage, QScrollArea#browseScrollArea, QWidget#browseContent {{ background: {c.content_background}; }}"
+            f"QFrame#browseIntroSurface {{ background: {c.surface_primary}; border: 1px solid {c.border}; border-radius: {theme.metrics.radius_lg}px; }}"
             f"QLabel#browsePageTitle {{ color: {c.text_primary}; font-size: {theme.fonts.page_title}px; font-weight: 700; }}"
+            f"QLabel#browsePageDetail {{ color: {c.secondary_text}; font-size: {theme.fonts.secondary}px; }}"
             f"QScrollArea#browseScrollArea QScrollBar:vertical {{ background: transparent; width: 10px; margin: 4px 2px 4px 0; }}"
             f"QScrollArea#browseScrollArea QScrollBar::handle:vertical {{ background: {c.text_tertiary}; min-height: 36px; border-radius: 5px; }}"
             f"QScrollArea#browseScrollArea QScrollBar::handle:vertical:hover {{ background: {c.text_secondary}; }}"

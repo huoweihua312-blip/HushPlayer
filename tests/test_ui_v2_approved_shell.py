@@ -105,6 +105,7 @@ class ApprovedShellMigrationTests(unittest.TestCase):
         page = self.window.router.browse_page
         self.assertIs(self.window.router.currentWidget(), page)
         self.assertEqual(set(page.sections), {"recent_added", "recommended", "recent_played"})
+        self.assertEqual(page.intro_surface.objectName(), "browseIntroSurface")
         self.assertEqual(page.target_card_count, 5)
         for section in page.sections.values():
             visible_cards = [card for card in section.cards if not card.isHidden()]
@@ -125,6 +126,19 @@ class ApprovedShellMigrationTests(unittest.TestCase):
                         any(marker in visible_label.casefold() for marker in ("mock", "demo", "preview", "fixture")),
                         visible_label,
                     )
+
+    def test_browse_uses_a_safe_six_card_density_at_1440px(self) -> None:
+        page = self.window.router.browse_page
+        self.window.resize(1440, 900)
+        self.app.processEvents()
+        self.assertEqual(page.target_card_count, 6)
+        for section in page.sections.values():
+            visible_cards = [card for card in section.cards if not card.isHidden()]
+            self.assertEqual(len(visible_cards), 6)
+            self.assertLessEqual(
+                max(card.geometry().right() for card in visible_cards),
+                section.row.contentsRect().right(),
+            )
 
     def test_track_selection_uses_surface_and_accent_rail_without_cell_frame(self) -> None:
         source = inspect.getsource(self.window.library_page.track_table.delegate.__class__)

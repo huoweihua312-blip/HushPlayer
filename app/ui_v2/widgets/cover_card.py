@@ -86,6 +86,8 @@ class CoverCard(QFrame):
 
     COVER_WIDTH = 164
     COVER_HEIGHT = 164
+    CARD_WIDTH = 170
+    CARD_HEIGHT = 218
     PLAY_BUTTON_SIZE = 36
     PLAY_BUTTON_INSET = 10
 
@@ -94,10 +96,12 @@ class CoverCard(QFrame):
         self._theme = theme
         self._track: Track | None = None
         self._interactive = True
+        self._hovered = False
         self.setObjectName("coverCard")
-        self.setFixedWidth(self.COVER_WIDTH)
-        self.setFixedHeight(210)
+        self.setFixedWidth(self.CARD_WIDTH)
+        self.setFixedHeight(self.CARD_HEIGHT)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.setAttribute(Qt.WidgetAttribute.WA_Hover, True)
         self.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.customContextMenuRequested.connect(self._emit_context_menu)
 
@@ -128,16 +132,19 @@ class CoverCard(QFrame):
         self.title_label = ElidedLabel(self)
         self.title_label.setObjectName("coverCardTitle")
         self.title_label.setWordWrap(False)
+        self.title_label.setFixedHeight(18)
         self.meta_label = ElidedLabel(self)
         self.meta_label.setObjectName("coverCardMeta")
         self.meta_label.setWordWrap(False)
+        self.meta_label.setFixedHeight(17)
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setContentsMargins(2, 2, 2, 2)
         layout.setSpacing(0)
         layout.addWidget(artwork_host)
         layout.addSpacing(4)
         layout.addWidget(self.title_label)
         layout.addWidget(self.meta_label)
+        layout.addStretch(1)
         self.set_theme(theme)
 
     @property
@@ -146,18 +153,24 @@ class CoverCard(QFrame):
 
     def set_theme(self, theme: Theme) -> None:
         self._theme = theme
-        c = theme.colors
-        self.setStyleSheet(
-            f"QFrame#coverCard {{ background: transparent; border: 0; }}"
-            f"QLabel#coverCardArtwork {{ border: 0; border-radius: {theme.metrics.radius_lg}px; background: {c.surface_secondary}; }}"
-            f"QLabel#coverCardTitle {{ color: {c.text_primary}; font-size: {theme.fonts.card_title}px; font-weight: 600; line-height: 18px; }}"
-            f"QLabel#coverCardMeta {{ color: {c.text_secondary}; font-size: {theme.fonts.card_meta}px; line-height: 17px; }}"
-            f"QToolButton#coverCardPlay {{ border: 0; background: transparent; padding: 0; margin: 0 {self.PLAY_BUTTON_INSET}px {self.PLAY_BUTTON_INSET}px 0; }}"
-        )
+        self._apply_surface_style()
         self.play_button.setIcon(icon("play", theme, "disabled" if not self._interactive else "normal"))
         self.play_button.setIconSize(QSize(16, 16))
         self.play_button.set_theme(theme)
         self._refresh_artwork()
+
+    def _apply_surface_style(self) -> None:
+        c = self._theme.colors
+        background = c.surface_secondary if self._hovered else "transparent"
+        border = c.border if self._hovered else "transparent"
+        self.setStyleSheet(
+            f"QFrame#coverCard {{ background: {background}; border: 1px solid {border}; "
+            f"border-radius: {self._theme.metrics.radius_md}px; }}"
+            f"QLabel#coverCardArtwork {{ border: 0; border-radius: {self._theme.metrics.radius_md}px; background: {c.surface_secondary}; }}"
+            f"QLabel#coverCardTitle {{ color: {c.text_primary}; font-size: {self._theme.fonts.card_title}px; font-weight: 600; line-height: 18px; }}"
+            f"QLabel#coverCardMeta {{ color: {c.text_secondary}; font-size: {self._theme.fonts.card_meta}px; line-height: 17px; }}"
+            f"QToolButton#coverCardPlay {{ border: 0; background: transparent; padding: 0; margin: 0 {self.PLAY_BUTTON_INSET}px {self.PLAY_BUTTON_INSET}px 0; }}"
+        )
 
     def set_track(self, track: Track) -> None:
         self._track = track
@@ -189,11 +202,15 @@ class CoverCard(QFrame):
         self.set_theme(self._theme)
 
     def enterEvent(self, event) -> None:  # noqa: N802
+        self._hovered = True
+        self._apply_surface_style()
         self.play_button.setVisible(self._interactive)
         self._artwork_effect.setOpacity(0.7 if self._interactive else 1.0)
         super().enterEvent(event)
 
     def leaveEvent(self, event) -> None:  # noqa: N802
+        self._hovered = False
+        self._apply_surface_style()
         self.play_button.hide()
         self._artwork_effect.setOpacity(1.0)
         super().leaveEvent(event)

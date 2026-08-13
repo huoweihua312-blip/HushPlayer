@@ -106,14 +106,17 @@ class PlayerBar(QFrame):
     def set_theme(self, theme: Theme) -> None:
         self._theme = theme
         c = theme.colors
+        m = theme.metrics
         self.setFixedHeight(theme.metrics.player_bar_height)
         self.progress_slider.set_visual_colors(theme)
         self.volume_slider.set_visual_colors(theme)
         self.setStyleSheet(
-            f"QFrame#playerBar {{ background: {c.playerbar_background}; border-top: 1px solid {c.divider}; }}"
-            f"QLabel#playerTitle {{ color: {c.text_primary}; font-size: {theme.fonts.player_title}px; font-weight: 600; }}"
+            f"QFrame#playerBar {{ background: {c.playerbar_background}; border-top: 1px solid {c.border}; }}"
+            f"QWidget#trackRegionInner, QWidget#utilityRegionInner {{ background: {c.surface_secondary}; border: 1px solid {c.border}; border-radius: {m.radius_md}px; }}"
+            f"QWidget#trackMetadata, QWidget#volumeGroup, QWidget#transportRow, QWidget#progressRow {{ background: transparent; border: 0; }}"
+            f"QLabel#playerTitle {{ color: {c.text_primary}; font-size: {theme.fonts.player_title}px; font-weight: 700; }}"
             f"QLabel#playerArtist {{ color: {c.text_secondary}; font-size: {theme.fonts.player_meta}px; }}"
-            f"QLabel#playerAvailability {{ color: {c.warning}; font-size: {theme.fonts.caption}px; }}"
+            f"QLabel#playerAvailability {{ padding: 1px 5px; border-radius: {m.radius_sm}px; background: {c.surface_pressed}; color: {c.warning}; font-size: {theme.fonts.caption}px; }}"
             f"QLabel#playerTime {{ color: {c.text_secondary}; font-size: 11px; }}"
             f"QSlider#playerProgress, QSlider#playerVolume {{ background: transparent; border: 0; }}"
             f"QSlider#playerProgress::groove:horizontal {{ height: 3px; border-radius: 2px; background: {c.progress_track}; }}"
@@ -194,8 +197,8 @@ class PlayerBar(QFrame):
             QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Fixed
         )
         track_inner_layout = QHBoxLayout(self.track_inner)
-        track_inner_layout.setContentsMargins(0, 0, 0, 0)
-        track_inner_layout.setSpacing(12)
+        track_inner_layout.setContentsMargins(8, 6, 8, 6)
+        track_inner_layout.setSpacing(10)
         self.artwork = ArtworkThumbnail(self._theme, self.track_inner, size=56)
         self.title_label = ElidedLabel(self.track_inner)
         self.title_label.setObjectName("playerTitle")
@@ -359,7 +362,7 @@ class PlayerBar(QFrame):
             QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Fixed
         )
         utility_layout = QHBoxLayout(self.utility_inner)
-        utility_layout.setContentsMargins(0, 0, 0, 0)
+        utility_layout.setContentsMargins(5, 5, 5, 5)
         utility_layout.setSpacing(9)
         self.queue_button = PlayerIconButton(
             "queue", "播放队列", self._theme, self.utility_inner, size=32, icon_canvas_size=18,
