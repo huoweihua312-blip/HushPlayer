@@ -5,6 +5,7 @@ import unittest
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
+from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QApplication, QPushButton
 
 from app.ui_v2.models.online_track import OnlineTrack
@@ -72,6 +73,11 @@ class OnlineRecoveryCandidateDialogTests(unittest.TestCase):
                 self.assertGreaterEqual(dialog.list_widget.item(0).sizeHint().height(), 56)
                 self.assertIn("已选择：夜航 0", dialog.selection_label.full_text)
                 self.assertTrue(dialog.list_widget.hasFocus())
+                self.assertTrue(
+                    bool(dialog.windowFlags() & Qt.WindowType.FramelessWindowHint)
+                )
+                self.assertEqual(dialog.surface.objectName(), "onlineRecoveryDialogSurface")
+                self.assertEqual(dialog.close_button.objectName(), "onlineRecoveryCloseButton")
             finally:
                 dialog.close()
                 dialog.deleteLater()

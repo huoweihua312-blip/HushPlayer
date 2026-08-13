@@ -162,7 +162,7 @@ class ToolbarComboBox(ThemedComboBox):
 
     def set_theme(self, theme: Theme) -> None:
         self._theme = theme
-        height = max(34, min(38, theme.metrics.control_height))
+        height = max(34, theme.metrics.control_height)
         self.setFixedHeight(height)
         SettingsControlFactory.style_combo(self, theme)
         self.update()
@@ -492,7 +492,7 @@ class SettingsControlFactory:
             if control.variant != "toolbar":
                 control.setMinimumHeight(max(32, theme.metrics.control_height - 4))
         if isinstance(control, ToolbarComboBox):
-            height = max(34, min(38, theme.metrics.control_height))
+            height = max(34, theme.metrics.control_height)
             content_height = height - 2
             radius = theme.metrics.radius_md
             selector = 'QComboBox[quietOrbitComboVariant="toolbar"]'

@@ -56,6 +56,7 @@ class UiV2ThemeTests(unittest.TestCase):
         self.assertIn("QWidget#libraryWorkSurface", stylesheet)
         self.assertIn("QWidget#trackListWorkSurface", stylesheet)
         self.assertIn("QWidget#collectionActionRow", stylesheet)
+        self.assertIn("QWidget#onlineSourcePage", stylesheet)
         dialog_stylesheet = build_dialog_stylesheet(theme)
         self.assertIn('QDialog QPushButton[role="primary"]', dialog_stylesheet)
         self.assertIn("QDialog QFrame#settingsCard", dialog_stylesheet)

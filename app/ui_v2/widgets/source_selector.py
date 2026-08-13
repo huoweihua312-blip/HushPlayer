@@ -18,6 +18,7 @@ class SourceSelector(QToolButton):
         self.adapter = adapter
         self._theme = theme
         self._compact = False
+        self.setObjectName("onlineSourceSelector")
         self.setAccessibleName("在线来源筛选")
         self.setAccessibleDescription("选择在线搜索时使用的来源")
         self.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
@@ -37,9 +38,12 @@ class SourceSelector(QToolButton):
         self.setIcon(icon("online", theme))
         self.setIconSize(QSize(theme.metrics.icon_sm, theme.metrics.icon_sm))
         self.setStyleSheet(
-            f"QToolButton {{ min-height: {theme.metrics.control_height}px; padding: 0 {theme.metrics.spacing_sm}px; "
-            f"border: 0; border-radius: {theme.metrics.radius_sm}px; color: {theme.colors.secondary_text}; }}"
-            f"QToolButton:hover {{ color: {theme.colors.primary_text}; background: {theme.colors.hover_background}; }}"
+            f"QToolButton#onlineSourceSelector {{ min-height: {theme.metrics.control_height}px; padding: 0 {theme.metrics.spacing_md}px; "
+            f"border: 1px solid {theme.colors.border}; border-radius: {theme.metrics.radius_sm}px; "
+            f"background: {theme.colors.surface_secondary}; color: {theme.colors.primary_text}; font-weight: 600; }}"
+            f"QToolButton#onlineSourceSelector:hover {{ color: {theme.colors.primary_text}; background: {theme.colors.hover_background}; "
+            f"border-color: {theme.colors.border_strong}; }}"
+            f"QToolButton#onlineSourceSelector:focus {{ border-color: {theme.colors.focus_ring}; }}"
         )
 
     def _rebuild_menu(self, sources) -> None:
@@ -78,5 +82,5 @@ class SourceSelector(QToolButton):
 
     def _refresh_text(self) -> None:
         count = sum(source.enabled for source in self.adapter.sources())
-        self.setText("来源" if self._compact else f"来源 {count}")
-        self.setToolTip(f"已启用 {count} 个在线来源")
+        self.setText("来源" if self._compact else f"选择来源 · {count}")
+        self.setToolTip(f"已启用 {count} 个在线来源；点击可调整本次搜索范围")

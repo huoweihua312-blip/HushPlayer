@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from PySide6.QtCore import Signal
-from PySide6.QtWidgets import QHBoxLayout, QLabel, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QVBoxLayout, QWidget
 
 from app.ui_v2.adapters.online_adapter import OnlineAdapter
 from app.ui_v2.adapters.playlist_adapter import PlaylistAdapter
@@ -35,11 +35,17 @@ class OnlineSearchPage(QWidget):
         self._theme = theme
         self._responsive_width: int | None = None
         self.setObjectName("onlineSearchPage")
-        self.title_label = QLabel("在线搜索", self)
-        self.detail_label = QLabel("从已启用的在线来源聚合结果。", self)
+        self.identity_surface = QFrame(self)
+        self.identity_surface.setObjectName("onlineSearchIdentitySurface")
+        self.result_surface = QFrame(self)
+        self.result_surface.setObjectName("onlineSearchResultSurface")
+        self.title_label = QLabel("在线搜索", self.identity_surface)
+        self.title_label.setObjectName("onlineSearchTitle")
+        self.detail_label = QLabel("从已启用的在线来源聚合结果。", self.identity_surface)
+        self.detail_label.setObjectName("onlineSearchDetail")
         self.query_context_label = QLabel(self)
         self.query_context_label.setObjectName("onlineSearchQueryContext")
-        self.scope_label = QLabel("范围：在线来源", self)
+        self.scope_label = QLabel("搜索范围：已启用的在线来源", self)
         self.scope_label.setObjectName("onlineSearchScope")
         self.search_bar = OnlineSearchBar(theme, self)
         self.source_selector = SourceSelector(adapter, theme, self)
@@ -47,30 +53,44 @@ class OnlineSearchPage(QWidget):
         # The shell title bar is the single production query input. Keep this
         # control as a compatibility handle for deterministic tests.
         self.search_bar.setVisible(False)
-        self.result_toolbar = OnlineResultToolbar(theme, self)
-        self.result_table = OnlineResultTable(adapter, playlists, theme, self)
-        self.history_view = SearchHistoryView(theme, self)
-        self.state_view = SearchStateView(theme, self)
+        self.result_toolbar = OnlineResultToolbar(theme, self.result_surface)
+        self.result_table = OnlineResultTable(adapter, playlists, theme, self.result_surface)
+        self.history_view = SearchHistoryView(theme, self.result_surface)
+        self.history_view.setObjectName("onlineSearchHistorySurface")
+        self.state_view = SearchStateView(theme, self.result_surface)
+        self.state_view.setObjectName("onlineSearchStateSurface")
+        identity_heading = QVBoxLayout()
+        identity_heading.setContentsMargins(0, 0, 0, 0)
+        identity_heading.setSpacing(3)
+        identity_heading.addWidget(self.title_label)
+        identity_heading.addWidget(self.detail_label)
+        identity_context = QHBoxLayout()
+        identity_context.setContentsMargins(0, 0, 0, 0)
+        identity_context.setSpacing(theme.metrics.spacing_sm)
+        identity_context.addWidget(self.query_context_label)
+        identity_context.addWidget(self.scope_label)
+        identity_context.addWidget(self.source_summary_label)
+        identity_context.addStretch(1)
+        identity_context.addWidget(self.source_selector)
+        identity_layout = QVBoxLayout(self.identity_surface)
+        identity_layout.setContentsMargins(20, 18, 20, 18)
+        identity_layout.setSpacing(14)
+        identity_layout.addLayout(identity_heading)
+        identity_layout.addLayout(identity_context)
+        result_layout = QVBoxLayout(self.result_surface)
+        result_layout.setContentsMargins(12, 12, 12, 12)
+        result_layout.setSpacing(theme.metrics.spacing_sm)
+        result_layout.addWidget(self.result_toolbar)
+        result_layout.addWidget(self.history_view)
+        result_layout.addWidget(self.state_view, 1)
+        result_layout.addWidget(self.result_table, 1)
         layout = QVBoxLayout(self)
         metrics = theme.metrics
-        layout.setContentsMargins(metrics.page_margin, metrics.spacing_md, metrics.page_margin, metrics.page_margin)
-        layout.setSpacing(metrics.spacing_sm)
-        layout.addWidget(self.title_label)
-        layout.addWidget(self.detail_label)
-        query_context = QHBoxLayout()
-        query_context.setContentsMargins(0, 0, 0, 0)
-        query_context.setSpacing(metrics.spacing_sm)
-        query_context.addWidget(self.query_context_label)
-        query_context.addWidget(self.scope_label)
-        query_context.addWidget(self.source_summary_label)
-        query_context.addStretch(1)
-        query_context.addWidget(self.source_selector)
-        layout.addLayout(query_context)
-        layout.addWidget(self.result_toolbar)
-        layout.addWidget(self.history_view)
-        layout.addWidget(self.state_view, 1)
-        layout.addWidget(self.result_table, 1)
-        self.result_table.setMinimumHeight(220)
+        layout.setContentsMargins(metrics.page_margin, metrics.spacing_lg, metrics.page_margin, metrics.page_margin)
+        layout.setSpacing(metrics.spacing_md)
+        layout.addWidget(self.identity_surface)
+        layout.addWidget(self.result_surface, 1)
+        self.result_table.setMinimumHeight(260)
         self.search_bar.query_changed.connect(adapter.set_query)
         self.search_bar.search_requested.connect(self._search)
         self.history_view.query_requested.connect(self._search_history)
@@ -101,18 +121,56 @@ class OnlineSearchPage(QWidget):
 
     def set_theme(self, theme: Theme) -> None:
         self._theme = theme
-        self.setStyleSheet(build_stylesheet(theme))
-        self.title_label.setStyleSheet(
-            f"font-size: {theme.fonts.page_title}px; font-weight: 600; color: {theme.colors.primary_text};"
+        colors = theme.colors
+        metrics = theme.metrics
+        self.setStyleSheet(
+            build_stylesheet(theme)
+            + f"""
+            QFrame#onlineSearchIdentitySurface {{
+                background: {colors.surface_primary};
+                border: 1px solid {colors.border};
+                border-radius: {metrics.radius_lg}px;
+            }}
+            QFrame#onlineSearchResultSurface {{
+                background: {colors.surface_primary};
+                border: 1px solid {colors.border};
+                border-radius: {metrics.radius_lg}px;
+            }}
+            QLabel#onlineSearchTitle {{
+                font-size: {theme.fonts.page_title}px;
+                font-weight: 700;
+                color: {colors.primary_text};
+            }}
+            QLabel#onlineSearchDetail {{ color: {colors.secondary_text}; }}
+            QLabel#onlineSearchQueryContext {{
+                color: {colors.primary_text};
+                font-size: {theme.fonts.secondary}px;
+                font-weight: 600;
+            }}
+            QLabel#onlineSearchScope {{
+                color: {colors.subtle_text};
+                font-size: {theme.fonts.caption}px;
+            }}
+            QWidget#onlineSearchHistorySurface {{
+                background: {colors.surface_secondary};
+                border: 1px solid {colors.border};
+                border-radius: {metrics.radius_md}px;
+            }}
+            QWidget#onlineSearchStateSurface {{
+                background: {colors.surface_secondary};
+                border: 1px solid {colors.border};
+                border-radius: {metrics.radius_md}px;
+            }}
+            QTableView#onlineResultTable {{
+                background: {colors.surface_primary};
+                border: 0;
+            }}
+            """
         )
-        self.detail_label.setStyleSheet(f"color: {theme.colors.secondary_text};")
-        self.query_context_label.setStyleSheet(
-            f"color: {theme.colors.primary_text}; font-size: {theme.fonts.secondary}px; font-weight: 600;"
+        self.source_summary_label.setStyleSheet(
+            f"padding: 3px 8px; border-radius: {metrics.radius_sm}px; background: {colors.surface_secondary}; "
+            f"color: {colors.secondary_text}; font-size: {theme.fonts.caption}px;"
         )
-        self.scope_label.setStyleSheet(
-            f"color: {theme.colors.subtle_text}; font-size: {theme.fonts.caption}px;"
-        )
-        self.source_summary_label.setStyleSheet(f"color: {theme.colors.subtle_text};")
         self.search_bar.set_theme(theme)
         self.source_selector.set_theme(theme)
         self.result_toolbar.set_theme(theme)
@@ -126,7 +184,8 @@ class OnlineSearchPage(QWidget):
         self.source_selector.set_compact(narrow)
         self.result_table.set_responsive_reference_width(width)
         self.result_toolbar.set_compact(narrow)
-        self.result_toolbar.sources_button.setText("来源" if narrow else "来源状态")
+        self.result_toolbar.sources_button.setText("来源" if narrow else "管理来源")
+        self.identity_surface.setMinimumHeight(112 if narrow else 126)
         self._sync_header_visibility()
 
     def _search(self) -> None:
@@ -158,6 +217,7 @@ class OnlineSearchPage(QWidget):
         self.detail_label.setVisible(show_context and not narrow)
         self.scope_label.setVisible(show_context and not narrow)
         self.source_summary_label.setVisible(show_context and not narrow)
+        self.identity_surface.setMinimumHeight(88 if has_results else 112 if narrow else 126)
 
     def _sync_sources(self, sources) -> None:
         enabled = [source for source in sources if source.enabled]

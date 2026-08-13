@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from PySide6.QtCore import Qt, Signal
-from PySide6.QtWidgets import QLabel, QProgressBar, QToolButton, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QHBoxLayout, QLabel, QProgressBar, QToolButton, QVBoxLayout, QWidget
 
 from app.ui_v2.models.online_search_state import OnlineSearchState
 from app.ui_v2.theme.tokens import Theme
@@ -18,6 +18,7 @@ class SearchStateView(QWidget):
     def __init__(self, theme: Theme, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self._theme = theme
+        self.setMinimumHeight(260)
         self.title_label = QLabel(self)
         self.detail_label = QLabel(self)
         self.progress = QProgressBar(self)
@@ -30,7 +31,7 @@ class SearchStateView(QWidget):
         self.retry_button.setAccessibleName("重试在线搜索")
         self.retry_button.clicked.connect(self.retry_requested)
         self.sources_button = QToolButton(self)
-        self.sources_button.setText("查看来源")
+        self.sources_button.setText("管理来源")
         self.sources_button.setAccessibleName("查看在线来源")
         self.sources_button.clicked.connect(self.sources_requested)
         self.history_button = QToolButton(self)
@@ -41,17 +42,25 @@ class SearchStateView(QWidget):
         for label in (self.title_label, self.detail_label):
             label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.detail_label.setWordWrap(True)
+        self.actions = QWidget(self)
+        self.actions.setObjectName("onlineSearchStateActions")
+        action_layout = QHBoxLayout(self.actions)
+        action_layout.setContentsMargins(0, 0, 0, 0)
+        action_layout.setSpacing(8)
+        action_layout.addStretch(1)
+        action_layout.addWidget(self.cancel_button)
+        action_layout.addWidget(self.retry_button)
+        action_layout.addWidget(self.sources_button)
+        action_layout.addWidget(self.history_button)
+        action_layout.addStretch(1)
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(24, 24, 24, 24)
-        layout.setSpacing(8)
+        layout.setContentsMargins(32, 28, 32, 28)
+        layout.setSpacing(10)
         layout.addStretch(1)
         layout.addWidget(self.title_label)
         layout.addWidget(self.detail_label)
         layout.addWidget(self.progress)
-        layout.addWidget(self.cancel_button, 0, Qt.AlignmentFlag.AlignHCenter)
-        layout.addWidget(self.retry_button, 0, Qt.AlignmentFlag.AlignHCenter)
-        layout.addWidget(self.sources_button, 0, Qt.AlignmentFlag.AlignHCenter)
-        layout.addWidget(self.history_button, 0, Qt.AlignmentFlag.AlignHCenter)
+        layout.addWidget(self.actions)
         layout.addStretch(1)
         self.set_state(OnlineSearchState("idle", ""))
         self.set_theme(theme)
@@ -77,16 +86,26 @@ class SearchStateView(QWidget):
     def set_theme(self, theme: Theme) -> None:
         self._theme = theme
         self.title_label.setStyleSheet(
-            f"font-size: {theme.fonts.section_title}px; font-weight: 600; color: {theme.colors.primary_text};"
+            f"font-size: {theme.fonts.section_title}px; font-weight: 700; color: {theme.colors.primary_text};"
         )
-        self.detail_label.setStyleSheet(f"color: {theme.colors.secondary_text};")
+        self.detail_label.setStyleSheet(
+            f"color: {theme.colors.secondary_text}; max-width: 560px;"
+        )
         self.progress.setStyleSheet(
             f"QProgressBar {{ border: 0; height: 5px; border-radius: 2px; background: {theme.colors.border}; }}"
             f"QProgressBar::chunk {{ border-radius: 2px; background: {theme.colors.accent}; }}"
         )
-        for button in (self.cancel_button, self.retry_button, self.sources_button, self.history_button):
+        for button in (self.cancel_button, self.sources_button, self.history_button):
             button.setStyleSheet(
                 f"QToolButton {{ min-height: {theme.metrics.control_height}px; padding: 0 {theme.metrics.spacing_md}px; "
-                f"border: 0; border-radius: {theme.metrics.radius_sm}px; color: {theme.colors.secondary_text}; }}"
-                f"QToolButton:hover {{ color: {theme.colors.primary_text}; background: {theme.colors.hover_background}; }}"
+                f"border: 1px solid {theme.colors.border}; border-radius: {theme.metrics.radius_sm}px; "
+                f"background: {theme.colors.surface_primary}; color: {theme.colors.secondary_text}; }}"
+                f"QToolButton:hover {{ color: {theme.colors.primary_text}; background: {theme.colors.hover_background}; "
+                f"border-color: {theme.colors.border_strong}; }}"
             )
+        self.retry_button.setStyleSheet(
+            f"QToolButton {{ min-height: {theme.metrics.control_height}px; padding: 0 {theme.metrics.spacing_md}px; "
+            f"border: 1px solid transparent; border-radius: {theme.metrics.radius_sm}px; "
+            f"background: {theme.colors.accent}; color: {theme.colors.content_background}; font-weight: 600; }}"
+            f"QToolButton:hover {{ background: {theme.colors.accent_hover}; }}"
+        )

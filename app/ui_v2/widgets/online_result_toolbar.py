@@ -18,8 +18,12 @@ class OnlineResultToolbar(QWidget):
     def __init__(self, theme: Theme, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self._theme = theme
+        self.setObjectName("onlineResultToolbar")
+        self.setMinimumHeight(56)
         self.summary_label = QLabel(self)
+        self.summary_label.setObjectName("onlineResultCount")
         self.warning_label = QLabel(self)
+        self.warning_label.setObjectName("onlineResultWarning")
         self.source_filter = ToolbarComboBox(theme, self)
         self.source_filter.setAccessibleName("来源筛选")
         self.source_filter.setAccessibleDescription("筛选在线搜索结果的来源")
@@ -40,13 +44,13 @@ class OnlineResultToolbar(QWidget):
         self.retry_button.setToolTip("重新查询当前关键词")
         self.retry_button.clicked.connect(self.retry_requested)
         self.sources_button = QToolButton(self)
-        self.sources_button.setText("来源状态")
+        self.sources_button.setText("管理来源")
         self.sources_button.setAccessibleName("查看在线来源状态")
         self.sources_button.setToolTip("管理在线来源的启用状态")
         self.sources_button.clicked.connect(self.sources_requested)
         layout = QHBoxLayout(self)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(8)
+        layout.setContentsMargins(12, 8, 12, 8)
+        layout.setSpacing(10)
         layout.addWidget(self.summary_label)
         layout.addWidget(self.warning_label)
         layout.addWidget(self.source_filter)
@@ -87,19 +91,34 @@ class OnlineResultToolbar(QWidget):
 
     def set_theme(self, theme: Theme) -> None:
         self._theme = theme
-        self.summary_label.setStyleSheet(
-            f"color: {theme.colors.secondary_text}; padding-right: {theme.metrics.spacing_xs}px; "
-            f"font-size: {theme.fonts.caption}px;"
+        colors = theme.colors
+        metrics = theme.metrics
+        self.setStyleSheet(
+            f"QWidget#onlineResultToolbar {{ background: {colors.surface_secondary}; border: 1px solid {colors.border}; "
+            f"border-radius: {metrics.radius_md}px; }}"
         )
-        self.warning_label.setStyleSheet(f"color: {theme.colors.warning};")
+        self.summary_label.setStyleSheet(
+            f"padding: 3px 8px; border-radius: {metrics.radius_sm}px; background: {colors.elevated_background}; "
+            f"color: {colors.primary_text}; font-size: {theme.fonts.caption}px; font-weight: 600;"
+        )
+        self.warning_label.setStyleSheet(
+            f"color: {colors.warning}; font-size: {theme.fonts.caption}px;"
+        )
         self.source_filter.set_theme(theme)
         self.sort_selector.set_theme(theme)
-        for button in (self.retry_button, self.sources_button):
-            button.setStyleSheet(
-                f"QToolButton {{ min-height: {theme.metrics.control_height}px; padding: 0 {theme.metrics.spacing_sm}px; "
-                f"border: 0; border-radius: {theme.metrics.radius_sm}px; color: {theme.colors.secondary_text}; }}"
-                f"QToolButton:hover {{ color: {theme.colors.primary_text}; background: {theme.colors.hover_background}; }}"
-            )
+        self.retry_button.setStyleSheet(
+            f"QToolButton {{ min-height: {metrics.control_height}px; padding: 0 {metrics.spacing_md}px; "
+            f"border: 1px solid {colors.border}; border-radius: {metrics.radius_sm}px; color: {colors.warning}; "
+            f"background: {colors.surface_primary}; }}"
+            f"QToolButton:hover {{ color: {colors.primary_text}; background: {colors.hover_background}; border-color: {colors.border_strong}; }}"
+        )
+        self.sources_button.setStyleSheet(
+            f"QToolButton {{ min-height: {metrics.control_height}px; padding: 0 {metrics.spacing_md}px; "
+            f"border: 1px solid {colors.border}; border-radius: {metrics.radius_sm}px; color: {colors.secondary_text}; "
+            f"background: {colors.surface_primary}; }}"
+            f"QToolButton:hover {{ color: {colors.primary_text}; background: {colors.hover_background}; border-color: {colors.border_strong}; }}"
+            f"QToolButton:focus {{ border-color: {colors.focus_ring}; }}"
+        )
 
     def _emit_source_filter(self) -> None:
         self.source_filter_changed.emit(str(self.source_filter.currentData() or ""))

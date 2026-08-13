@@ -67,7 +67,7 @@ def build_stylesheet(theme: Theme) -> str:
             background: {c.app_background};
         }}
         QWidget#uiV2ContentContainer, QStackedWidget#uiV2ContentRouter,
-        QWidget#libraryPage, QWidget#trackListPage, QWidget#onlineSearchPage {{
+        QWidget#libraryPage, QWidget#trackListPage, QWidget#onlineSearchPage, QWidget#onlineSourcePage {{
             background: {c.content_background};
         }}
         QWidget#libraryWorkSurface, QWidget#trackListWorkSurface {{

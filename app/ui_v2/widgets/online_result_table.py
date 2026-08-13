@@ -41,7 +41,7 @@ class OnlineResultDelegate(QStyledItemDelegate):
         self._theme = theme
 
     def sizeHint(self, option, index):  # noqa: N802
-        return super().sizeHint(option, index).expandedTo(option.fontMetrics.size(0, 48))
+        return super().sizeHint(option, index).expandedTo(option.fontMetrics.size(0, 52))
 
     def paint(self, painter: QPainter, option, index) -> None:  # noqa: N802
         track = index.data(ONLINE_TRACK_ROLE)
@@ -152,12 +152,12 @@ class OnlineResultDelegate(QStyledItemDelegate):
 
     def _background(self, state: RowVisualState) -> QColor:
         values = {
-            RowVisualState.NORMAL: self._theme.colors.content_background,
+            RowVisualState.NORMAL: self._theme.colors.surface_primary,
             RowVisualState.HOVER: self._theme.colors.hover_background,
             RowVisualState.SELECTED: self._theme.colors.selected_background,
             RowVisualState.PLAYING: self._theme.colors.playing_background,
             RowVisualState.SELECTED_PLAYING: self._theme.colors.selected_background,
-            RowVisualState.DISABLED: self._theme.colors.content_background,
+            RowVisualState.DISABLED: self._theme.colors.surface_primary,
         }
         return QColor(values[state])
 
@@ -205,7 +205,7 @@ class OnlineResultTable(QTableView):
         self.setVerticalScrollMode(QAbstractItemView.ScrollMode.ScrollPerPixel)
         self.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.verticalHeader().hide()
-        self.verticalHeader().setDefaultSectionSize(48)
+        self.verticalHeader().setDefaultSectionSize(52)
         self.horizontalHeader().setStretchLastSection(False)
         self.doubleClicked.connect(self._on_double_clicked)
         self.customContextMenuRequested.connect(self._show_context_menu)
@@ -218,6 +218,19 @@ class OnlineResultTable(QTableView):
     def set_theme(self, theme: Theme) -> None:
         self._theme = theme
         self.delegate.set_theme(theme)
+        colors = theme.colors
+        metrics = theme.metrics
+        self.setStyleSheet(
+            f"QTableView#onlineResultTable {{ background: {colors.surface_primary}; border: 0; outline: 0; }}"
+            f"QTableView#onlineResultTable QHeaderView {{ background: {colors.surface_primary}; border: 0; }}"
+            f"QTableView#onlineResultTable QHeaderView::section {{ height: 36px; padding: 0 {metrics.spacing_sm}px; "
+            f"background: {colors.surface_primary}; color: {colors.text_tertiary}; border: 0; "
+            f"border-bottom: 1px solid {colors.divider}; font-size: {theme.fonts.card_meta}px; font-weight: 600; }}"
+            f"QTableView#onlineResultTable QScrollBar:vertical {{ width: 6px; margin: 4px 2px; background: transparent; border: 0; }}"
+            f"QTableView#onlineResultTable QScrollBar::handle:vertical {{ min-height: 28px; border-radius: 3px; background: {colors.border_strong}; }}"
+            f"QTableView#onlineResultTable QScrollBar::handle:vertical:hover {{ background: {colors.text_tertiary}; }}"
+            f"QTableView#onlineResultTable QScrollBar::add-line:vertical, QTableView#onlineResultTable QScrollBar::sub-line:vertical {{ height: 0; }}"
+        )
         self.viewport().update()
 
     def set_responsive_reference_width(self, width: int) -> None:

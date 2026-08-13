@@ -347,6 +347,12 @@ class OnlineSearchPageTests(unittest.TestCase):
         self.app.processEvents()
         self.assertIsInstance(self.window.router.currentWidget(), OnlineSourcePage)
         source_page = self.window.router.currentWidget()
+        self.assertEqual(source_page.header_surface.objectName(), "onlineSourceHeaderSurface")
+        self.assertEqual(source_page.list_surface.objectName(), "onlineSourceListSurface")
+        self.assertEqual(
+            source_page.add_source_button.toolButtonStyle(),
+            Qt.ToolButtonStyle.ToolButtonTextBesideIcon,
+        )
         first_row = next(iter(source_page._rows.values()))
         original = first_row._enabled
         first_row.toggle_requested.emit(first_row.source_id, not original)
