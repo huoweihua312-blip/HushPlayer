@@ -112,7 +112,7 @@ class PlayerBar(QFrame):
         self.volume_slider.set_visual_colors(theme)
         self.setStyleSheet(
             f"QFrame#playerBar {{ background: {c.playerbar_background}; border-top: 1px solid {c.border}; }}"
-            f"QWidget#trackRegionInner, QWidget#utilityRegionInner {{ background: {c.surface_secondary}; border: 1px solid {c.border}; border-radius: {m.radius_md}px; }}"
+            f"QWidget#trackRegionInner, QWidget#utilityRegionInner {{ background: transparent; border: 0; border-radius: 0; }}"
             f"QWidget#trackMetadata, QWidget#volumeGroup, QWidget#transportRow, QWidget#progressRow {{ background: transparent; border: 0; }}"
             f"QLabel#playerTitle {{ color: {c.text_primary}; font-size: {theme.fonts.player_title}px; font-weight: 600; }}"
             f"QLabel#playerArtist {{ color: {c.text_secondary}; font-size: {theme.fonts.player_meta}px; font-weight: 400; }}"

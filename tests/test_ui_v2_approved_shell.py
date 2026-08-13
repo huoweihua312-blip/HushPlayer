@@ -439,6 +439,9 @@ class ApprovedShellMigrationTests(unittest.TestCase):
 
     def test_player_side_regions_center_natural_width_in_double_stretch_outers(self) -> None:
         bar = self.window.player_bar
+        self.assertIn("QWidget#trackRegionInner", bar.styleSheet())
+        self.assertIn("background: transparent", bar.styleSheet())
+        self.assertIn("border: 0", bar.styleSheet())
         self.window.playback_adapter.play()
         for outer, inner, layout in (
             (bar.track_region, bar.track_inner, bar.track_region_layout),
