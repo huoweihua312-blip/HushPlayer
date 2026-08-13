@@ -113,7 +113,7 @@ class PlayerBar(QFrame):
             f"QFrame#playerBar {{ background: {c.playerbar_background}; border-top: 1px solid {c.divider}; }}"
             f"QLabel#playerTitle {{ color: {c.text_primary}; font-size: {theme.fonts.player_title}px; font-weight: 600; }}"
             f"QLabel#playerArtist {{ color: {c.text_secondary}; font-size: {theme.fonts.player_meta}px; }}"
-            f"QLabel#playerTime {{ color: {c.text_secondary}; font-size: 11px; }}"
+            f"QLabel#playerTime {{ color: {c.text_secondary}; font-size: {max(12, theme.fonts.caption - 1)}px; }}"
             f"QSlider#playerProgress, QSlider#playerVolume {{ background: transparent; border: 0; }}"
             f"QSlider#playerProgress::groove:horizontal {{ height: 3px; border-radius: 2px; background: {c.progress_track}; }}"
             f"QSlider#playerVolume::groove:horizontal {{ height: 3px; border-radius: 2px; background: {c.progress_track}; }}"
@@ -185,7 +185,7 @@ class PlayerBar(QFrame):
         # fixed vertical rhythm instead of letting the two labels consume the
         # full-height side region independently.
         self.metadata.setFixedWidth(174)
-        self.metadata.setFixedHeight(36)
+        self.metadata.setFixedHeight(40)
         self.metadata.setSizePolicy(
             QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed
         )
@@ -193,11 +193,11 @@ class PlayerBar(QFrame):
         metadata_layout.setContentsMargins(0, 0, 0, 0)
         metadata_layout.setSpacing(3)
         metadata_layout.setAlignment(Qt.AlignmentFlag.AlignVCenter)
-        self.title_label.setFixedHeight(15)
+        self.title_label.setFixedHeight(18)
         self.title_label.setSizePolicy(
             QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed
         )
-        self.artist_label.setFixedHeight(14)
+        self.artist_label.setFixedHeight(17)
         self.artist_label.setSizePolicy(
             QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed
         )

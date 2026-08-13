@@ -59,6 +59,8 @@ def build_stylesheet(theme: Theme) -> str:
             background: {c.app_background};
             color: {c.text_primary};
             font-family: "Segoe UI Variable", "Segoe UI";
+            font-size: {theme.fonts.body}px;
+            font-weight: 500;
         }}
         QWidget#uiV2Body, QWidget#uiV2ContentContainer,
         QStackedWidget#uiV2ContentRouter, QWidget#libraryPage {{

@@ -84,15 +84,18 @@ class ThemeMetrics:
 
 @dataclass(frozen=True, slots=True)
 class ThemeFonts:
-    page_title: int = 36
-    section_title: int = 22
-    body: int = 15
-    secondary: int = 14
-    caption: int = 12
-    card_title: int = 14
-    card_meta: int = 12
-    player_title: int = 14
-    player_meta: int = 12
+    # The V2 baseline is intentionally one step above Qt's Windows default.
+    # This keeps Chinese glyphs readable at 100% display scaling without
+    # making the layout feel oversized on a 900px-wide window.
+    page_title: int = 38
+    section_title: int = 23
+    body: int = 16
+    secondary: int = 15
+    caption: int = 13
+    card_title: int = 15
+    card_meta: int = 13
+    player_title: int = 15
+    player_meta: int = 13
 
 
 @dataclass(frozen=True, slots=True)

@@ -147,6 +147,7 @@ class OnlineResultTable(QTableView):
         self.model = OnlineTrackModel((), self)
         self.delegate = OnlineResultDelegate(theme, self)
         self._theme = theme
+        self._apply_theme_font(theme)
         self._hovered_row = -1
         self._responsive_width: int | None = None
         self._all_tracks = adapter.results()
@@ -177,8 +178,14 @@ class OnlineResultTable(QTableView):
 
     def set_theme(self, theme: Theme) -> None:
         self._theme = theme
+        self._apply_theme_font(theme)
         self.delegate.set_theme(theme)
         self.viewport().update()
+
+    def _apply_theme_font(self, theme: Theme) -> None:
+        font = QFont(self.font())
+        font.setPixelSize(theme.fonts.body)
+        self.setFont(font)
 
     def set_responsive_reference_width(self, width: int) -> None:
         normalized = max(1, int(width))

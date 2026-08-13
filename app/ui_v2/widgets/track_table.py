@@ -134,6 +134,7 @@ class TrackTable(QTableView):
         self.model = TrackTableModel(adapter.tracks(), self)
         self.delegate = TrackDelegate(theme, self)
         self._theme = theme
+        self._apply_theme_font(theme)
         self._hovered_row = -1
         self._column_profile = "narrow"
         self._responsive_reference_width: int | None = None
@@ -178,10 +179,16 @@ class TrackTable(QTableView):
 
     def set_theme(self, theme: Theme) -> None:
         self._theme = theme
+        self._apply_theme_font(theme)
         self.delegate.set_theme(theme)
         self.header.set_theme(theme)
         self._apply_scrollbar_style()
         self.viewport().update()
+
+    def _apply_theme_font(self, theme: Theme) -> None:
+        font = QFont(self.font())
+        font.setPixelSize(theme.fonts.body)
+        self.setFont(font)
 
     def _apply_scrollbar_style(self) -> None:
         c = self._theme.colors
