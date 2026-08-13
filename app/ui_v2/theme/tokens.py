@@ -164,21 +164,23 @@ class ThemeMetrics:
 
 @dataclass(frozen=True, slots=True)
 class ThemeFonts:
-    caption: int = 12
-    body_small: int = 13
-    body: int = 14
-    control: int = 14
-    section_title: int = 20
-    page_title: int = 30
-    hero_title: int = 34
-    track_title: int = 15
-    metadata: int = 13
-    numeric: int = 13
-    secondary: int = 14
-    card_title: int = 14
-    card_meta: int = 13
-    player_title: int = 14
-    player_meta: int = 13
+    # Keep the Chinese UI one readable step above Qt's Windows default while
+    # preserving the compact Quiet Orbit rhythm at 900px-wide windows.
+    caption: int = 13
+    body_small: int = 14
+    body: int = 15
+    control: int = 15
+    section_title: int = 21
+    page_title: int = 32
+    hero_title: int = 36
+    track_title: int = 16
+    metadata: int = 14
+    numeric: int = 14
+    secondary: int = 15
+    card_title: int = 15
+    card_meta: int = 14
+    player_title: int = 15
+    player_meta: int = 14
     family: str = "Source Han Sans SC"
 
 

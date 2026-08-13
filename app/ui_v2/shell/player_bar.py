@@ -207,7 +207,7 @@ class PlayerBar(QFrame):
         self.identity_stack = QWidget(self.track_inner)
         self.identity_stack.setObjectName("playerIdentityStack")
         self.identity_stack.setFixedWidth(154)
-        self.identity_stack.setFixedHeight(53)
+        self.identity_stack.setFixedHeight(60)
         identity_layout = QVBoxLayout(self.identity_stack)
         identity_layout.setContentsMargins(0, 0, 0, 0)
         identity_layout.setSpacing(4)
@@ -221,7 +221,7 @@ class PlayerBar(QFrame):
         # fixed vertical rhythm instead of letting the two labels consume the
         # full-height side region independently.
         self.metadata.setFixedWidth(154)
-        self.metadata.setFixedHeight(36)
+        self.metadata.setFixedHeight(40)
         self.metadata.setSizePolicy(
             QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed
         )
@@ -229,11 +229,11 @@ class PlayerBar(QFrame):
         metadata_layout.setContentsMargins(0, 0, 0, 0)
         metadata_layout.setSpacing(3)
         metadata_layout.setAlignment(Qt.AlignmentFlag.AlignVCenter)
-        self.title_label.setFixedHeight(15)
+        self.title_label.setFixedHeight(18)
         self.title_label.setSizePolicy(
             QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed
         )
-        self.artist_label.setFixedHeight(14)
+        self.artist_label.setFixedHeight(17)
         self.artist_label.setSizePolicy(
             QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed
         )
