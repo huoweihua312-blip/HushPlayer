@@ -114,10 +114,10 @@ class PlayerBar(QFrame):
             f"QFrame#playerBar {{ background: {c.playerbar_background}; border-top: 1px solid {c.border}; }}"
             f"QWidget#trackRegionInner, QWidget#utilityRegionInner {{ background: {c.surface_secondary}; border: 1px solid {c.border}; border-radius: {m.radius_md}px; }}"
             f"QWidget#trackMetadata, QWidget#volumeGroup, QWidget#transportRow, QWidget#progressRow {{ background: transparent; border: 0; }}"
-            f"QLabel#playerTitle {{ color: {c.text_primary}; font-size: {theme.fonts.player_title}px; font-weight: 700; }}"
-            f"QLabel#playerArtist {{ color: {c.text_secondary}; font-size: {theme.fonts.player_meta}px; font-weight: 500; }}"
-            f"QLabel#playerAvailability {{ padding: 1px 5px; border-radius: {m.radius_sm}px; background: {c.surface_pressed}; color: {c.warning}; font-size: {theme.fonts.caption}px; font-weight: 500; }}"
-            f"QLabel#playerTime {{ color: {c.text_secondary}; font-size: {theme.fonts.caption}px; font-weight: 500; }}"
+            f"QLabel#playerTitle {{ color: {c.text_primary}; font-size: {theme.fonts.player_title}px; font-weight: 600; }}"
+            f"QLabel#playerArtist {{ color: {c.text_secondary}; font-size: {theme.fonts.player_meta}px; font-weight: 400; }}"
+            f"QLabel#playerAvailability {{ padding: 1px 5px; border-radius: {m.radius_sm}px; background: {c.surface_pressed}; color: {c.warning}; font-size: {theme.fonts.caption}px; font-weight: 400; }}"
+            f"QLabel#playerTime {{ color: {c.text_secondary}; font-size: {theme.fonts.caption}px; font-weight: 400; }}"
             f"QSlider#playerProgress, QSlider#playerVolume {{ background: transparent; border: 0; }}"
             f"QSlider#playerProgress::groove:horizontal {{ height: 3px; border-radius: 2px; background: {c.progress_track}; }}"
             f"QSlider#playerVolume::groove:horizontal {{ height: 3px; border-radius: 2px; background: {c.progress_track}; }}"
@@ -153,11 +153,11 @@ class PlayerBar(QFrame):
     def _refresh_metadata_width(self) -> None:
         if not all(hasattr(self, name) for name in ("metadata", "artwork")):
             return
-        base_width = 118 if self._compact else 154
+        base_width = 132 if self._compact else 196
         region_width = max(0, self.track_region.width() - 32)
         fixed_width = self.artwork.width() + 24
         available = max(base_width, region_width - fixed_width)
-        width = min(260, available)
+        width = min(320, available)
         self.metadata.setFixedWidth(width)
         if hasattr(self, "identity_stack"):
             self.identity_stack.setFixedWidth(width)

@@ -31,6 +31,7 @@ FONT_FALLBACKS = (
 
 
 _BUNDLED_FONT_PATHS = (
+    Path(__file__).resolve().parents[1] / "assets" / "fonts" / "SourceHanSansSC-Regular.otf",
     Path(__file__).resolve().parents[1] / "assets" / "fonts" / "SourceHanSansSC-Medium.otf",
     Path(__file__).resolve().parents[1] / "assets" / "fonts" / "SourceHanSansSC-Bold.otf",
     Path(__file__).resolve().parents[1] / "assets" / "fonts" / "NotoSansSC-VF.ttf",

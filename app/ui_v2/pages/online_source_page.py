@@ -109,20 +109,20 @@ class SourceRow(QFrame):
         )
         self.name_label.setStyleSheet(f"font-weight: 700; color: {colors.primary_text};")
         self.detail_label.setStyleSheet(
-            f"font-size: {theme.fonts.caption}px; font-weight: 500; color: {colors.secondary_text};"
+            f"font-size: {theme.fonts.caption}px; font-weight: 400; color: {colors.secondary_text};"
         )
         self.capability_label.setStyleSheet(
-            f"font-size: {theme.fonts.caption}px; font-weight: 500; color: {colors.text_tertiary};"
+            f"font-size: {theme.fonts.caption}px; font-weight: 400; color: {colors.text_tertiary};"
         )
         self.error_label.setStyleSheet(
-            f"font-size: {theme.fonts.caption}px; font-weight: 500; color: {colors.danger};"
+            f"font-size: {theme.fonts.caption}px; font-weight: 400; color: {colors.danger};"
         )
         self.badge.set_theme(theme)
         if self._enabled:
             self.enabled_button.setStyleSheet(
                 f"QToolButton {{ min-height: {metrics.control_height}px; padding: 0 {metrics.spacing_md}px; "
                 f"border: 1px solid {colors.border}; border-radius: {metrics.radius_sm}px; "
-                f"color: {colors.secondary_text}; background: {colors.surface_secondary}; font-weight: 500; }}"
+                f"color: {colors.secondary_text}; background: {colors.surface_secondary}; font-weight: 400; }}"
                 f"QToolButton:hover {{ color: {colors.primary_text}; background: {colors.hover_background}; border-color: {colors.border_strong}; }}"
             )
         else:
@@ -135,12 +135,12 @@ class SourceRow(QFrame):
         self.retry_button.setStyleSheet(
             f"QToolButton {{ min-height: {metrics.control_height}px; padding: 0 {metrics.spacing_sm}px; "
             f"border: 1px solid {colors.border}; border-radius: {metrics.radius_sm}px; color: {colors.warning}; "
-            f"background: {colors.surface_secondary}; font-weight: 500; }}"
+                f"background: {colors.surface_secondary}; font-weight: 400; }}"
             f"QToolButton:hover {{ color: {colors.primary_text}; background: {colors.hover_background}; }}"
         )
         self.remove_button.setStyleSheet(
             f"QToolButton {{ min-height: {metrics.control_height}px; padding: 0 {metrics.spacing_sm}px; "
-            f"border: 1px solid transparent; border-radius: {metrics.radius_sm}px; color: {colors.secondary_text}; background: transparent; font-weight: 500; }}"
+                f"border: 1px solid transparent; border-radius: {metrics.radius_sm}px; color: {colors.secondary_text}; background: transparent; font-weight: 400; }}"
             f"QToolButton:hover {{ color: {colors.danger}; background: {colors.hover_background}; }}"
         )
 

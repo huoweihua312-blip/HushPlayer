@@ -107,13 +107,13 @@ class BrowseSection(QFrame):
         self.setStyleSheet(
             f"QFrame#browseSection {{ background: {c.surface_primary}; border: 1px solid {c.border}; border-radius: {theme.metrics.radius_lg}px; }}"
             f"QLabel#browseSectionTitle {{ color: {c.text_primary}; font-size: {theme.fonts.section_title}px; font-weight: 700; }}"
-            f"QLabel#browseSectionStatus {{ padding: 3px 8px; border-radius: {theme.metrics.radius_sm}px; background: {c.surface_secondary}; color: {c.text_secondary}; font-size: {theme.fonts.card_meta}px; font-weight: 500; }}"
-            f"QLabel#browseSectionEmpty {{ color: {c.text_tertiary}; font-size: {theme.fonts.secondary}px; font-weight: 500; }}"
+            f"QLabel#browseSectionStatus {{ padding: 3px 8px; border-radius: {theme.metrics.radius_sm}px; background: {c.surface_secondary}; color: {c.text_secondary}; font-size: {theme.fonts.card_meta}px; font-weight: 400; }}"
+            f"QLabel#browseSectionEmpty {{ color: {c.text_tertiary}; font-size: {theme.fonts.secondary}px; font-weight: 400; }}"
             f"QToolButton#browseRefreshButton {{ min-width: 32px; min-height: 32px; border: 1px solid {c.border}; border-radius: {theme.metrics.radius_sm}px; color: {c.text_secondary}; background: {c.surface_secondary}; }}"
             f"QToolButton#browseRefreshButton:hover {{ color: {c.primary_text}; background: {c.hover_background}; border-color: {c.border_strong}; }}"
-            f"QToolButton#browseOnlineSearchButton {{ min-height: 32px; padding: 0 {theme.metrics.spacing_sm}px; border: 1px solid {c.border}; border-radius: {theme.metrics.radius_sm}px; color: {c.secondary_text}; background: {c.surface_secondary}; font-size: {theme.fonts.card_meta}px; font-weight: 500; }}"
+            f"QToolButton#browseOnlineSearchButton {{ min-height: 32px; padding: 0 {theme.metrics.spacing_sm}px; border: 1px solid {c.border}; border-radius: {theme.metrics.radius_sm}px; color: {c.secondary_text}; background: {c.surface_secondary}; font-size: {theme.fonts.card_meta}px; font-weight: 400; }}"
             f"QToolButton#browseOnlineSearchButton:hover {{ color: {c.primary_text}; background: {c.hover_background}; border-color: {c.border_strong}; }}"
-            f"QToolButton#browseSeeAll {{ border: 0; padding: 0; color: {c.accent}; font-size: {theme.fonts.card_meta}px; font-weight: 500; background: transparent; }}"
+            f"QToolButton#browseSeeAll {{ border: 0; padding: 0; color: {c.accent}; font-size: {theme.fonts.card_meta}px; font-weight: 400; background: transparent; }}"
             f"QToolButton#browseSeeAll:hover {{ color: {c.text_primary}; }}"
         )
         self.refresh_button.setIcon(icon("updates", theme))

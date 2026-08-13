@@ -164,7 +164,7 @@ class OnlineResultDelegate(QStyledItemDelegate):
     @staticmethod
     def _draw_text(painter, rect, text, color, *, bold: bool = False, align=Qt.AlignmentFlag.AlignLeft) -> None:
         font = QFont(painter.font())
-        font.setWeight(QFont.Weight.DemiBold if bold else QFont.Weight.Medium)
+        font.setWeight(QFont.Weight.DemiBold if bold else QFont.Weight.Normal)
         painter.setFont(font)
         painter.setPen(color)
         value = painter.fontMetrics().elidedText(str(text), Qt.TextElideMode.ElideRight, max(0, int(rect.width())))

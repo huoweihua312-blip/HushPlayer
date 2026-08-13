@@ -169,7 +169,7 @@ class CoverCard(QFrame):
             f"border-radius: {self._theme.metrics.radius_md}px; }}"
             f"QLabel#coverCardArtwork {{ border: 0; border-radius: {self._theme.metrics.radius_md}px; background: {c.surface_secondary}; }}"
             f"QLabel#coverCardTitle {{ color: {c.text_primary}; font-size: {self._theme.fonts.card_title}px; font-weight: 600; line-height: 18px; }}"
-            f"QLabel#coverCardMeta {{ color: {c.text_secondary}; font-size: {self._theme.fonts.card_meta}px; font-weight: 500; line-height: 18px; }}"
+            f"QLabel#coverCardMeta {{ color: {c.text_secondary}; font-size: {self._theme.fonts.card_meta}px; font-weight: 400; line-height: 18px; }}"
             f"QToolButton#coverCardPlay {{ border: 0; background: transparent; padding: 0; margin: 0 {self.PLAY_BUTTON_INSET}px {self.PLAY_BUTTON_INSET}px 0; }}"
         )
 

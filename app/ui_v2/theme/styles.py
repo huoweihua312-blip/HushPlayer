@@ -58,7 +58,7 @@ def build_stylesheet(theme: Theme) -> str:
         QWidget, QMenu, QToolTip {{
             font-family: {font_family_qss()};
             font-size: {theme.fonts.body}px;
-            font-weight: 500;
+            font-weight: 400;
         }}
         QWidget#uiV2Root {{
             background: {c.app_background};

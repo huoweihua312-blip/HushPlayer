@@ -69,7 +69,7 @@ class SettingsSidebar(QFrame):
             button.setIconSize(QSize(18, 18))
             button.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
             button.setStyleSheet(
-                f"QToolButton {{ min-height: {theme.metrics.control_height}px; max-width: {width - 16}px; text-align: left; padding: 0 8px; border: 0; border-radius: {theme.metrics.radius_sm}px; color: {theme.colors.secondary_text}; font-weight: 500; }} "
+                f"QToolButton {{ min-height: {theme.metrics.control_height}px; max-width: {width - 16}px; text-align: left; padding: 0 8px; border: 0; border-radius: {theme.metrics.radius_sm}px; color: {theme.colors.secondary_text}; font-weight: 400; }} "
                 f"QToolButton:hover {{ background: {theme.colors.hover_background}; color: {theme.colors.primary_text}; }} "
                 f"QToolButton:checked {{ background: {theme.colors.selected_background}; color: {theme.colors.primary_text}; font-weight: 700; }}"
             )

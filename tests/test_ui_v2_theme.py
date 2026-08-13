@@ -79,11 +79,14 @@ class UiV2ThemeTests(unittest.TestCase):
 
     def test_bundled_chinese_font_is_available_to_source_and_packaged_builds(self) -> None:
         font_root = PROJECT_ROOT / "app" / "ui_v2" / "assets" / "fonts"
+        regular_path = font_root / "SourceHanSansSC-Regular.otf"
         medium_path = font_root / "SourceHanSansSC-Medium.otf"
         bold_path = font_root / "SourceHanSansSC-Bold.otf"
         license_path = font_root / "SourceHanSansSC-OFL.txt"
+        self.assertTrue(regular_path.is_file())
         self.assertTrue(medium_path.is_file())
         self.assertTrue(bold_path.is_file())
+        self.assertGreater(regular_path.stat().st_size, 1_000_000)
         self.assertGreater(medium_path.stat().st_size, 1_000_000)
         self.assertGreater(bold_path.stat().st_size, 1_000_000)
         self.assertTrue(license_path.is_file())

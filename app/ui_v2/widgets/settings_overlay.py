@@ -941,7 +941,7 @@ class SettingsOverlay(QWidget):
             f"QPushButton:hover {{ background: {c.hover_background}; }}"
         )
         self.title_label.setStyleSheet(f"font-size: {theme.fonts.page_title}px; font-weight: 700; color: {c.primary_text};")
-        self.subtitle_label.setStyleSheet(f"font-size: {theme.fonts.caption}px; font-weight: 500; color: {c.secondary_text};")
+        self.subtitle_label.setStyleSheet(f"font-size: {theme.fonts.caption}px; font-weight: 400; color: {c.secondary_text};")
         self.header_icon.setIcon(fluent_settings_icon("general", theme, "selected", 20))
         self.header_icon.setIconSize(QSize(20, 20))
         self.header_icon.setStyleSheet(
@@ -972,15 +972,15 @@ class SettingsOverlay(QWidget):
                 control.set_theme(theme)
         if hasattr(self, "update_status"):
             self.update_status.setStyleSheet(
-                f"font-size: {theme.fonts.caption}px; font-weight: 500; color: {c.secondary_text};"
+                f"font-size: {theme.fonts.caption}px; font-weight: 400; color: {c.secondary_text};"
             )
         if hasattr(self, "cache_status"):
             self.cache_status.setStyleSheet(
-                f"font-size: {theme.fonts.caption}px; font-weight: 500; color: {c.secondary_text};"
+                f"font-size: {theme.fonts.caption}px; font-weight: 400; color: {c.secondary_text};"
             )
         if hasattr(self, "about_changelog"):
             self.about_changelog.setStyleSheet(
-                f"QPlainTextEdit#settingsAboutChangelog {{ min-height: 260px; padding: 12px; border: 1px solid {c.border}; border-radius: {theme.metrics.radius_md}px; background: {c.surface_secondary}; color: {c.primary_text}; selection-background-color: {c.accent}; selection-color: {c.content_background}; font-size: {theme.fonts.body}px; font-weight: 500; }}"
+                f"QPlainTextEdit#settingsAboutChangelog {{ min-height: 260px; padding: 12px; border: 1px solid {c.border}; border-radius: {theme.metrics.radius_md}px; background: {c.surface_secondary}; color: {c.primary_text}; selection-background-color: {c.accent}; selection-color: {c.content_background}; font-size: {theme.fonts.body}px; font-weight: 400; }}"
             )
         for key, page in self._category_pages.items():
             if key == "online_sources" and hasattr(page, "set_theme"):
