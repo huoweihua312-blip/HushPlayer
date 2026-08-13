@@ -220,10 +220,8 @@ class ApprovedShellMigrationTests(unittest.TestCase):
         unselected_contents = selected.contentsRect()
         selected.set_selected(True)
         self.assertEqual(selected.contentsRect(), unselected_contents)
-        self.assertIn(
-            f"border-left: 3px solid {self.window.theme.colors.accent}",
-            selected.styleSheet(),
-        )
+        self.assertNotIn("border-left", selected.styleSheet())
+        self.assertNotIn("border-left-color", selected.styleSheet())
         self.assertIn("border: 1px solid transparent", selected.styleSheet())
         source = inspect.getsource(navigation_item_module.NavigationItem)
         self.assertNotIn("def paintEvent", source)
