@@ -83,7 +83,7 @@ class BrowseSection(QFrame):
         self.row.setFixedHeight(CoverCard.CARD_HEIGHT)
         self.row_layout = QHBoxLayout(self.row)
         self.row_layout.setContentsMargins(0, 0, 0, 0)
-        self.row_layout.setSpacing(14)
+        self.row_layout.setSpacing(16)
         self.empty_label = QLabel("这里还没有可展示的歌曲", self.row)
         self.empty_label.setObjectName("browseSectionEmpty")
         self.empty_label.setVisible(False)
@@ -91,8 +91,8 @@ class BrowseSection(QFrame):
         self.row_layout.addStretch(1)
 
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(16, 12, 16, 12)
-        layout.setSpacing(0)
+        layout.setContentsMargins(16, 14, 16, 14)
+        layout.setSpacing(6)
         layout.addWidget(self.heading)
         layout.addWidget(self.row)
         self.set_theme(theme)
@@ -107,13 +107,13 @@ class BrowseSection(QFrame):
         self.setStyleSheet(
             f"QFrame#browseSection {{ background: {c.surface_primary}; border: 1px solid {c.border}; border-radius: {theme.metrics.radius_lg}px; }}"
             f"QLabel#browseSectionTitle {{ color: {c.text_primary}; font-size: {theme.fonts.section_title}px; font-weight: 700; }}"
-            f"QLabel#browseSectionStatus {{ padding: 3px 8px; border-radius: {theme.metrics.radius_sm}px; background: {c.surface_secondary}; color: {c.text_secondary}; font-size: {theme.fonts.card_meta}px; }}"
-            f"QLabel#browseSectionEmpty {{ color: {c.text_tertiary}; font-size: {theme.fonts.secondary}px; }}"
+            f"QLabel#browseSectionStatus {{ padding: 3px 8px; border-radius: {theme.metrics.radius_sm}px; background: {c.surface_secondary}; color: {c.text_secondary}; font-size: {theme.fonts.card_meta}px; font-weight: 500; }}"
+            f"QLabel#browseSectionEmpty {{ color: {c.text_tertiary}; font-size: {theme.fonts.secondary}px; font-weight: 500; }}"
             f"QToolButton#browseRefreshButton {{ min-width: 32px; min-height: 32px; border: 1px solid {c.border}; border-radius: {theme.metrics.radius_sm}px; color: {c.text_secondary}; background: {c.surface_secondary}; }}"
             f"QToolButton#browseRefreshButton:hover {{ color: {c.primary_text}; background: {c.hover_background}; border-color: {c.border_strong}; }}"
-            f"QToolButton#browseOnlineSearchButton {{ min-height: 32px; padding: 0 {theme.metrics.spacing_sm}px; border: 1px solid {c.border}; border-radius: {theme.metrics.radius_sm}px; color: {c.secondary_text}; background: {c.surface_secondary}; font-size: {theme.fonts.card_meta}px; }}"
+            f"QToolButton#browseOnlineSearchButton {{ min-height: 32px; padding: 0 {theme.metrics.spacing_sm}px; border: 1px solid {c.border}; border-radius: {theme.metrics.radius_sm}px; color: {c.secondary_text}; background: {c.surface_secondary}; font-size: {theme.fonts.card_meta}px; font-weight: 500; }}"
             f"QToolButton#browseOnlineSearchButton:hover {{ color: {c.primary_text}; background: {c.hover_background}; border-color: {c.border_strong}; }}"
-            f"QToolButton#browseSeeAll {{ border: 0; padding: 0; color: {c.accent}; font-size: {theme.fonts.card_meta}px; background: transparent; }}"
+            f"QToolButton#browseSeeAll {{ border: 0; padding: 0; color: {c.accent}; font-size: {theme.fonts.card_meta}px; font-weight: 500; background: transparent; }}"
             f"QToolButton#browseSeeAll:hover {{ color: {c.text_primary}; }}"
         )
         self.refresh_button.setIcon(icon("updates", theme))
@@ -205,7 +205,7 @@ class BrowsePage(QWidget):
             theme.metrics.page_margin,
             self._content_safe_bottom,
         )
-        self.content_layout.setSpacing(theme.metrics.spacing_md)
+        self.content_layout.setSpacing(theme.metrics.spacing_lg + theme.metrics.spacing_xs)
 
         self.intro_surface = QFrame(self.content)
         self.intro_surface.setObjectName("browseIntroSurface")
@@ -214,8 +214,8 @@ class BrowsePage(QWidget):
         self.detail_label = QLabel("最近添加、再次播放与新的发现，都在这里自然衔接。", self.intro_surface)
         self.detail_label.setObjectName("browsePageDetail")
         intro_layout = QVBoxLayout(self.intro_surface)
-        intro_layout.setContentsMargins(20, 18, 20, 18)
-        intro_layout.setSpacing(4)
+        intro_layout.setContentsMargins(20, 20, 20, 20)
+        intro_layout.setSpacing(8)
         intro_layout.addWidget(self.title_label)
         intro_layout.addWidget(self.detail_label)
         self.content_layout.addWidget(self.intro_surface)
@@ -278,7 +278,7 @@ class BrowsePage(QWidget):
             f"QWidget#browsePage, QScrollArea#browseScrollArea, QWidget#browseContent {{ background: {c.content_background}; }}"
             f"QFrame#browseIntroSurface {{ background: {c.surface_primary}; border: 1px solid {c.border}; border-radius: {theme.metrics.radius_lg}px; }}"
             f"QLabel#browsePageTitle {{ color: {c.text_primary}; font-size: {theme.fonts.page_title}px; font-weight: 700; }}"
-            f"QLabel#browsePageDetail {{ color: {c.secondary_text}; font-size: {theme.fonts.secondary}px; }}"
+            f"QLabel#browsePageDetail {{ color: {c.secondary_text}; font-size: {theme.fonts.secondary}px; font-weight: 500; }}"
             f"QScrollArea#browseScrollArea QScrollBar:vertical {{ background: transparent; width: 10px; margin: 4px 2px 4px 0; }}"
             f"QScrollArea#browseScrollArea QScrollBar::handle:vertical {{ background: {c.text_tertiary}; min-height: 36px; border-radius: 5px; }}"
             f"QScrollArea#browseScrollArea QScrollBar::handle:vertical:hover {{ background: {c.text_secondary}; }}"

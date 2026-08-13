@@ -142,7 +142,7 @@ class NavigationItem(QToolButton):
         self.setStyleSheet(
             f"QToolButton {{ text-align: left; padding: 0 10px; border: 1px solid transparent; "
             f"border-radius: {self._theme.metrics.radius_md}px; font-size: {self._theme.fonts.body}px; "
-            f"font-weight: {600 if self._selected else 400}; "
+            f"font-weight: {600 if self._selected else 500}; "
             f"color: {c.primary_text if self._selected else c.secondary_text}; "
             f"background: {c.selected_background if self._selected else 'transparent'}; }}"
             f"QToolButton:hover {{ color: {c.primary_text}; background: {c.hover_background}; border-color: {c.border}; "

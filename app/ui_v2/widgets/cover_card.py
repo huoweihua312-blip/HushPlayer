@@ -136,13 +136,14 @@ class CoverCard(QFrame):
         self.meta_label = ElidedLabel(self)
         self.meta_label.setObjectName("coverCardMeta")
         self.meta_label.setWordWrap(False)
-        self.meta_label.setFixedHeight(17)
+        self.meta_label.setFixedHeight(18)
         layout = QVBoxLayout(self)
         layout.setContentsMargins(2, 2, 2, 2)
         layout.setSpacing(0)
         layout.addWidget(artwork_host)
-        layout.addSpacing(4)
+        layout.addSpacing(6)
         layout.addWidget(self.title_label)
+        layout.addSpacing(2)
         layout.addWidget(self.meta_label)
         layout.addStretch(1)
         self.set_theme(theme)
@@ -168,7 +169,7 @@ class CoverCard(QFrame):
             f"border-radius: {self._theme.metrics.radius_md}px; }}"
             f"QLabel#coverCardArtwork {{ border: 0; border-radius: {self._theme.metrics.radius_md}px; background: {c.surface_secondary}; }}"
             f"QLabel#coverCardTitle {{ color: {c.text_primary}; font-size: {self._theme.fonts.card_title}px; font-weight: 600; line-height: 18px; }}"
-            f"QLabel#coverCardMeta {{ color: {c.text_secondary}; font-size: {self._theme.fonts.card_meta}px; line-height: 17px; }}"
+            f"QLabel#coverCardMeta {{ color: {c.text_secondary}; font-size: {self._theme.fonts.card_meta}px; font-weight: 500; line-height: 18px; }}"
             f"QToolButton#coverCardPlay {{ border: 0; background: transparent; padding: 0; margin: 0 {self.PLAY_BUTTON_INSET}px {self.PLAY_BUTTON_INSET}px 0; }}"
         )
 

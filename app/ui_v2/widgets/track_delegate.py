@@ -150,7 +150,7 @@ class TrackDelegate(QStyledItemDelegate):
                 self._draw_loading_indicator(painter, artwork_rect)
             left = artwork_rect.right() + 10
             font = QFont(option.font)
-            font.setWeight(QFont.Weight.DemiBold if playing else QFont.Weight.Normal)
+            font.setWeight(QFont.Weight.DemiBold if playing else QFont.Weight.Medium)
             painter.setFont(font)
             title_color = QColor(colors.accent) if playing and not disabled else text_color
             self._draw_text(

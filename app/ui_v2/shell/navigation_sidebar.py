@@ -81,7 +81,7 @@ class NavigationSidebar(QFrame):
         self.library_box = self.primary_section  # Compatibility handle for existing shell tests.
         primary_layout = QVBoxLayout(self.primary_section)
         primary_layout.setContentsMargins(18, 20, 14, 0)
-        primary_layout.setSpacing(0)
+        primary_layout.setSpacing(2)
         self.library_caption = self._caption("资料库", self.primary_section)
         self.library_caption.setFixedHeight(29)
         primary_layout.addWidget(self.library_caption)
@@ -127,7 +127,7 @@ class NavigationSidebar(QFrame):
         self.content.setObjectName("navigationContent")
         self.playlist_layout = QVBoxLayout(self.content)
         self.playlist_layout.setContentsMargins(0, 0, 0, 0)
-        self.playlist_layout.setSpacing(0)
+        self.playlist_layout.setSpacing(2)
         self.playlist_container = self.content
         self._add_static_item("liked", self.playlist_layout, 42)
         # Compatibility handle for older shell tests. It is not attached to

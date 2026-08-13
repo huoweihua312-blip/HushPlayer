@@ -77,10 +77,10 @@ class MediaCard(QFrame):
             f"font-size: {theme.fonts.body}px; font-weight: 600; color: {theme.colors.primary_text};"
         )
         self.subtitle_label.setStyleSheet(
-            f"font-size: {theme.fonts.secondary}px; color: {theme.colors.secondary_text};"
+            f"font-size: {theme.fonts.secondary}px; font-weight: 500; color: {theme.colors.secondary_text};"
         )
         self.detail_label.setStyleSheet(
-            f"font-size: {theme.fonts.caption}px; color: {theme.colors.subtle_text};"
+            f"font-size: {theme.fonts.caption}px; font-weight: 500; color: {theme.colors.subtle_text};"
         )
 
     def mouseReleaseEvent(self, event: QMouseEvent) -> None:  # noqa: N802
