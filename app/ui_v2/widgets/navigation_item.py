@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from PySide6.QtCore import QSize, Qt, Signal
-from PySide6.QtGui import QContextMenuEvent, QIcon
+from PySide6.QtGui import QContextMenuEvent, QFocusEvent, QIcon, QMouseEvent
 from PySide6.QtWidgets import QSizePolicy, QToolButton, QWidget
 
 from app.ui_v2.models.navigation_item import NavigationItem as NavigationValue
@@ -32,6 +32,7 @@ class NavigationItem(QToolButton):
         self._theme = theme
         self._compact = False
         self._selected = False
+        self._focus_visible = False
         self._full_title = item.title
         self._custom_icon: QIcon | None = None
         self.setText(item.title)
@@ -92,6 +93,29 @@ class NavigationItem(QToolButton):
         super().showEvent(event)
         self._refresh_elided_text()
 
+    def focusInEvent(self, event: QFocusEvent) -> None:  # noqa: N802
+        super().focusInEvent(event)
+        self._focus_visible = event.reason() in {
+            Qt.FocusReason.TabFocusReason,
+            Qt.FocusReason.BacktabFocusReason,
+            Qt.FocusReason.ShortcutFocusReason,
+        }
+        self._refresh_visuals()
+
+    def focusOutEvent(self, event: QFocusEvent) -> None:  # noqa: N802
+        super().focusOutEvent(event)
+        self._focus_visible = False
+        self._refresh_visuals()
+
+    def mousePressEvent(self, event: QMouseEvent) -> None:  # noqa: N802
+        # Mouse navigation uses the selected-row surface as its feedback.  A
+        # keyboard focus ring remains available for Tab/shortcut navigation,
+        # but clicking a route must not leave a decorative border behind.
+        if self._focus_visible:
+            self._focus_visible = False
+            self._refresh_visuals()
+        super().mousePressEvent(event)
+
     def contextMenuEvent(self, event: QContextMenuEvent) -> None:  # noqa: N802
         if self.item.playlist_id:
             self.context_requested.emit(self.item.playlist_id, event.globalPos())
@@ -124,7 +148,7 @@ class NavigationItem(QToolButton):
             f"QToolButton:hover {{ color: {c.primary_text}; background: {c.hover_background}; border-color: {c.border}; "
             f"}}"
             f"QToolButton:pressed {{ background: {c.playing_background}; }}"
-            f"QToolButton:focus {{ border-color: {c.focus_ring}; }}"
+            f"QToolButton:focus {{ border-color: {c.focus_ring if self._focus_visible else 'transparent'}; }}"
             f"QToolButton:disabled {{ color: {c.disabled_text}; background: transparent; }}"
             f"QToolButton:disabled:hover {{ color: {c.disabled_text}; background: transparent; }}"
         )
