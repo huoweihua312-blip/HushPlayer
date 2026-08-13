@@ -120,11 +120,11 @@ class NowPlayingPage(QFrame):
         colors = theme.colors
         self.setStyleSheet(
             f"QFrame#nowPlayingPage {{ background: transparent; }}"
-            f"QLabel#nowPlayingTitle {{ color: {colors.text_primary}; font-size: 32px; font-weight: 600; }}"
-            f"QLabel#nowPlayingArtist {{ color: {colors.text_secondary}; font-size: 19px; }}"
-            f"QLabel#nowPlayingAlbum {{ color: {colors.text_tertiary}; font-size: 15px; }}"
-            f"QLabel#nowPlayingDetail {{ color: {colors.text_secondary}; font-size: 13px; }}"
-            f"QLabel#nowPlayingError {{ color: {colors.danger}; font-size: 13px; }}"
+            f"QLabel#nowPlayingTitle {{ color: {colors.text_primary}; font-size: {theme.fonts.page_title}px; font-weight: 600; }}"
+            f"QLabel#nowPlayingArtist {{ color: {colors.text_secondary}; font-size: {theme.fonts.secondary}px; }}"
+            f"QLabel#nowPlayingAlbum {{ color: {colors.text_tertiary}; font-size: {theme.fonts.body}px; }}"
+            f"QLabel#nowPlayingDetail {{ color: {colors.text_secondary}; font-size: {theme.fonts.caption}px; }}"
+            f"QLabel#nowPlayingError {{ color: {colors.danger}; font-size: {theme.fonts.caption}px; }}"
             f"QToolButton {{ border: 0; border-radius: 19px; background: transparent; }}"
             f"QToolButton:hover {{ background: {colors.surface_hover}; }}"
         )

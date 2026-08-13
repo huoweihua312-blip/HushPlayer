@@ -101,7 +101,7 @@ class TrackCollectionHero(QWidget):
             f"font-size: {theme.fonts.caption}px; font-weight: 600; color: {colors.accent};"
         )
         self.title_label.setStyleSheet(
-            f"font-size: {theme.fonts.page_title + 8}px; font-weight: 600; color: {colors.primary_text};"
+            f"font-size: {theme.fonts.hero_title}px; font-weight: 600; color: {colors.primary_text};"
         )
         self.meta_label.setStyleSheet(
             f"font-size: {theme.fonts.secondary}px; color: {colors.secondary_text};"

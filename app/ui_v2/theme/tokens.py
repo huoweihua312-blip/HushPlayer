@@ -155,12 +155,13 @@ class ThemeMetrics:
 
 @dataclass(frozen=True, slots=True)
 class ThemeFonts:
-    caption: int = 13
+    caption: int = 12
     body_small: int = 13
-    body: int = 15
+    body: int = 14
     control: int = 14
-    section_title: int = 22
-    page_title: int = 32
+    section_title: int = 20
+    page_title: int = 30
+    hero_title: int = 34
     track_title: int = 15
     metadata: int = 13
     numeric: int = 13

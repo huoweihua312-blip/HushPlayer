@@ -117,7 +117,7 @@ class PlayerBar(QFrame):
             f"QLabel#playerTitle {{ color: {c.text_primary}; font-size: {theme.fonts.player_title}px; font-weight: 700; }}"
             f"QLabel#playerArtist {{ color: {c.text_secondary}; font-size: {theme.fonts.player_meta}px; }}"
             f"QLabel#playerAvailability {{ padding: 1px 5px; border-radius: {m.radius_sm}px; background: {c.surface_pressed}; color: {c.warning}; font-size: {theme.fonts.caption}px; }}"
-            f"QLabel#playerTime {{ color: {c.text_secondary}; font-size: 11px; }}"
+            f"QLabel#playerTime {{ color: {c.text_secondary}; font-size: {theme.fonts.caption}px; }}"
             f"QSlider#playerProgress, QSlider#playerVolume {{ background: transparent; border: 0; }}"
             f"QSlider#playerProgress::groove:horizontal {{ height: 3px; border-radius: 2px; background: {c.progress_track}; }}"
             f"QSlider#playerVolume::groove:horizontal {{ height: 3px; border-radius: 2px; background: {c.progress_track}; }}"

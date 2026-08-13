@@ -208,7 +208,7 @@ class NavigationSidebar(QFrame):
         )
         for label in self._section_labels:
             label.setStyleSheet(
-                f"padding-left: 12px; color: {c.text_tertiary}; font-size: 11px; font-weight: 600;"
+                f"padding-left: 12px; color: {c.text_tertiary}; font-size: {theme.fonts.caption}px; font-weight: 600;"
             )
         for item in (*self._items.values(), *self._playlist_items.values()):
             item.set_theme(theme)
