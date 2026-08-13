@@ -71,7 +71,7 @@ class OnlineRecoveryCandidateDialogTests(unittest.TestCase):
                 self.assertIn(get_theme(mode).colors.primary_text, dialog.styleSheet())
                 self.assertIn("一首非常长的歌曲标题", dialog.list_widget.item(1).toolTip())
                 self.assertGreaterEqual(dialog.list_widget.item(0).sizeHint().height(), 56)
-                self.assertIn("已选择：夜航 0", dialog.selection_label.full_text)
+                self.assertIn("第 1/4 项 · 已选择：夜航 0", dialog.selection_label.full_text)
                 self.assertTrue(dialog.list_widget.hasFocus())
                 self.assertTrue(
                     bool(dialog.windowFlags() & Qt.WindowType.FramelessWindowHint)

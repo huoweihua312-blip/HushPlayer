@@ -96,7 +96,9 @@ def build_stylesheet(theme: Theme) -> str:
             selection-color: {c.text_primary};
         }}
         QLineEdit#searchInput:focus, QLineEdit#titleBarSearchInput:focus {{ border-color: {c.focus_ring}; }}
-        QToolButton:focus, QPushButton:focus, QComboBox:focus, QSlider:focus,
+        /* Tool buttons own their focus treatment so mouse clicks do not leave
+           a second, unexpected outline around compact navigation/actions. */
+        QPushButton:focus, QComboBox:focus, QSlider:focus,
         QLineEdit:focus {{ outline: 1px solid {c.focus_ring}; outline-offset: 1px; }}
         QToolTip {{
             padding: {m.spacing_xs}px {m.spacing_sm}px;

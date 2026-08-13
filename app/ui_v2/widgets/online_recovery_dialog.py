@@ -44,7 +44,7 @@ class _CandidateRow(QFrame):
         layout.setSpacing(3)
         layout.addWidget(self.title_label)
         layout.addWidget(self.detail_label)
-        self.setMinimumHeight(62)
+        self.setMinimumHeight(70)
         self.set_theme(theme)
 
     def set_theme(self, theme: Theme) -> None:
@@ -67,8 +67,8 @@ class OnlineRecoveryCandidateDialog(QDialog):
         self.setObjectName("onlineRecoveryCandidateDialog")
         self.setWindowFlags(Qt.WindowType.Dialog | Qt.WindowType.FramelessWindowHint)
         self.setModal(True)
-        self.setMinimumSize(680, 486)
-        self.resize(736, min(620, 360 + min(8, len(self._candidates)) * 38))
+        self.setMinimumSize(720, 560)
+        self.resize(780, min(760, 470 + min(8, len(self._candidates)) * 36))
         self._apply_theme(theme)
 
         self.surface = QFrame(self)
@@ -117,7 +117,7 @@ class OnlineRecoveryCandidateDialog(QDialog):
             item.setData(Qt.ItemDataRole.UserRole, track)
             item.setToolTip(self._label_for(track))
             row = _CandidateRow(track, theme, self.list_widget)
-            item.setSizeHint(QSize(0, 68))
+            item.setSizeHint(QSize(0, 76))
             self.list_widget.addItem(item)
             self.list_widget.setItemWidget(item, row)
         if self.list_widget.count():
@@ -243,6 +243,10 @@ class OnlineRecoveryCandidateDialog(QDialog):
                 padding: 0;
                 border-radius: {metrics.radius_sm}px;
             }}
+            QFrame#onlineRecoveryCandidateRow {{
+                background: transparent;
+                border: 0;
+            }}
             QListWidget#onlineRecoveryCandidateList::item:selected {{
                 background: {colors.selected_background};
                 border: 1px solid {colors.focus_ring};
@@ -285,6 +289,9 @@ class OnlineRecoveryCandidateDialog(QDialog):
             self.selection_label.setToolTip("")
             return
         track = self._candidates[int(row)]
-        text = f"已选择：{track.title} · {track.source_name} · {format_duration(track.duration_ms)}"
+        text = (
+            f"第 {int(row) + 1}/{len(self._candidates)} 项 · "
+            f"已选择：{track.title} · {track.source_name} · {format_duration(track.duration_ms)}"
+        )
         self.selection_label.set_full_text(text)
         self.selection_label.setToolTip(text)
