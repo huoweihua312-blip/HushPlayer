@@ -57,6 +57,7 @@ def build_stylesheet(theme: Theme) -> str:
     return f"""
         QWidget, QMenu, QToolTip {{
             font-family: {font_family_qss()};
+            font-size: {theme.fonts.body}px;
             font-weight: 400;
         }}
         QWidget#uiV2Root {{
@@ -104,6 +105,25 @@ def build_stylesheet(theme: Theme) -> str:
             background: {c.surface_elevated};
             color: {c.text_primary};
         }}
+        QPushButton {{
+            min-height: {m.control_height}px;
+            padding: 0 {m.spacing_md}px;
+            border: 1px solid transparent;
+            border-radius: {m.radius_sm}px;
+            background: transparent;
+            color: {c.text_secondary};
+        }}
+        QPushButton:hover {{
+            background: {c.hover_background};
+            color: {c.text_primary};
+        }}
+        QPushButton:pressed {{ background: {c.surface_pressed}; }}
+        QPushButton:disabled {{
+            background: transparent;
+            color: {c.text_disabled};
+        }}
+        QCheckBox, QRadioButton {{ color: {c.text_secondary}; spacing: {m.spacing_sm}px; }}
+        QCheckBox:hover, QRadioButton:hover {{ color: {c.text_primary}; }}
         QComboBox {{
             min-height: {m.control_height}px;
             padding: 0 {m.spacing_md}px;

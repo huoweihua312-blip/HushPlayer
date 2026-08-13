@@ -30,10 +30,10 @@ class _PlayerSlider(QSlider):
 
     def __init__(self, orientation: Qt.Orientation, parent: QWidget | None = None) -> None:
         super().__init__(orientation, parent)
-        self._track_color = QColor("#43464a")
-        self._fill_color = QColor("#f4f3f2")
-        self._handle_color = QColor("#f4f3f2")
-        self._disabled_color = QColor("#606166")
+        self._track_color = QColor("#606166")
+        self._fill_color = QColor("#f2f1ee")
+        self._handle_color = QColor("#f2f1ee")
+        self._disabled_color = QColor("#6a6a70")
         self.setMouseTracking(True)
 
     def set_visual_colors(self, theme: Theme) -> None:

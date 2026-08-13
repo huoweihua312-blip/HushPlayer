@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Literal
 
 
@@ -10,20 +11,49 @@ ThemeMode = Literal["light", "dark"]
 
 
 FONT_FALLBACKS = (
-    # Windows UI fonts stay ahead of the optional cross-platform families so
-    # Chinese glyphs keep stable proportions and hinting on high-DPI screens.
+    # Noto Sans SC is bundled under SIL OFL 1.1 so the source build and the
+    # packaged app use the same calm, modern Chinese glyph shapes.  Installed
+    # alternatives remain in the chain for environments that block app fonts.
+    "Noto Sans SC",
+    "MiSans",
     "Microsoft YaHei UI",
     "Microsoft YaHei",
     "Segoe UI Variable Text",
     "Segoe UI",
     "DengXian",
-    "MiSans",
-    "MiSans VF",
     "HarmonyOS Sans SC",
     "Noto Sans CJK SC",
     "Source Han Sans SC",
     "sans-serif",
 )
+
+
+_BUNDLED_FONT_PATH = (
+    Path(__file__).resolve().parents[1] / "assets" / "fonts" / "NotoSansSC-VF.ttf"
+)
+_BUNDLED_FONT_ID: int | None = None
+_BUNDLED_FONT_ATTEMPTED = False
+
+
+def _ensure_bundled_font_loaded() -> None:
+    """Load the redistributable UI font once the Qt application exists."""
+
+    global _BUNDLED_FONT_ATTEMPTED, _BUNDLED_FONT_ID
+    if _BUNDLED_FONT_ID is not None or _BUNDLED_FONT_ATTEMPTED:
+        return
+    try:
+        from PySide6.QtGui import QFontDatabase, QGuiApplication
+
+        if QGuiApplication.instance() is None or not _BUNDLED_FONT_PATH.is_file():
+            return
+        _BUNDLED_FONT_ATTEMPTED = True
+        font_id = QFontDatabase.addApplicationFont(str(_BUNDLED_FONT_PATH))
+        if font_id >= 0:
+            _BUNDLED_FONT_ID = font_id
+    except Exception:
+        # A system fallback is preferable to making startup dependent on an
+        # optional font resource or a platform-specific font loader.
+        _BUNDLED_FONT_ATTEMPTED = True
 
 
 def resolve_font_family() -> str:
@@ -34,6 +64,7 @@ def resolve_font_family() -> str:
 
         if QGuiApplication.instance() is None:
             return "Segoe UI"
+        _ensure_bundled_font_loaded()
         installed = set(QFontDatabase.families())
     except Exception:
         installed = set()
@@ -46,6 +77,7 @@ def resolve_font_family() -> str:
 def font_family_qss() -> str:
     """Return the approved ordered stack without requiring a QApplication."""
 
+    _ensure_bundled_font_loaded()
     return ", ".join(f'"{family}"' for family in FONT_FALLBACKS)
 
 
@@ -137,7 +169,7 @@ class ThemeFonts:
     card_meta: int = 13
     player_title: int = 14
     player_meta: int = 13
-    family: str = "Microsoft YaHei UI"
+    family: str = "Noto Sans SC"
 
 
 @dataclass(frozen=True, slots=True)
@@ -229,14 +261,14 @@ def _colors(
 LIGHT_THEME = Theme(
     mode="light",
     colors=_colors(
-        app="#f2f5f1", sidebar="#e8eeea", content="#f6f8f4", player="#edf2ee",
-        surface="#fbfdf9", surface_secondary="#eef2ed", elevated="#ffffff",
-        hover="#e5ece7", selected="#dfe9e2", playing="#f0e7d3", pressed="#d3e0d7", divider="#d5ded7",
-        primary="#172521", secondary="#40544b", tertiary="#63756d", disabled="#9aa8a0",
-        icon="#50665d", active="#af8e4f", progress_track="#adbbb3", accent="#af8e4f",
-        accent_hover="#c09f61", accent_pressed="#92743e", danger="#b5645d",
-        warning="#92702e", success="#3d805e", shadow="rgba(31, 48, 41, .16)",
-        overlay="rgba(31, 48, 41, .26)",
+        app="#f4f4f2", sidebar="#ededeb", content="#f8f8f6", player="#f0f0ee",
+        surface="#ffffff", surface_secondary="#f2f2f0", elevated="#ffffff",
+        hover="#e9e9e7", selected="#e5e5e3", playing="#f3eadb", pressed="#dddddb", divider="#d8d8d6",
+        primary="#1d1d1f", secondary="#505055", tertiary="#77777c", disabled="#a1a1a6",
+        icon="#5b5b60", active="#a3844b", progress_track="#b2b2b1", accent="#a3844b",
+        accent_hover="#b8955a", accent_pressed="#896b3d", danger="#bd625c",
+        warning="#96732e", success="#3f8060", shadow="rgba(24, 24, 27, .16)",
+        overlay="rgba(24, 24, 27, .26)",
     ),
     fonts=ThemeFonts(),
 )
@@ -245,14 +277,14 @@ LIGHT_THEME = Theme(
 DARK_THEME = Theme(
     mode="dark",
     colors=_colors(
-        app="#0b1112", sidebar="#0d1516", content="#10191a", player="#121d1e",
-        surface="#152123", surface_secondary="#182527", elevated="#1d2a2c",
-        hover="#213032", selected="#1b2928", playing="#292719", pressed="#2a3839", divider="#283638",
-        primary="#f0f4f0", secondary="#bdcac3", tertiary="#85958e", disabled="#65736e",
-        icon="#cbd6d0", active="#c8a667", progress_track="#52625d", accent="#c8a667",
-        accent_hover="#d8b877", accent_pressed="#a78950", danger="#e1887f",
-        warning="#d4ad63", success="#86c49f", shadow="rgba(0, 0, 0, .52)",
-        overlay="rgba(0, 0, 0, .46)",
+        app="#111111", sidebar="#161616", content="#1b1b1b", player="#171717",
+        surface="#202020", surface_secondary="#242424", elevated="#2b2b2b",
+        hover="#333333", selected="#303030", playing="#322c24", pressed="#393939", divider="#383838",
+        primary="#f2f1ee", secondary="#c8c7c3", tertiary="#929292", disabled="#6b6b6b",
+        icon="#d1d1ce", active="#c9a86a", progress_track="#616161", accent="#c9a86a",
+        accent_hover="#dab97b", accent_pressed="#a78950", danger="#e18c83",
+        warning="#d9b873", success="#8bc2a0", shadow="rgba(0, 0, 0, .56)",
+        overlay="rgba(0, 0, 0, .52)",
     ),
     fonts=ThemeFonts(),
 )

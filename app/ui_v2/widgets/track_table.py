@@ -170,6 +170,11 @@ class TrackTable(QTableView):
         self.customContextMenuRequested.connect(self._show_context_menu)
         header = self.header
         header.setStretchLastSection(False)
+        # The bundled Chinese font makes Qt's style-derived minimum section
+        # size wider than the compact status/action columns.  Fixed profiles
+        # own those widths; otherwise a 900/1100px window can grow a hidden
+        # horizontal overflow that the table intentionally suppresses.
+        header.setMinimumSectionSize(0)
         header.setSectionsClickable(True)
         header.setSortIndicatorShown(False)
         header.setSortIndicator(int(adapter.sort_column), adapter.sort_order)
