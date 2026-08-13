@@ -11,9 +11,12 @@ ThemeMode = Literal["light", "dark"]
 
 
 FONT_FALLBACKS = (
-    # Noto Sans SC is bundled under SIL OFL 1.1 so the source build and the
-    # packaged app use the same calm, modern Chinese glyph shapes.  Installed
-    # alternatives remain in the chain for environments that block app fonts.
+    # Source Han Sans SC is bundled under SIL OFL 1.1.  Its static Medium and
+    # Bold faces remain visibly distinct on Windows instead of relying on a
+    # platform's variable-font weight synthesis.
+    "Source Han Sans SC",
+    # Keep the previous bundled font as a safe fallback for older packaged
+    # layouts and environments that reject one of the static OTF faces.
     "Noto Sans SC",
     "MiSans",
     "Microsoft YaHei UI",
@@ -23,33 +26,39 @@ FONT_FALLBACKS = (
     "DengXian",
     "HarmonyOS Sans SC",
     "Noto Sans CJK SC",
-    "Source Han Sans SC",
     "sans-serif",
 )
 
 
-_BUNDLED_FONT_PATH = (
-    Path(__file__).resolve().parents[1] / "assets" / "fonts" / "NotoSansSC-VF.ttf"
+_BUNDLED_FONT_PATHS = (
+    Path(__file__).resolve().parents[1] / "assets" / "fonts" / "SourceHanSansSC-Medium.otf",
+    Path(__file__).resolve().parents[1] / "assets" / "fonts" / "SourceHanSansSC-Bold.otf",
+    Path(__file__).resolve().parents[1] / "assets" / "fonts" / "NotoSansSC-VF.ttf",
 )
-_BUNDLED_FONT_ID: int | None = None
+_BUNDLED_FONT_IDS: tuple[int, ...] = ()
 _BUNDLED_FONT_ATTEMPTED = False
 
 
 def _ensure_bundled_font_loaded() -> None:
     """Load the redistributable UI font once the Qt application exists."""
 
-    global _BUNDLED_FONT_ATTEMPTED, _BUNDLED_FONT_ID
-    if _BUNDLED_FONT_ID is not None or _BUNDLED_FONT_ATTEMPTED:
+    global _BUNDLED_FONT_ATTEMPTED, _BUNDLED_FONT_IDS
+    if _BUNDLED_FONT_IDS or _BUNDLED_FONT_ATTEMPTED:
         return
     try:
         from PySide6.QtGui import QFontDatabase, QGuiApplication
 
-        if QGuiApplication.instance() is None or not _BUNDLED_FONT_PATH.is_file():
+        if QGuiApplication.instance() is None:
             return
         _BUNDLED_FONT_ATTEMPTED = True
-        font_id = QFontDatabase.addApplicationFont(str(_BUNDLED_FONT_PATH))
-        if font_id >= 0:
-            _BUNDLED_FONT_ID = font_id
+        loaded: list[int] = []
+        for font_path in _BUNDLED_FONT_PATHS:
+            if not font_path.is_file():
+                continue
+            font_id = QFontDatabase.addApplicationFont(str(font_path))
+            if font_id >= 0:
+                loaded.append(font_id)
+        _BUNDLED_FONT_IDS = tuple(loaded)
     except Exception:
         # A system fallback is preferable to making startup dependent on an
         # optional font resource or a platform-specific font loader.
@@ -170,7 +179,7 @@ class ThemeFonts:
     card_meta: int = 13
     player_title: int = 14
     player_meta: int = 13
-    family: str = "Noto Sans SC"
+    family: str = "Source Han Sans SC"
 
 
 @dataclass(frozen=True, slots=True)

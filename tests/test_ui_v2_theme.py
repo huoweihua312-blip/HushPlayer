@@ -75,14 +75,18 @@ class UiV2ThemeTests(unittest.TestCase):
         self.assertFalse(icon("sun", get_theme("light")).isNull())
 
     def test_bundled_chinese_font_is_available_to_source_and_packaged_builds(self) -> None:
-        font_path = PROJECT_ROOT / "app" / "ui_v2" / "assets" / "fonts" / "NotoSansSC-VF.ttf"
-        license_path = PROJECT_ROOT / "app" / "ui_v2" / "assets" / "fonts" / "NotoSansSC-OFL.txt"
-        self.assertTrue(font_path.is_file())
-        self.assertGreater(font_path.stat().st_size, 1_000_000)
+        font_root = PROJECT_ROOT / "app" / "ui_v2" / "assets" / "fonts"
+        medium_path = font_root / "SourceHanSansSC-Medium.otf"
+        bold_path = font_root / "SourceHanSansSC-Bold.otf"
+        license_path = font_root / "SourceHanSansSC-OFL.txt"
+        self.assertTrue(medium_path.is_file())
+        self.assertTrue(bold_path.is_file())
+        self.assertGreater(medium_path.stat().st_size, 1_000_000)
+        self.assertGreater(bold_path.stat().st_size, 1_000_000)
         self.assertTrue(license_path.is_file())
         self.assertIn("SIL OPEN FONT LICENSE", license_path.read_text(encoding="utf-8"))
-        self.assertIn('"Noto Sans SC"', font_family_qss())
-        self.assertEqual(resolve_font_family(), "Noto Sans SC")
+        self.assertIn('"Source Han Sans SC"', font_family_qss())
+        self.assertEqual(resolve_font_family(), "Source Han Sans SC")
 
     def test_light_and_dark_row_state_colors_are_distinct_and_restrained(self) -> None:
         for mode in ("light", "dark"):
