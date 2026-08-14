@@ -116,7 +116,7 @@ class ThemeRevealOverlay(QWidget):
     """Temporary old-theme layer used by the opt-in transition demo."""
 
     finished = Signal()
-    _DURATION_MS = 420
+    _DURATION_MS = 700
 
     def __init__(self, snapshot: QPixmap, origin: QPoint, parent: QWidget) -> None:
         super().__init__(parent)
@@ -512,8 +512,8 @@ class MainWindow(QMainWindow):
         snapshot = self.grab()
         if snapshot.isNull():
             return None
-        mark = self.title_bar.brand_mark
-        origin = mark.mapTo(self, mark.rect().center())
+        theme_button = self.title_bar.theme_button
+        origin = theme_button.mapTo(self, theme_button.rect().center())
         return ThemeRevealOverlay(snapshot, origin, self)
 
     def _start_theme_reveal(self, overlay: ThemeRevealOverlay) -> None:
