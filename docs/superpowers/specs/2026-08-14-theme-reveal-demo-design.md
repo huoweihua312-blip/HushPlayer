@@ -2,10 +2,9 @@
 
 ## Purpose
 
-Provide a reversible visual demo for the next HushPlayer theme transition: the
+Provide the HushPlayer theme transition: the
 new theme is revealed from the upper-right theme toggle button and expands
-across the window. The demo is opt-in through `HUSHPLAYER_THEME_REVEAL_DEMO=1` so normal
-theme switching remains unchanged until the interaction is accepted.
+across the window. This behavior is enabled in the normal application.
 
 ## Design
 
@@ -22,7 +21,7 @@ theme switching remains unchanged until the interaction is accepted.
   frames are skipped.
 - Disable the theme button during the short transition to avoid overlapping
   reveals.
-- If the demo flag is absent, keep the current immediate theme transition.
+- Keep theme persistence and the existing target theme colors unchanged.
 
 ## Scope and safety
 
@@ -33,9 +32,9 @@ without requiring the animation to render.
 
 ## Acceptance criteria
 
-1. A manual theme toggle with the demo flag starts at the theme button and
+1. A manual theme toggle starts at the theme button and
    reveals the target theme across the whole window.
 2. The target theme, player state, route, and shell widget identities remain
    unchanged after the animation.
 3. The overlay ignores mouse input and is removed after completion.
-4. Without the demo flag, existing theme-switch behavior remains immediate.
+4. The normal application uses the complete reveal without an environment flag.

@@ -266,9 +266,7 @@ class MainWindow(QMainWindow):
             if self._force_dark_theme or appearance_mode != "light"
             else "light"
         )
-        self._theme_reveal_demo_enabled = os.environ.get(
-            "HUSHPLAYER_THEME_REVEAL_DEMO", ""
-        ).strip().casefold() in {"1", "true", "yes", "on"}
+        self._theme_reveal_enabled = True
         self._animate_next_theme_change = False
         self._theme_reveal_overlay: ThemeRevealOverlay | None = None
         self._immersive_shell_active = False
@@ -470,11 +468,13 @@ class MainWindow(QMainWindow):
         target_theme = get_theme("light" if mode == "light" else "dark")
         animate = (
             self._animate_next_theme_change
-            and self._theme_reveal_demo_enabled
+            and self._theme_reveal_enabled
             and self.isVisible()
             and target_theme.mode != self._theme.mode
         )
         reveal_overlay = self._prepare_theme_reveal() if animate else None
+        if reveal_overlay is not None:
+            self._show_theme_reveal(reveal_overlay)
         self._animate_next_theme_change = False
         self._theme = target_theme
         app = QApplication.instance()
@@ -511,13 +511,13 @@ class MainWindow(QMainWindow):
             self.update()
             self.root.update()
         if reveal_overlay is not None:
-            self._start_theme_reveal(reveal_overlay)
+            reveal_overlay.start_animation()
 
     def toggle_theme(self) -> None:
         """Persist an explicit Light/Dark choice through the existing bridge."""
 
         target = "light" if self._theme.mode == "dark" else "dark"
-        self._animate_next_theme_change = self._theme_reveal_demo_enabled
+        self._animate_next_theme_change = self._theme_reveal_enabled
         if self.settings_overlay is not None and self.settings_overlay.isVisible():
             try:
                 self.settings_overlay.set_appearance_mode(target)
@@ -536,10 +536,10 @@ class MainWindow(QMainWindow):
         self._settings_snapshot = saved
 
     def _queue_theme_reveal_apply(self, snapshot: SettingsSnapshot) -> bool:
-        """Start the opt-in reveal before synchronous theme persistence runs."""
+        """Start the reveal before synchronous theme persistence runs."""
 
         if not (
-            self._theme_reveal_demo_enabled
+            self._theme_reveal_enabled
             and self.isVisible()
             and self._theme_reveal_overlay is None
         ):
@@ -589,10 +589,6 @@ class MainWindow(QMainWindow):
         theme_button = self.title_bar.theme_button
         origin = theme_button.mapTo(self, theme_button.rect().center())
         return ThemeRevealOverlay(snapshot, origin, self)
-
-    def _start_theme_reveal(self, overlay: ThemeRevealOverlay) -> None:
-        self._attach_theme_reveal(overlay)
-        overlay.start()
 
     def _show_theme_reveal(self, overlay: ThemeRevealOverlay) -> None:
         self._attach_theme_reveal(overlay)

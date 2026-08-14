@@ -264,6 +264,7 @@ class UiV2MainWindowTests(unittest.TestCase):
         self.window.settings_overlay.cancel_and_close()
 
         self.window.toggle_theme()
+        QTest.qWait(self.window._THEME_REVEAL_APPLY_DELAY_MS + 40)
         self.app.processEvents()
         self.assertEqual(self.window.theme.mode, "light")
         self.assertIs(self.window.player_bar, player_bar)
@@ -300,9 +301,7 @@ class UiV2MainWindowTests(unittest.TestCase):
         self.window._set_button_keyboard_focus(button, True)
         self.assertEqual(button.property("hushKeyboardFocus"), "true")
 
-    def test_theme_reveal_demo_is_opt_in_and_cleans_up_after_animation(self) -> None:
-        self.assertFalse(self.window._theme_reveal_demo_enabled)
-        self.window._theme_reveal_demo_enabled = True
+    def test_theme_reveal_is_enabled_and_cleans_up_after_animation(self) -> None:
         self.window._animate_next_theme_change = True
         target = "light" if self.window.theme.mode == "dark" else "dark"
 
@@ -318,8 +317,7 @@ class UiV2MainWindowTests(unittest.TestCase):
         self.app.processEvents()
         self.assertIsNone(self.window._theme_reveal_overlay)
 
-    def test_theme_reveal_demo_starts_before_theme_persistence(self) -> None:
-        self.window._theme_reveal_demo_enabled = True
+    def test_theme_reveal_starts_before_theme_persistence(self) -> None:
         original_mode = self.window.theme.mode
 
         self.window.toggle_theme()
