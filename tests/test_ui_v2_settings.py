@@ -232,7 +232,7 @@ class SettingsOverlayIntegrationTests(unittest.TestCase):
         overlay.set_category("about")
         self.app.processEvents()
         changelog = overlay.about_changelog.toPlainText()
-        self.assertIn("0.6.0-beta.5", changelog)
+        self.assertIn(APP_VERSION, changelog)
         self.assertIn("在线更新摘要", changelog)
         self.assertNotIn("## 未发布", changelog)
         self.assertNotIn("mock", changelog.casefold())
