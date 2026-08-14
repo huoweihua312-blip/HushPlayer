@@ -164,6 +164,25 @@ class UiV2ImmersiveLyricsTests(unittest.TestCase):
         self.app.processEvents()
         self.assertEqual(self.window.playback_adapter.state.current_track.id, first_track_id)
 
+    def test_shared_playback_controls_mute_and_unmute_global_output(self) -> None:
+        self._play_track()
+        immersive = self._immersive_page()
+        controls = immersive.controls
+        self.window.playback_adapter.set_volume(68)
+        self.app.processEvents()
+
+        controls.volume_button.click()
+        self.app.processEvents()
+        self.assertTrue(self.window.playback_adapter.state.is_muted)
+        self.assertEqual(controls.volume_button.toolTip(), "取消静音")
+        self.assertEqual(self.window.player_bar.volume_button.toolTip(), "取消静音")
+
+        controls.volume_button.click()
+        self.app.processEvents()
+        self.assertFalse(self.window.playback_adapter.state.is_muted)
+        self.assertEqual(controls.volume_button.toolTip(), "静音")
+        self.assertEqual(self.window.player_bar.volume_button.toolTip(), "静音")
+
     def test_options_survive_route_track_resize_and_reuse_core_widgets(self) -> None:
         self._play_track()
         immersive = self._immersive_page()

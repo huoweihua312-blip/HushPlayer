@@ -3807,6 +3807,13 @@ class ImmersiveLyricsWindow(QWidget):
                 liked_signal,
                 self.on_external_liked_state_changed,
             )
+        controller = getattr(self.main_window, "production_playback_controller", None)
+        muted_signal = getattr(controller, "muted_changed", None)
+        if muted_signal is not None:
+            self._connect_external_signal(
+                muted_signal,
+                self.on_external_muted_state_changed,
+            )
         main_volume_slider = getattr(self.main_window, "volume_slider", None)
         if main_volume_slider is not None:
             self._connect_external_signal(
@@ -4089,6 +4096,10 @@ class ImmersiveLyricsWindow(QWidget):
             self.update_immersive_duration(player.duration())
             self.update_immersive_position(player.position())
             self.update_immersive_playback_state(player.playbackState())
+        self.sync_volume_from_main(getattr(self.main_window, "current_volume", 0))
+        controller = getattr(self.main_window, "production_playback_controller", None)
+        muted = getattr(controller, "is_muted", False)
+        self.on_external_muted_state_changed(bool(muted))
         self.refresh_play_mode_state()
 
     def update_immersive_position(self, position: int) -> None:
@@ -4141,6 +4152,12 @@ class ImmersiveLyricsWindow(QWidget):
         muted_getter = getattr(self.main_window, "_audio_is_muted", None)
         muted = bool(muted_getter()) if callable(muted_getter) else False
         self.immersive_volume_icon.set_muted(volume == 0 or muted)
+
+    def on_external_muted_state_changed(self, muted: bool) -> None:
+        """Keep the legacy lyrics control in lockstep with global audio mute."""
+
+        volume = max(0, min(100, int(self.immersive_volume_slider.value())))
+        self.immersive_volume_icon.set_muted(volume == 0 or bool(muted))
 
     def request_previous_song(self) -> None:
         callback = getattr(self.main_window, "play_previous_song", None)

@@ -55,6 +55,22 @@ class FakeMediaPlayer(QObject):
         self.playbackStateChanged.emit(state)
 
 
+class FakeMuteController(QObject):
+    muted_changed = Signal(bool)
+
+    def __init__(self) -> None:
+        super().__init__()
+        self._muted = False
+
+    @property
+    def is_muted(self) -> bool:
+        return self._muted
+
+    def toggle_mute(self) -> None:
+        self._muted = not self._muted
+        self.muted_changed.emit(self._muted)
+
+
 class StubMainWindow(QObject):
     liked_state_changed = Signal(str, bool)
 
@@ -62,6 +78,7 @@ class StubMainWindow(QObject):
         super().__init__()
         self.settings = {"immersive_auto_hide_ui": False}
         self.media_player = FakeMediaPlayer()
+        self.production_playback_controller = FakeMuteController()
         self.current_volume = 72
         self.play_mode = "list_loop"
         self.current_song_path = str(root / "local-track.mp3")
@@ -127,6 +144,12 @@ class StubMainWindow(QObject):
     def change_volume(self, value: int) -> None:
         self.current_volume = int(value)
         self.volume_changes.append(int(value))
+
+    def toggle_mute(self) -> None:
+        self.production_playback_controller.toggle_mute()
+
+    def _audio_is_muted(self) -> bool:
+        return self.production_playback_controller.is_muted
 
     def on_immersive_lyrics_closed(self) -> None:
         self.closed_count += 1
@@ -207,6 +230,14 @@ def run_test(app: QApplication, root: Path) -> dict[str, float]:
     assert window._responsive_mode == "wide"
     assert window.body_layout.direction() == QBoxLayout.Direction.LeftToRight
     assert window.cover_label.isVisible()
+    QTest.mouseClick(window.immersive_volume_icon, Qt.MouseButton.LeftButton)
+    app.processEvents()
+    assert main.production_playback_controller.is_muted
+    assert window.immersive_volume_icon._muted
+    QTest.mouseClick(window.immersive_volume_icon, Qt.MouseButton.LeftButton)
+    app.processEvents()
+    assert not main.production_playback_controller.is_muted
+    assert not window.immersive_volume_icon._muted
     header_buttons = window.control_header.findChildren(QPushButton)
     header_texts = [button.text() for button in header_buttons]
     assert header_texts == ["进入全屏", "显示设置", "退出沉浸"]
