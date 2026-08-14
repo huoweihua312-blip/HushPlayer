@@ -1223,6 +1223,10 @@ class MainWindow(QMainWindow):
         """Refresh the local playback projection after the read-only snapshot arrives."""
 
         self.playback_adapter.set_queue(self.library_collection.tracks())
+        # The shared collection coalesces updates through a short timer.  The
+        # landing page should not make the user wait for that timer after a
+        # successful startup load, so render the Browse snapshot immediately.
+        self.router.browse_page.refresh_cards()
         self._request_loaded_remote_artwork()
         self.library_page.set_playback_enabled(
             self.playback_adapter.has_real_backend
