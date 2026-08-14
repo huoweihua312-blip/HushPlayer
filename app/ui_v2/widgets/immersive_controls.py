@@ -243,7 +243,9 @@ class ImmersiveControls(QWidget):
         if muted is None:
             muted = self._adapter.state.is_muted if self._adapter is not None else False
         is_muted = bool(muted) or self.volume_slider.value() == 0
-        self.volume_button.setIcon(icon("volume_mute" if is_muted else "volume", self._theme))
+        self.volume_button.setIcon(
+            fluent_icon("volume_mute" if is_muted else "volume", self._theme, size=18)
+        )
         action = "取消静音" if is_muted else "静音"
         self.volume_button.setToolTip(action)
         self.volume_button.setAccessibleName(action)

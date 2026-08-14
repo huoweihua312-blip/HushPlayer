@@ -176,12 +176,14 @@ class UiV2ImmersiveLyricsTests(unittest.TestCase):
         self.assertTrue(self.window.playback_adapter.state.is_muted)
         self.assertEqual(controls.volume_button.toolTip(), "取消静音")
         self.assertEqual(self.window.player_bar.volume_button.toolTip(), "取消静音")
+        muted_icon_key = controls.volume_button.icon().cacheKey()
 
         controls.volume_button.click()
         self.app.processEvents()
         self.assertFalse(self.window.playback_adapter.state.is_muted)
         self.assertEqual(controls.volume_button.toolTip(), "静音")
         self.assertEqual(self.window.player_bar.volume_button.toolTip(), "静音")
+        self.assertNotEqual(controls.volume_button.icon().cacheKey(), muted_icon_key)
 
     def test_options_survive_route_track_resize_and_reuse_core_widgets(self) -> None:
         self._play_track()
