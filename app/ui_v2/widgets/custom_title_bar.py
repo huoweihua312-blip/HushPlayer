@@ -48,6 +48,7 @@ class CustomTitleBar(QFrame):
         self.search_icon.setEnabled(False)
         self.search_input = QLineEdit(self)
         self.search_input.setObjectName("titleBarSearchInput")
+        self.search_input.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
         self.search_input.setPlaceholderText("搜索歌曲、歌手或专辑")
         self.search_input.setClearButtonEnabled(True)
         self.search_input.setAccessibleName("全局搜索")

@@ -125,6 +125,8 @@ class LyricsCanvasV2(QWidget):
         self._ordinary_viewport: tuple[int, int, float] | None = None
         self._ordinary_metrics: ResponsiveLyricsMetrics | None = None
         self._browse_anchor = -1
+        self._browse_offset = 0.0
+        self._browse_content_height = 0
         self._line_rects: dict[str, QRect] = {}
         self._last_metrics: dict[str, int] = {}
         self.setObjectName("lyricsCanvasV2")
@@ -265,6 +267,8 @@ class LyricsCanvasV2(QWidget):
     def set_document(self, document: LyricsDocument | None) -> None:
         self._document = document
         self._browse_anchor = -1
+        self._browse_offset = 0.0
+        self._browse_content_height = 0
         self.return_button.setVisible(False)
         self.update()
 
@@ -276,8 +280,7 @@ class LyricsCanvasV2(QWidget):
             self._active_segment_progress = 0.0
         if self._playback_active and line is not None and line.segments and self._mode == "immersive":
             self._highlight_timer.start()
-        if not self.browsing:
-            self.update()
+        self.update()
 
     def set_active_segment(self, line: LyricLine, index: int, progress: float) -> None:
         line_changed = self._active_line is None or line.id != self._active_line.id
@@ -313,8 +316,7 @@ class LyricsCanvasV2(QWidget):
                 self._set_playback_anchor(incoming_position)
         if self._playback_active and self._mode == "immersive":
             self._highlight_timer.start()
-        if not self.browsing:
-            self.update()
+        self.update()
 
     def set_playback_position(self, position_ms: int, *, force: bool = False) -> None:
         """Correct local interpolation only when the shared clock actually drifts."""
@@ -455,6 +457,7 @@ class LyricsCanvasV2(QWidget):
         if self._browse_anchor < 0:
             return
         self._browse_anchor = -1
+        self._browse_offset = 0.0
         self.return_button.setVisible(False)
         self.browsing_changed.emit(False)
         self.update()
@@ -463,14 +466,135 @@ class LyricsCanvasV2(QWidget):
         if self._document is None or not self._document.lines:
             event.ignore()
             return
-        anchor = self._browse_anchor if self.browsing else self._active_index()
-        delta = event.angleDelta().y()
-        step = -1 if delta > 0 else 1
-        self._browse_anchor = max(0, min(len(self._document.lines) - 1, anchor + step))
-        self.return_button.setVisible(True)
-        self.browsing_changed.emit(True)
+        if not self.browsing:
+            self._begin_browse()
+        delta = event.pixelDelta().y()
+        pixel_delta = bool(delta)
+        if not delta:
+            delta = event.angleDelta().y()
+        if not delta:
+            event.ignore()
+            return
+        # Trackpads provide pixels directly.  A mouse wheel notch is mapped to
+        # a comfortable distance instead of jumping exactly one lyric row.
+        distance = float(delta) if pixel_delta else float(delta) * 0.65
+        self._browse_offset = self._clamp_browse_offset(self._browse_offset - distance)
         self.update()
         event.accept()
+
+    def _begin_browse(self) -> None:
+        self._browse_anchor = self._active_index()
+        self._browse_offset = self._offset_for_current_line()
+        self.return_button.setVisible(True)
+        self.browsing_changed.emit(True)
+
+    def _offset_for_current_line(self) -> float:
+        if self._document is None or not self._document.lines:
+            return 0.0
+        active_index = self._active_index()
+        rows, content_height = self._browse_layout(active_index)
+        self._browse_content_height = content_height
+        if not rows:
+            return 0.0
+        active_row = rows[active_index]
+        _index, _line, rect, _row_top, _row_bottom = active_row
+        top_safe, bottom_safe, target_fraction = self._browse_viewport_metrics()
+        target_center = top_safe + round((self.height() - top_safe - bottom_safe) * target_fraction)
+        return self._clamp_browse_offset(rect.center().y() - target_center)
+
+    def _clamp_browse_offset(self, value: float) -> float:
+        maximum = max(0.0, float(self._browse_content_height - self.height()))
+        return max(0.0, min(maximum, float(value)))
+
+    def _browse_viewport_metrics(self) -> tuple[int, int, float]:
+        ordinary_metrics = self._ordinary_metrics if self._mode == "ordinary" else None
+        top_safe = ordinary_metrics.top_safe_area if ordinary_metrics is not None else 12
+        bottom_safe = ordinary_metrics.bottom_safe_area if ordinary_metrics is not None else 12
+        target_fraction = 0.45 if self._mode == "ordinary" else 0.48
+        return top_safe, bottom_safe, target_fraction
+
+    def _browse_layout(self, active_index: int) -> tuple[list[tuple[int, LyricLine, QRect, int, int]], int]:
+        document = self._document
+        if document is None or not document.lines:
+            return [], 0
+        sizes = self.effective_font_sizes
+        text_width = min(self._max_text_width, max(240, self.width() - 40))
+        top_safe, bottom_safe, _target_fraction = self._browse_viewport_metrics()
+        x = max(20, (self.width() - text_width) // 2)
+        rows: list[tuple[int, LyricLine, QRect, int, int]] = []
+        y = top_safe
+        for index, line in enumerate(document.lines):
+            active = index == active_index
+            distance = abs(index - active_index)
+            font, lines = self._line_font_and_lines(line, active, distance, sizes, text_width)
+            rect = self._text_rect(x, y, text_width, font, line.text, 5, lines=lines)
+            row_bottom = y + self._line_height(line, active, distance, sizes)
+            rows.append((index, line, rect, y, row_bottom))
+            y = row_bottom
+        return rows, y + bottom_safe
+
+    def _paint_browsing(self, document: LyricsDocument) -> None:
+        active_index = self._active_index()
+        sizes = self.effective_font_sizes
+        text_width = min(self._max_text_width, max(240, self.width() - 40))
+        rows, content_height = self._browse_layout(active_index)
+        self._browse_content_height = content_height
+        self._browse_offset = self._clamp_browse_offset(self._browse_offset)
+        offset = self._browse_offset
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.TextAntialiasing)
+        active_line_count = 0
+        active_font_size = sizes[0]
+        active_highlight_line_count = 0
+        for index, line, source_rect, row_top, row_bottom in rows:
+            screen_top = round(row_top - offset)
+            screen_bottom = round(row_bottom - offset)
+            if screen_bottom < 0 or screen_top > self.height():
+                continue
+            distance = abs(index - active_index)
+            active = index == active_index
+            font, lines = self._line_font_and_lines(line, active, distance, sizes, text_width)
+            rect = self._text_rect(source_rect.x(), screen_top, source_rect.width(), font, line.text, 5, lines=lines)
+            self._line_rects[line.id] = rect
+            if active:
+                active_line_count = len(lines)
+                active_font_size = font.pixelSize()
+                active_highlight_line_count = self._draw_active_line(painter, rect, line, font, lines)
+            else:
+                self._draw_text(
+                    painter,
+                    rect,
+                    line.text,
+                    font,
+                    _with_alpha(self._theme.colors.primary_text, self.inactive_alpha_for_distance(distance)),
+                    shadow=False,
+                    lines=lines,
+                )
+            y = screen_top + rect.height()
+            if active and self._translation_visible and line.translation:
+                sub_font = self._font(sizes[2], QFont.Weight.Medium)
+                sub_rect = self._text_rect(source_rect.x(), y, text_width, sub_font, line.translation, 3)
+                self._draw_text(painter, sub_rect, line.translation, sub_font, _with_alpha(self._theme.colors.secondary_text, 230), shadow=False)
+                y += sub_rect.height() + 2
+            if active and self._romanization_visible and line.romanization:
+                roman_font = self._font(sizes[3], QFont.Weight.Normal)
+                roman_rect = self._text_rect(source_rect.x(), y, text_width, roman_font, line.romanization, 3)
+                self._draw_text(painter, roman_rect, line.romanization, roman_font, _with_alpha(self._theme.colors.subtle_text, 226), shadow=False)
+        painter.end()
+        self._last_metrics = {
+            "active": active_font_size,
+            "normal": sizes[1],
+            "translation": sizes[2],
+            "romanization": sizes[3],
+            "text_width": text_width,
+            "line_spacing": self._line_spacing(),
+            "section_spacing": self._section_spacing(),
+            "active_line_count": active_line_count,
+            "active_highlight_line_count": active_highlight_line_count,
+            "active_line_elided": 0,
+            "browse_offset": round(self._browse_offset),
+            "browse_content_height": self._browse_content_height,
+        }
 
     def mouseReleaseEvent(self, event) -> None:  # noqa: N802
         if event.button() == Qt.MouseButton.LeftButton:
@@ -493,6 +617,9 @@ class LyricsCanvasV2(QWidget):
         self._line_rects.clear()
         document = self._document
         if document is None or not document.lines:
+            return
+        if self.browsing:
+            self._paint_browsing(document)
             return
         active_index = self._browse_anchor if self.browsing else self._active_index()
         active_index = max(0, min(len(document.lines) - 1, active_index))
@@ -533,7 +660,16 @@ class LyricsCanvasV2(QWidget):
         bottom_safe = ordinary_metrics.bottom_safe_area if ordinary_metrics is not None else 12
         target_center = top_safe + round((self.height() - top_safe - bottom_safe) * target_fraction)
         total_height = sum(heights)
-        y = max(top_safe, min(max(top_safe, self.height() - total_height - bottom_safe), target_center - active_center))
+        target_y = target_center - active_center
+        available_height = max(0, self.height() - top_safe - bottom_safe)
+        if total_height <= available_height:
+            y = max(top_safe, min(max(top_safe, self.height() - total_height - bottom_safe), target_y))
+        else:
+            # On compact lyric surfaces the context group can be taller than
+            # the viewport.  Keep the active line in the reading band instead
+            # of pinning the whole group to the top and making the current
+            # line appear too low.
+            y = target_y
         x = max(20, (self.width() - text_width) // 2)
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.TextAntialiasing)

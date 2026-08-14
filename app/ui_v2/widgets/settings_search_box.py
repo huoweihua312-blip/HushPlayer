@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from PySide6.QtCore import Signal
+from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import QHBoxLayout, QLineEdit, QToolButton, QWidget
 
 from app.ui_v2.theme.icons import icon
@@ -19,6 +19,7 @@ class SettingsSearchBox(QWidget):
         self._theme = theme
         self.input = QLineEdit(self)
         self.input.setObjectName("settingsSearchInput")
+        self.input.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
         self.input.setPlaceholderText("搜索设置")
         self.clear_button = QToolButton(self)
         self.clear_button.setToolTip("清空设置搜索")

@@ -124,17 +124,20 @@ class ImmersiveControls(QWidget):
         self.progress_slider.sliderPressed.connect(self._begin_progress)
         self.progress_slider.sliderReleased.connect(self._commit_progress)
         self.volume_slider.valueChanged.connect(adapter.set_volume)
+        self.volume_button.clicked.connect(self._toggle_mute)
         adapter.track_changed.connect(self._on_track_changed)
         adapter.playing_changed.connect(self._on_playing_changed)
         adapter.position_changed.connect(self._on_position_changed)
         adapter.duration_changed.connect(self._on_duration_changed)
         adapter.volume_changed.connect(self._on_volume_changed)
+        adapter.muted_changed.connect(self._on_muted_changed)
         adapter.shuffle_changed.connect(self._on_shuffle_changed)
         adapter.repeat_mode_changed.connect(self._on_repeat_changed)
         self._on_track_changed(adapter.state.current_track)
         self._on_playing_changed(adapter.state.is_playing)
         self._on_position_changed(adapter.state.position_ms)
         self._on_volume_changed(adapter.state.volume)
+        self._on_muted_changed(adapter.state.is_muted)
         self._on_shuffle_changed(adapter.state.shuffle_enabled)
         self._on_repeat_changed(adapter.state.repeat_mode)
 
@@ -158,7 +161,7 @@ class ImmersiveControls(QWidget):
         )
         self.previous_button.setIcon(icon("previous", theme))
         self.next_button.setIcon(icon("next", theme))
-        self.volume_button.setIcon(icon("volume", theme))
+        self._on_muted_changed(self._adapter.state.is_muted if self._adapter else False)
         self.more_button.setIcon(fluent_icon("more", theme, size=18))
         self.shuffle_button.setIcon(fluent_icon("shuffle", theme, "selected" if self._adapter and self._adapter.state.shuffle_enabled else "normal", size=18))
         self.repeat_button.setIcon(fluent_icon("repeat", theme, "selected" if self._adapter and self._adapter.state.repeat_mode != RepeatMode.OFF else "normal", size=18))
@@ -231,6 +234,24 @@ class ImmersiveControls(QWidget):
         previous = self.volume_slider.blockSignals(True)
         self.volume_slider.setValue(int(value))
         self.volume_slider.blockSignals(previous)
+        self._refresh_volume_icon()
+
+    def _on_muted_changed(self, muted: bool) -> None:
+        self._refresh_volume_icon(bool(muted))
+
+    def _refresh_volume_icon(self, muted: bool | None = None) -> None:
+        if muted is None:
+            muted = self._adapter.state.is_muted if self._adapter is not None else False
+        is_muted = bool(muted) or self.volume_slider.value() == 0
+        self.volume_button.setIcon(icon("volume_mute" if is_muted else "volume", self._theme))
+        action = "取消静音" if is_muted else "静音"
+        self.volume_button.setToolTip(action)
+        self.volume_button.setAccessibleName(action)
+
+    def _toggle_mute(self) -> None:
+        if self._adapter is None:
+            return
+        self._adapter.set_muted(not self._adapter.state.is_muted)
 
     def _on_shuffle_changed(self, enabled: bool) -> None:
         if self._adapter is not None:

@@ -16,7 +16,7 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from PySide6.QtCore import QPoint, QPointF, QObject, Qt, Signal
 from PySide6.QtGui import QWheelEvent
-from PySide6.QtWidgets import QApplication, QSlider
+from PySide6.QtWidgets import QApplication, QLineEdit, QSlider
 
 from app.ui_v2.adapters.lyrics_adapter import LyricsAdapter
 from app.ui_v2.mock.track_factory import create_mock_tracks
@@ -277,6 +277,56 @@ class LyricsPageTests(unittest.TestCase):
             self.assertEqual(id(page.lyrics_view), canvas_id)
             self.assertLessEqual(page._content_container.maximumWidth(), 1020)
             self.assertLessEqual(page.lyrics_view.maximumWidth(), 980)
+
+    def test_browse_scroll_is_continuous_and_playback_follow_returns_cleanly(self) -> None:
+        self._play_library_track()
+        page = self._lyrics_page()
+        canvas = page.lyrics_view
+        self.window.resize(1200, 800)
+        self.app.processEvents()
+        event = QWheelEvent(
+            QPointF(80, 80), QPointF(80, 80), QPoint(), QPoint(0, -120),
+            Qt.MouseButton.NoButton, Qt.KeyboardModifier.NoModifier,
+            Qt.ScrollPhase.ScrollUpdate, False,
+        )
+        canvas.wheelEvent(event)
+        canvas.repaint()
+        self.app.processEvents()
+        first_offset = canvas.last_metrics["browse_offset"]
+        canvas.wheelEvent(event)
+        canvas.repaint()
+        self.app.processEvents()
+        second_offset = canvas.last_metrics["browse_offset"]
+        self.assertTrue(canvas.browsing)
+        self.assertGreater(second_offset, first_offset)
+        self.assertGreater(canvas.last_metrics["browse_content_height"], canvas.height())
+        canvas.return_to_current()
+        self.assertFalse(canvas.browsing)
+        self.assertFalse(canvas.return_button.isVisible())
+
+    def test_search_inputs_are_vertically_centered(self) -> None:
+        for control in self.window.findChildren(QLineEdit):
+            self.assertTrue(
+                control.alignment() & Qt.AlignmentFlag.AlignVCenter,
+                control.objectName() or "unnamed QLineEdit",
+            )
+
+    def test_immersive_volume_and_mute_controls_share_playback_state(self) -> None:
+        self._play_library_track()
+        self.window.navigation_adapter.set_route("immersive_lyrics")
+        self.app.processEvents()
+        shell = self.window.router.currentWidget()
+        controls = shell.controls
+        adapter = self.window.playback_adapter
+        adapter.set_muted(True)
+        self.app.processEvents()
+        self.assertTrue(adapter.state.is_muted)
+        self.assertEqual(controls.volume_button.toolTip(), "取消静音")
+        controls.volume_button.click()
+        self.assertFalse(adapter.state.is_muted)
+        adapter.set_volume(31)
+        self.app.processEvents()
+        self.assertEqual(controls.volume_slider.value(), 31)
 
     def test_distance_hierarchy_segments_and_light_readability(self) -> None:
         self._play_library_track()

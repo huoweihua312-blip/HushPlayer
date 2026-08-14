@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from PySide6.QtCore import QSize, Signal
+from PySide6.QtCore import QSize, Qt, Signal
 from PySide6.QtWidgets import QHBoxLayout, QLineEdit, QToolButton, QWidget
 
 from app.ui_v2.theme.icons import icon
@@ -17,6 +17,7 @@ class OnlineSearchBar(QWidget):
         super().__init__(parent)
         self._theme = theme
         self.line_edit = QLineEdit(self)
+        self.line_edit.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
         self.line_edit.setPlaceholderText("搜索歌曲、歌手或专辑")
         self.line_edit.setMaxLength(120)
         self.line_edit.textChanged.connect(self.query_changed)

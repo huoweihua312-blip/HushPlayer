@@ -315,6 +315,7 @@ class SettingsPage(QWidget):
         self.folder_list = QListWidget(self)
         self.folder_list.setMaximumHeight(130)
         self.folder_input = QLineEdit(self)
+        self.folder_input.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
         self.folder_input.setPlaceholderText("例如 E:\\Music\\Preview")
         self.folder_add_button = QPushButton("添加文件夹", self)
         self.folder_remove_button = QPushButton("移除", self)
