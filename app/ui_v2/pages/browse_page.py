@@ -21,7 +21,7 @@ from app.ui_v2.adapters.library_collection import LibraryCollectionAdapter
 from app.ui_v2.adapters.online_adapter import OnlineAdapter
 from app.ui_v2.adapters.playlist_adapter import PlaylistAdapter
 from app.ui_v2.models.track import Track
-from app.ui_v2.theme.icons import icon
+from app.ui_v2.theme.icons import fluent_settings_interactive_icon, icon
 from app.ui_v2.theme.tokens import Theme
 from app.ui_v2.widgets.cover_card import CoverCard
 
@@ -119,8 +119,8 @@ class BrowseSection(QFrame):
             f"QToolButton#browseSeeAll {{ border: 0; padding: 0; color: {c.accent}; font-size: {theme.fonts.card_meta}px; font-weight: 400; background: transparent; }}"
             f"QToolButton#browseSeeAll:hover {{ color: {c.text_primary}; }}"
         )
-        self.refresh_button.setIcon(icon("updates", theme))
-        self.refresh_button.setIconSize(QSize(16, 16))
+        self.refresh_button.setIcon(fluent_settings_interactive_icon("updates", theme, size=18))
+        self.refresh_button.setIconSize(QSize(18, 18))
         for card in self._cards:
             card.set_theme(theme)
 

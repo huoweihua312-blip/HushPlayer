@@ -108,6 +108,7 @@ class ApprovedShellMigrationTests(unittest.TestCase):
         self.assertEqual(set(page.sections), {"recent_added", "recommended", "recent_played"})
         self.assertEqual(page.intro_surface.objectName(), "browseIntroSurface")
         self.assertEqual(page.target_card_count, 4)
+        self.assertFalse(page.sections["recommended"].refresh_button.icon().isNull())
         for section in page.sections.values():
             visible_cards = [card for card in section.cards if not card.isHidden()]
             self.assertEqual(len(visible_cards), 4)
