@@ -352,11 +352,14 @@ class LyricsCanvasV2(QWidget):
         if (
             not self._playback_active
             or self._mode != "immersive"
-            or self.browsing
             or self._active_line is None
             or not self._active_line.segments
         ):
             return
+        # Browsing only freezes the viewport position.  It must not pause the
+        # shared playback clock or the character-level highlight; otherwise
+        # the lyric surface looks like a separate, static page until the user
+        # presses "return to current lyrics".
         position = self._interpolated_position_ms()
         index, progress = self._segment_at_position(self._active_line, position)
         if index < 0:

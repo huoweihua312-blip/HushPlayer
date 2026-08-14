@@ -304,6 +304,28 @@ class LyricsPageTests(unittest.TestCase):
         self.assertFalse(canvas.browsing)
         self.assertFalse(canvas.return_button.isVisible())
 
+    def test_browsing_keeps_character_highlight_running(self) -> None:
+        self._play_library_track()
+        page = self._lyrics_page()
+        canvas = page.lyrics_view
+        line = next(line for line in canvas.document.lines if line.segments)
+        segment = line.segments[0]
+        self.window.navigation_adapter.set_route("immersive_lyrics")
+        self.app.processEvents()
+        canvas = self.window.router.currentWidget().canvas
+        canvas.set_active_line(line)
+        canvas.set_active_segment(line, 0, 0.0)
+        canvas.set_playback_active(True)
+        canvas._set_playback_anchor(
+            segment.start_ms + max(1, (segment.end_ms - segment.start_ms) // 2)
+            if segment.end_ms is not None
+            else segment.start_ms + 400
+        )
+        canvas._begin_browse()
+        canvas._on_highlight_tick()
+        self.assertTrue(canvas.browsing)
+        self.assertGreater(canvas._active_segment_progress, 0.0)
+
     def test_search_inputs_are_vertically_centered(self) -> None:
         for control in self.window.findChildren(QLineEdit):
             self.assertTrue(
