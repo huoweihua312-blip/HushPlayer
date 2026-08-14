@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from PySide6.QtCore import QSize, Signal
+from PySide6.QtCore import QSize, Qt, Signal
 from PySide6.QtWidgets import QMenu, QToolButton, QWidget
 
 from app.ui_v2.adapters.online_adapter import OnlineAdapter
@@ -20,8 +20,12 @@ class SourceSelector(QToolButton):
         self._compact = False
         self.setObjectName("onlineSourceSelector")
         self.setAccessibleName("在线来源筛选")
-        self.setAccessibleDescription("选择在线搜索时使用的来源")
+        self.setAccessibleDescription("选择在线搜索时使用的来源；点击打开来源筛选菜单")
         self.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
+        # QToolButton defaults to icon-only on some Windows styles.  That made
+        # this control appear as an unexplained square even though it already
+        # had a useful label. Keep the label visible beside the cloud icon.
+        self.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
         self._menu = QMenu(self)
         self.setMenu(self._menu)
         adapter.source_state_changed.connect(self._rebuild_menu)
@@ -31,19 +35,26 @@ class SourceSelector(QToolButton):
 
     def set_compact(self, compact: bool) -> None:
         self._compact = bool(compact)
+        self.setMinimumWidth(82 if self._compact else 112)
         self._refresh_text()
 
     def set_theme(self, theme: Theme) -> None:
         self._theme = theme
         self.setIcon(icon("online", theme))
         self.setIconSize(QSize(theme.metrics.icon_sm, theme.metrics.icon_sm))
+        self.setMinimumWidth(82 if self._compact else 112)
         self.setStyleSheet(
-            f"QToolButton#onlineSourceSelector {{ min-height: {theme.metrics.control_height}px; padding: 0 {theme.metrics.spacing_md}px; "
-            f"border: 1px solid {theme.colors.border}; border-radius: {theme.metrics.radius_sm}px; "
+            f"QToolButton#onlineSourceSelector {{ min-height: {theme.metrics.control_height}px; "
+            f"padding: 0 {theme.metrics.spacing_md}px 0 {theme.metrics.spacing_sm}px; "
+            f"border: 1px solid {theme.colors.border}; border-radius: {theme.metrics.radius_md}px; "
             f"background: {theme.colors.surface_secondary}; color: {theme.colors.primary_text}; font-weight: 600; }}"
             f"QToolButton#onlineSourceSelector:hover {{ color: {theme.colors.primary_text}; background: {theme.colors.hover_background}; "
             f"border-color: {theme.colors.border_strong}; }}"
+            f"QToolButton#onlineSourceSelector:pressed {{ background: {theme.colors.surface_elevated}; }}"
             f"QToolButton#onlineSourceSelector:focus {{ border-color: {theme.colors.focus_ring}; }}"
+            f"QToolButton#onlineSourceSelector::menu-indicator {{ subcontrol-origin: padding; "
+            f"subcontrol-position: right center; width: 12px; height: 12px; "
+            f"right: {theme.metrics.spacing_xs}px; }}"
         )
 
     def _rebuild_menu(self, sources) -> None:
@@ -82,5 +93,5 @@ class SourceSelector(QToolButton):
 
     def _refresh_text(self) -> None:
         count = sum(source.enabled for source in self.adapter.sources())
-        self.setText("来源" if self._compact else f"选择来源 · {count}")
-        self.setToolTip(f"已启用 {count} 个在线来源；点击可调整本次搜索范围")
+        self.setText("来源" if self._compact else f"来源 · {count}")
+        self.setToolTip(f"已启用 {count} 个在线来源；点击调整本次搜索范围")

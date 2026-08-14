@@ -207,6 +207,14 @@ class OnlineSearchPageTests(unittest.TestCase):
 
     def test_result_filter_sort_and_source_selector_status(self) -> None:
         page = self._search_page()
+        self.assertEqual(
+            page.source_selector.toolButtonStyle(),
+            Qt.ToolButtonStyle.ToolButtonTextBesideIcon,
+        )
+        enabled_count = sum(source.enabled for source in self.window.online_adapter.sources())
+        self.assertEqual(page.source_selector.text(), f"来源 · {enabled_count}")
+        self.assertGreaterEqual(page.source_selector.minimumWidth(), 100)
+        self.assertIn("调整本次搜索范围", page.source_selector.toolTip())
         model = page.result_table.model
         self._complete_search(page, "Paper Moon")
         self.assertEqual(page.result_toolbar.sort_selector.currentData(), "relevance")
