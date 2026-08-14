@@ -318,6 +318,22 @@ class UiV2MainWindowTests(unittest.TestCase):
         self.app.processEvents()
         self.assertIsNone(self.window._theme_reveal_overlay)
 
+    def test_theme_reveal_demo_starts_before_theme_persistence(self) -> None:
+        self.window._theme_reveal_demo_enabled = True
+        original_mode = self.window.theme.mode
+
+        self.window.toggle_theme()
+        self.assertIsNotNone(self.window._theme_reveal_overlay)
+        self.assertEqual(self.window.theme.mode, original_mode)
+
+        QTest.qWait(self.window._THEME_REVEAL_APPLY_DELAY_MS + 20)
+        self.app.processEvents()
+        self.assertNotEqual(self.window.theme.mode, original_mode)
+
+        QTest.qWait(1260)
+        self.app.processEvents()
+        self.assertIsNone(self.window._theme_reveal_overlay)
+
     def test_all_navigation_entries_are_clickable_and_route_to_cached_pages(self) -> None:
         sidebar = self.window.sidebar
         long_playlist_name = "一个用于验证提示文本的超长自定义歌单名称"

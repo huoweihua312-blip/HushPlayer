@@ -198,6 +198,7 @@ class MainWindow(QMainWindow):
     """Composes cached V2 pages around one mock or read-only library source."""
 
     _WINDOW_CORNER_RADIUS = 16
+    _THEME_REVEAL_APPLY_DELAY_MS = 16
 
     def __init__(
         self,
@@ -518,12 +519,56 @@ class MainWindow(QMainWindow):
                 raise
             return
         snapshot = self._settings_snapshot.with_updates({"appearance_mode": target})
+        if self._queue_theme_reveal_apply(snapshot):
+            return
         try:
             saved = self.settings_bridge.save_snapshot(snapshot)
         except Exception:
             self._animate_next_theme_change = False
             raise
         self._settings_snapshot = saved
+
+    def _queue_theme_reveal_apply(self, snapshot: SettingsSnapshot) -> bool:
+        """Start the opt-in reveal before synchronous theme persistence runs."""
+
+        if not (
+            self._theme_reveal_demo_enabled
+            and self.isVisible()
+            and self._theme_reveal_overlay is None
+        ):
+            return False
+        overlay = self._prepare_theme_reveal()
+        if overlay is None:
+            return False
+        self._animate_next_theme_change = False
+        self._start_theme_reveal(overlay)
+        QTimer.singleShot(
+            self._THEME_REVEAL_APPLY_DELAY_MS,
+            lambda snapshot=snapshot: self._apply_queued_theme_snapshot(snapshot),
+        )
+        return True
+
+    def _apply_queued_theme_snapshot(self, snapshot: SettingsSnapshot) -> None:
+        try:
+            self._settings_snapshot = self.settings_bridge.save_snapshot(snapshot)
+        except Exception as error:
+            self._cancel_theme_reveal()
+            QToolTip.showText(
+                self.title_bar.theme_button.mapToGlobal(
+                    self.title_bar.theme_button.rect().bottomLeft()
+                ),
+                f"主题切换失败：{error}",
+                self.title_bar.theme_button,
+            )
+
+    def _cancel_theme_reveal(self) -> None:
+        overlay = self._theme_reveal_overlay
+        self._theme_reveal_overlay = None
+        if overlay is not None:
+            overlay._animation.stop()
+            overlay.hide()
+            overlay.deleteLater()
+        self.title_bar.theme_button.setEnabled(True)
 
     def _prepare_theme_reveal(self) -> ThemeRevealOverlay | None:
         if self._theme_reveal_overlay is not None:

@@ -16,6 +16,8 @@ theme switching remains unchanged until the interaction is accepted.
   centered on the visible sun/moon theme toggle button, so the target theme
   appears to softly radiate from the user's action.
 - Use a 1200 ms ease-out transition and remove the overlay when finished.
+- Start the overlay before the synchronous theme persistence pass, then defer
+  applying the new theme by one render frame so the reveal responds immediately.
 - Disable the theme button during the short transition to avoid overlapping
   reveals.
 - If the demo flag is absent, keep the current immediate theme transition.
