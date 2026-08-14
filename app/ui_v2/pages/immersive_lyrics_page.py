@@ -588,6 +588,7 @@ class ImmersiveLyricsPage(QWidget):
             self._controls_hovered = False
             self.settings_panel.hide()
             self.queue_panel.hide()
+            self._sync_overlay_hit_testing()
         else:
             self.wake_controls()
 
@@ -934,6 +935,7 @@ class ImmersiveLyricsPage(QWidget):
         else:
             self.readability_overlay.set_regions(QRect(), QRect(), self.controls.geometry())
         self.overlay_host.setGeometry(self.rect())
+        self._sync_overlay_hit_testing()
         self.overlay_host.raise_()
         self.header.raise_()
         self.controls.raise_()
@@ -941,6 +943,22 @@ class ImmersiveLyricsPage(QWidget):
             self.settings_panel.raise_()
         if self.queue_panel.isVisible():
             self.queue_panel.raise_()
+
+    def _sync_overlay_hit_testing(self) -> None:
+        """Let the lyric surface receive input unless a popup is open.
+
+        The overlay host spans the complete immersive page so it can dismiss
+        an open queue/settings panel when the user clicks outside it.  Keeping
+        it interactive while both panels are hidden also makes it swallow
+        wheel events destined for the lyrics canvas and clicks destined for
+        the shared playback controls.
+        """
+
+        panel_visible = self.settings_panel.isVisible() or self.queue_panel.isVisible()
+        self.overlay_host.setAttribute(
+            Qt.WidgetAttribute.WA_TransparentForMouseEvents,
+            not panel_visible,
+        )
 
     def eventFilter(self, watched, event):  # noqa: N802
         if event.type() in (

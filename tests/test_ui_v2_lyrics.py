@@ -311,6 +311,32 @@ class LyricsPageTests(unittest.TestCase):
                 control.objectName() or "unnamed QLineEdit",
             )
 
+    def test_search_inputs_use_optical_baseline_compensation(self) -> None:
+        controls = self.window.findChildren(QLineEdit)
+        self.assertTrue(controls)
+        for control in controls:
+            self.assertEqual(control.textMargins().top(), -2, control.objectName())
+            self.assertEqual(control.textMargins().bottom(), 2, control.objectName())
+
+    def test_immersive_overlay_releases_content_input_when_closed(self) -> None:
+        self._play_library_track()
+        self.window.navigation_adapter.set_route("immersive_lyrics")
+        self.app.processEvents()
+        shell = self.window.router.currentWidget()
+        self.assertTrue(
+            shell.overlay_host.testAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+        )
+        shell.show_settings_panel()
+        self.app.processEvents()
+        self.assertFalse(
+            shell.overlay_host.testAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+        )
+        shell.hide_settings_panel()
+        self.app.processEvents()
+        self.assertTrue(
+            shell.overlay_host.testAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+        )
+
     def test_immersive_volume_and_mute_controls_share_playback_state(self) -> None:
         self._play_library_track()
         self.window.navigation_adapter.set_route("immersive_lyrics")

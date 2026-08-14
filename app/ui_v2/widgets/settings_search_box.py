@@ -7,6 +7,7 @@ from PySide6.QtWidgets import QHBoxLayout, QLineEdit, QToolButton, QWidget
 
 from app.ui_v2.theme.icons import icon
 from app.ui_v2.theme.tokens import Theme
+from app.ui_v2.widgets.line_edit import apply_optical_vertical_center
 
 
 class SettingsSearchBox(QWidget):
@@ -19,7 +20,7 @@ class SettingsSearchBox(QWidget):
         self._theme = theme
         self.input = QLineEdit(self)
         self.input.setObjectName("settingsSearchInput")
-        self.input.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+        apply_optical_vertical_center(self.input)
         self.input.setPlaceholderText("搜索设置")
         self.clear_button = QToolButton(self)
         self.clear_button.setToolTip("清空设置搜索")

@@ -10,6 +10,7 @@ from PySide6.QtWidgets import QLabel, QFrame, QGridLayout, QHBoxLayout, QLineEdi
 
 from app.ui_v2.theme.icons import fluent_settings_interactive_icon, icon
 from app.ui_v2.theme.tokens import Theme
+from app.ui_v2.widgets.line_edit import apply_optical_vertical_center
 
 
 _QUIET_ORBIT_LOGO = Path(__file__).resolve().parents[1] / "assets" / "quiet-orbit-logo.svg"
@@ -48,7 +49,7 @@ class CustomTitleBar(QFrame):
         self.search_icon.setEnabled(False)
         self.search_input = QLineEdit(self)
         self.search_input.setObjectName("titleBarSearchInput")
-        self.search_input.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+        apply_optical_vertical_center(self.search_input)
         self.search_input.setPlaceholderText("搜索歌曲、歌手或专辑")
         self.search_input.setClearButtonEnabled(True)
         self.search_input.setAccessibleName("全局搜索")

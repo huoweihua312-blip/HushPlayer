@@ -32,6 +32,7 @@ from app.ui_v2.models.settings_search_result import SettingsSearchResult
 from app.ui_v2.models.settings_state import SettingsState
 from app.ui_v2.theme.icons import icon
 from app.ui_v2.theme.tokens import Theme
+from app.ui_v2.widgets.line_edit import apply_optical_vertical_center
 from app.ui_v2.widgets.settings_badge import SettingsBadge
 from app.ui_v2.widgets.settings_control_factory import SettingsControlFactory, SliderSpinControl
 from app.ui_v2.widgets.settings_empty_result import SettingsEmptyResult
@@ -315,7 +316,7 @@ class SettingsPage(QWidget):
         self.folder_list = QListWidget(self)
         self.folder_list.setMaximumHeight(130)
         self.folder_input = QLineEdit(self)
-        self.folder_input.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+        apply_optical_vertical_center(self.folder_input)
         self.folder_input.setPlaceholderText("例如 E:\\Music\\Preview")
         self.folder_add_button = QPushButton("添加文件夹", self)
         self.folder_remove_button = QPushButton("移除", self)

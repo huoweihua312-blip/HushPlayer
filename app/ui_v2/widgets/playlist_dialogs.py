@@ -15,6 +15,7 @@ from PySide6.QtWidgets import (
 
 from app.ui_v2.theme.styles import build_dialog_stylesheet
 from app.ui_v2.theme.tokens import Theme
+from app.ui_v2.widgets.line_edit import apply_optical_vertical_center
 
 
 class PlaylistNameDialog(QDialog):
@@ -39,7 +40,7 @@ class PlaylistNameDialog(QDialog):
         self.title_label.setObjectName("playlistDialogTitle")
         self.name_input = QLineEdit(self)
         self.name_input.setObjectName("playlistNameInput")
-        self.name_input.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+        apply_optical_vertical_center(self.name_input)
         self.name_input.setAccessibleName("歌单名称")
         self.name_input.setPlaceholderText("输入歌单名称")
         self.name_input.setText(str(initial_name or ""))

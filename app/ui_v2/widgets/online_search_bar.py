@@ -7,6 +7,7 @@ from PySide6.QtWidgets import QHBoxLayout, QLineEdit, QToolButton, QWidget
 
 from app.ui_v2.theme.icons import icon
 from app.ui_v2.theme.tokens import Theme
+from app.ui_v2.widgets.line_edit import apply_optical_vertical_center
 
 
 class OnlineSearchBar(QWidget):
@@ -17,7 +18,7 @@ class OnlineSearchBar(QWidget):
         super().__init__(parent)
         self._theme = theme
         self.line_edit = QLineEdit(self)
-        self.line_edit.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+        apply_optical_vertical_center(self.line_edit)
         self.line_edit.setPlaceholderText("搜索歌曲、歌手或专辑")
         self.line_edit.setMaxLength(120)
         self.line_edit.textChanged.connect(self.query_changed)
