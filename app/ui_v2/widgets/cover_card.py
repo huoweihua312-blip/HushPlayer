@@ -18,7 +18,7 @@ from app.ui_v2.models.track import Track
 from app.ui_v2.theme.icons import icon
 from app.ui_v2.theme.tokens import Theme
 from app.ui_v2.widgets.elided_label import ElidedLabel
-from app.ui_v2.widgets.artwork_thumbnail import artwork_pixmap_for_track
+from app.ui_v2.widgets.artwork_thumbnail import ArtworkThumbnail
 from app.ui_v2.widgets.track_display import display_track_text
 
 
@@ -105,10 +105,13 @@ class CoverCard(QFrame):
         self.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.customContextMenuRequested.connect(self._emit_context_menu)
 
-        self.artwork = QLabel(self)
+        self.artwork = ArtworkThumbnail(
+            theme,
+            self,
+            size=self.COVER_WIDTH,
+            clip_artwork=True,
+        )
         self.artwork.setObjectName("coverCardArtwork")
-        self.artwork.setFixedSize(self.COVER_WIDTH, self.COVER_HEIGHT)
-        self.artwork.setScaledContents(False)
         self._artwork_effect = QGraphicsOpacityEffect(self.artwork)
         self._artwork_effect.setOpacity(1.0)
         self.artwork.setGraphicsEffect(self._artwork_effect)
@@ -155,6 +158,7 @@ class CoverCard(QFrame):
     def set_theme(self, theme: Theme) -> None:
         self._theme = theme
         self._apply_surface_style()
+        self.artwork.set_theme(theme)
         self.play_button.setIcon(icon("play", theme, "disabled" if not self._interactive else "normal"))
         self.play_button.setIconSize(QSize(16, 16))
         self.play_button.set_theme(theme)
@@ -228,11 +232,9 @@ class CoverCard(QFrame):
 
     def _refresh_artwork(self) -> None:
         if self._track is None:
-            self.artwork.clear()
+            self.artwork.set_track(None)
             return
-        self.artwork.setPixmap(
-            artwork_pixmap_for_track(self._track, self.COVER_WIDTH, self.COVER_HEIGHT)
-        )
+        self.artwork.set_track(self._track)
 
     def _emit_play_requested(self) -> None:
         if self._interactive and self._track is not None:

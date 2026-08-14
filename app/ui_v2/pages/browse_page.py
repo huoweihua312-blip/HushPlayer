@@ -29,6 +29,9 @@ from app.ui_v2.widgets.cover_card import CoverCard
 class BrowseSection(QFrame):
     """One approved Browse heading plus a reusable horizontal CoverCard row."""
 
+    HORIZONTAL_PADDING = 32
+    CARD_ROW_SPACING = 14
+
     track_activated = Signal(object)
     play_requested = Signal(object)
     context_menu_requested = Signal(object, object)
@@ -83,7 +86,7 @@ class BrowseSection(QFrame):
         self.row.setFixedHeight(CoverCard.CARD_HEIGHT)
         self.row_layout = QHBoxLayout(self.row)
         self.row_layout.setContentsMargins(0, 0, 0, 0)
-        self.row_layout.setSpacing(16)
+        self.row_layout.setSpacing(self.CARD_ROW_SPACING)
         self.empty_label = QLabel("这里还没有可展示的歌曲", self.row)
         self.empty_label.setObjectName("browseSectionEmpty")
         self.empty_label.setVisible(False)
@@ -186,6 +189,7 @@ class BrowsePage(QWidget):
         self._reference_width = 1200
         self._content_safe_bottom = theme.metrics.player_bar_height + theme.metrics.content_safe_bottom
         self._refresh_scheduled = False
+        self._density_sync_scheduled = False
         self._is_shutdown = False
         self.setObjectName("browsePage")
 
@@ -249,6 +253,7 @@ class BrowsePage(QWidget):
                 lambda _status: self._sync_recommendation_heading()
             )
         self.set_theme(theme)
+        self._last_target_card_count = self.target_card_count
         self.refresh_cards()
 
     @property
@@ -260,16 +265,31 @@ class BrowsePage(QWidget):
         """Use the reference density without allowing cards to become tiny."""
 
         if self._reference_width <= 960:
-            return 3
-        if self._reference_width < 1200:
-            return 4
-        if self._reference_width < 1440:
-            return 5
-        if self._reference_width < 1600:
-            return 6
-        if self._reference_width >= 1600:
-            return 7
-        return 5
+            target = 3
+        elif self._reference_width < 1200:
+            target = 4
+        elif self._reference_width < 1440:
+            target = 5
+        elif self._reference_width < 1600:
+            target = 6
+        else:
+            target = 7
+
+        # The window width includes the sidebar and the vertical scrollbar.
+        # Reduce density only when the actual viewport cannot hold the full
+        # row, instead of allowing the last card to be clipped at the edge.
+        viewport_width = self.scroll_area.viewport().width()
+        if viewport_width > 0:
+            available_row_width = viewport_width - (
+                2 * self._theme.metrics.page_margin
+                + BrowseSection.HORIZONTAL_PADDING
+            )
+            while target > 3:
+                row_width = target * CoverCard.CARD_WIDTH + (target - 1) * BrowseSection.CARD_ROW_SPACING
+                if row_width <= available_row_width:
+                    break
+                target -= 1
+        return target
 
     def set_theme(self, theme: Theme) -> None:
         self._theme = theme
@@ -298,6 +318,7 @@ class BrowsePage(QWidget):
     def shutdown(self) -> None:
         self._is_shutdown = True
         self._refresh_scheduled = False
+        self._density_sync_scheduled = False
         if self.discovery_adapter is not None:
             self.discovery_adapter.shutdown()
 
@@ -319,11 +340,33 @@ class BrowsePage(QWidget):
     def set_responsive_reference_width(self, width: int) -> None:
         width = max(1, int(width))
         if width == self._reference_width:
+            self._schedule_density_sync()
             return
         self._reference_width = width
         if self.discovery_adapter is not None:
             self.discovery_adapter.set_maximum(self.target_card_count)
         self.refresh_cards()
+        self._schedule_density_sync()
+
+    def _schedule_density_sync(self) -> None:
+        if self._is_shutdown or self._density_sync_scheduled:
+            return
+        self._density_sync_scheduled = True
+        QTimer.singleShot(0, self._sync_density)
+
+    def _sync_density(self) -> None:
+        self._density_sync_scheduled = False
+        if self._is_shutdown:
+            return
+        target = self.target_card_count
+        if target == self._last_target_card_count:
+            return
+        self._last_target_card_count = target
+        self.refresh_cards()
+
+    def resizeEvent(self, event) -> None:  # noqa: N802
+        super().resizeEvent(event)
+        self._schedule_density_sync()
 
     def refresh_cards(self) -> None:
         # A direct refresh (resize, initial render, or explicit retry) makes a

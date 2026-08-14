@@ -14,7 +14,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from PySide6.QtCore import QSize, Qt
+from PySide6.QtCore import QPoint, QSize, Qt
 from PySide6.QtGui import QColor
 from PySide6.QtWidgets import QApplication, QHBoxLayout, QVBoxLayout
 
@@ -32,6 +32,7 @@ from app.ui_v2.theme.icons import (
 from app.ui_v2.theme.tokens import get_theme
 import app.ui_v2.widgets.navigation_item as navigation_item_module
 from app.ui_v2.widgets.cover_card import CoverCard, CoverCardPlayButton
+from app.ui_v2.widgets.artwork_thumbnail import ArtworkThumbnail
 from app.ui_v2.widgets.placeholder_cover import placeholder_cover_index
 from app.ui_v2.widgets.playback_button import PlayerIconButton
 from app.ui_v2.shell.main_window import MainWindow
@@ -106,13 +107,15 @@ class ApprovedShellMigrationTests(unittest.TestCase):
         self.assertIs(self.window.router.currentWidget(), page)
         self.assertEqual(set(page.sections), {"recent_added", "recommended", "recent_played"})
         self.assertEqual(page.intro_surface.objectName(), "browseIntroSurface")
-        self.assertEqual(page.target_card_count, 5)
+        self.assertEqual(page.target_card_count, 4)
         for section in page.sections.values():
             visible_cards = [card for card in section.cards if not card.isHidden()]
-            self.assertEqual(len(visible_cards), 5)
+            self.assertEqual(len(visible_cards), 4)
             self.assertTrue(all(isinstance(card, CoverCard) for card in visible_cards))
             self.assertTrue(all(isinstance(card.play_button, CoverCardPlayButton) for card in visible_cards))
             for card in visible_cards:
+                self.assertIsInstance(card.artwork, ArtworkThumbnail)
+                self.assertTrue(card.artwork._clip_artwork)
                 self.assertEqual(
                     placeholder_cover_index(card.track.stable_id),
                     placeholder_cover_index(card.track.stable_id),
@@ -586,7 +589,7 @@ class ApprovedShellMigrationTests(unittest.TestCase):
         player_bar = self.window.player_bar
         adapter = self.window.playback_adapter
         model = self.window.library_page.track_table.model
-        for width, expected_cards, compact in ((900, 3, True), (1200, 5, False), (1600, 7, False)):
+        for width, expected_cards, compact in ((900, 3, True), (1200, 4, False), (1600, 7, False)):
             self.window.resize(width, 600 if width == 900 else 800)
             self.app.processEvents()
             self.assertEqual(page.target_card_count, expected_cards)
@@ -597,6 +600,19 @@ class ApprovedShellMigrationTests(unittest.TestCase):
             self.assertIs(self.window.player_bar, player_bar)
         self.assertEqual(self.window.sidebar.brand_label.text(), "HushPlayer")
         self.assertTrue(player_bar.more_button.isHidden())
+
+    def test_browse_content_keeps_a_safe_right_inset(self) -> None:
+        page = self.window.router.browse_page
+        self.window.resize(1200, 800)
+        self.app.processEvents()
+        viewport = page.scroll_area.viewport()
+        minimum_inset = get_theme("dark").metrics.page_margin
+        for section in page.sections.values():
+            origin = section.mapTo(viewport, QPoint(0, 0))
+            self.assertLessEqual(
+                origin.x() + section.width(),
+                viewport.width() - minimum_inset,
+            )
 
     def test_content_safe_area_is_owned_by_the_shared_router_contract(self) -> None:
         expected = get_theme("dark").metrics.player_bar_height + get_theme("dark").metrics.content_safe_bottom
