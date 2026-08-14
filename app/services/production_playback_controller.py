@@ -65,6 +65,7 @@ class ProductionPlaybackController(QObject):
         self._last_end_at = 0.0
         self._closed = False
         self._playback_status = "idle"
+        self._last_nonzero_volume = max(1, min(100, int(volume)))
         self._online_resolver: OnlineMediaResolver | None = None
         self._pending_online_token = 0
         self._resolved_online_identity = ""
@@ -393,6 +394,8 @@ class ProductionPlaybackController(QObject):
         volume = max(0, min(100, int(value)))
         if volume == self.volume:
             return
+        if volume > 0:
+            self._last_nonzero_volume = volume
         self.audio_output.setVolume(volume / 100)
         self.volume_changed.emit(volume)
 
@@ -401,6 +404,17 @@ class ProductionPlaybackController(QObject):
         if callable(set_muted):
             set_muted(bool(value))
         self.muted_changed.emit(bool(value))
+
+    def toggle_mute(self) -> None:
+        """Toggle output mute and recover gracefully from a zero-volume slider."""
+
+        if self.is_muted or self.volume == 0:
+            if self.is_muted:
+                self.set_muted(False)
+            if self.volume == 0:
+                self.set_volume(self._last_nonzero_volume)
+            return
+        self.set_muted(True)
 
     def set_play_mode(self, value: str) -> None:
         mode = self._normalize_play_mode(value)

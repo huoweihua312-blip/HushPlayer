@@ -50,6 +50,7 @@ class PlaybackAdapter(QObject):
         self._tracks_by_identity: dict[str, Track] = {}
         self._requested_tracks_by_id: dict[str, Track] = {}
         self._state = PlaybackState()
+        self._last_nonzero_volume = max(1, int(self._state.volume))
         self._timer = QTimer(self)
         self._timer.setInterval(max(100, int(tick_interval_ms)))
         self._timer.timeout.connect(self._on_timer_timeout)
@@ -64,6 +65,7 @@ class PlaybackAdapter(QObject):
                 is_muted=controller.is_muted,
                 status=controller.playback_status,
             )
+            self._last_nonzero_volume = max(1, int(controller.volume))
 
     @property
     def state(self) -> PlaybackState:
@@ -267,6 +269,8 @@ class PlaybackAdapter(QObject):
             self._controller.set_volume(value)
             return
         volume = max(0, min(100, int(value)))
+        if volume > 0:
+            self._last_nonzero_volume = volume
         if volume == self._state.volume:
             return
         self._state = replace(self._state, volume=volume)
@@ -281,6 +285,19 @@ class PlaybackAdapter(QObject):
             return
         self._state = replace(self._state, is_muted=muted)
         self.muted_changed.emit(muted)
+
+    def toggle_mute(self) -> None:
+        """Use one global mute action for the player bar and lyrics controls."""
+
+        if self._controller is not None:
+            self._controller.toggle_mute()
+            return
+        if self._state.is_muted or self._state.volume == 0:
+            self.set_muted(False)
+            if self._state.volume == 0:
+                self.set_volume(self._last_nonzero_volume)
+            return
+        self.set_muted(True)
 
     def toggle_favorite(self) -> None:
         if self._state.current_track is None:
@@ -573,7 +590,10 @@ class PlaybackAdapter(QObject):
         self.duration_changed.emit(value)
 
     def _on_controller_volume_changed(self, volume: int) -> None:
-        self._set_state(volume=max(0, min(100, int(volume))))
+        normalized = max(0, min(100, int(volume)))
+        if normalized > 0:
+            self._last_nonzero_volume = normalized
+        self._set_state(volume=normalized)
         self.volume_changed.emit(self._state.volume)
 
     def _on_controller_muted_changed(self, muted: bool) -> None:

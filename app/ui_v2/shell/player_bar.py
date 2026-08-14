@@ -661,4 +661,4 @@ class PlayerBar(QFrame):
         self.adapter.seek(self.progress_slider.value())
 
     def _toggle_mute(self) -> None:
-        self.adapter.set_muted(not self.adapter.state.is_muted)
+        self.adapter.toggle_mute()

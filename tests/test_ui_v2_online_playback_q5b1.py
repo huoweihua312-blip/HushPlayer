@@ -22,6 +22,8 @@ from app.services.online_media_resolver import OnlineMediaResolver
 from app.services.production_playback_controller import ProductionPlaybackController
 from app.ui_v2.adapters.playback_adapter import PlaybackAdapter
 from app.ui_v2.models.track import Track
+from app.ui_v2.theme.tokens import get_theme
+from app.ui_v2.widgets.immersive_controls import ImmersiveControls
 
 
 class _FakeAudioOutput(QObject):
@@ -267,6 +269,26 @@ class OnlinePlaybackQ5B1Tests(unittest.TestCase):
         self.controller.pause()
         self.assertEqual(self.controller.playback_status, "paused")
         self.assertTrue(self.controller.play())
+
+    def test_immersive_mute_button_controls_shared_output_and_restores_zero_volume(self) -> None:
+        controls = ImmersiveControls(get_theme("dark"))
+        controls.bind_playback(self.adapter)
+        self.adapter.set_volume(68)
+
+        controls.volume_button.click()
+        self.assertTrue(self.controller.is_muted)
+        self.assertTrue(self.adapter.state.is_muted)
+        self.assertEqual(controls.volume_button.toolTip(), "取消静音")
+
+        controls.volume_button.click()
+        self.assertFalse(self.controller.is_muted)
+        self.assertFalse(self.adapter.state.is_muted)
+
+        self.adapter.set_volume(0)
+        controls.volume_button.click()
+        self.assertFalse(self.controller.is_muted)
+        self.assertEqual(self.controller.volume, 68)
+        self.assertEqual(self.adapter.state.volume, 68)
 
     def test_complete_cache_hit_skips_online_resolve(self) -> None:
         remote = _remote_track("cached")

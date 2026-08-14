@@ -251,7 +251,7 @@ class ImmersiveControls(QWidget):
     def _toggle_mute(self) -> None:
         if self._adapter is None:
             return
-        self._adapter.set_muted(not self._adapter.state.is_muted)
+        self._adapter.toggle_mute()
 
     def _on_shuffle_changed(self, enabled: bool) -> None:
         if self._adapter is not None:

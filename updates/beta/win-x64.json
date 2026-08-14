@@ -1,15 +1,19 @@
 {
     "schema_version": 1,
     "channel": "beta",
-    "version": "0.6.0-beta.6",
-    "numeric_version": "0.6.0.6",
+    "version": "0.6.0-beta.7",
+    "numeric_version": "0.6.0.7",
     "architecture": "win-x64",
     "mandatory": false,
-    "setup_url": "https://gitcode.com/gcw_iPVB8B5g/HushPlayer-updates/releases/download/v0.6.0-beta.6/HushPlayer-0.6.0-beta.6-win-x64-setup.exe",
-    "setup_size": 116686007,
-    "sha256": "f78d42149dfa675f03f5c396b8e0c93008e868d23acbf32d45cb6b6d7676c162",
+    "setup_url": "https://gitcode.com/gcw_iPVB8B5g/HushPlayer-updates/releases/download/v0.6.0-beta.7/HushPlayer-0.6.0-beta.7-win-x64-setup.exe",
+    "setup_size": 116667673,
+    "sha256": "d383f550ff37cd1a2d1b6922eeee12bc78ea64a48879ea256c9f72ec3ae0166b",
     "release_notes": [
-        "修复真实音乐库加载完成后浏览页卡片未立即刷新的问题。"
+        "修复歌词页喇叭按钮无法全局静音或取消静音的问题，主播放栏与歌词页现在共享同一播放状态。",
+        "音量滑块调为 0 后点击喇叭可恢复上一次非零音量。",
+        "修复应用内更新遇到在线源后台进程占用安装目录时立即回滚的问题，更新助手现在会在安全范围内重试目录替换。",
+        "增加完整安装包更新备用入口；应用内更新无法完成时，用户仍可下载并校验安装包后更新到当前安装目录。",
+        "将应用图标调整为深灰色视觉，减少与深色界面不一致的绿色底色。"
     ],
     "release_history": [
         {
@@ -158,10 +162,22 @@
             "notes": [
                 "修复真实音乐库加载完成后浏览页卡片未立即刷新的问题。"
             ]
+        },
+        {
+            "version": "0.6.0-beta.7",
+            "numeric_version": "0.6.0.7",
+            "release_date": "2026-08-14",
+            "notes": [
+                "修复歌词页喇叭按钮无法全局静音或取消静音的问题，主播放栏与歌词页现在共享同一播放状态。",
+                "音量滑块调为 0 后点击喇叭可恢复上一次非零音量。",
+                "修复应用内更新遇到在线源后台进程占用安装目录时立即回滚的问题，更新助手现在会在安全范围内重试目录替换。",
+                "增加完整安装包更新备用入口；应用内更新无法完成时，用户仍可下载并校验安装包后更新到当前安装目录。",
+                "将应用图标调整为深灰色视觉，减少与深色界面不一致的绿色底色。"
+            ]
         }
     ],
-    "package_url": "https://gitcode.com/gcw_iPVB8B5g/HushPlayer-updates/releases/download/v0.6.0-beta.6/HushPlayer-0.6.0-beta.6-win-x64-update.zip",
-    "package_size": 158256423,
-    "package_sha256": "79ef408cb2fb8942ae50cf95dca99c379c69d694ff698ce1e36b0c450f8ca732",
-    "package_filename": "HushPlayer-0.6.0-beta.6-win-x64-update.zip"
+    "package_url": "https://gitcode.com/gcw_iPVB8B5g/HushPlayer-updates/releases/download/v0.6.0-beta.7/HushPlayer-0.6.0-beta.7-win-x64-update.zip",
+    "package_size": 158250905,
+    "package_sha256": "1ed050adaae8ba431b9afc9693ab9c5a9156351372666385a86c31fc288f4e0e",
+    "package_filename": "HushPlayer-0.6.0-beta.7-win-x64-update.zip"
 }
