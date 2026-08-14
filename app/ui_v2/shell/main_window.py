@@ -146,8 +146,15 @@ class ThemeRevealOverlay(QWidget):
         self._animation.finished.connect(self._finish)
 
     def start(self) -> None:
+        self.show_ready()
+        self.start_animation()
+
+    def show_ready(self) -> None:
         self.raise_()
         self.show()
+        self.repaint()
+
+    def start_animation(self) -> None:
         self._animation.start()
 
     def _set_radius(self, value) -> None:
@@ -541,7 +548,7 @@ class MainWindow(QMainWindow):
         if overlay is None:
             return False
         self._animate_next_theme_change = False
-        self._start_theme_reveal(overlay)
+        self._show_theme_reveal(overlay)
         QTimer.singleShot(
             self._THEME_REVEAL_APPLY_DELAY_MS,
             lambda snapshot=snapshot: self._apply_queued_theme_snapshot(snapshot),
@@ -551,6 +558,8 @@ class MainWindow(QMainWindow):
     def _apply_queued_theme_snapshot(self, snapshot: SettingsSnapshot) -> None:
         try:
             self._settings_snapshot = self.settings_bridge.save_snapshot(snapshot)
+            if self._theme_reveal_overlay is not None:
+                self._theme_reveal_overlay.start_animation()
         except Exception as error:
             self._cancel_theme_reveal()
             QToolTip.showText(
@@ -582,10 +591,17 @@ class MainWindow(QMainWindow):
         return ThemeRevealOverlay(snapshot, origin, self)
 
     def _start_theme_reveal(self, overlay: ThemeRevealOverlay) -> None:
+        self._attach_theme_reveal(overlay)
+        overlay.start()
+
+    def _show_theme_reveal(self, overlay: ThemeRevealOverlay) -> None:
+        self._attach_theme_reveal(overlay)
+        overlay.show_ready()
+
+    def _attach_theme_reveal(self, overlay: ThemeRevealOverlay) -> None:
         self._theme_reveal_overlay = overlay
         overlay.finished.connect(self._on_theme_reveal_finished)
         self.title_bar.theme_button.setEnabled(False)
-        overlay.start()
 
     def _on_theme_reveal_finished(self) -> None:
         self._theme_reveal_overlay = None

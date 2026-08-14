@@ -323,12 +323,17 @@ class UiV2MainWindowTests(unittest.TestCase):
         original_mode = self.window.theme.mode
 
         self.window.toggle_theme()
-        self.assertIsNotNone(self.window._theme_reveal_overlay)
+        overlay = self.window._theme_reveal_overlay
+        self.assertIsNotNone(overlay)
         self.assertEqual(self.window.theme.mode, original_mode)
+        self.assertEqual(overlay._radius, 0.0)
 
         QTest.qWait(self.window._THEME_REVEAL_APPLY_DELAY_MS + 20)
         self.app.processEvents()
         self.assertNotEqual(self.window.theme.mode, original_mode)
+        QTest.qWait(40)
+        self.app.processEvents()
+        self.assertGreater(overlay._radius, 0.0)
 
         QTest.qWait(1260)
         self.app.processEvents()
