@@ -29,6 +29,7 @@ from PySide6.QtGui import (
     QGuiApplication,
     QKeySequence,
     QMouseEvent,
+    QImage,
     QBrush,
     QPainter,
     QPainterPath,
@@ -119,7 +120,7 @@ class ThemeRevealOverlay(QWidget):
     """Temporary old-theme layer used by the opt-in transition demo."""
 
     finished = Signal()
-    _DURATION_MS = 900
+    _DURATION_MS = 1200
     _FEATHER_PX = 110
 
     def __init__(self, snapshot: QPixmap, origin: QPoint, parent: QWidget) -> None:
@@ -161,33 +162,36 @@ class ThemeRevealOverlay(QWidget):
     def paintEvent(self, event) -> None:  # noqa: N802
         if self._snapshot.isNull():
             return
-        painter = QPainter(self)
-        painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform, True)
-        painter.drawPixmap(self.rect(), self._snapshot)
         if self._radius <= 0:
+            painter = QPainter(self)
+            painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform, True)
+            painter.drawPixmap(self.rect(), self._snapshot)
             return
         feather = min(self._FEATHER_PX, max(24.0, self._radius * 0.24))
         inner_ratio = max(0.0, (self._radius - feather) / self._radius)
-        gradient = QRadialGradient(
+        image = QImage(
+            self.size(),
+            QImage.Format.Format_ARGB32_Premultiplied,
+        )
+        image.fill(Qt.GlobalColor.transparent)
+        image_painter = QPainter(image)
+        image_painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform, True)
+        image_painter.drawPixmap(image.rect(), self._snapshot)
+        image_painter.setCompositionMode(
+            QPainter.CompositionMode.CompositionMode_DestinationIn
+        )
+        inverse_gradient = QRadialGradient(
             QPointF(float(self._origin.x()), float(self._origin.y())),
             self._radius,
         )
-        gradient.setColorAt(0.0, QColor(0, 0, 0, 255))
-        gradient.setColorAt(inner_ratio, QColor(0, 0, 0, 255))
-        gradient.setColorAt(1.0, QColor(0, 0, 0, 0))
-        painter.setCompositionMode(
-            QPainter.CompositionMode.CompositionMode_DestinationOut
-        )
-        painter.setPen(Qt.PenStyle.NoPen)
-        painter.setBrush(QBrush(gradient))
-        painter.drawEllipse(
-            QRectF(
-                float(self._origin.x()) - self._radius,
-                float(self._origin.y()) - self._radius,
-                self._radius * 2.0,
-                self._radius * 2.0,
-            )
-        )
+        inverse_gradient.setColorAt(0.0, QColor(0, 0, 0, 0))
+        inverse_gradient.setColorAt(inner_ratio, QColor(0, 0, 0, 0))
+        inverse_gradient.setColorAt(1.0, QColor(0, 0, 0, 255))
+        image_painter.fillRect(image.rect(), QBrush(inverse_gradient))
+        image_painter.end()
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform, True)
+        painter.drawImage(self.rect(), image)
 
 
 class MainWindow(QMainWindow):

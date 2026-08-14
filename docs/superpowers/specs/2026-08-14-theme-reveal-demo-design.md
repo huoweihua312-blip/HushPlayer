@@ -15,7 +15,7 @@ theme switching remains unchanged until the interaction is accepted.
 - Fade an expanding circular hole through a 110px feathered radial gradient,
   centered on the visible sun/moon theme toggle button, so the target theme
   appears to softly radiate from the user's action.
-- Use a 900 ms ease-out transition and remove the overlay when finished.
+- Use a 1200 ms ease-out transition and remove the overlay when finished.
 - Disable the theme button during the short transition to avoid overlapping
   reveals.
 - If the demo flag is absent, keep the current immediate theme transition.
