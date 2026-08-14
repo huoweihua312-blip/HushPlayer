@@ -62,7 +62,7 @@ class PlayerIconButton(QToolButton):
                 f"QToolButton {{ border: 0; border-radius: {self._button_size // 2}px; background: {colors.text_primary}; }}"
                 f"QToolButton:hover {{ background: {colors.accent_hover}; }}"
                 f"QToolButton:pressed {{ background: {colors.accent_pressed}; }}"
-                f"QToolButton:focus {{ border: 1px solid {colors.text_primary}; }}"
+                f"QToolButton[hushKeyboardFocus=\"true\"]:focus {{ border: 1px solid {colors.text_primary}; }}"
                 f"QToolButton:disabled {{ background: {_rgba(colors.text_primary, 0.16)}; }}"
             )
         else:
@@ -71,7 +71,7 @@ class PlayerIconButton(QToolButton):
                 "background: transparent; }"
                 f"QToolButton:hover {{ background: {_rgba(colors.text_primary, 0.08)}; }}"
                 f"QToolButton:pressed {{ background: {_rgba(colors.text_primary, 0.13)}; }}"
-                f"QToolButton:focus {{ border: 1px solid {colors.text_primary}; }}"
+                f"QToolButton[hushKeyboardFocus=\"true\"]:focus {{ border: 1px solid {colors.text_primary}; }}"
                 f"QToolButton:disabled, QToolButton:disabled:hover, QToolButton:disabled:pressed {{ background: transparent; }}"
             )
         self._refresh_icon()

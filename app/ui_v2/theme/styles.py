@@ -96,10 +96,18 @@ def build_stylesheet(theme: Theme) -> str:
             selection-color: {c.text_primary};
         }}
         QLineEdit#searchInput:focus, QLineEdit#titleBarSearchInput:focus {{ border-color: {c.focus_ring}; }}
-        /* Tool buttons own their focus treatment so mouse clicks do not leave
-           a second, unexpected outline around compact navigation/actions. */
-        QPushButton:focus, QComboBox:focus, QSlider:focus,
-        QLineEdit:focus {{ outline: 1px solid {c.focus_ring}; outline-offset: 1px; }}
+        /* Mouse clicks should not leave a detached outline around compact
+           actions. Keep a clear ring for keyboard navigation instead. */
+        QPushButton:focus, QToolButton:focus {{ outline: 0; }}
+        QPushButton[hushKeyboardFocus="true"]:focus,
+        QToolButton[hushKeyboardFocus="true"]:focus {{
+            outline: 1px solid {c.focus_ring};
+            outline-offset: 1px;
+        }}
+        QComboBox:focus, QSlider:focus, QLineEdit:focus {{
+            outline: 1px solid {c.focus_ring};
+            outline-offset: 1px;
+        }}
         QToolTip {{
             padding: {m.spacing_xs}px {m.spacing_sm}px;
             border: 1px solid {c.divider};
@@ -299,6 +307,11 @@ def build_dialog_stylesheet(theme: Theme) -> str:
         }}
         QDialog QPushButton:focus, QDialog QToolButton:focus {{
             outline: 0;
+        }}
+        QDialog QPushButton[hushKeyboardFocus="true"]:focus,
+        QDialog QToolButton[hushKeyboardFocus="true"]:focus {{
+            outline: 1px solid {c.focus_ring};
+            outline-offset: 1px;
             border-color: {c.focus_ring};
         }}
         QDialog QPushButton:disabled, QDialog QToolButton:disabled {{

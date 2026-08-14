@@ -117,7 +117,7 @@ class OnlineResultToolbar(QWidget):
             f"border: 1px solid {colors.border}; border-radius: {metrics.radius_sm}px; color: {colors.secondary_text}; "
             f"background: {colors.surface_primary}; }}"
             f"QToolButton:hover {{ color: {colors.primary_text}; background: {colors.hover_background}; border-color: {colors.border_strong}; }}"
-            f"QToolButton:focus {{ border-color: {colors.focus_ring}; }}"
+            f"QToolButton[hushKeyboardFocus=\"true\"]:focus {{ border-color: {colors.focus_ring}; }}"
         )
 
     def _emit_source_filter(self) -> None:

@@ -54,7 +54,7 @@ class SectionToolbar(QWidget):
             f"background: {colors.accent}; font-weight: 600; }}"
             f"QToolButton:hover {{ background: {colors.accent_hover}; }}"
             f"QToolButton:pressed {{ background: {colors.accent_pressed}; }}"
-            f"QToolButton:focus {{ border-color: {colors.focus_ring}; }}"
+            f"QToolButton[hushKeyboardFocus=\"true\"]:focus {{ border-color: {colors.focus_ring}; }}"
             f"QToolButton:disabled {{ color: {colors.disabled_text}; background: {colors.surface_secondary}; }}"
         )
         self.shuffle_button.setStyleSheet(
@@ -63,6 +63,6 @@ class SectionToolbar(QWidget):
             f"background: {colors.surface_secondary}; }}"
             f"QToolButton:hover {{ color: {colors.primary_text}; background: {colors.hover_background}; border-color: {colors.border_strong}; }}"
             f"QToolButton:pressed {{ background: {colors.selected_background}; }}"
-            f"QToolButton:focus {{ border-color: {colors.focus_ring}; }}"
+            f"QToolButton[hushKeyboardFocus=\"true\"]:focus {{ border-color: {colors.focus_ring}; }}"
             f"QToolButton:disabled {{ color: {colors.disabled_text}; background: transparent; border-color: {colors.border}; }}"
         )

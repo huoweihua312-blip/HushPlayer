@@ -251,7 +251,7 @@ class LyricsCanvasV2(QWidget):
             "QToolButton#returnToCurrentLyrics:pressed {"
             f"background: {_rgba(theme.colors.text_primary, 0.13)}; border-color: transparent;"
             "}"
-            "QToolButton#returnToCurrentLyrics:focus {"
+            "QToolButton#returnToCurrentLyrics[hushKeyboardFocus=\"true\"]:focus {"
             f"background: transparent; border: 1px solid {_rgba(theme.colors.focus_ring, 0.55)};"
             "}"
         )

@@ -93,7 +93,7 @@ class SettingsFooter(QFrame):
             f"border-bottom-right-radius: {theme.metrics.radius_lg}px; "
             f"background: {theme.colors.elevated_background}; }}"
         )
-        neutral = f"QPushButton {{ min-height: {theme.metrics.control_height}px; padding: 0 12px; border: 1px solid {theme.colors.border}; border-radius: {theme.metrics.radius_sm}px; background: {theme.colors.surface_secondary}; color: {theme.colors.primary_text}; }} QPushButton:hover {{ background: {theme.colors.hover_background}; }} QPushButton:focus {{ border: 1px solid {theme.colors.focus_ring}; }} QPushButton:disabled {{ color: {theme.colors.disabled_text}; }}"
+        neutral = f"QPushButton {{ min-height: {theme.metrics.control_height}px; padding: 0 12px; border: 1px solid {theme.colors.border}; border-radius: {theme.metrics.radius_sm}px; background: {theme.colors.surface_secondary}; color: {theme.colors.primary_text}; }} QPushButton:hover {{ background: {theme.colors.hover_background}; }} QPushButton[hushKeyboardFocus=\"true\"]:focus {{ border: 1px solid {theme.colors.focus_ring}; }} QPushButton:disabled {{ color: {theme.colors.disabled_text}; }}"
         for button in (self.category_defaults_button, self.all_defaults_button, self.cancel_button):
             button.setStyleSheet(neutral)
         self.save_button.setStyleSheet(

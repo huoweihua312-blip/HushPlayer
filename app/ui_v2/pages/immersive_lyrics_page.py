@@ -238,7 +238,7 @@ class ImmersiveLyricsPage(QWidget):
             f"QToolButton#immersiveModeButton:checked {{ background: transparent; color: {colors.text_primary}; "
             f"border-bottom: 2px solid {colors.accent}; }}"
             f"QToolButton#immersiveModeButton:pressed {{ background: transparent; }}"
-            f"QToolButton#immersiveModeButton:focus {{ background: transparent; border-bottom: 2px solid {colors.focus_ring}; }}"
+            f"QToolButton#immersiveModeButton[hushKeyboardFocus=\"true\"]:focus {{ background: transparent; border-bottom: 2px solid {colors.focus_ring}; }}"
         )
         for name, button in (("back", self.header_back_button), ("window_minimize", self._window_buttons[0]), ("window_maximize", self._window_buttons[1]), ("window_close", self._window_buttons[2])):
             button.setIcon(icon(name, theme, "normal"))

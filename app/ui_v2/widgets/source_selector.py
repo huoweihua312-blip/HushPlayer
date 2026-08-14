@@ -57,7 +57,7 @@ class SourceSelector(QToolButton):
             f"QToolButton#onlineSourceSelector:hover {{ color: {theme.colors.primary_text}; background: {theme.colors.hover_background}; "
             f"border-color: {theme.colors.border_strong}; }}"
             f"QToolButton#onlineSourceSelector:pressed {{ background: {theme.colors.surface_elevated}; }}"
-            f"QToolButton#onlineSourceSelector:focus {{ border-color: {theme.colors.focus_ring}; }}"
+            f"QToolButton#onlineSourceSelector[hushKeyboardFocus=\"true\"]:focus {{ border-color: {theme.colors.focus_ring}; }}"
             f"QToolButton#onlineSourceSelector::menu-indicator {{ subcontrol-origin: padding; "
             f"subcontrol-position: right center; width: 12px; height: 12px; "
             f"right: {theme.metrics.spacing_xs}px; }}"

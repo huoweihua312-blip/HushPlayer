@@ -31,6 +31,7 @@ from app.ui_v2.widgets.quiet_context_menu import apply_menu_theme
 _PLAYLIST_COVER_DIR = Path(__file__).resolve().parent.parent / "assets" / "sidebar_playlist_covers"
 _PLAYLIST_COVERS = ("midnight", "daily", "coast")
 _QUIET_ORBIT_LOGO = Path(__file__).resolve().parent.parent / "assets" / "quiet-orbit-logo.svg"
+_QUIET_ORBIT_LOGO_LIGHT = Path(__file__).resolve().parent.parent / "assets" / "quiet-orbit-logo-light.svg"
 
 
 class NavigationSidebar(QFrame):
@@ -198,7 +199,8 @@ class NavigationSidebar(QFrame):
             f"QLabel#navigationBrandMark {{ background: transparent; }}"
             f"QLabel#navigationBrandLabel {{ color: {c.text_primary}; font-size: 17px; font-weight: 600; }}"
         )
-        logo = QPixmap(str(_QUIET_ORBIT_LOGO))
+        logo_path = _QUIET_ORBIT_LOGO_LIGHT if theme.mode == "light" else _QUIET_ORBIT_LOGO
+        logo = QPixmap(str(logo_path))
         self.brand_mark.setPixmap(
             logo.scaled(
                 self.brand_mark.size(),

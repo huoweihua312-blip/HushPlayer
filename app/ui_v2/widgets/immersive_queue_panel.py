@@ -281,7 +281,7 @@ class ImmersiveQueuePanel(QFrame):
             f"QListView::item {{ background: transparent; padding: 0; border: 0; }}"
             f"QToolButton {{ border: 0; border-radius: 16px; background: transparent; }}"
             f"QToolButton:hover {{ background: {colors.surface_hover}; }}"
-            f"QToolButton:focus {{ border: 1px solid {colors.focus_ring}; }}"
+            f"QToolButton[hushKeyboardFocus=\"true\"]:focus {{ border: 1px solid {colors.focus_ring}; }}"
         )
         self.title_label.setStyleSheet(
             f"font-size: {theme.fonts.section_title}px; font-weight: 650; color: {colors.text_primary};"

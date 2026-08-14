@@ -953,7 +953,7 @@ class SettingsOverlay(QWidget):
             f"QToolButton#settingsCloseButton {{ min-width: 32px; max-width: 32px; min-height: 32px; max-height: 32px; border: 0; border-radius: 9px; background: transparent; }} "
             f"QToolButton#settingsCloseButton:hover {{ background: rgba(255,255,255,18); }} "
             f"QToolButton#settingsCloseButton:pressed {{ background: rgba(255,255,255,28); }} "
-            f"QToolButton#settingsCloseButton:focus {{ border: 1px solid {c.focus_ring}; background: transparent; }}"
+            f"QToolButton#settingsCloseButton[hushKeyboardFocus=\"true\"]:focus {{ border: 1px solid {c.focus_ring}; background: transparent; }}"
         )
         self.sidebar.set_theme(theme)
         self.footer.set_theme(theme)

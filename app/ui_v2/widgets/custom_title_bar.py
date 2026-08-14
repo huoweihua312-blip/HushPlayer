@@ -14,6 +14,7 @@ from app.ui_v2.widgets.line_edit import apply_optical_vertical_center
 
 
 _QUIET_ORBIT_LOGO = Path(__file__).resolve().parents[1] / "assets" / "quiet-orbit-logo.svg"
+_QUIET_ORBIT_LOGO_LIGHT = Path(__file__).resolve().parents[1] / "assets" / "quiet-orbit-logo-light.svg"
 
 
 class CustomTitleBar(QFrame):
@@ -195,7 +196,9 @@ class CustomTitleBar(QFrame):
         self.theme_button.setIconSize(QSize(18, 18))
         self.view_options_button.setIcon(icon("more", theme))
         self.view_options_button.setIconSize(QSize(18, 18))
-        logo = QPixmap(str(_QUIET_ORBIT_LOGO))
+        logo_path = _QUIET_ORBIT_LOGO_LIGHT if theme.mode == "light" else _QUIET_ORBIT_LOGO
+        self.brand_mark.setProperty("hushLogoAsset", str(logo_path))
+        logo = QPixmap(str(logo_path))
         self.brand_mark.setPixmap(
             logo.scaled(
                 self.brand_mark.size(),

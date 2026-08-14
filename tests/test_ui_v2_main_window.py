@@ -22,6 +22,7 @@ from app.ui_v2.models.track import format_duration
 from app.ui_v2.models.track_table_model import TrackColumn
 from app.ui_v2.shell.content_router import ComingSoonPage
 from app.ui_v2.shell.main_window import MainWindow
+from app.ui_v2.widgets.custom_title_bar import _QUIET_ORBIT_LOGO, _QUIET_ORBIT_LOGO_LIGHT
 
 
 class UiV2MainWindowTests(unittest.TestCase):
@@ -271,6 +272,32 @@ class UiV2MainWindowTests(unittest.TestCase):
             self.window.settings_bridge.value(self.window._settings_snapshot, "appearance_mode"),
             "light",
         )
+
+    def test_theme_transition_keeps_shell_updates_and_uses_light_logo(self) -> None:
+        title_bar = self.window.title_bar
+        library_page = self.window.library_page
+        player_bar = self.window.player_bar
+
+        self.window.set_theme("dark")
+        self.assertFalse(title_bar.brand_mark.pixmap().isNull())
+        self.assertEqual(Path(title_bar.brand_mark.property("hushLogoAsset")), _QUIET_ORBIT_LOGO)
+        self.window.set_theme("light")
+        self.app.processEvents()
+
+        self.assertTrue(self.window.updatesEnabled())
+        self.assertTrue(self.window.root.updatesEnabled())
+        self.assertIs(self.window.library_page, library_page)
+        self.assertIs(self.window.player_bar, player_bar)
+        self.assertEqual(Path(title_bar.brand_mark.property("hushLogoAsset")), _QUIET_ORBIT_LOGO_LIGHT)
+        self.assertTrue(_QUIET_ORBIT_LOGO_LIGHT.is_file())
+
+    def test_mouse_focus_is_hidden_but_keyboard_focus_can_be_marked(self) -> None:
+        button = self.window.title_bar.theme_button
+
+        self.window._set_button_keyboard_focus(button, False)
+        self.assertEqual(button.property("hushKeyboardFocus"), "false")
+        self.window._set_button_keyboard_focus(button, True)
+        self.assertEqual(button.property("hushKeyboardFocus"), "true")
 
     def test_all_navigation_entries_are_clickable_and_route_to_cached_pages(self) -> None:
         sidebar = self.window.sidebar

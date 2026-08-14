@@ -202,7 +202,7 @@ class ThemedDisclosureButton(QToolButton):
             "QToolButton { min-height: 32px; border: 0; border-radius: 5px; padding: 0 6px; "
             f"background: transparent; color: {theme.colors.primary_text}; font-weight: 600; text-align: left; }}"
             f"QToolButton:hover {{ background: {theme.colors.hover_background}; }}"
-            f"QToolButton:focus {{ border: 1px solid {theme.colors.accent}; }}"
+            f"QToolButton[hushKeyboardFocus=\"true\"]:focus {{ border: 1px solid {theme.colors.accent}; }}"
         )
 
     def set_reduce_motion(self, enabled: bool) -> None:
@@ -425,7 +425,7 @@ class SettingsPathPicker(QWidget):
             f"QLabel#settingsPathValue {{ min-height: {theme.metrics.control_height - 4}px; padding: 0 8px; border: 1px solid {c.border}; border-radius: {theme.metrics.radius_sm}px; background: {c.surface_secondary}; color: {c.primary_text}; }} "
             f"QLabel#settingsPathStatus {{ color: {c.warning}; font-size: {theme.fonts.caption}px; }} "
             f"QToolButton {{ min-height: {theme.metrics.control_height - 4}px; padding: 0 8px; border: 1px solid {c.border}; border-radius: {theme.metrics.radius_sm}px; background: {c.surface_secondary}; color: {c.primary_text}; font-weight: 400; }} "
-            f"QToolButton:hover {{ background: {c.hover_background}; }} QToolButton:focus {{ border: 1px solid {c.focus_ring}; }} QToolButton:disabled {{ color: {c.disabled_text}; }}"
+            f"QToolButton:hover {{ background: {c.hover_background}; }} QToolButton[hushKeyboardFocus=\"true\"]:focus {{ border: 1px solid {c.focus_ring}; }} QToolButton:disabled {{ color: {c.disabled_text}; }}"
         )
 
 
@@ -442,7 +442,7 @@ class SettingsActionButton(QPushButton):
         c = theme.colors
         self.setStyleSheet(
             f"QPushButton {{ min-height: {theme.metrics.control_height - 4}px; padding: 0 12px; border: 1px solid {c.border}; border-radius: {theme.metrics.radius_sm}px; background: {c.surface_secondary}; color: {c.primary_text}; font-weight: 400; }} "
-            f"QPushButton:hover {{ background: {c.hover_background}; }} QPushButton:pressed {{ background: {c.surface_pressed}; }} QPushButton:focus {{ border: 1px solid {c.focus_ring}; }} QPushButton:disabled {{ color: {c.disabled_text}; }}"
+            f"QPushButton:hover {{ background: {c.hover_background}; }} QPushButton:pressed {{ background: {c.surface_pressed}; }} QPushButton[hushKeyboardFocus=\"true\"]:focus {{ border: 1px solid {c.focus_ring}; }} QPushButton:disabled {{ color: {c.disabled_text}; }}"
         )
 
 
@@ -453,7 +453,7 @@ class SettingsDangerAction(SettingsActionButton):
         c = theme.colors
         self.setStyleSheet(
             f"QPushButton {{ min-height: {theme.metrics.control_height - 4}px; padding: 0 12px; border: 1px solid {c.danger}; border-radius: {theme.metrics.radius_sm}px; background: transparent; color: {c.danger}; font-weight: 400; }} "
-            f"QPushButton:hover {{ background: {c.hover_background}; }} QPushButton:pressed {{ background: {c.surface_pressed}; }} QPushButton:focus {{ border: 1px solid {c.focus_ring}; }} QPushButton:disabled {{ color: {c.disabled_text}; border-color: {c.border}; }}"
+            f"QPushButton:hover {{ background: {c.hover_background}; }} QPushButton:pressed {{ background: {c.surface_pressed}; }} QPushButton[hushKeyboardFocus=\"true\"]:focus {{ border: 1px solid {c.focus_ring}; }} QPushButton:disabled {{ color: {c.disabled_text}; border-color: {c.border}; }}"
         )
 
 

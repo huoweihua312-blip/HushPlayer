@@ -149,7 +149,7 @@ class NavigationItem(QToolButton):
             f"QToolButton:hover {{ color: {c.primary_text}; background: {c.hover_background}; border-color: {c.border}; "
             f"}}"
             f"QToolButton:pressed {{ background: {c.playing_background}; }}"
-            f"QToolButton:focus {{ border-color: {c.focus_ring if self._focus_visible else 'transparent'}; }}"
+            f"QToolButton[hushKeyboardFocus=\"true\"]:focus {{ border-color: {c.focus_ring}; }}"
             f"QToolButton:disabled {{ color: {c.disabled_text}; background: transparent; }}"
             f"QToolButton:disabled:hover {{ color: {c.disabled_text}; background: transparent; }}"
         )

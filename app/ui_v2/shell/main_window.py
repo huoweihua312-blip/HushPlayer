@@ -22,6 +22,7 @@ from PySide6.QtGui import (
     QShortcut,
 )
 from PySide6.QtWidgets import (
+    QAbstractButton,
     QAbstractSlider,
     QApplication,
     QDialog,
@@ -305,6 +306,7 @@ class MainWindow(QMainWindow):
         self._update_dialog: UpdateDialog | None = None
         self._pending_recovery_tracks: dict[int, Track] = {}
         self._automatic_recovery_identities: set[str] = set()
+        self._keyboard_focus_navigation = False
         QApplication.instance().installEventFilter(self)
         self._connect_state()
         self.setWindowTitle("HushPlayer UI V2")
@@ -358,27 +360,38 @@ class MainWindow(QMainWindow):
     def set_theme(self, mode: str) -> None:
         self._theme = get_theme("light" if mode == "light" else "dark")
         app = QApplication.instance()
-        if app is not None:
-            app.setPalette(build_application_palette(self._theme))
-            app.setStyleSheet(build_stylesheet(self._theme))
-            app.setProperty("hushUiFlavor", "ui-v2")
-            app.setProperty("hushUiV2ThemeMode", self._theme.mode)
-        self._apply_root_stylesheet()
-        self.title_bar.set_theme(self._theme)
-        self.library_page.set_theme(self._theme)
-        self.sidebar.set_theme(self._theme)
-        self.router.set_theme(self._theme)
-        self.player_bar.set_theme(self._theme)
-        if self.settings_overlay is not None:
-            self.settings_overlay.set_theme(self._theme)
-        self.router.set_content_safe_bottom(
-            self._theme.metrics.player_bar_height + self._theme.metrics.content_safe_bottom
-        )
-        if not self._immersive_transparency_enabled:
-            self._shell_surface_states = tuple(
-                (widget, QPalette(widget.palette()), widget.autoFillBackground())
-                for widget in (self.root, self.body, self.content_container, self.router)
+        stylesheet = build_stylesheet(self._theme)
+        was_enabled = self.updatesEnabled()
+        root_was_enabled = self.root.updatesEnabled()
+        self.setUpdatesEnabled(False)
+        self.root.setUpdatesEnabled(False)
+        try:
+            if app is not None:
+                app.setPalette(build_application_palette(self._theme))
+                app.setStyleSheet(stylesheet)
+                app.setProperty("hushUiFlavor", "ui-v2")
+                app.setProperty("hushUiV2ThemeMode", self._theme.mode)
+            self._apply_root_stylesheet(stylesheet)
+            self.title_bar.set_theme(self._theme)
+            self.library_page.set_theme(self._theme)
+            self.sidebar.set_theme(self._theme)
+            self.router.set_theme(self._theme)
+            self.player_bar.set_theme(self._theme)
+            if self.settings_overlay is not None:
+                self.settings_overlay.set_theme(self._theme)
+            self.router.set_content_safe_bottom(
+                self._theme.metrics.player_bar_height + self._theme.metrics.content_safe_bottom
             )
+            if not self._immersive_transparency_enabled:
+                self._shell_surface_states = tuple(
+                    (widget, QPalette(widget.palette()), widget.autoFillBackground())
+                    for widget in (self.root, self.body, self.content_container, self.router)
+                )
+        finally:
+            self.root.setUpdatesEnabled(root_was_enabled)
+            self.setUpdatesEnabled(was_enabled)
+            self.update()
+            self.root.update()
 
     def toggle_theme(self) -> None:
         """Persist an explicit Light/Dark choice through the existing bridge."""
@@ -472,6 +485,22 @@ class MainWindow(QMainWindow):
     def eventFilter(self, watched, event) -> bool:  # noqa: N802
         """Provide native-feeling edge resizing for the frameless approved shell."""
 
+        if isinstance(watched, QAbstractButton):
+            if event.type() == QEvent.Type.MouseButtonPress:
+                self._keyboard_focus_navigation = False
+                self._set_button_keyboard_focus(watched, False)
+            elif event.type() == QEvent.Type.KeyPress:
+                if event.key() in {
+                    Qt.Key.Key_Tab,
+                    Qt.Key.Key_Backtab,
+                }:
+                    self._keyboard_focus_navigation = True
+            elif event.type() == QEvent.Type.FocusIn:
+                self._set_button_keyboard_focus(
+                    watched,
+                    self._keyboard_focus_navigation,
+                )
+
         if event.type() == QEvent.Type.KeyPress and self._handle_immersive_key_event(event):
             return True
         if not isinstance(event, QMouseEvent) or self.isMaximized() or self.isFullScreen():
@@ -498,6 +527,17 @@ class MainWindow(QMainWindow):
             event.accept()
             return True
         return super().eventFilter(watched, event)
+
+    @staticmethod
+    def _set_button_keyboard_focus(button: QAbstractButton, visible: bool) -> None:
+        value = "true" if visible else "false"
+        if button.property("hushKeyboardFocus") == value:
+            return
+        button.setProperty("hushKeyboardFocus", value)
+        style = button.style()
+        style.unpolish(button)
+        style.polish(button)
+        button.update()
 
     def _handle_immersive_key_event(self, event) -> bool:
         """Handle unmodified immersive controls only while this window is foreground."""
@@ -983,8 +1023,8 @@ class MainWindow(QMainWindow):
             self.activateWindow()
         self._update_window_shape()
 
-    def _apply_root_stylesheet(self) -> None:
-        stylesheet = build_stylesheet(self._theme)
+    def _apply_root_stylesheet(self, stylesheet: str | None = None) -> None:
+        stylesheet = stylesheet or build_stylesheet(self._theme)
         stylesheet += (
             f"\nQWidget#uiV2Root {{ border: 1px solid {self._theme.colors.divider}; "
             f"border-radius: {self._WINDOW_CORNER_RADIUS}px; }}\n"
