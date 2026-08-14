@@ -136,6 +136,12 @@ class UpdateDialog(QDialog):
         self.install_button.setAccessibleName("立即更新" if manifest.has_in_app_package else "立即安装")
         self.install_button.setEnabled(False)
         self.install_button.clicked.connect(self.install_now)
+        self.fallback_install_button: QPushButton | None = None
+        if manifest.has_in_app_package:
+            self.fallback_install_button = QPushButton("下载完整安装包")
+            self.fallback_install_button.setObjectName("settingsSecondaryButton")
+            self.fallback_install_button.setAccessibleName("使用完整安装包更新")
+            self.fallback_install_button.clicked.connect(self.install_with_installer)
         close_button = QPushButton("稍后")
         close_button.setObjectName("settingsSecondaryButton")
         close_button.clicked.connect(self.close)
@@ -143,6 +149,8 @@ class UpdateDialog(QDialog):
         button_row.addWidget(self.cancel_button)
         button_row.addStretch(1)
         button_row.addWidget(close_button)
+        if self.fallback_install_button is not None:
+            button_row.addWidget(self.fallback_install_button)
         button_row.addWidget(self.install_button)
         layout.addLayout(button_row)
 
@@ -153,12 +161,27 @@ class UpdateDialog(QDialog):
         service.downloadVerified.connect(self.on_download_verified)
         service.installerLaunchFailed.connect(self.on_installer_launch_failed)
 
+        verified_path = None
         if (
+            service.verified_package_manifest == manifest
+            and service.verified_package_path is not None
+            and service.verified_package_path.is_file()
+        ):
+            verified_path = service.verified_package_path
+        elif (
+            service.verified_installer_manifest == manifest
+            and service.verified_installer_path is not None
+            and service.verified_installer_path.is_file()
+        ):
+            verified_path = service.verified_installer_path
+        elif (
             service.verified_manifest == manifest
             and service.verified_path is not None
             and service.verified_path.is_file()
         ):
-            self.on_download_verified(manifest, str(service.verified_path))
+            verified_path = service.verified_path
+        if verified_path is not None:
+            self.on_download_verified(manifest, str(verified_path))
 
     @staticmethod
     def format_release_notes(
@@ -193,8 +216,26 @@ class UpdateDialog(QDialog):
             "当前有其他更新检查或下载正在进行。",
         )
 
+    def _package_ready(self) -> bool:
+        return (
+            self.service.verified_package_manifest == self.manifest
+            and self.service.verified_package_path is not None
+            and self.service.verified_package_path.is_file()
+        )
+
+    def _installer_ready(self) -> bool:
+        return (
+            self.service.verified_installer_manifest == self.manifest
+            and self.service.verified_installer_path is not None
+            and self.service.verified_installer_path.is_file()
+        )
+
     def on_download_started(self, _path: str) -> None:
-        download_name = "应用内更新包" if self.manifest.has_in_app_package else "完整安装包"
+        download_name = (
+            "完整安装包"
+            if self.service.download_kind == "installer"
+            else "应用内更新包"
+        )
         self.status_label.setText(f"正在下载并校验{download_name}…")
         self.progress_bar.setValue(0)
         self.progress_bar.show()
@@ -205,9 +246,16 @@ class UpdateDialog(QDialog):
         self.download_button.setEnabled(False)
         self.cancel_button.setEnabled(True)
         self.install_button.setEnabled(False)
+        if self.fallback_install_button is not None:
+            self.fallback_install_button.setEnabled(False)
 
     def on_download_progress(self, received: int, total: int) -> None:
-        expected = max(1, int(total or self.manifest.download_size))
+        fallback_total = (
+            self.manifest.setup_size
+            if self.service.download_kind == "installer"
+            else self.manifest.download_size
+        )
+        expected = max(1, int(total or fallback_total))
         percent = max(0, min(100, int(received * 100 / expected)))
         self.progress_bar.setValue(percent)
         self.progress_label.setText(
@@ -218,19 +266,36 @@ class UpdateDialog(QDialog):
         self.status_label.setText("下载或校验失败。未保留可用的更新文件。")
         self.download_button.setEnabled(True)
         self.cancel_button.setEnabled(False)
-        self.install_button.setEnabled(False)
+        self.install_button.setEnabled(self._package_ready() or (
+            not self.manifest.has_in_app_package and self._installer_ready()
+        ))
+        if self.fallback_install_button is not None:
+            self.fallback_install_button.setEnabled(True)
         QMessageBox.warning(self, "更新失败", message)
 
     def on_download_cancelled(self) -> None:
         self.status_label.setText("下载已取消。未完成的临时文件已清理。")
         self.download_button.setEnabled(True)
         self.cancel_button.setEnabled(False)
-        self.install_button.setEnabled(False)
+        self.install_button.setEnabled(self._package_ready() or (
+            not self.manifest.has_in_app_package and self._installer_ready()
+        ))
+        if self.fallback_install_button is not None:
+            self.fallback_install_button.setEnabled(True)
 
     def on_download_verified(self, manifest: object, path: str) -> None:
         if manifest != self.manifest:
             return
-        if self.manifest.has_in_app_package:
+        package_ready = self._package_ready()
+        installer_ready = self._installer_ready()
+        if (
+            self.manifest.has_in_app_package
+            and self.service.last_download_kind == "installer"
+        ):
+            self.status_label.setText(
+                "完整安装包大小和 SHA-256 已校验，可以使用外部安装方式更新。"
+            )
+        elif self.manifest.has_in_app_package:
             self.status_label.setText(
                 "应用内更新包大小和 SHA-256 已校验，更新完成后 HushPlayer 会自动重启。"
             )
@@ -247,7 +312,14 @@ class UpdateDialog(QDialog):
         self.progress_label.show()
         self.download_button.setEnabled(False)
         self.cancel_button.setEnabled(False)
-        self.install_button.setEnabled(bool(path))
+        self.install_button.setEnabled(
+            package_ready if self.manifest.has_in_app_package else installer_ready
+        )
+        if self.fallback_install_button is not None:
+            self.fallback_install_button.setText(
+                "立即使用安装包更新" if installer_ready else "下载完整安装包"
+            )
+            self.fallback_install_button.setEnabled(True)
 
     def install_now(self) -> None:
         if self.manifest.has_in_app_package:
@@ -278,16 +350,43 @@ class UpdateDialog(QDialog):
         self.install_button.setEnabled(False)
         self.service.launch_verified_update()
 
+    def install_with_installer(self) -> None:
+        if not self._installer_ready():
+            if self.service.start_installer_download(self.manifest):
+                self.status_label.setText("正在下载并校验完整安装包…")
+                return
+            QMessageBox.information(
+                self,
+                "应用更新",
+                "当前有其他更新检查或下载正在进行。",
+            )
+            return
+
+        answer = QMessageBox.question(
+            self,
+            "使用安装包更新",
+            "将启动可见的安装向导，并更新到当前 HushPlayer 安装目录。是否继续？",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        if answer != QMessageBox.StandardButton.Yes:
+            return
+        self.status_label.setText("正在重新校验并启动安装程序…")
+        if self.fallback_install_button is not None:
+            self.fallback_install_button.setEnabled(False)
+        self.service.launch_verified_installer()
+
     def on_installer_launch_failed(self, message: str) -> None:
         self.status_label.setText(
-            "应用内更新助手未能启动，HushPlayer 将继续运行。"
-            if self.manifest.has_in_app_package
-            else "安装程序未能启动，HushPlayer 将继续运行。"
+            "更新程序未能启动，HushPlayer 将继续运行。"
         )
         self.install_button.setEnabled(
-            self.service.verified_manifest == self.manifest
-            and self.service.verified_path is not None
+            self._package_ready()
+            if self.manifest.has_in_app_package
+            else self._installer_ready()
         )
+        if self.fallback_install_button is not None:
+            self.fallback_install_button.setEnabled(True)
         QMessageBox.warning(self, "无法启动安装", message)
 
     def closeEvent(self, event) -> None:

@@ -10,6 +10,7 @@ import sys
 import tempfile
 import threading
 import time
+import zipfile
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
@@ -1011,6 +1012,82 @@ def service_checks(root: Path, server: FixtureServer, setup: bytes) -> None:
     service.shutdown()
 
 
+def package_fallback_checks(root: Path, server: FixtureServer, setup: bytes) -> None:
+    """Keep the full installer path available beside a verified ZIP update."""
+
+    package_name = f"HushPlayer-{fixture_release(1)[0]}-win-x64-update.zip"
+    package_path = root / package_name
+    with zipfile.ZipFile(package_path, "w", compression=zipfile.ZIP_STORED) as archive:
+        archive.writestr("HushPlayer.exe", b"portable executable" * 128)
+        archive.writestr("HushPlayerUpdater.exe", b"portable updater" * 128)
+    package = package_path.read_bytes()
+    server.routes["/fallback-package.zip"] = {
+        "body": package,
+        "content_type": "application/zip",
+    }
+    server.routes["/fallback-setup.exe"] = {
+        "body": setup,
+        "content_type": "application/octet-stream",
+    }
+    document = manifest_document(
+        f"{server.base_url}/fallback-setup.exe",
+        setup,
+    )
+    document.update(
+        {
+            "package_url": f"{server.base_url}/fallback-package.zip",
+            "package_size": len(package),
+            "package_sha256": hashlib.sha256(package).hexdigest(),
+            "package_filename": package_name,
+        }
+    )
+    manifest = parse_update_manifest(
+        encoded_manifest(document),
+        allow_insecure_localhost=True,
+    )
+    launcher_calls: list[tuple[str, list[str]]] = []
+
+    def launcher(path: str, arguments: list[str]):
+        launcher_calls.append((path, list(arguments)))
+        return True, 12345
+
+    service = AppUpdateService(
+        updates_dir=root / "fallback-updates",
+        allow_insecure_localhost=True,
+        installer_launcher=launcher,
+        application_dir=root / "running-install",
+    )
+    verified: list[tuple[UpdateManifest, str]] = []
+    service.downloadVerified.connect(
+        lambda item, path: verified.append((item, path))
+    )
+    assert service.start_download(manifest)
+    assert wait_until(lambda: len(verified) == 1)
+    package_verified_path = service.verified_package_path
+    assert package_verified_path is not None and package_verified_path.is_file()
+
+    assert service.start_installer_download(manifest)
+    assert wait_until(lambda: len(verified) == 2)
+    assert service.verified_installer_path is not None
+    assert service.verified_installer_path.is_file()
+    assert package_verified_path.is_file()
+    assert service.launch_verified_installer()
+    assert launcher_calls
+    assert launcher_calls[-1][0].endswith(manifest.installer_filename)
+    assert f'/DIR="{(root / "running-install").resolve()}"' in launcher_calls[-1][1]
+
+    dialog = UpdateDialog(service, manifest)
+    try:
+        assert dialog.install_button.isEnabled()
+        assert dialog.fallback_install_button is not None
+        assert dialog.fallback_install_button.isEnabled()
+    finally:
+        dialog.close()
+        dialog.deleteLater()
+        QCoreApplication.sendPostedEvents(dialog, QEvent.Type.DeferredDelete)
+        service.shutdown()
+
+
 def shutdown_callback_check(root: Path, server: FixtureServer, setup: bytes) -> None:
     document = manifest_document(f"{server.base_url}/setup.exe", setup)
     configure_manifest_route(server, document, delay=0.4)
@@ -1114,6 +1191,7 @@ def main() -> None:
         with tempfile.TemporaryDirectory(prefix="hushplayer_app_update_") as temp_dir:
             root = Path(temp_dir)
             service_checks(root, server, setup)
+            package_fallback_checks(root, server, setup)
             manifest_source_fallback_checks(root, server, setup)
             shutdown_callback_check(root, server, setup)
     finally:

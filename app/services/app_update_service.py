@@ -681,6 +681,11 @@ class AppUpdateService(QObject):
         self._download_cancel_requested = False
         self._verified_manifest: UpdateManifest | None = None
         self._verified_path: Path | None = None
+        self._verified_package_manifest: UpdateManifest | None = None
+        self._verified_package_path: Path | None = None
+        self._verified_installer_manifest: UpdateManifest | None = None
+        self._verified_installer_path: Path | None = None
+        self._last_download_kind = ""
         self._shutting_down = False
 
     @property
@@ -698,6 +703,30 @@ class AppUpdateService(QObject):
     @property
     def verified_path(self) -> Path | None:
         return self._verified_path
+
+    @property
+    def verified_package_manifest(self) -> UpdateManifest | None:
+        return self._verified_package_manifest
+
+    @property
+    def verified_package_path(self) -> Path | None:
+        return self._verified_package_path
+
+    @property
+    def verified_installer_manifest(self) -> UpdateManifest | None:
+        return self._verified_installer_manifest
+
+    @property
+    def verified_installer_path(self) -> Path | None:
+        return self._verified_installer_path
+
+    @property
+    def download_kind(self) -> str:
+        return self._download_kind
+
+    @property
+    def last_download_kind(self) -> str:
+        return self._last_download_kind
 
     @staticmethod
     def _normalize_manifest_sources(
@@ -887,7 +916,12 @@ class AppUpdateService(QObject):
         print(f"更新清单获取成功：{source_name}")
         self._complete_check_success(manifest)
 
-    def start_download(self, manifest: UpdateManifest) -> bool:
+    def start_download(
+        self,
+        manifest: UpdateManifest,
+        *,
+        kind: str | None = None,
+    ) -> bool:
         if (
             self._shutting_down
             or self.is_checking
@@ -896,12 +930,36 @@ class AppUpdateService(QObject):
             or not manifest.is_newer
         ):
             return False
+        download_kind = kind or (
+            "package" if manifest.has_in_app_package else "installer"
+        )
+        if download_kind not in {"package", "installer"}:
+            return False
+        if download_kind == "package" and not manifest.has_in_app_package:
+            return False
+        if download_kind == "package":
+            download_url = manifest.package_url
+            download_size = manifest.package_size
+            download_sha256 = manifest.package_sha256
+            download_filename = manifest.package_filename
+        else:
+            download_url = manifest.setup_url
+            download_size = manifest.setup_size
+            download_sha256 = manifest.sha256
+            download_filename = manifest.installer_filename
+        if (
+            not download_url
+            or download_size is None
+            or not download_sha256
+            or not download_filename
+        ):
+            return False
         try:
             validate_update_url(
-                manifest.download_url,
+                download_url,
                 allow_insecure_localhost=self.allow_insecure_localhost,
             )
-            target = self._prepare_download_target(manifest.download_filename)
+            target = self._prepare_download_target(download_filename)
         except (OSError, UpdateValidationError) as error:
             self.downloadFailed.emit(f"无法准备更新下载：{error}")
             return False
@@ -913,7 +971,7 @@ class AppUpdateService(QObject):
             _dispose_save_file(save_file)
             return False
 
-        request = QNetworkRequest(QUrl(manifest.download_url))
+        request = QNetworkRequest(QUrl(download_url))
         request.setAttribute(
             QNetworkRequest.Attribute.RedirectPolicyAttribute,
             QNetworkRequest.RedirectPolicy.NoLessSafeRedirectPolicy,
@@ -929,12 +987,18 @@ class AppUpdateService(QObject):
         self._download_hash = hashlib.sha256()
         self._download_prefix.clear()
         self._download_written = 0
-        self._download_kind = "package" if manifest.has_in_app_package else "installer"
-        self._download_expected_size = manifest.download_size
-        self._download_expected_sha256 = manifest.download_sha256
-        self._download_expected_prefix = b"PK" if manifest.has_in_app_package else b"MZ"
+        self._download_kind = download_kind
+        self._download_expected_size = int(download_size)
+        self._download_expected_sha256 = str(download_sha256).casefold()
+        self._download_expected_prefix = b"PK" if download_kind == "package" else b"MZ"
         self._download_failure = ""
         self._download_cancel_requested = False
+        if download_kind == "package":
+            self._verified_package_manifest = None
+            self._verified_package_path = None
+        else:
+            self._verified_installer_manifest = None
+            self._verified_installer_path = None
         self._verified_manifest = None
         self._verified_path = None
         reply.metaDataChanged.connect(
@@ -952,6 +1016,11 @@ class AppUpdateService(QObject):
         self._download_timer.start(self.DOWNLOAD_TOTAL_TIMEOUT_MS)
         self.downloadStarted.emit(str(target))
         return True
+
+    def start_installer_download(self, manifest: UpdateManifest) -> bool:
+        """Download the full installer without discarding a verified ZIP."""
+
+        return self.start_download(manifest, kind="installer")
 
     def _prepare_download_target(self, filename: str) -> Path:
         root = self.updates_dir.expanduser().resolve()
@@ -985,7 +1054,12 @@ class AppUpdateService(QObject):
                     or _PACKAGE_FILENAME_PATTERN.fullmatch(candidate.name)
                     or _UPDATER_COPY_PATTERN.fullmatch(candidate.name)
                 )
-                or candidate == self._verified_path
+                or candidate
+                in {
+                    self._verified_path,
+                    self._verified_package_path,
+                    self._verified_installer_path,
+                }
             ):
                 continue
             try:
@@ -1181,6 +1255,13 @@ class AppUpdateService(QObject):
             return
         self._verified_manifest = manifest
         self._verified_path = target
+        if download_kind == "package":
+            self._verified_package_manifest = manifest
+            self._verified_package_path = target
+        else:
+            self._verified_installer_manifest = manifest
+            self._verified_installer_path = target
+        self._last_download_kind = download_kind
         if not self._shutting_down:
             self.downloadVerified.emit(manifest, str(target))
 
@@ -1192,9 +1273,11 @@ class AppUpdateService(QObject):
         return Path(__file__).resolve().parents[2]
 
     def launch_verified_update(self) -> bool:
-        manifest = self._verified_manifest
-        path = self._verified_path
+        manifest = self._verified_package_manifest
+        path = self._verified_package_path
         if manifest is None or path is None:
+            if not manifest and self._verified_installer_manifest is not None:
+                return self.launch_verified_installer()
             self.installerLaunchFailed.emit("更新文件尚未完成校验，不能启动更新。")
             return False
         if not manifest.has_in_app_package:
@@ -1250,16 +1333,25 @@ class AppUpdateService(QObject):
         return True
 
     def launch_verified_installer(self) -> bool:
-        manifest = self._verified_manifest
-        path = self._verified_path
+        manifest = self._verified_installer_manifest
+        path = self._verified_installer_path
+        if manifest is None or path is None:
+            # Preserve compatibility with callers that may have populated the
+            # legacy generic verified state directly.
+            manifest = self._verified_manifest
+            path = self._verified_path
         if manifest is None or path is None:
             self.installerLaunchFailed.emit("安装包尚未完成校验，不能启动安装。")
             return False
         try:
             verify_installer_file(path, manifest)
         except UpdateValidationError as error:
-            self._verified_manifest = None
-            self._verified_path = None
+            if path == self._verified_installer_path:
+                self._verified_installer_manifest = None
+                self._verified_installer_path = None
+            if path == self._verified_path:
+                self._verified_manifest = None
+                self._verified_path = None
             self._delete_update_file(path)
             self.installerLaunchFailed.emit(str(error))
             return False
