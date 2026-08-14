@@ -35,19 +35,19 @@ class SourceSelector(QToolButton):
 
     def set_compact(self, compact: bool) -> None:
         self._compact = bool(compact)
-        self.setMinimumWidth(82 if self._compact else 112)
+        self.setMinimumWidth(80 if self._compact else 96)
         self._refresh_text()
 
     def set_theme(self, theme: Theme) -> None:
         self._theme = theme
         self.setIcon(icon("online", theme))
         self.setIconSize(QSize(theme.metrics.icon_sm, theme.metrics.icon_sm))
-        self.setMinimumWidth(82 if self._compact else 112)
+        self.setMinimumWidth(80 if self._compact else 96)
         self.setStyleSheet(
             f"QToolButton#onlineSourceSelector {{ min-height: {theme.metrics.control_height}px; "
-            f"padding: 0 {theme.metrics.spacing_md}px 0 {theme.metrics.spacing_sm}px; "
+            f"padding: 0 {theme.metrics.spacing_sm}px; "
             f"border: 1px solid {theme.colors.border}; border-radius: {theme.metrics.radius_md}px; "
-            f"background: {theme.colors.surface_secondary}; color: {theme.colors.primary_text}; font-weight: 600; }}"
+            f"background: {theme.colors.surface_secondary}; color: {theme.colors.primary_text}; font-weight: 500; }}"
             f"QToolButton#onlineSourceSelector:hover {{ color: {theme.colors.primary_text}; background: {theme.colors.hover_background}; "
             f"border-color: {theme.colors.border_strong}; }}"
             f"QToolButton#onlineSourceSelector:pressed {{ background: {theme.colors.surface_elevated}; }}"
@@ -93,5 +93,8 @@ class SourceSelector(QToolButton):
 
     def _refresh_text(self) -> None:
         count = sum(source.enabled for source in self.adapter.sources())
-        self.setText("来源" if self._compact else f"来源 · {count}")
+        # The identity row already shows the enabled-source count. Keep this
+        # action label short so the control reads as one coherent secondary
+        # button instead of repeating the same status twice.
+        self.setText("来源")
         self.setToolTip(f"已启用 {count} 个在线来源；点击调整本次搜索范围")
