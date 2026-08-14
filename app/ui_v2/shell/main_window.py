@@ -14,6 +14,7 @@ from PySide6.QtCore import (
     QEasingCurve,
     QEvent,
     QPoint,
+    QPointF,
     QRect,
     QRectF,
     QUrl,
@@ -28,10 +29,12 @@ from PySide6.QtGui import (
     QGuiApplication,
     QKeySequence,
     QMouseEvent,
+    QBrush,
     QPainter,
     QPainterPath,
     QPalette,
     QPixmap,
+    QRadialGradient,
     QRegion,
     QShortcut,
 )
@@ -116,7 +119,8 @@ class ThemeRevealOverlay(QWidget):
     """Temporary old-theme layer used by the opt-in transition demo."""
 
     finished = Signal()
-    _DURATION_MS = 700
+    _DURATION_MS = 900
+    _FEATHER_PX = 110
 
     def __init__(self, snapshot: QPixmap, origin: QPoint, parent: QWidget) -> None:
         super().__init__(parent)
@@ -133,7 +137,7 @@ class ThemeRevealOverlay(QWidget):
         self._animation = QVariantAnimation(self)
         self._animation.setStartValue(0.0)
         self._animation.setEndValue(
-            math.hypot(float(self.width()), float(self.height()))
+            math.hypot(float(self.width()), float(self.height())) + self._FEATHER_PX
         )
         self._animation.setDuration(self._DURATION_MS)
         self._animation.setEasingCurve(QEasingCurve.Type.OutCubic)
@@ -159,10 +163,24 @@ class ThemeRevealOverlay(QWidget):
             return
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform, True)
-        reveal = QPainterPath()
-        reveal.setFillRule(Qt.FillRule.OddEvenFill)
-        reveal.addRect(QRectF(self.rect()))
-        reveal.addEllipse(
+        painter.drawPixmap(self.rect(), self._snapshot)
+        if self._radius <= 0:
+            return
+        feather = min(self._FEATHER_PX, max(24.0, self._radius * 0.24))
+        inner_ratio = max(0.0, (self._radius - feather) / self._radius)
+        gradient = QRadialGradient(
+            QPointF(float(self._origin.x()), float(self._origin.y())),
+            self._radius,
+        )
+        gradient.setColorAt(0.0, QColor(0, 0, 0, 255))
+        gradient.setColorAt(inner_ratio, QColor(0, 0, 0, 255))
+        gradient.setColorAt(1.0, QColor(0, 0, 0, 0))
+        painter.setCompositionMode(
+            QPainter.CompositionMode.CompositionMode_DestinationOut
+        )
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(QBrush(gradient))
+        painter.drawEllipse(
             QRectF(
                 float(self._origin.x()) - self._radius,
                 float(self._origin.y()) - self._radius,
@@ -170,8 +188,6 @@ class ThemeRevealOverlay(QWidget):
                 self._radius * 2.0,
             )
         )
-        painter.setClipPath(reveal)
-        painter.drawPixmap(self.rect(), self._snapshot)
 
 
 class MainWindow(QMainWindow):

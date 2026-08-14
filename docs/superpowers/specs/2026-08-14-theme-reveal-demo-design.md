@@ -12,10 +12,10 @@ theme switching remains unchanged until the interaction is accepted.
 - Capture the current window once immediately before a manual theme toggle.
 - Apply the existing target theme underneath the captured image.
 - Display the captured image in a mouse-transparent overlay.
-- Cut an expanding circular hole from the overlay, centered on the visible
-  sun/moon theme toggle button, so the target theme appears to radiate from
-  the user's action.
-- Use a 700 ms ease-out transition and remove the overlay when finished.
+- Fade an expanding circular hole through a 110px feathered radial gradient,
+  centered on the visible sun/moon theme toggle button, so the target theme
+  appears to softly radiate from the user's action.
+- Use a 900 ms ease-out transition and remove the overlay when finished.
 - Disable the theme button during the short transition to avoid overlapping
   reveals.
 - If the demo flag is absent, keep the current immediate theme transition.
