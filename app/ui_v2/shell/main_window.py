@@ -5,19 +5,33 @@ from __future__ import annotations
 import ctypes
 from dataclasses import replace
 from enum import Enum
+import math
 import os
 from pathlib import Path
 import tempfile
 
-from PySide6.QtCore import QEvent, QPoint, QRect, QRectF, QUrl, Qt, QTimer
+from PySide6.QtCore import (
+    QEasingCurve,
+    QEvent,
+    QPoint,
+    QRect,
+    QRectF,
+    QUrl,
+    Qt,
+    QTimer,
+    QVariantAnimation,
+    Signal,
+)
 from PySide6.QtGui import (
     QColor,
     QDesktopServices,
     QGuiApplication,
     QKeySequence,
     QMouseEvent,
+    QPainter,
     QPainterPath,
     QPalette,
+    QPixmap,
     QRegion,
     QShortcut,
 )
@@ -98,6 +112,68 @@ def _resolve_data_mode(value: str | None) -> str:
     return mode
 
 
+class ThemeRevealOverlay(QWidget):
+    """Temporary old-theme layer used by the opt-in transition demo."""
+
+    finished = Signal()
+    _DURATION_MS = 420
+
+    def __init__(self, snapshot: QPixmap, origin: QPoint, parent: QWidget) -> None:
+        super().__init__(parent)
+        self.setObjectName("themeRevealOverlay")
+        self.setStyleSheet(
+            "QWidget#themeRevealOverlay { background: transparent; border: 0; }"
+        )
+        self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
+        self.setGeometry(parent.rect())
+        self._snapshot = snapshot
+        self._origin = QPoint(origin)
+        self._radius = 0.0
+        self._animation = QVariantAnimation(self)
+        self._animation.setStartValue(0.0)
+        self._animation.setEndValue(
+            math.hypot(float(self.width()), float(self.height()))
+        )
+        self._animation.setDuration(self._DURATION_MS)
+        self._animation.setEasingCurve(QEasingCurve.Type.OutCubic)
+        self._animation.valueChanged.connect(self._set_radius)
+        self._animation.finished.connect(self._finish)
+
+    def start(self) -> None:
+        self.raise_()
+        self.show()
+        self._animation.start()
+
+    def _set_radius(self, value) -> None:
+        self._radius = float(value or 0.0)
+        self.update()
+
+    def _finish(self) -> None:
+        self.hide()
+        self.finished.emit()
+        self.deleteLater()
+
+    def paintEvent(self, event) -> None:  # noqa: N802
+        if self._snapshot.isNull():
+            return
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform, True)
+        reveal = QPainterPath()
+        reveal.setFillRule(Qt.FillRule.OddEvenFill)
+        reveal.addRect(QRectF(self.rect()))
+        reveal.addEllipse(
+            QRectF(
+                float(self._origin.x()) - self._radius,
+                float(self._origin.y()) - self._radius,
+                self._radius * 2.0,
+                self._radius * 2.0,
+            )
+        )
+        painter.setClipPath(reveal)
+        painter.drawPixmap(self.rect(), self._snapshot)
+
+
 class MainWindow(QMainWindow):
     """Composes cached V2 pages around one mock or read-only library source."""
 
@@ -162,6 +238,11 @@ class MainWindow(QMainWindow):
             if self._force_dark_theme or appearance_mode != "light"
             else "light"
         )
+        self._theme_reveal_demo_enabled = os.environ.get(
+            "HUSHPLAYER_THEME_REVEAL_DEMO", ""
+        ).strip().casefold() in {"1", "true", "yes", "on"}
+        self._animate_next_theme_change = False
+        self._theme_reveal_overlay: ThemeRevealOverlay | None = None
         self._immersive_shell_active = False
         self._immersive_normal_geometry: QRect | None = None
         self._immersive_transparency_enabled = False
@@ -358,7 +439,16 @@ class MainWindow(QMainWindow):
         }
 
     def set_theme(self, mode: str) -> None:
-        self._theme = get_theme("light" if mode == "light" else "dark")
+        target_theme = get_theme("light" if mode == "light" else "dark")
+        animate = (
+            self._animate_next_theme_change
+            and self._theme_reveal_demo_enabled
+            and self.isVisible()
+            and target_theme.mode != self._theme.mode
+        )
+        reveal_overlay = self._prepare_theme_reveal() if animate else None
+        self._animate_next_theme_change = False
+        self._theme = target_theme
         app = QApplication.instance()
         stylesheet = build_stylesheet(self._theme)
         was_enabled = self.updatesEnabled()
@@ -392,17 +482,49 @@ class MainWindow(QMainWindow):
             self.setUpdatesEnabled(was_enabled)
             self.update()
             self.root.update()
+        if reveal_overlay is not None:
+            self._start_theme_reveal(reveal_overlay)
 
     def toggle_theme(self) -> None:
         """Persist an explicit Light/Dark choice through the existing bridge."""
 
         target = "light" if self._theme.mode == "dark" else "dark"
+        self._animate_next_theme_change = self._theme_reveal_demo_enabled
         if self.settings_overlay is not None and self.settings_overlay.isVisible():
-            self.settings_overlay.set_appearance_mode(target)
+            try:
+                self.settings_overlay.set_appearance_mode(target)
+            except Exception:
+                self._animate_next_theme_change = False
+                raise
             return
         snapshot = self._settings_snapshot.with_updates({"appearance_mode": target})
-        saved = self.settings_bridge.save_snapshot(snapshot)
+        try:
+            saved = self.settings_bridge.save_snapshot(snapshot)
+        except Exception:
+            self._animate_next_theme_change = False
+            raise
         self._settings_snapshot = saved
+
+    def _prepare_theme_reveal(self) -> ThemeRevealOverlay | None:
+        if self._theme_reveal_overlay is not None:
+            self._theme_reveal_overlay.deleteLater()
+            self._theme_reveal_overlay = None
+        snapshot = self.grab()
+        if snapshot.isNull():
+            return None
+        mark = self.title_bar.brand_mark
+        origin = mark.mapTo(self, mark.rect().center())
+        return ThemeRevealOverlay(snapshot, origin, self)
+
+    def _start_theme_reveal(self, overlay: ThemeRevealOverlay) -> None:
+        self._theme_reveal_overlay = overlay
+        overlay.finished.connect(self._on_theme_reveal_finished)
+        self.title_bar.theme_button.setEnabled(False)
+        overlay.start()
+
+    def _on_theme_reveal_finished(self) -> None:
+        self._theme_reveal_overlay = None
+        self.title_bar.theme_button.setEnabled(True)
 
     def resizeEvent(self, event) -> None:  # noqa: N802
         super().resizeEvent(event)

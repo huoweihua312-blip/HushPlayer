@@ -16,6 +16,7 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from PySide6.QtGui import QColor, QPalette
+from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication
 
 from app.ui_v2.models.track import format_duration
@@ -298,6 +299,19 @@ class UiV2MainWindowTests(unittest.TestCase):
         self.assertEqual(button.property("hushKeyboardFocus"), "false")
         self.window._set_button_keyboard_focus(button, True)
         self.assertEqual(button.property("hushKeyboardFocus"), "true")
+
+    def test_theme_reveal_demo_is_opt_in_and_cleans_up_after_animation(self) -> None:
+        self.assertFalse(self.window._theme_reveal_demo_enabled)
+        self.window._theme_reveal_demo_enabled = True
+        self.window._animate_next_theme_change = True
+        target = "light" if self.window.theme.mode == "dark" else "dark"
+
+        self.window.set_theme(target)
+        self.app.processEvents()
+        self.assertIsNotNone(self.window._theme_reveal_overlay)
+        QTest.qWait(480)
+        self.app.processEvents()
+        self.assertIsNone(self.window._theme_reveal_overlay)
 
     def test_all_navigation_entries_are_clickable_and_route_to_cached_pages(self) -> None:
         sidebar = self.window.sidebar
