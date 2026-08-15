@@ -30,6 +30,7 @@ from app.services.app_update_service import (
     AppUpdateService,
     UpdateManifest,
     UpdateValidationError,
+    _detached_working_directory,
     parse_update_manifest,
     select_update_release_notes,
     verify_installer_file,
@@ -444,6 +445,13 @@ def release_history_checks(setup: bytes) -> None:
         )
     )
     assert select_update_release_notes(same_version) == ()
+
+
+def detached_updater_working_directory_check(root: Path) -> None:
+    install_dir = root / "HushPlayer Application"
+    helper = root / "updates" / "HushPlayerUpdater-123.exe"
+    assert _detached_working_directory(str(helper)) == str(helper.parent.resolve())
+    assert _detached_working_directory(str(helper)) != str(install_dir.resolve())
 
 
 def configure_manifest_route(
@@ -1194,6 +1202,7 @@ def main() -> None:
             package_fallback_checks(root, server, setup)
             manifest_source_fallback_checks(root, server, setup)
             shutdown_callback_check(root, server, setup)
+            detached_updater_working_directory_check(root)
     finally:
         server.close()
     update_dialog_history_layout_check(setup)

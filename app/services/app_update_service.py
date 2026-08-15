@@ -563,8 +563,24 @@ def verify_update_package(path: str | Path, manifest: UpdateManifest) -> None:
         raise UpdateValidationError(f"无法读取应用内更新包：{error}") from error
 
 
+def _detached_working_directory(path: str) -> str:
+    """Return a safe working directory for a detached updater process.
+
+    The updater must not inherit HushPlayer's install directory as its current
+    working directory. On Windows that can keep the directory locked while
+    the updater is trying to rename it during an in-place update.
+    """
+
+    return str(Path(path).expanduser().resolve().parent)
+
+
 def _start_detached_installer(path: str, arguments: list[str]):
-    return QProcess.startDetached(path, arguments)
+    executable = Path(path).expanduser().resolve()
+    return QProcess.startDetached(
+        str(executable),
+        arguments,
+        _detached_working_directory(str(executable)),
+    )
 
 
 def _dispose_save_file(save_file: QSaveFile, *, cancel: bool = False) -> None:
