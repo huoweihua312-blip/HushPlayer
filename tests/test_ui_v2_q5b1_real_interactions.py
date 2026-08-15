@@ -10,6 +10,7 @@ from dataclasses import replace
 from datetime import datetime
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import patch
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
@@ -37,7 +38,7 @@ from app.ui_v2.pages.immersive_lyrics_page import ImmersiveLyricsPage
 from app.ui_v2.shell.immersive_player_shell import ImmersivePlayerShell
 from app.ui_v2.shell.main_window import MainWindow
 from app.ui_v2.theme.tokens import get_theme
-from app.ui_v2.widgets.artwork_thumbnail import artwork_pixmap_for_track
+from app.ui_v2.widgets.artwork_thumbnail import ArtworkThumbnail, artwork_pixmap_for_track
 from app.ui_v2.widgets.online_result_table import OnlineResultDelegate
 
 
@@ -434,6 +435,23 @@ class Q5B1ArtworkPipelineTests(unittest.TestCase):
     def _center_color(pixmap) -> tuple[int, int, int, int]:
         color = pixmap.toImage().pixelColor(pixmap.width() // 2, pixmap.height() // 2)
         return color.getRgb()
+
+    def test_theme_change_keeps_loaded_thumbnail_pixmap(self) -> None:
+        thumbnail = ArtworkThumbnail(get_theme("dark"), size=56, clip_artwork=True)
+        track = _remote_track("theme-cache", QColor(17, 201, 177))
+        try:
+            thumbnail.set_track(track)
+            before = thumbnail._artwork_pixmap.cacheKey()
+            self.assertNotEqual(before, 0)
+            with patch(
+                "app.ui_v2.widgets.artwork_thumbnail.artwork_pixmap_for_track",
+                side_effect=AssertionError("theme changes must not reload artwork"),
+            ):
+                thumbnail.set_theme(get_theme("light"))
+            self.assertEqual(thumbnail._artwork_pixmap.cacheKey(), before)
+        finally:
+            thumbnail.deleteLater()
+            self.app.processEvents()
 
     def test_remote_identity_cache_stale_protection_and_surface_consistency(self) -> None:
         raw = {

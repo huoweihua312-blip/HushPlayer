@@ -16,6 +16,10 @@ from app.ui_v2.widgets.track_display import display_track_text
 
 
 _ARTWORK_CACHE: dict[tuple[str, str, int, int], QPixmap] = {}
+_ARTWORK_SOURCE_CACHE: dict[
+    tuple[str, str, str, int, int], tuple[str, QPixmap]
+] = {}
+_ARTWORK_SOURCE_CACHE_LIMIT = 128
 
 
 def artwork_pixmap_for_track(track: Track | None, width: int, height: int) -> QPixmap:
@@ -27,16 +31,32 @@ def artwork_pixmap_for_track(track: Track | None, width: int, height: int) -> QP
         return cover_pixmap("hushplayer", width, height)
 
     data = bytes(track.artwork_data or b"")
-    source_key = ""
-    source = QPixmap()
-    if data:
-        source_key = hashlib.sha256(data).hexdigest()[:20]
-        source.loadFromData(data)
-    if source.isNull() and track.artwork_path:
-        path = Path(track.artwork_path)
-        if path.is_file():
-            source_key = f"file:{path}"
-            source.load(str(path))
+    source_cache_key = (
+        track.stable_id,
+        str(track.artwork_path or ""),
+        str(track.artwork_key or ""),
+        len(data),
+        id(data) if data else 0,
+    )
+    cached_source = _ARTWORK_SOURCE_CACHE.get(source_cache_key)
+    if cached_source is not None:
+        source_key, source = cached_source
+    else:
+        source_key = ""
+        source = QPixmap()
+        if data:
+            source_key = hashlib.sha256(data).hexdigest()[:20]
+            source.loadFromData(data)
+        if source.isNull() and track.artwork_path:
+            path = Path(track.artwork_path)
+            if path.is_file():
+                source_key = f"file:{path}"
+                source.load(str(path))
+        if not source.isNull():
+            _ARTWORK_SOURCE_CACHE[source_cache_key] = (source_key, source)
+            if len(_ARTWORK_SOURCE_CACHE) > _ARTWORK_SOURCE_CACHE_LIMIT:
+                oldest_key = next(iter(_ARTWORK_SOURCE_CACHE))
+                _ARTWORK_SOURCE_CACHE.pop(oldest_key, None)
     if source.isNull():
         return cover_pixmap(track.stable_id, width, height)
 
@@ -89,7 +109,13 @@ class ArtworkThumbnail(QLabel):
                 f"border: 0; "
                 f"border-radius: 5px;"
             )
-        self._refresh_artwork()
+        # Theme changes only restyle the surface.  The artwork pixmap itself
+        # is theme-independent, so keep it in place to avoid decoding covers
+        # again while a library or favorites page is repainting.
+        if self._track is None:
+            self._refresh_artwork()
+        else:
+            self.update()
 
     def set_track(self, track: Track | None) -> None:
         self._track = track
