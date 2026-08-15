@@ -5,7 +5,7 @@
     "numeric_version": "0.6.0.8",
     "architecture": "win-x64",
     "mandatory": false,
-    "setup_url": "https://gitcode.com/gcw_iPVB8B5g/HushPlayer-updates/releases/download/v0.6.0-beta.8/HushPlayer-0.6.0-beta.8-win-x64-setup.exe",
+    "setup_url": "https://api.gitcode.com/api/v5/repos/gcw_iPVB8B5g/HushPlayer-updates/releases/v0.6.0-beta.8/attach_files/HushPlayer-0.6.0-beta.8-win-x64-setup.exe/download",
     "setup_size": 116677776,
     "sha256": "f1ecde18145ee95dcdf517f8987545b1fda3de450654d9017302c7822aefd522",
     "release_notes": [
@@ -182,7 +182,7 @@
             ]
         }
     ],
-    "package_url": "https://gitcode.com/gcw_iPVB8B5g/HushPlayer-updates/releases/download/v0.6.0-beta.8/HushPlayer-0.6.0-beta.8-win-x64-update.zip",
+    "package_url": "https://api.gitcode.com/api/v5/repos/gcw_iPVB8B5g/HushPlayer-updates/releases/v0.6.0-beta.8/attach_files/HushPlayer-0.6.0-beta.8-win-x64-update.zip/download",
     "package_size": 158258649,
     "package_sha256": "ef871ef960f3a72f3fb54caf60a83d34eb4713589a41616914c9289026fc45a9",
     "package_filename": "HushPlayer-0.6.0-beta.8-win-x64-update.zip"

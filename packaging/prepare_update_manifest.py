@@ -49,7 +49,8 @@ MAX_NOTES_PER_RELEASE = 50
 MAX_NOTE_LENGTH = 1000
 MANIFEST_SCHEMA_VERSION = 1
 RELEASE_DOWNLOAD_BASE_URL = (
-    "https://gitcode.com/gcw_iPVB8B5g/HushPlayer-updates/releases/download"
+    "https://api.gitcode.com/api/v5/repos/gcw_iPVB8B5g/"
+    "HushPlayer-updates/releases"
 )
 _SHA256_PATTERN = re.compile(r"^[0-9a-fA-F]{64}$")
 
@@ -259,15 +260,15 @@ def expected_package_filename() -> str:
 
 def default_staged_setup_url() -> str:
     return (
-        f"{RELEASE_DOWNLOAD_BASE_URL}/v{APP_VERSION}/"
-        f"{expected_installer_filename()}"
+        f"{RELEASE_DOWNLOAD_BASE_URL}/v{APP_VERSION}/attach_files/"
+        f"{expected_installer_filename()}/download"
     )
 
 
 def default_staged_package_url() -> str:
     return (
-        f"{RELEASE_DOWNLOAD_BASE_URL}/v{APP_VERSION}/"
-        f"{expected_package_filename()}"
+        f"{RELEASE_DOWNLOAD_BASE_URL}/v{APP_VERSION}/attach_files/"
+        f"{expected_package_filename()}/download"
     )
 
 
