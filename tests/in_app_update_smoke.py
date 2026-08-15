@@ -134,6 +134,21 @@ def updater_swap_checks(root: Path) -> None:
     assert not list(root.glob(".HushPlayer-backup-*"))
 
 
+def updater_working_directory_check() -> None:
+    updater = _load_module(
+        "hushplayer_packaged_updater_working_directory_smoke",
+        PROJECT_ROOT / "packaging" / "hushplayer_updater.py",
+    )
+    expected_source_dir = (PROJECT_ROOT / "packaging").resolve()
+    assert updater._updater_process_directory() == expected_source_dir
+
+    helper_path = expected_source_dir / "HushPlayerUpdater.exe"
+    with patch.object(updater.sys, "frozen", True, create=True), patch.object(
+        updater.sys, "executable", str(helper_path)
+    ):
+        assert updater._updater_process_directory() == expected_source_dir
+
+
 def updater_replace_retry_checks(root: Path) -> None:
     updater = _load_module(
         "hushplayer_packaged_updater_retry_smoke",
@@ -237,6 +252,7 @@ def main() -> None:
         root = Path(temporary)
         package_manifest_checks(root)
         updater_swap_checks(root)
+        updater_working_directory_check()
         updater_replace_retry_checks(root)
         payload_builder_checks(root)
     print("in-app update smoke: OK")

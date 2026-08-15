@@ -32,6 +32,25 @@ class UpdateApplyError(RuntimeError):
     pass
 
 
+def _updater_process_directory() -> Path:
+    """Return the directory containing the detached updater executable."""
+
+    if getattr(sys, "frozen", False):
+        return Path(sys.executable).resolve().parent
+    return Path(__file__).resolve().parent
+
+
+def _set_safe_updater_working_directory() -> None:
+    """Avoid keeping the user's install directory open as the process CWD."""
+
+    try:
+        os.chdir(_updater_process_directory())
+    except OSError:
+        # The replace retry remains the final safety net if changing the CWD
+        # is unavailable in an unusual launch environment.
+        return
+
+
 def _safe_member_name(name: str) -> str:
     normalized = str(name or "").replace("\\", "/").rstrip("/")
     parts = normalized.split("/")
@@ -223,6 +242,7 @@ def parse_arguments(argv: list[str] | None = None) -> argparse.Namespace:
 
 
 def main(argv: list[str] | None = None) -> int:
+    _set_safe_updater_working_directory()
     arguments = parse_arguments(argv)
     install_dir = arguments.install_dir.expanduser().resolve()
     try:
