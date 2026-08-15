@@ -133,7 +133,9 @@ def check_sources() -> None:
         PROJECT_ROOT / "packaging" / "installer" / "HushPlayer.iss"
     ).read_text(encoding="utf-8")
     assert "AppId={{8A9C184E-32A0-4D9E-A3D4-51C492A5D7B6}" in installer_source
-    assert "UsePreviousAppDir=yes" in installer_source
+    assert "DefaultDirName={userpf}\\{#MyAppName}" in installer_source
+    assert "UsePreviousAppDir=no" in installer_source
+    assert "UsePreviousGroup=no" in installer_source
     assert "CloseApplications=yes" in installer_source
     assert "RestartApplications=no" in installer_source
     assert "[UninstallDelete]" not in installer_source

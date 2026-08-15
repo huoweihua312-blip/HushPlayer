@@ -29,10 +29,14 @@ VersionInfoProductVersion={#MyAppNumericVersion}
 VersionInfoProductTextVersion={#MyAppVersion}
 
 ; 当前用户安装，不弹管理员权限确认
-DefaultDirName={localappdata}\Programs\{#MyAppName}
+; 使用 Inno Setup 的当前用户 Program Files 目录，避免旧环境变量或路径重定向
+; 生成带非法字符的目标目录。
+DefaultDirName={userpf}\{#MyAppName}
 DefaultGroupName={#MyAppName}
 PrivilegesRequired=lowest
-UsePreviousAppDir=yes
+; 不复用旧安装器记忆的目录，避免历史测试目录或损坏路径阻塞安装。
+UsePreviousAppDir=no
+UsePreviousGroup=no
 
 ; HushPlayer 当前只发布 Windows x64
 ArchitecturesAllowed=x64compatible

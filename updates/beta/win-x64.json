@@ -1,17 +1,17 @@
 {
     "schema_version": 1,
     "channel": "beta",
-    "version": "0.6.0-beta.9",
-    "numeric_version": "0.6.0.9",
+    "version": "0.6.0-beta.10",
+    "numeric_version": "0.6.0.10",
     "architecture": "win-x64",
     "mandatory": false,
-    "setup_url": "https://api.gitcode.com/api/v5/repos/gcw_iPVB8B5g/HushPlayer-updates/releases/v0.6.0-beta.9/attach_files/HushPlayer-0.6.0-beta.9-win-x64-setup.exe/download",
-    "setup_size": 116682930,
-    "sha256": "8d64e75d02276db9860dd8c42e401c4d684c6aa585dc6d356416661ee466247b",
+    "setup_url": "https://api.gitcode.com/api/v5/repos/gcw_iPVB8B5g/HushPlayer-updates/releases/v0.6.0-beta.10/attach_files/HushPlayer-0.6.0-beta.10-win-x64-setup.exe/download",
+    "setup_size": 116687828,
+    "sha256": "540676586ce4988e9ed388f74c3477f753c64a64976e03343e7d445dcd6b9577",
     "release_notes": [
-        "修复应用内更新时更新助手继承安装目录工作路径，导致 Windows 无法替换旧安装目录并回滚的问题。",
-        "更新助手启动后切换到自身独立工作目录，降低目录锁定和更新失败风险。",
-        "增加 beta.7 到后续版本的更新助手工作目录回归测试。"
+        "修复 Windows 安装器在特定旧安装路径或路径复用状态下提示文件夹名称非法、无法继续安装的问题。",
+        "使用当前用户的标准 Program Files 目录作为安全默认位置，并保留用户手动选择其他安装位置的能力。",
+        "增加安装脚本路径规则回归检查，避免历史测试路径污染后续安装。"
     ],
     "release_history": [
         {
@@ -191,10 +191,20 @@
                 "更新助手启动后切换到自身独立工作目录，降低目录锁定和更新失败风险。",
                 "增加 beta.7 到后续版本的更新助手工作目录回归测试。"
             ]
+        },
+        {
+            "version": "0.6.0-beta.10",
+            "numeric_version": "0.6.0.10",
+            "release_date": "2026-08-15",
+            "notes": [
+                "修复 Windows 安装器在特定旧安装路径或路径复用状态下提示文件夹名称非法、无法继续安装的问题。",
+                "使用当前用户的标准 Program Files 目录作为安全默认位置，并保留用户手动选择其他安装位置的能力。",
+                "增加安装脚本路径规则回归检查，避免历史测试路径污染后续安装。"
+            ]
         }
     ],
-    "package_url": "https://api.gitcode.com/api/v5/repos/gcw_iPVB8B5g/HushPlayer-updates/releases/v0.6.0-beta.9/attach_files/HushPlayer-0.6.0-beta.9-win-x64-update.zip/download",
-    "package_size": 158258545,
-    "package_sha256": "4fae7ee2a8f81f8fd8d8b3132a4032cfc1de3c84737b4be9232f78181f892c33",
-    "package_filename": "HushPlayer-0.6.0-beta.9-win-x64-update.zip"
+    "package_url": "https://api.gitcode.com/api/v5/repos/gcw_iPVB8B5g/HushPlayer-updates/releases/v0.6.0-beta.10/attach_files/HushPlayer-0.6.0-beta.10-win-x64-update.zip/download",
+    "package_size": 158258700,
+    "package_sha256": "0aa626cc662c7b85cb4207226a8a7c40831ff2b2aa779199bfca2f62991adf4a",
+    "package_filename": "HushPlayer-0.6.0-beta.10-win-x64-update.zip"
 }
