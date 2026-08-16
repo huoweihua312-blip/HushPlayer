@@ -99,7 +99,12 @@ def load_settings_document(path: Path) -> dict[str, Any]:
     result["volume"] = max(0, min(100, volume))
 
     play_mode = result.get("play_mode", DEFAULT_SETTINGS["play_mode"])
-    if play_mode not in {"sequence", "list_loop", "single_loop", "shuffle"}:
+    if not isinstance(play_mode, str) or play_mode not in {
+        "sequence",
+        "list_loop",
+        "single_loop",
+        "shuffle",
+    }:
         play_mode = DEFAULT_SETTINGS["play_mode"]
     result["play_mode"] = play_mode
 

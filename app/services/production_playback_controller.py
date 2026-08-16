@@ -123,6 +123,12 @@ class ProductionPlaybackController(QObject):
         return self._current_item
 
     @property
+    def online_cache_key(self) -> str:
+        """Return the active online cache key for protected maintenance."""
+
+        return self._online_cache_key
+
+    @property
     def current_index(self) -> int:
         return self.queue.current_index
 

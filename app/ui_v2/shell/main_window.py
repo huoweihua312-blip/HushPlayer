@@ -54,7 +54,9 @@ from PySide6.QtWidgets import (
 from app.core.app_paths import AppPaths
 from app.core.version import APP_VERSION
 from app.services.app_update_service import AppUpdateService, UpdateManifest
+from app.services.cache_maintenance import clear_missing_cache_files
 from app.services.library_repository import LibraryRepository
+from app.services.music_folder_scan import MusicFolderImportService
 from app.services.online_discovery_runtime import OnlineDiscoveryRuntime
 from app.services.remote_track_store import RemoteTrackStore
 from app.ui_v2.adapters.library_adapter import LibraryAdapter
@@ -247,16 +249,28 @@ class MainWindow(QMainWindow):
         self.update_service.updaterLaunched.connect(
             self._on_update_installer_launched
         )
+        settings_actions = {
+            "check_updates": self._check_for_updates,
+            "open_settings_path": self._open_settings_path,
+        }
+        if self.data_mode == "real":
+            settings_actions.update(
+                {
+                    "scan_music_folders": self._scan_music_folders,
+                    "clear_missing_cache": self._clear_missing_cache,
+                    "open_audio_cache_directory": self._open_audio_cache_directory,
+                    "clear_incomplete_audio_cache": self._clear_incomplete_audio_cache,
+                    "clear_all_audio_cache": self._clear_all_audio_cache,
+                }
+            )
         self.settings_bridge = LegacySettingsBridge(
             settings_path=resolved_settings_path,
             apply_callback=self._apply_settings_snapshot,
-            action_callbacks={
-                "check_updates": self._check_for_updates,
-                "open_settings_path": self._open_settings_path,
-            },
+            action_callbacks=settings_actions,
             parent=self,
         )
         self._settings_snapshot = self.settings_bridge.read_snapshot()
+        self._startup_scan_timer: QTimer | None = None
         appearance_mode = str(
             self.settings_bridge.value(self._settings_snapshot, "appearance_mode")
             or "dark"
@@ -302,8 +316,15 @@ class MainWindow(QMainWindow):
             )
             if self.online_discovery.parent() is None:
                 self.online_discovery.setParent(self)
+            self.music_import_service = MusicFolderImportService(
+                resolved_paths.data_dir / "library.json",
+                resolved_paths.data_dir / "pending_imports.json",
+                self,
+            )
+            self.music_import_service.completed.connect(self._on_music_import_completed)
         else:
             self.online_discovery = None
+            self.music_import_service = None
         self.library_collection = LibraryCollectionAdapter(
             () if is_real_library else create_mock_tracks(1000),
             self,
@@ -434,6 +455,19 @@ class MainWindow(QMainWindow):
             self.online_adapter.remote_collection_changed.connect(
                 self.real_library_adapter.refresh
             )
+            if bool(
+                self.settings_bridge.value(
+                    self._settings_snapshot,
+                    "auto_scan_music_folders_on_startup",
+                )
+            ):
+                self._startup_scan_timer = QTimer(self)
+                self._startup_scan_timer.setSingleShot(True)
+                self._startup_scan_timer.setInterval(1_800)
+                self._startup_scan_timer.timeout.connect(
+                    self._auto_scan_music_folders_on_startup
+                )
+                self._startup_scan_timer.start()
 
     @property
     def theme(self) -> Theme:
@@ -666,6 +700,10 @@ class MainWindow(QMainWindow):
             self.settings_overlay.cancel_and_close()
         if self.real_library_adapter is not None:
             self.real_library_adapter.shutdown()
+        if self._startup_scan_timer is not None:
+            self._startup_scan_timer.stop()
+        if self.music_import_service is not None:
+            self.music_import_service.shutdown()
         browse_page = getattr(self.router, "browse_page", None)
         if browse_page is not None and hasattr(browse_page, "shutdown"):
             browse_page.shutdown()
@@ -1042,6 +1080,72 @@ class MainWindow(QMainWindow):
         if not candidate.exists():
             return False
         return bool(QDesktopServices.openUrl(QUrl.fromLocalFile(str(candidate.resolve()))))
+
+    def _scan_music_folders(self) -> str:
+        service = self.music_import_service
+        if service is None:
+            return "当前运行模式不支持真实音乐库扫描。"
+        folders = self.settings_bridge.value(self._settings_snapshot, "music_scan_folders") or []
+        folders = [str(folder).strip() for folder in folders if str(folder).strip()]
+        if not folders:
+            return "请先在设置中添加音乐文件夹。"
+        mode = str(
+            self.settings_bridge.value(self._settings_snapshot, "music_scan_import_mode")
+            or "pending"
+        )
+        if not service.start(folders, import_mode=mode):
+            return "已有音乐扫描任务正在运行。"
+        return "正在扫描音乐文件夹…"
+
+    def _auto_scan_music_folders_on_startup(self) -> None:
+        if self.data_mode == "real":
+            self._scan_music_folders()
+
+    def _on_music_import_completed(self, result: object) -> None:
+        if not isinstance(result, dict):
+            return
+        added = int(result.get("added_count", 0) or 0)
+        pending = int(result.get("pending_count", 0) or 0)
+        if self.settings_overlay is not None:
+            self.settings_overlay.set_update_status(
+                f"扫描完成：加入音乐库 {added} 首，待确认 {pending} 首。"
+            )
+        if self.real_library_adapter is not None and added:
+            self.real_library_adapter.refresh()
+
+    def _open_audio_cache_directory(self) -> bool:
+        discovery = self.online_discovery
+        if discovery is None:
+            return False
+        return self._open_settings_path(str(discovery.online_audio_cache.cache_root))
+
+    def _clear_missing_cache(self) -> dict[str, object]:
+        paths = AppPaths.resolve()
+        return clear_missing_cache_files(
+            (paths.cache_dir / "covers", paths.cache_dir / "lyrics")
+        )
+
+    def _protected_online_audio_cache_key(self) -> str:
+        controller = self.playback_adapter.controller
+        if controller is None:
+            return ""
+        return str(getattr(controller, "online_cache_key", "") or "")
+
+    def _clear_incomplete_audio_cache(self) -> dict:
+        discovery = self.online_discovery
+        if discovery is None:
+            return {"removed": 0, "skipped": 0, "bytes": 0}
+        return discovery.online_audio_cache.clear_incomplete(
+            protected_cache_key=self._protected_online_audio_cache_key()
+        )
+
+    def _clear_all_audio_cache(self) -> dict:
+        discovery = self.online_discovery
+        if discovery is None:
+            return {"removed": 0, "skipped": 0, "bytes": 0}
+        return discovery.online_audio_cache.clear_all(
+            protected_cache_key=self._protected_online_audio_cache_key()
+        )
 
     def _apply_settings_values(self, values: dict[str, object]) -> None:
         """Apply persisted settings to the small set of V2 runtime models."""
