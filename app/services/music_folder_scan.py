@@ -6,6 +6,7 @@ import json
 import os
 from pathlib import Path
 import time
+from collections.abc import Iterable
 from typing import Any
 
 from mutagen import File as MutagenFile
@@ -349,6 +350,7 @@ class MusicFolderImportService(QObject):
 
     progress = Signal(object)
     completed = Signal(object)
+    pending_changed = Signal(object)
     failed = Signal(str)
     busy_changed = Signal(bool)
 
@@ -443,6 +445,109 @@ class MusicFolderImportService(QObject):
         if thread is not None and thread.isRunning():
             thread.requestInterruption()
 
+    def pending_records(self) -> list[dict]:
+        """Return the current pending-import records for a V2 page."""
+
+        document = _read_json_document(self.pending_imports_path, [])
+        if not isinstance(document, list):
+            return []
+        return [dict(item) for item in document if isinstance(item, dict)]
+
+    def import_pending(self, paths: Iterable[str]) -> dict[str, object]:
+        """Move selected pending records into the library document."""
+
+        if self.busy:
+            return {"ok": False, "error": "音乐扫描正在运行。"}
+        selected = {
+            str(path).strip().casefold()
+            for path in paths
+            if str(path).strip()
+        }
+        if not selected:
+            return {"ok": False, "error": "没有选择待导入歌曲。"}
+        pending = self.pending_records()
+        library = _read_json_document(self.library_path, [])
+        library = library if isinstance(library, list) else []
+        existing = {
+            str(item.get("path")).strip().casefold()
+            for item in library
+            if isinstance(item, dict) and str(item.get("path") or "").strip()
+        }
+        remaining: list[dict] = []
+        imported = 0
+        duplicates = 0
+        matched = 0
+        for item in pending:
+            key = str(item.get("path") or "").strip().casefold()
+            if key not in selected:
+                remaining.append(item)
+                continue
+            matched += 1
+            if not key or key in existing:
+                duplicates += 1
+                continue
+            record = dict(item)
+            record.pop("demo", None)
+            library.append(record)
+            existing.add(key)
+            imported += 1
+        if not matched:
+            return {"ok": False, "error": "选中的待导入歌曲已不存在。"}
+        _write_json_document(self.pending_imports_path, remaining)
+        if imported:
+            _write_json_document(self.library_path, library)
+        result = {
+            "ok": True,
+            "imported": imported,
+            "duplicates": duplicates,
+            "remaining": len(remaining),
+        }
+        self.pending_changed.emit(self.pending_records())
+        return result
+
+    def ignore_pending(self, paths: Iterable[str]) -> dict[str, object]:
+        """Remove selected pending records and remember their file paths."""
+
+        if self.busy:
+            return {"ok": False, "error": "音乐扫描正在运行。"}
+        selected = {
+            str(path).strip().casefold()
+            for path in paths
+            if str(path).strip()
+        }
+        if not selected:
+            return {"ok": False, "error": "没有选择待忽略歌曲。"}
+        pending = self.pending_records()
+        ignored_document = _read_json_document(self.ignored_imports_path, [])
+        ignored = [
+            str(item).strip().casefold()
+            for item in ignored_document
+            if str(item).strip()
+        ] if isinstance(ignored_document, list) else []
+        ignored_keys = set(ignored)
+        remaining: list[dict] = []
+        ignored_count = 0
+        for item in pending:
+            key = str(item.get("path") or "").strip().casefold()
+            if key not in selected:
+                remaining.append(item)
+                continue
+            if key and key not in ignored_keys:
+                ignored.append(key)
+                ignored_keys.add(key)
+            ignored_count += 1
+        if not ignored_count:
+            return {"ok": False, "error": "选中的待导入歌曲已不存在。"}
+        _write_json_document(self.pending_imports_path, remaining)
+        _write_json_document(self.ignored_imports_path, ignored)
+        result = {
+            "ok": True,
+            "ignored": ignored_count,
+            "remaining": len(remaining),
+        }
+        self.pending_changed.emit(self.pending_records())
+        return result
+
     def shutdown(self, timeout_ms: int = 2_000) -> None:
         self._closed = True
         self.cancel()
@@ -522,4 +627,6 @@ class MusicFolderImportService(QObject):
         if pending_count:
             _write_json_document(self.pending_imports_path, pending)
         result.update({"added_count": added_count, "pending_count": pending_count})
+        if pending_count:
+            self.pending_changed.emit(self.pending_records())
         return result

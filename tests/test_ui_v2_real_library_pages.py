@@ -332,6 +332,26 @@ class RealLibraryPageTests(unittest.TestCase):
         self.assertIn("online_search", self.window.sidebar._items)
         self.assertFalse(self.window.sidebar.new_playlist_button.isHidden())
 
+    def test_real_mode_exposes_pending_import_route_and_actions(self) -> None:
+        pending_path = self.data_dir / "pending_imports.json"
+        record = {
+            "title": "待确认歌曲",
+            "artist": "测试歌手",
+            "album": "测试专辑",
+            "path": str((self.root / "music" / "pending.mp3").resolve()),
+        }
+        _write_json(pending_path, [record])
+        page = self.window.router.page_for_route("pending_imports")
+        self.assertEqual(page.list_widget.count(), 1)
+        self.assertIn("pending_imports", {
+            item.route_id for item in self.window.navigation_adapter.items()
+        })
+        self.window.navigation_adapter.set_route("pending_imports")
+        self.assertIs(self.window.router.currentWidget(), page)
+        page.list_widget.item(0).setSelected(True)
+        page.import_button.click()
+        self.assertEqual(json.loads(pending_path.read_text(encoding="utf-8")), [])
+
 
 if __name__ == "__main__":
     unittest.main()

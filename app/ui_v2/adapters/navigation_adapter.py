@@ -20,6 +20,7 @@ class NavigationAdapter(QObject):
 
     MAIN_ITEMS = (
         NavigationItem("library", "音乐库", "library", "音乐库"),
+        NavigationItem("pending_imports", "待导入", "playlist", "音乐库"),
         NavigationItem("browse", "浏览", "browse", "音乐库"),
         NavigationItem("liked", "我喜欢", "favorite", "歌单"),
         NavigationItem("recent", "最近播放", "recent", "低频"),
@@ -36,6 +37,7 @@ class NavigationAdapter(QObject):
         parent: QObject | None = None,
         *,
         include_online: bool = True,
+        include_pending: bool = False,
     ) -> None:
         super().__init__(parent)
         self._owned_playlists = playlists is None
@@ -45,6 +47,7 @@ class NavigationAdapter(QObject):
         self._route = "browse"
         self._current_playlist_id = ""
         self._include_online = bool(include_online)
+        self._include_pending = bool(include_pending)
         self._back_stack: list[str] = []
         self._forward_stack: list[str] = []
         self.playlist_adapter.playlists_changed.connect(self._on_playlists_changed)
@@ -66,9 +69,12 @@ class NavigationAdapter(QObject):
         return bool(self._forward_stack)
 
     def items(self) -> tuple[NavigationItem, ...]:
-        if self._include_online:
-            return self.MAIN_ITEMS
-        return tuple(item for item in self.MAIN_ITEMS if item.route_id != "online_search")
+        items = self.MAIN_ITEMS
+        if not self._include_online:
+            items = tuple(item for item in items if item.route_id != "online_search")
+        if not self._include_pending:
+            items = tuple(item for item in items if item.route_id != "pending_imports")
+        return items
 
     def playlists(self) -> tuple[Playlist, ...]:
         return self.playlist_adapter.playlists()

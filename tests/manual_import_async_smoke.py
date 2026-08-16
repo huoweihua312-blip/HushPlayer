@@ -170,6 +170,32 @@ class MusicFolderScanSmoke(unittest.TestCase):
                 self.assertFalse(service.busy)
                 self.assertEqual(completed[-1]["pending_count"], 1)
                 self.assertEqual(json.loads(pending_path.read_text(encoding="utf-8"))[0]["path"], str(pending_file.resolve()))
+
+                imported = service.import_pending([str(pending_file)])
+                self.assertTrue(imported["ok"])
+                self.assertEqual(imported["imported"], 1)
+                self.assertEqual(json.loads(pending_path.read_text(encoding="utf-8")), [])
+                library_records = json.loads(library_path.read_text(encoding="utf-8"))
+                self.assertEqual(len(library_records), 2)
+
+                ignored_file = _touch(root / "ignored" / "ignored.mp3")
+                completed.clear()
+                self.assertTrue(service.start([str(ignored_file.parent)], import_mode="pending"))
+                deadline = time.monotonic() + 5
+                while not completed and time.monotonic() < deadline:
+                    self.app.processEvents()
+                    QThread.msleep(2)
+                while service.busy and time.monotonic() < deadline:
+                    self.app.processEvents()
+                    QThread.msleep(2)
+                ignored = service.ignore_pending([str(ignored_file)])
+                self.assertTrue(ignored["ok"])
+                self.assertEqual(ignored["ignored"], 1)
+                ignored_records = json.loads(
+                    (library_path.parent / "ignored_imports.json").read_text(encoding="utf-8")
+                )
+                self.assertIn(str(ignored_file.resolve()).casefold(), ignored_records)
+                self.assertEqual(service.pending_records(), [])
             finally:
                 service.shutdown()
 

@@ -35,12 +35,14 @@ from app.ui_v2.shell.immersive_player_shell import ImmersivePlayerShell
 from app.ui_v2.pages.lyrics_page import LyricsPage
 from app.ui_v2.pages.online_search_page import OnlineSearchPage
 from app.ui_v2.pages.online_source_page import OnlineSourcePage
+from app.ui_v2.pages.pending_imports_page import PendingImportsPage
 from app.ui_v2.pages.playlist_page import PlaylistPage
 from app.ui_v2.pages.recent_page import RecentPage
 from app.ui_v2.pages.track_list_page import TrackListPage
 from app.ui_v2.theme.icons import icon
 from app.ui_v2.theme.tokens import Theme
 from app.ui_v2.models.immersive_lyrics_options import ImmersiveLyricsOptions
+from app.services.music_folder_scan import MusicFolderImportService
 
 
 class ComingSoonPage(QWidget):
@@ -89,6 +91,9 @@ class ContentRouter(QStackedWidget):
     online_recovery_requested = Signal(object)
     immersive_fullscreen_requested = Signal(bool)
     immersive_transparency_requested = Signal(bool)
+    pending_import_requested = Signal(object)
+    pending_ignore_requested = Signal(object)
+    pending_open_folder_requested = Signal(str)
 
     ROUTE_METADATA = {
         "online_search": ("在线搜索", "search"),
@@ -110,6 +115,7 @@ class ContentRouter(QStackedWidget):
         *,
         settings_bridge: LegacySettingsBridge | None = None,
         settings_apply_callback: Callable[[dict[str, object]], None] | None = None,
+        pending_import_service: MusicFolderImportService | None = None,
     ) -> None:
         super().__init__(parent)
         self._theme = theme
@@ -123,6 +129,7 @@ class ContentRouter(QStackedWidget):
         self._immersive_options = immersive_options
         self._settings_bridge = settings_bridge
         self._settings_apply_callback = settings_apply_callback
+        self._pending_import_service = pending_import_service
         self._immersive_return_route = "lyrics"
         self._last_normal_route = navigation.route if not navigation.route.startswith("immersive") else "browse"
         self._content_safe_bottom = 0
@@ -185,6 +192,8 @@ class ContentRouter(QStackedWidget):
             return self._cached_page("online_search", self._create_online_search_page)
         if route_id == "online_sources":
             return self._cached_page("online_sources", self._create_online_source_page)
+        if route_id == "pending_imports" and self._pending_import_service is not None:
+            return self._cached_page("pending_imports", self._create_pending_imports_page)
         if route_id == "lyrics":
             return self._cached_page("lyrics", self._create_lyrics_page)
         if route_id == "settings":
@@ -369,6 +378,17 @@ class ContentRouter(QStackedWidget):
     def _create_online_source_page(self) -> OnlineSourcePage:
         page = OnlineSourcePage(self._online_sources, self._theme, self)
         page.back_requested.connect(lambda: self._navigation.set_route("online_search"))
+        return page
+
+    def _create_pending_imports_page(self) -> PendingImportsPage:
+        page = PendingImportsPage(self._theme, self)
+        service = self._pending_import_service
+        if service is not None:
+            page.set_records(service.pending_records())
+            service.pending_changed.connect(page.set_records)
+        page.import_requested.connect(self.pending_import_requested)
+        page.ignore_requested.connect(self.pending_ignore_requested)
+        page.open_folder_requested.connect(self.pending_open_folder_requested)
         return page
 
     def _create_lyrics_page(self) -> LyricsPage:

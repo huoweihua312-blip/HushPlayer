@@ -87,6 +87,8 @@ class NavigationSidebar(QFrame):
         self.library_caption.setFixedHeight(29)
         primary_layout.addWidget(self.library_caption)
         self._add_static_item("library", primary_layout, 42)
+        if any(item.route_id == "pending_imports" for item in adapter.items()):
+            self._add_static_item("pending_imports", primary_layout, 42)
         self._add_static_item("browse", primary_layout, 42)
         if any(item.route_id == "online_search" for item in adapter.items()):
             self._add_static_item("online_search", primary_layout, 42)

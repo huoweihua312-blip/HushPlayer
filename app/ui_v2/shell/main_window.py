@@ -355,6 +355,7 @@ class MainWindow(QMainWindow):
             self.playlist_adapter,
             self,
             include_online=True,
+            include_pending=is_real_library,
         )
         self.playback_adapter = playback_adapter or PlaybackAdapter(self)
         if playback_adapter is not None and playback_adapter.parent() is None:
@@ -411,6 +412,7 @@ class MainWindow(QMainWindow):
             self,
             settings_bridge=self.settings_bridge,
             settings_apply_callback=self._apply_settings_snapshot,
+            pending_import_service=self.music_import_service,
         )
         self.player_bar = PlayerBar(self.playback_adapter, self._theme, self)
         self.player_bar.set_read_only(
@@ -933,6 +935,9 @@ class MainWindow(QMainWindow):
         self.router.queue_requested.connect(self._play_queue)
         self.router.online_play_requested.connect(self._play_online_track)
         self.router.online_recovery_requested.connect(self._request_online_recovery)
+        self.router.pending_import_requested.connect(self._import_pending_paths)
+        self.router.pending_ignore_requested.connect(self._ignore_pending_paths)
+        self.router.pending_open_folder_requested.connect(self._open_pending_folder)
         self.router.immersive_fullscreen_requested.connect(
             self.set_immersive_fullscreen
         )
@@ -1110,8 +1115,54 @@ class MainWindow(QMainWindow):
             self.settings_overlay.set_update_status(
                 f"扫描完成：加入音乐库 {added} 首，待确认 {pending} 首。"
             )
+        self._show_pending_status(
+            f"扫描完成：加入音乐库 {added} 首，待确认 {pending} 首。"
+        )
         if self.real_library_adapter is not None and added:
             self.real_library_adapter.refresh()
+
+    def _pending_page(self):
+        return self.router._pages.get("pending_imports")
+
+    def _show_pending_status(self, text: str) -> None:
+        page = self._pending_page()
+        if page is not None and hasattr(page, "set_status"):
+            page.set_status(text)
+
+    def _import_pending_paths(self, paths: object) -> None:
+        service = self.music_import_service
+        if service is None or not isinstance(paths, (list, tuple)):
+            return
+        result = service.import_pending(str(path) for path in paths)
+        if result.get("ok") and int(result.get("imported", 0) or 0):
+            if self.real_library_adapter is not None:
+                self.real_library_adapter.refresh()
+        if result.get("ok"):
+            self._show_pending_status(
+                f"已加入音乐库 {int(result.get('imported', 0) or 0)} 首。"
+            )
+        else:
+            self._show_pending_status(str(result.get("error") or "加入音乐库失败。"))
+
+    def _ignore_pending_paths(self, paths: object) -> None:
+        service = self.music_import_service
+        if service is None or not isinstance(paths, (list, tuple)):
+            return
+        result = service.ignore_pending(str(path) for path in paths)
+        if result.get("ok"):
+            self._show_pending_status(
+                f"已忽略 {int(result.get('ignored', 0) or 0)} 首歌曲。"
+            )
+        else:
+            self._show_pending_status(str(result.get("error") or "忽略歌曲失败。"))
+
+    def _open_pending_folder(self, path: str) -> bool:
+        candidate = Path(str(path or "")).expanduser()
+        if not candidate.is_dir():
+            candidate = candidate.parent
+        if not candidate:
+            return False
+        return self._open_settings_path(str(candidate))
 
     def _open_audio_cache_directory(self) -> bool:
         discovery = self.online_discovery

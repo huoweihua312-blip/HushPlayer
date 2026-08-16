@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 import sys
 import tempfile
+import time
 import unittest
 from dataclasses import replace
 from datetime import datetime
@@ -228,6 +229,16 @@ class OnlinePlaybackQ5B1Tests(unittest.TestCase):
     def _process_events(self) -> None:
         self.app.processEvents()
 
+    def _wait_until(self, predicate, timeout_ms: int = 1_000) -> bool:
+        deadline = time.monotonic() + timeout_ms / 1000.0
+        while time.monotonic() < deadline:
+            self.app.processEvents()
+            if predicate():
+                return True
+            time.sleep(0.01)
+        self.app.processEvents()
+        return bool(predicate())
+
     def _local_track(self) -> Track:
         return Track(
             id="local",
@@ -315,7 +326,10 @@ class OnlinePlaybackQ5B1Tests(unittest.TestCase):
 
         self.client.resolve(request_id)
 
-        self.assertEqual(len(self.cache.started), 1)
+        self.assertTrue(
+            self._wait_until(lambda: len(self.cache.started) == 1),
+            "allowed online cache did not start within the expected deferred window",
+        )
         cached_media, resolution = self.cache.started[0]
         self.assertEqual(cached_media.stable_identity, remote.stable_identity)
         self.assertEqual(resolution["url"], "https://fixture.invalid/audio.mp3")
