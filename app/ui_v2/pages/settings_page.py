@@ -235,6 +235,7 @@ class SettingsPage(QWidget):
         section.add_row(self._switch_row("general.auto_open_floating_lyrics", "自动打开桌面歌词", "播放时自动打开桌面歌词。"))
         section.add_row(self._switch_row("general.minimize_to_tray", "最小化到托盘", "最小化后保留在通知区域。"))
         section.add_row(self._combo_row("general.close_behavior", "关闭窗口行为", "选择关闭窗口时的操作。", (("直接退出", "exit"), ("最小化到托盘", "tray"), ("每次询问", "ask"))))
+        section.add_row(self._switch_row("general.remember_close_choice", "记住关闭窗口时的选择", "关闭后记住退出或最小化选择；关闭此项后恢复每次询问。"))
         section.add_row(self._combo_row("general.language", "界面语言", "更新语言偏好，不重启也不切换完整翻译。", (("简体中文", "zh_CN"), ("English", "en_US"))))
         layout.addWidget(section)
 

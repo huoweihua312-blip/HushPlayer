@@ -425,6 +425,7 @@ class SettingsOverlay(QWidget):
         section = self._track_section(self._section("启动与窗口", "保留现有 HushPlayer 启动和窗口行为。"))
         section.add_row(self._toggle_row("auto_scan_music_folders_on_startup", "启动时自动扫描这些文件夹", "启动时扫描已保存的音乐文件夹。"))
         section.add_row(self._toggle_row("floating_lyrics_auto_open", "启动时自动打开桌面歌词", "播放启动时自动打开现有桌面歌词窗口。"))
+        section.add_row(self._toggle_row("remember_close_choice", "记住关闭窗口时的选择", "关闭后记住“直接退出”或“最小化到托盘”；关闭此项后恢复每次询问。"))
         layout.addWidget(section)
 
     def _build_appearance(self, layout: QVBoxLayout) -> None:

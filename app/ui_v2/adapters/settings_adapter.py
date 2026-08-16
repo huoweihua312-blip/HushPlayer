@@ -19,6 +19,7 @@ SEARCH_ENTRIES: tuple[SettingsSearchResult, ...] = (
     SettingsSearchResult("general.auto_open_floating_lyrics", "常规", "自动打开桌面歌词", "播放时打开桌面歌词预览", ("floating", "desktop lyrics")),
     SettingsSearchResult("general.minimize_to_tray", "常规", "最小化到托盘", "最小化后保留在通知区域", ("tray",)),
     SettingsSearchResult("general.close_behavior", "常规", "关闭窗口行为", "选择直接退出、最小化或询问", ("close", "exit")),
+    SettingsSearchResult("general.remember_close_choice", "常规", "记住关闭窗口时的选择", "关闭后保留上次选择，关闭此项可恢复每次询问", ("close", "remember", "tray")),
     SettingsSearchResult("general.language", "常规", "界面语言", "选择界面语言偏好", ("language", "english")),
     SettingsSearchResult("appearance.theme_mode", "外观", "主题", "跟随系统、浅色或深色主题", ("theme", "light", "dark")),
     SettingsSearchResult("appearance.accent_mode", "外观", "强调色", "控制界面的强调颜色模式", ("accent", "color")),

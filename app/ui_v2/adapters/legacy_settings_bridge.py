@@ -67,6 +67,8 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "auto_check_updates_on_startup": False,
     "update_check_delay_seconds": 15,
     "cache_directory": "",
+    "remember_close_choice": False,
+    "close_behavior": "ask",
     "immersive_background_mode": "cover",
     "immersive_background_visual_mode": "artwork",
     "immersive_background_custom_path": "",
@@ -140,6 +142,21 @@ def load_settings_document(path: Path) -> dict[str, Any]:
         result["auto_check_updates_on_startup"], bool
     ):
         result["auto_check_updates_on_startup"] = False
+    if "remember_close_choice" in result and not isinstance(
+        result["remember_close_choice"], bool
+    ):
+        result["remember_close_choice"] = False
+    result["remember_close_choice"] = bool(
+        result.get("remember_close_choice", DEFAULT_SETTINGS["remember_close_choice"])
+    )
+    close_behavior = str(
+        result.get("close_behavior", DEFAULT_SETTINGS["close_behavior"])
+    ).strip().casefold()
+    if close_behavior not in {"ask", "exit", "tray"}:
+        close_behavior = DEFAULT_SETTINGS["close_behavior"]
+    if not bool(result.get("remember_close_choice", False)):
+        close_behavior = "ask"
+    result["close_behavior"] = close_behavior
     if "music_scan_folders" in result and not isinstance(result["music_scan_folders"], list):
         result["music_scan_folders"] = []
     return result
@@ -204,6 +221,11 @@ class LegacySettingsBridge(QObject):
         visual_mode = document.get("immersive_background_visual_mode")
         if visual_mode is not None and str(visual_mode).strip().casefold() not in IMMERSIVE_BACKGROUND_VISUAL_MODES:
             errors["immersive_background_visual_mode"] = "沉浸背景显示模式无效。"
+        close_behavior = str(document.get("close_behavior", "ask")).strip().casefold()
+        if close_behavior not in {"ask", "exit", "tray"}:
+            errors["close_behavior"] = "关闭窗口行为无效。"
+        if not isinstance(document.get("remember_close_choice", False), bool):
+            errors["remember_close_choice"] = "关闭行为记忆选项无效。"
         try:
             opacity = int(document.get("floating_lyrics_opacity", 100))
         except (TypeError, ValueError):
@@ -250,6 +272,11 @@ class LegacySettingsBridge(QObject):
 
     def save_snapshot(self, snapshot: SettingsSnapshot) -> SettingsSnapshot:
         document = snapshot.to_dict()
+        document["remember_close_choice"] = bool(
+            document.get("remember_close_choice", False)
+        )
+        if not document["remember_close_choice"]:
+            document["close_behavior"] = "ask"
         errors = self.validate(document)
         if errors:
             message = next(iter(errors.values()))

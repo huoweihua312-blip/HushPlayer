@@ -13,6 +13,7 @@ class GeneralSettings:
     auto_open_floating_lyrics: bool = False
     minimize_to_tray: bool = True
     close_behavior: str = "ask"
+    remember_close_choice: bool = False
     language: str = "zh_CN"
 
 

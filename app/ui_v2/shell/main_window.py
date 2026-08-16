@@ -79,6 +79,7 @@ from app.ui_v2.pages.all_songs_page import AllSongsPage
 from app.ui_v2.models.immersive_lyrics_options import ImmersiveLyricsOptions
 from app.ui_v2.models.settings_snapshot import SettingsSnapshot
 from app.ui_v2.models.track import Track, artwork_url_from_payload
+from app.ui_v2.shell.close_behavior_controller import CloseBehaviorController
 from app.ui_v2.shell.content_router import ContentRouter
 from app.ui_v2.shell.navigation_sidebar import NavigationSidebar
 from app.ui_v2.shell.player_bar import PlayerBar
@@ -221,6 +222,7 @@ class MainWindow(QMainWindow):
         lyrics_adapter: LyricsAdapter | None = None,
         online_discovery: OnlineDiscoveryRuntime | None = None,
         force_dark_theme: bool = False,
+        close_behavior_controller: CloseBehaviorController | None = None,
     ) -> None:
         super().__init__(parent)
         self.setWindowFlags(self.windowFlags() | Qt.WindowType.FramelessWindowHint)
@@ -270,6 +272,18 @@ class MainWindow(QMainWindow):
             parent=self,
         )
         self._settings_snapshot = self.settings_bridge.read_snapshot()
+        application = QApplication.instance()
+        if application is None:
+            raise RuntimeError("HushPlayer requires a QApplication before creating MainWindow.")
+        self.close_behavior_controller = close_behavior_controller or CloseBehaviorController(
+            application,
+            resolved_settings_path,
+            icon=application.windowIcon(),
+            parent=application,
+        )
+        self.close_behavior_controller.register_window(self)
+        self._user_close_requested = False
+        self._close_finalized = False
         self._startup_scan_timer: QTimer | None = None
         appearance_mode = str(
             self.settings_bridge.value(self._settings_snapshot, "appearance_mode")
@@ -696,7 +710,26 @@ class MainWindow(QMainWindow):
             return False
         return int(result) == 0
 
+    def request_user_close(self) -> None:
+        """Route the custom title-bar X through the close behavior controller."""
+
+        if self._close_finalized:
+            return
+        self._user_close_requested = True
+        self.close()
+
     def closeEvent(self, event) -> None:  # noqa: N802
+        if self._user_close_requested:
+            self._user_close_requested = False
+            if not self.close_behavior_controller.handle_close(self, event):
+                return
+        self._finalize_close()
+        super().closeEvent(event)
+
+    def _finalize_close(self) -> None:
+        if self._close_finalized:
+            return
+        self._close_finalized = True
         QApplication.instance().removeEventFilter(self)
         if self.settings_overlay is not None and self.settings_overlay.isVisible():
             self.settings_overlay.cancel_and_close()
@@ -719,7 +752,6 @@ class MainWindow(QMainWindow):
         controller = self.playback_adapter.controller
         if controller is not None:
             controller.shutdown()
-        super().closeEvent(event)
 
     def eventFilter(self, watched, event) -> bool:  # noqa: N802
         """Provide native-feeling edge resizing for the frameless approved shell."""

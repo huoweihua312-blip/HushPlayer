@@ -324,4 +324,9 @@ class CustomTitleBar(QFrame):
         self.set_theme(self._theme)
 
     def _close_window(self) -> None:
-        self._window().close()
+        window = self._window()
+        request_user_close = getattr(window, "request_user_close", None)
+        if callable(request_user_close):
+            request_user_close()
+            return
+        window.close()
