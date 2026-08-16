@@ -44,6 +44,10 @@ class LyricsStateView(QWidget):
             "loading": ("正在加载歌词", "请稍候。"),
             "empty": ("暂无歌词", "没有找到这首歌曲的歌词。"),
             "failed": ("歌词加载失败", "暂时无法显示歌词，请稍后重试。"),
+            "playback_unavailable": (
+                "歌曲无法播放",
+                state.message or "当前无法播放这首歌曲，暂不显示默认歌词。",
+            ),
             "instrumental": ("纯音乐", "这首歌曲没有人声歌词。"),
         }
         title, detail = values.get(state.phase, ("歌词", state.message))

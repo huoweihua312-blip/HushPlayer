@@ -28,6 +28,8 @@ from app.ui_v2.models.online_track_model import (
 from app.ui_v2.theme.icons import icon, paint_icon
 from app.ui_v2.theme.tokens import Theme
 from app.ui_v2.widgets.track_delegate import RowVisualState
+from app.ui_v2.widgets.artwork_thumbnail import artwork_pixmap_for_track
+from app.ui_v2.widgets.track_display import present_track_identity_values
 
 
 class OnlineResultDelegate(QStyledItemDelegate):
@@ -39,7 +41,7 @@ class OnlineResultDelegate(QStyledItemDelegate):
         self._theme = theme
 
     def sizeHint(self, option, index):  # noqa: N802
-        return super().sizeHint(option, index).expandedTo(option.fontMetrics.size(0, 48))
+        return super().sizeHint(option, index).expandedTo(option.fontMetrics.size(0, 52))
 
     def paint(self, painter: QPainter, option, index) -> None:  # noqa: N802
         track = index.data(ONLINE_TRACK_ROLE)
@@ -51,6 +53,14 @@ class OnlineResultDelegate(QStyledItemDelegate):
         playing = bool(index.data(ONLINE_PLAYING_ROLE))
         state = self._state(track, selected, hovered, playing)
         colors = self._theme.colors
+        identity = present_track_identity_values(
+            track.title,
+            track.artist,
+            track.album,
+            is_online=True,
+            availability=track.availability,
+            playback_detail=track.availability_detail,
+        )
         painter.save()
         rect = QRectF(option.rect)
         painter.fillRect(rect, self._background(state))
@@ -74,10 +84,20 @@ class OnlineResultDelegate(QStyledItemDelegate):
             )
         elif column == OnlineColumn.TITLE:
             left = content.left()
+            artwork = artwork_pixmap_for_track(track.as_track(), 32, 32)
+            painter.drawPixmap(
+                int(left),
+                int(content.center().y() - 16),
+                artwork,
+            )
+            left += 42
             if playing:
                 paint_icon(painter, "playing", QRectF(left, content.center().y() - 8, 16, 16), self._theme, "selected")
                 left += 22
-            self._draw_text(painter, QRectF(left, content.top(), content.right() - left, content.height()), track.title, QColor(colors.accent) if playing else text_color, bold=playing)
+            title_rect = QRectF(left, content.top(), content.right() - left, content.height())
+            if track.explicit:
+                title_rect.setRight(max(title_rect.left(), title_rect.right() - 22))
+            self._draw_text(painter, title_rect, identity.title, QColor(colors.accent) if playing else text_color, bold=playing)
             if track.explicit and content.width() > 72:
                 badge = QRectF(content.right() - 18, content.center().y() - 8, 16, 16)
                 painter.setPen(Qt.PenStyle.NoPen)
@@ -89,8 +109,20 @@ class OnlineResultDelegate(QStyledItemDelegate):
             paint_icon(painter, "online", QRectF(content.left(), content.center().y() - 8, 16, 16), self._theme, icon_state)
             self._draw_text(painter, content.adjusted(22, 0, 0, 0), track.source_name, secondary)
         elif column == OnlineColumn.STATUS:
-            color = colors.success if track.availability == "available" else colors.disabled_text
-            self._draw_text(painter, content, index.data(Qt.ItemDataRole.DisplayRole) or "", QColor(color))
+            if identity.availability.is_confirmed_error:
+                color = colors.disabled_text
+            elif identity.availability.is_resolving:
+                color = colors.subtle_text
+            else:
+                color = colors.success
+            status_text = (
+                identity.availability.label
+                if identity.availability.is_visible
+                else "可用"
+                if identity.availability.is_playable
+                else "未解析"
+            )
+            self._draw_text(painter, content, status_text, QColor(color))
         elif column == OnlineColumn.DURATION:
             self._draw_text(painter, content, index.data(Qt.ItemDataRole.DisplayRole) or "", secondary, align=Qt.AlignmentFlag.AlignRight)
         else:
@@ -98,7 +130,15 @@ class OnlineResultDelegate(QStyledItemDelegate):
         painter.restore()
 
     def _state(self, track: OnlineTrack, selected: bool, hovered: bool, playing: bool) -> RowVisualState:
-        if track.availability != "available":
+        identity = present_track_identity_values(
+            track.title,
+            track.artist,
+            track.album,
+            is_online=True,
+            availability=track.availability,
+            playback_detail=track.availability_detail,
+        )
+        if identity.availability.is_confirmed_error and not identity.availability.is_retryable:
             return RowVisualState.DISABLED
         if selected and playing:
             return RowVisualState.SELECTED_PLAYING
@@ -112,12 +152,12 @@ class OnlineResultDelegate(QStyledItemDelegate):
 
     def _background(self, state: RowVisualState) -> QColor:
         values = {
-            RowVisualState.NORMAL: self._theme.colors.content_background,
+            RowVisualState.NORMAL: self._theme.colors.surface_primary,
             RowVisualState.HOVER: self._theme.colors.hover_background,
             RowVisualState.SELECTED: self._theme.colors.selected_background,
             RowVisualState.PLAYING: self._theme.colors.playing_background,
             RowVisualState.SELECTED_PLAYING: self._theme.colors.selected_background,
-            RowVisualState.DISABLED: self._theme.colors.content_background,
+            RowVisualState.DISABLED: self._theme.colors.surface_primary,
         }
         return QColor(values[state])
 
@@ -166,7 +206,7 @@ class OnlineResultTable(QTableView):
         self.setVerticalScrollMode(QAbstractItemView.ScrollMode.ScrollPerPixel)
         self.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.verticalHeader().hide()
-        self.verticalHeader().setDefaultSectionSize(48)
+        self.verticalHeader().setDefaultSectionSize(52)
         self.horizontalHeader().setStretchLastSection(False)
         self.doubleClicked.connect(self._on_double_clicked)
         self.customContextMenuRequested.connect(self._show_context_menu)
@@ -180,6 +220,19 @@ class OnlineResultTable(QTableView):
         self._theme = theme
         self._apply_theme_font(theme)
         self.delegate.set_theme(theme)
+        colors = theme.colors
+        metrics = theme.metrics
+        self.setStyleSheet(
+            f"QTableView#onlineResultTable {{ background: {colors.surface_primary}; border: 0; outline: 0; }}"
+            f"QTableView#onlineResultTable QHeaderView {{ background: {colors.surface_primary}; border: 0; }}"
+            f"QTableView#onlineResultTable QHeaderView::section {{ height: 36px; padding: 0 {metrics.spacing_sm}px; "
+            f"background: {colors.surface_primary}; color: {colors.text_tertiary}; border: 0; "
+            f"border-bottom: 1px solid {colors.divider}; font-size: {theme.fonts.card_meta}px; font-weight: 600; }}"
+            f"QTableView#onlineResultTable QScrollBar:vertical {{ width: 6px; margin: 4px 2px; background: transparent; border: 0; }}"
+            f"QTableView#onlineResultTable QScrollBar::handle:vertical {{ min-height: 28px; border-radius: 3px; background: {colors.border_strong}; }}"
+            f"QTableView#onlineResultTable QScrollBar::handle:vertical:hover {{ background: {colors.text_tertiary}; }}"
+            f"QTableView#onlineResultTable QScrollBar::add-line:vertical, QTableView#onlineResultTable QScrollBar::sub-line:vertical {{ height: 0; }}"
+        )
         self.viewport().update()
 
     def _apply_theme_font(self, theme: Theme) -> None:
@@ -226,7 +279,7 @@ class OnlineResultTable(QTableView):
     def mouseReleaseEvent(self, event) -> None:  # noqa: N802
         index = self.indexAt(event.position().toPoint())
         if event.button() == Qt.MouseButton.LeftButton and index.isValid() and index.column() == int(OnlineColumn.FAVORITE):
-            if not self.adapter.collection.read_only:
+            if not self.adapter.collection.read_only or self.adapter.can_mutate_remote:
                 self.adapter.toggle_favorite(self.model.track_at(index.row()).id)
             event.accept()
             return
@@ -237,12 +290,28 @@ class OnlineResultTable(QTableView):
         if track is None:
             return None
         menu = QMenu(self)
+        formal = self.adapter.is_formal
+        identity = present_track_identity_values(
+            track.title,
+            track.artist,
+            track.album,
+            is_online=True,
+            availability=track.availability,
+            playback_detail=track.availability_detail,
+        )
         play = menu.addAction(icon("play", self._theme), "播放")
         play.setEnabled(
-            track.availability == "available" and not self.adapter.collection.read_only
+            formal
+            or (
+                (
+                    not identity.availability.is_confirmed_error
+                    or identity.availability.is_retryable
+                )
+                and not self.adapter.collection.read_only
+            )
         )
         play.triggered.connect(lambda: self.adapter.request_play(track.id))
-        if not self.adapter.collection.read_only:
+        if not self.adapter.collection.read_only or self.adapter.can_mutate_remote:
             favorite = menu.addAction(icon("favorite", self._theme), "取消收藏" if track.is_favorite else "收藏")
             favorite.triggered.connect(lambda: self.adapter.toggle_favorite(track.id))
             add_menu = menu.addMenu(icon("add", self._theme), "添加到歌单")
@@ -251,19 +320,21 @@ class OnlineResultTable(QTableView):
                 action.triggered.connect(
                     lambda checked=False, playlist_id=playlist.id: self.adapter.request_add_to_playlist(track.id, playlist_id)
                 )
-            download = menu.addAction(icon("local", self._theme), "下载")
-            source = next((item for item in self.adapter.sources() if item.id == track.source_id), None)
-            download.setEnabled(bool(source and source.supports_download and track.availability == "available"))
-            download.triggered.connect(lambda: self.adapter.request_download(track.id))
+            if not formal:
+                download = menu.addAction(icon("local", self._theme), "下载")
+                source = next((item for item in self.adapter.sources() if item.id == track.source_id), None)
+                download.setEnabled(bool(source and source.supports_download and identity.availability.is_playable))
+                download.triggered.connect(lambda: self.adapter.request_download(track.id))
         info = menu.addAction(icon("library", self._theme), "查看歌曲信息")
         info.setEnabled(True)
+        info.triggered.connect(lambda: self.adapter.request_metadata(track.id))
         source_action = menu.addAction(icon("online", self._theme), "查看来源")
         source_action.triggered.connect(lambda: self.source_requested.emit())
         return menu
 
     def _on_double_clicked(self, index: QModelIndex) -> None:
         track = self.model.track_at(index.row())
-        if track is not None and not self.adapter.collection.read_only:
+        if track is not None and (self.adapter.is_formal or not self.adapter.collection.read_only):
             self.adapter.request_play(track.id)
 
     def _show_context_menu(self, position) -> None:
@@ -304,9 +375,40 @@ class OnlineResultTable(QTableView):
                 )
             )
         else:
-            tracks.sort(key=lambda track: track.result_rank)
+            tracks.sort(key=self._relevance_key)
         self.model.set_tracks(tracks)
         self.model.set_playing_track(self.adapter.playing_track_id)
+
+    def _relevance_key(self, track: OnlineTrack) -> tuple[int, int]:
+        """Prefer metadata matching the query while keeping ties stable."""
+        query = " ".join(str(self.adapter.query or "").casefold().split())
+        if not query:
+            return (0, track.result_rank)
+        terms = tuple(dict.fromkeys(query.split()))
+        title = " ".join(str(track.title or "").casefold().split())
+        artist = " ".join(str(track.artist or "").casefold().split())
+        album = " ".join(str(track.album or "").casefold().split())
+
+        def field_score(value: str, weight: int) -> int:
+            if not value:
+                return 0
+            if value == query:
+                return weight
+            if query in value:
+                return weight - 10
+            matched = sum(1 for term in terms if term and term in value)
+            if matched == len(terms) and matched:
+                return weight - 20
+            if matched:
+                return weight - 40 + matched
+            return 0
+
+        score = max(
+            field_score(title, 100),
+            field_score(artist, 70),
+            field_score(album, 55),
+        )
+        return (-score, track.result_rank)
 
     def _apply_column_widths(self) -> None:
         width = max(1, self.viewport().width() - 12)

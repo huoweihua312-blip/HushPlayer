@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
+
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import QLabel, QStackedWidget, QVBoxLayout, QWidget
 
 from app.ui_v2.adapters.albums_adapter import AlbumsAdapter
-from app.ui_v2.adapters.legacy_settings_bridge import LegacySettingsBridge
 from app.ui_v2.adapters.artists_adapter import (
     ArtistsAdapter,
     artist_identity,
@@ -15,6 +16,7 @@ from app.ui_v2.adapters.artists_adapter import (
 from app.ui_v2.adapters.favorites_adapter import FavoritesAdapter
 from app.ui_v2.adapters.library_collection import LibraryCollectionAdapter
 from app.ui_v2.adapters.lyrics_adapter import LyricsAdapter
+from app.ui_v2.adapters.legacy_settings_bridge import LegacySettingsBridge
 from app.ui_v2.adapters.navigation_adapter import NavigationAdapter
 from app.ui_v2.adapters.online_adapter import OnlineAdapter
 from app.ui_v2.adapters.online_source_adapter import OnlineSourceAdapter
@@ -84,9 +86,9 @@ class ContentRouter(QStackedWidget):
     track_play_requested = Signal(object, str)
     queue_requested = Signal(object, bool)
     online_play_requested = Signal(object)
+    online_recovery_requested = Signal(object)
     immersive_fullscreen_requested = Signal(bool)
     immersive_transparency_requested = Signal(bool)
-    lyrics_settings_requested = Signal()
 
     ROUTE_METADATA = {
         "online_search": ("在线搜索", "search"),
@@ -105,8 +107,9 @@ class ContentRouter(QStackedWidget):
         immersive_options: ImmersiveLyricsOptions,
         theme: Theme,
         parent: QWidget | None = None,
+        *,
         settings_bridge: LegacySettingsBridge | None = None,
-        settings_preview_callback=None,
+        settings_apply_callback: Callable[[dict[str, object]], None] | None = None,
     ) -> None:
         super().__init__(parent)
         self._theme = theme
@@ -114,14 +117,17 @@ class ContentRouter(QStackedWidget):
         self._collection = collection
         self._playlists = playlists
         self._online_adapter = online
+        self._online_adapter.play_requested.connect(self.online_play_requested)
         self._lyrics_adapter = lyrics
         self._playback_adapter = playback
         self._immersive_options = immersive_options
         self._settings_bridge = settings_bridge
-        self._settings_preview_callback = settings_preview_callback
+        self._settings_apply_callback = settings_apply_callback
         self._immersive_return_route = "lyrics"
         self._last_normal_route = navigation.route if not navigation.route.startswith("immersive") else "browse"
         self._content_safe_bottom = 0
+        self._playing_track_id = ""
+        self._is_playing = True
         self._online_sources = OnlineSourceAdapter(online, self)
         self._playback_enabled = (
             not collection.read_only or playback.has_real_backend
@@ -131,6 +137,9 @@ class ContentRouter(QStackedWidget):
             theme,
             self,
             playback_enabled=self._playback_enabled,
+            playlists=playlists,
+            online=online,
+            online_discovery=online.discovery,
         )
         self._pages: dict[str, QWidget] = {
             "browse": self.browse_page,
@@ -144,6 +153,9 @@ class ContentRouter(QStackedWidget):
         self.addWidget(self.browse_page)
         self.addWidget(library_page)
         self.browse_page.track_play_requested.connect(self.track_play_requested)
+        self.browse_page.online_search_requested.connect(
+            lambda: self._navigation.set_route("online_search")
+        )
         library_page.track_table.play_requested.connect(
             lambda track_id: self.track_play_requested.emit(
                 library_page.adapter.tracks(), track_id
@@ -238,7 +250,15 @@ class ContentRouter(QStackedWidget):
                 page.set_content_safe_bottom(self._content_safe_bottom)
 
     def set_playing_track(self, track_id: str) -> None:
+        self._playing_track_id = str(track_id or "")
         self._online_adapter.set_playing_track(track_id)
+        self._apply_playback_state()
+
+    def set_playback_state(self, is_playing: bool) -> None:
+        """Refresh only current rows when playback changes between play/pause."""
+
+        self._is_playing = bool(is_playing)
+        self._apply_playback_state()
 
     def set_global_query(self, text: str) -> None:
         """Forward the shell search to the active track-backed page."""
@@ -262,13 +282,26 @@ class ContentRouter(QStackedWidget):
                 page.set_content_safe_bottom(self._content_safe_bottom)
             if hasattr(page, "set_responsive_reference_width") and self.width() > 0:
                 page.set_responsive_reference_width(self.width())
+            self._apply_playback_state_to_page(page)
         return self._pages[key]
+
+    def _apply_playback_state(self) -> None:
+        for page in dict.fromkeys(self._pages.values()):
+            self._apply_playback_state_to_page(page)
+
+    def _apply_playback_state_to_page(self, page: QWidget) -> None:
+        table = getattr(page, "track_table", None)
+        setter = getattr(table, "set_playback_state", None)
+        if callable(setter):
+            setter(self._playing_track_id, self._is_playing)
 
     def _wire_track_page(self, page: TrackListPage) -> TrackListPage:
         if hasattr(page, "set_playback_enabled"):
             page.set_playback_enabled(self._playback_enabled)
         page.track_play_requested.connect(self.track_play_requested)
         page.queue_requested.connect(self.queue_requested)
+        if hasattr(page, "track_recovery_requested"):
+            page.track_recovery_requested.connect(self.online_recovery_requested)
         page.browse_library_requested.connect(lambda: self._navigation.set_route("library"))
         return page
 
@@ -331,7 +364,6 @@ class ContentRouter(QStackedWidget):
         page.source_management_requested.connect(
             lambda: self._navigation.set_route("online_sources")
         )
-        self._online_adapter.play_requested.connect(self.online_play_requested)
         return page
 
     def _create_online_source_page(self) -> OnlineSourcePage:
@@ -351,9 +383,9 @@ class ContentRouter(QStackedWidget):
             self._playback_adapter,
             self._theme,
             self._immersive_options,
+            self,
             settings_bridge=self._settings_bridge,
-            settings_preview_callback=self._settings_preview_callback,
-            parent=self,
+            settings_apply_callback=self._settings_apply_callback,
         )
         page.immersive_exit_requested.connect(self._return_from_immersive)
         page.fullscreen_requested.connect(self.immersive_fullscreen_requested)
@@ -365,17 +397,16 @@ class ContentRouter(QStackedWidget):
         return page
 
     def _switch_immersive_mode(self, mode: str) -> None:
-        target_route = (
-            "immersive_now_playing"
-            if str(mode) == "now_playing"
-            else "immersive_lyrics"
-        )
-        if self._navigation.route == target_route:
-            page = self._pages.get("immersive_lyrics")
-            if page is not None and hasattr(page, "set_mode"):
-                page.set_mode(mode)
+        page = self._pages.get("immersive_lyrics")
+        if isinstance(page, ImmersiveLyricsPage):
+            # These are views inside one cached player workspace.  Changing a
+            # tab must not rewrite navigation state or rebuild the shell.
+            page.set_mode(str(mode))
+            self.setCurrentWidget(page)
             return
-        self._navigation.set_route(target_route)
+        self._navigation.set_route(
+            "immersive_now_playing" if str(mode) == "now_playing" else "immersive_lyrics"
+        )
 
     def apply_immersive_options(self, options: ImmersiveLyricsOptions) -> None:
         page = self._pages.get("immersive_lyrics")

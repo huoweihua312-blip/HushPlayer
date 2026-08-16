@@ -20,6 +20,7 @@ SETTINGS_CATEGORIES: tuple[SettingsCategory, ...] = (
     SettingsCategory("playback", "播放", "playback"),
     SettingsCategory("lyrics", "歌词", "lyrics"),
     SettingsCategory("library", "音乐库", "library"),
+    SettingsCategory("online_sources", "在线来源", "online_sources"),
     SettingsCategory("cache", "缓存", "cache"),
     SettingsCategory("updates", "更新", "updates"),
     SettingsCategory("about", "关于", "about"),

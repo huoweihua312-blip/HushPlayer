@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import ctypes
+import os
 import sys
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Sequence
 
 from PySide6.QtCore import QCoreApplication, Qt
-from PySide6.QtGui import QGuiApplication, QIcon
+from PySide6.QtGui import QFont, QGuiApplication, QIcon
 from PySide6.QtWidgets import QApplication
 
 from app.core.app_paths import APP_NAME, APP_VERSION, AppPaths
@@ -44,15 +46,35 @@ def configure_qt_runtime() -> None:
     )
 
 
-def apply_ui_theme(app: QApplication, ui_flavor: str) -> None:
+def apply_ui_theme(
+    app: QApplication,
+    ui_flavor: str,
+    *,
+    settings_path: str | None = None,
+) -> None:
     """Install the selected shell theme before constructing its MainWindow."""
 
     flavor = str(ui_flavor or UI_FLAVOR_LEGACY).strip().casefold()
     if flavor == UI_FLAVOR_V2:
         from app.ui_v2.theme.styles import build_application_palette, build_stylesheet
-        from app.ui_v2.theme.tokens import get_theme
+        from app.ui_v2.adapters.legacy_settings_bridge import load_settings_document
+        from app.ui_v2.theme.tokens import get_theme, resolve_font_family
 
-        theme = get_theme("dark")
+        resolved_settings_path = settings_path or os.environ.get(
+            "HUSHPLAYER_UI_V2_SETTINGS_PATH", ""
+        )
+        if not resolved_settings_path:
+            resolved_settings_path = str(AppPaths.resolve().data_dir / "settings.json")
+        values = load_settings_document(Path(resolved_settings_path))
+        appearance = str(values.get("appearance_mode", "dark")).casefold()
+        theme = get_theme("light" if appearance == "light" else "dark")
+        ui_font = QFont(resolve_font_family(), 10)
+        ui_font.setStyleHint(QFont.StyleHint.SansSerif)
+        ui_font.setStyleStrategy(
+            QFont.StyleStrategy.PreferQuality | QFont.StyleStrategy.PreferAntialias
+        )
+        ui_font.setHintingPreference(QFont.HintingPreference.PreferFullHinting)
+        app.setFont(ui_font)
         app.setPalette(build_application_palette(theme))
         app.setStyleSheet(build_stylesheet(theme))
         app.setProperty("hushUiFlavor", UI_FLAVOR_V2)
@@ -73,6 +95,7 @@ def create_application_context(
     *,
     startup_started_at: float | None = None,
     ui_flavor: str = UI_FLAVOR_LEGACY,
+    settings_path: str | None = None,
 ) -> ApplicationContext:
     """Create or reuse the one QApplication used by either UI entrypoint."""
 
@@ -88,7 +111,7 @@ def create_application_context(
         raise RuntimeError("HushPlayer requires a QApplication for UI startup.")
     app.setApplicationName(APP_NAME)
     app.setApplicationVersion(APP_VERSION)
-    apply_ui_theme(app, ui_flavor)
+    apply_ui_theme(app, ui_flavor, settings_path=settings_path)
     icon = QIcon(str(paths.resource_path("assets", "icons", "HushPlayer.ico")))
     app.setWindowIcon(icon)
     if startup_started_at is not None:

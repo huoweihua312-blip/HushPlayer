@@ -654,12 +654,15 @@ class PlayerIconButton(QPushButton):
 
 
 class VolumeStatusIcon(QLabel):
+    clicked = Signal()
+
     def __init__(self) -> None:
         super().__init__()
         self._muted = False
         self._hovered = False
         self.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.setFixedSize(22, 22)
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
         self.setMouseTracking(True)
         self._refresh_icon()
 
@@ -681,6 +684,13 @@ class VolumeStatusIcon(QLabel):
         self._hovered = False
         self._refresh_icon()
         super().leaveEvent(event)
+
+    def mouseReleaseEvent(self, event) -> None:
+        if event.button() == Qt.MouseButton.LeftButton:
+            self.clicked.emit()
+            event.accept()
+            return
+        super().mouseReleaseEvent(event)
 
     def _refresh_icon(self) -> None:
         pixmap = QPixmap(24, 24)
@@ -3579,6 +3589,9 @@ class ImmersiveLyricsWindow(QWidget):
         progress_row.addWidget(self.immersive_total_time)
 
         self.immersive_volume_icon = VolumeStatusIcon()
+        toggle_mute = getattr(main_window, "toggle_mute", None)
+        if callable(toggle_mute):
+            self.immersive_volume_icon.clicked.connect(toggle_mute)
         self.immersive_volume_slider = QSlider(Qt.Orientation.Horizontal)
         self.immersive_volume_slider.setObjectName("immersiveVolumeSlider")
         self.immersive_volume_slider.setRange(0, 100)
@@ -3796,6 +3809,13 @@ class ImmersiveLyricsWindow(QWidget):
             self._connect_external_signal(
                 liked_signal,
                 self.on_external_liked_state_changed,
+            )
+        controller = getattr(self.main_window, "production_playback_controller", None)
+        muted_signal = getattr(controller, "muted_changed", None)
+        if muted_signal is not None:
+            self._connect_external_signal(
+                muted_signal,
+                self.on_external_muted_state_changed,
             )
         main_volume_slider = getattr(self.main_window, "volume_slider", None)
         if main_volume_slider is not None:
@@ -4079,6 +4099,10 @@ class ImmersiveLyricsWindow(QWidget):
             self.update_immersive_duration(player.duration())
             self.update_immersive_position(player.position())
             self.update_immersive_playback_state(player.playbackState())
+        self.sync_volume_from_main(getattr(self.main_window, "current_volume", 0))
+        controller = getattr(self.main_window, "production_playback_controller", None)
+        muted = getattr(controller, "is_muted", False)
+        self.on_external_muted_state_changed(bool(muted))
         self.refresh_play_mode_state()
 
     def update_immersive_position(self, position: int) -> None:
@@ -4116,7 +4140,9 @@ class ImmersiveLyricsWindow(QWidget):
 
     def on_immersive_volume_changed(self, value: int) -> None:
         volume = max(0, min(100, int(value)))
-        self.immersive_volume_icon.set_muted(volume == 0)
+        muted_getter = getattr(self.main_window, "_audio_is_muted", None)
+        muted = bool(muted_getter()) if callable(muted_getter) else False
+        self.immersive_volume_icon.set_muted(volume == 0 or muted)
         setter = getattr(self.main_window, "change_volume", None)
         if callable(setter):
             setter(volume)
@@ -4126,7 +4152,15 @@ class ImmersiveLyricsWindow(QWidget):
         self.immersive_volume_slider.blockSignals(True)
         self.immersive_volume_slider.setValue(volume)
         self.immersive_volume_slider.blockSignals(False)
-        self.immersive_volume_icon.set_muted(volume == 0)
+        muted_getter = getattr(self.main_window, "_audio_is_muted", None)
+        muted = bool(muted_getter()) if callable(muted_getter) else False
+        self.immersive_volume_icon.set_muted(volume == 0 or muted)
+
+    def on_external_muted_state_changed(self, muted: bool) -> None:
+        """Keep the legacy lyrics control in lockstep with global audio mute."""
+
+        volume = max(0, min(100, int(self.immersive_volume_slider.value())))
+        self.immersive_volume_icon.set_muted(volume == 0 or bool(muted))
 
     def request_previous_song(self) -> None:
         callback = getattr(self.main_window, "play_previous_song", None)
@@ -5056,6 +5090,9 @@ class MainWindow(QMainWindow):
         )
         self.audio_output = self.production_playback_controller.audio_output
         self.media_player = self.production_playback_controller.media_player
+        self.production_playback_controller.muted_changed.connect(
+            self._on_legacy_audio_muted_changed
+        )
         default_device = QMediaDevices.defaultAudioOutput()
         print("默认音频输出设备：", self.audio_device_name(default_device))
         self.sync_default_audio_output()
@@ -10135,6 +10172,7 @@ class MainWindow(QMainWindow):
 
         self.volume_icon_label = VolumeStatusIcon()
         self.volume_icon_label.setObjectName("volumeIconLabel")
+        self.volume_icon_label.clicked.connect(self.toggle_mute)
 
         self.volume_slider = PlayerVolumeSlider(Qt.Orientation.Horizontal)
         self.volume_slider.setObjectName("volumeSlider")
@@ -10224,7 +10262,22 @@ class MainWindow(QMainWindow):
             self.volume_value_label.setText(f"{volume}%")
 
         if hasattr(self, "volume_icon_label"):
-            self.volume_icon_label.set_muted(volume == 0)
+            self.volume_icon_label.set_muted(volume == 0 or self._audio_is_muted())
+
+    def _audio_is_muted(self) -> bool:
+        output = getattr(self, "audio_output", None)
+        getter = getattr(output, "isMuted", None)
+        return bool(getter()) if callable(getter) else False
+
+    def _on_legacy_audio_muted_changed(self, muted: bool) -> None:
+        displayed_muted = bool(muted) or int(getattr(self, "current_volume", 0)) == 0
+        volume_icon = getattr(self, "volume_icon_label", None)
+        if volume_icon is not None:
+            volume_icon.set_muted(displayed_muted)
+        immersive_window = getattr(self, "immersive_lyrics_window", None)
+        immersive_icon = getattr(immersive_window, "immersive_volume_icon", None)
+        if immersive_icon is not None:
+            immersive_icon.set_muted(displayed_muted)
 
     def dragEnterEvent(self, event) -> None:
         if event.mimeData().hasUrls():
@@ -12871,7 +12924,16 @@ class MainWindow(QMainWindow):
 
     def on_update_installer_launched(self, path: str) -> None:
         print("更新安装程序已启动，正在进入正式退出流程：", path)
+        # UpdateDialog.exec() owns a nested event loop.  End it explicitly so
+        # the updater can observe that this process has fully exited before
+        # replacing the installation directory.
+        dialog = getattr(self, "update_dialog", None)
+        if dialog is not None:
+            dialog.done(QDialog.DialogCode.Accepted)
         self.close()
+        application = QApplication.instance()
+        if application is not None:
+            application.quit()
 
     def open_settings_dialog(self) -> None:
         self.set_sidebar_active("settings")
@@ -17392,10 +17454,26 @@ class MainWindow(QMainWindow):
         return title, artist, album
 
     def change_volume(self, value: int) -> None:
-        self.current_volume = value
-        self.audio_output.setVolume(value / 100)
-        self.save_hush_settings({"volume": value})
-        print("音量改为：", value)
+        self.current_volume = max(0, min(100, int(value)))
+        controller = getattr(self, "production_playback_controller", None)
+        if controller is not None:
+            controller.set_volume(self.current_volume)
+        else:
+            self.audio_output.setVolume(self.current_volume / 100)
+        self.save_hush_settings({"volume": self.current_volume})
+        self.update_volume_status(self.current_volume)
+        print("音量改为：", self.current_volume)
+
+    def toggle_mute(self) -> None:
+        controller = getattr(self, "production_playback_controller", None)
+        if controller is None:
+            return
+        controller.toggle_mute()
+        restored_volume = controller.volume
+        if hasattr(self, "volume_slider") and self.volume_slider.value() != restored_volume:
+            self.volume_slider.setValue(restored_volume)
+        self.current_volume = restored_volume
+        self.update_volume_status(restored_volume)
 
     def on_seek_start(self) -> None:
         self.is_seeking = True

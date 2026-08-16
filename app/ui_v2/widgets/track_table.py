@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Callable
 
 from PySide6.QtCore import QModelIndex, QRectF, Qt, Signal
-from PySide6.QtGui import QColor, QContextMenuEvent, QFont, QPainter, QPen
+from PySide6.QtGui import QColor, QContextMenuEvent, QFont, QKeyEvent, QPainter, QPen
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QHeaderView,
@@ -19,6 +19,8 @@ from app.ui_v2.models.track import Track
 from app.ui_v2.models.track_table_model import TrackColumn, TrackTableModel
 from app.ui_v2.theme.icons import paint_icon
 from app.ui_v2.theme.tokens import Theme
+from app.ui_v2.widgets.quiet_context_menu import apply_menu_theme
+from app.ui_v2.widgets.responsive_columns import ResponsiveColumnPolicy
 from app.ui_v2.widgets.track_delegate import TrackDelegate
 
 
@@ -67,7 +69,7 @@ class TrackHeaderView(QHeaderView):
             if is_hovered
             else colors.elevated_background
             if is_sorted
-            else colors.content_background
+            else colors.surface_primary
         )
         painter.save()
         painter.fillRect(rect, QColor(background))
@@ -124,6 +126,7 @@ class TrackTable(QTableView):
     """View/controller boundary for selection, playback, favorites, and menus."""
 
     play_requested = Signal(str)
+    online_recovery_requested = Signal(object)
     favorite_toggled = Signal(str, bool)
     mock_action_requested = Signal(str, str)
     artist_requested = Signal(str)
@@ -132,6 +135,9 @@ class TrackTable(QTableView):
         super().__init__(parent)
         self.adapter = adapter
         self.model = TrackTableModel(adapter.tracks(), self)
+        meta_provider = getattr(adapter, "row_metadata", None)
+        if callable(meta_provider):
+            self.model.set_meta_provider(meta_provider)
         self.delegate = TrackDelegate(theme, self)
         self._theme = theme
         self._apply_theme_font(theme)
@@ -143,6 +149,8 @@ class TrackTable(QTableView):
         self._artist_navigation_enabled = False
         self._playback_enabled = True
         self.setObjectName("trackTable")
+        self.setAccessibleName("歌曲列表")
+        self.setAccessibleDescription("使用方向键选择歌曲，按 Enter 播放，按空格不改变播放状态")
         self.header = TrackHeaderView(theme, self)
         self.setHorizontalHeader(self.header)
         self.setModel(self.model)
@@ -158,10 +166,16 @@ class TrackTable(QTableView):
         self.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.setVerticalScrollMode(QAbstractItemView.ScrollMode.ScrollPerPixel)
         self.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         self.doubleClicked.connect(self._on_double_clicked)
         self.customContextMenuRequested.connect(self._show_context_menu)
         header = self.header
         header.setStretchLastSection(False)
+        # The bundled Chinese font makes Qt's style-derived minimum section
+        # size wider than the compact status/action columns.  Fixed profiles
+        # own those widths; otherwise a 900/1100px window can grow a hidden
+        # horizontal overflow that the table intentionally suppresses.
+        header.setMinimumSectionSize(0)
         header.setSectionsClickable(True)
         header.setSortIndicatorShown(False)
         header.setSortIndicator(int(adapter.sort_column), adapter.sort_order)
@@ -193,6 +207,7 @@ class TrackTable(QTableView):
     def _apply_scrollbar_style(self) -> None:
         c = self._theme.colors
         self.setStyleSheet(
+            f"QTableView#trackTable {{ background: {c.surface_primary}; border: 0; }}"
             f"QTableView#trackTable QScrollBar:vertical {{ width: 6px; background: transparent; "
             f"margin: 2px 0; border: 0; }}"
             f"QTableView#trackTable QScrollBar::handle:vertical {{ min-height: 24px; border-radius: 3px; "
@@ -216,8 +231,8 @@ class TrackTable(QTableView):
             track = self.model.track_at(index.row())
             if (
                 track is not None
-                and not track.is_missing
-                and not self.adapter.collection.read_only
+                and self._can_change_favorite(track)
+                and self.adapter.collection.can_mutate_favorites
             ):
                 next_value = not track.is_favorite
                 self.adapter.toggle_favorite(track.id)
@@ -236,6 +251,16 @@ class TrackTable(QTableView):
                 event.accept()
                 return
         super().mouseReleaseEvent(event)
+
+    def mouseDoubleClickEvent(self, event) -> None:  # noqa: N802
+        index = self.indexAt(event.position().toPoint())
+        track = self.model.track_at(index.row()) if index.isValid() else None
+        if track is not None and track.needs_online_recovery:
+            if self._playback_enabled:
+                self.online_recovery_requested.emit(track)
+            event.accept()
+            return
+        super().mouseDoubleClickEvent(event)
 
     def mouseMoveEvent(self, event) -> None:  # noqa: N802
         index = self.indexAt(event.position().toPoint())
@@ -293,6 +318,11 @@ class TrackTable(QTableView):
 
         self._playback_enabled = bool(enabled)
 
+    def set_playback_state(self, track_id: str, is_playing: bool) -> None:
+        """Forward current paused/playing state without replacing the model."""
+
+        self.model.set_playback_state(track_id, is_playing)
+
     def contextMenuEvent(self, event: QContextMenuEvent) -> None:  # noqa: N802
         index = self.indexAt(event.pos())
         menu = self.build_context_menu(index)
@@ -304,30 +334,33 @@ class TrackTable(QTableView):
         track = self.model.track_at(index.row()) if index.isValid() else None
         if track is None:
             return None
-        menu = QMenu(self)
+        menu = apply_menu_theme(QMenu(self), self._theme)
         play_action = menu.addAction("播放")
-        is_unavailable_online = bool(
-            self.adapter.collection.read_only and track.is_online
-        )
         play_action.setEnabled(
-            not track.is_missing
+            (not track.is_missing or track.is_online)
             and self._playback_enabled
-            and not is_unavailable_online
         )
-        if is_unavailable_online:
-            play_action.setToolTip("当前版本暂未接入在线播放")
+        if track.is_missing:
+            play_action.setToolTip("当前播放来源不可用，请选择“在线寻找并播放”")
+            play_action.setStatusTip("当前播放来源不可用")
         elif not self._playback_enabled:
             play_action.setToolTip("真实模式尚未接入播放")
         play_action.triggered.connect(lambda: self._request_play(track))
-        if not self.adapter.collection.read_only:
+        if track.needs_online_recovery:
+            recover_action = menu.addAction("在线寻找并播放")
+            recover_action.setEnabled(self._playback_enabled)
+            recover_action.setToolTip("保留当前歌单位置和收藏关系，只更换播放来源")
+            recover_action.setStatusTip("只更换播放来源，不替换歌曲成员")
+            recover_action.triggered.connect(lambda: self.online_recovery_requested.emit(track))
+        if self.adapter.collection.can_mutate_favorites:
             favorite_action = menu.addAction("取消收藏" if track.is_favorite else "添加到我喜欢")
-            favorite_action.setEnabled(not track.is_missing)
+            favorite_action.setEnabled(self._can_change_favorite(track))
             favorite_action.triggered.connect(lambda: self._toggle_from_menu(track))
             playlist_action = menu.addAction("添加到歌单")
             playlist_action.triggered.connect(
                 lambda: self.mock_action_requested.emit("add_to_playlist", track.id)
             )
-        if self._playlist_remove_callback is not None and not self.adapter.collection.read_only:
+        if self._playlist_remove_callback is not None:
             remove_action = menu.addAction("从当前歌单移除")
             remove_action.triggered.connect(
                 lambda: self._playlist_remove_callback(track.id)
@@ -339,6 +372,12 @@ class TrackTable(QTableView):
             artist_action.triggered.connect(lambda: self.artist_requested.emit(track.artist))
         return menu
 
+    @staticmethod
+    def _can_change_favorite(track: Track) -> bool:
+        """Allow removing stale favorites while keeping invalid additions blocked."""
+
+        return not track.is_missing or track.is_favorite
+
     def _show_context_menu(self, position) -> None:
         index = self.indexAt(position)
         menu = self.build_context_menu(index)
@@ -349,12 +388,32 @@ class TrackTable(QTableView):
 
     def _on_double_clicked(self, index: QModelIndex) -> None:
         track = self.model.track_at(index.row())
+        if track is not None and track.needs_online_recovery:
+            if self._playback_enabled:
+                self.online_recovery_requested.emit(track)
+            return
         if (
             track is not None
-            and not track.is_missing
-            and not (self.adapter.collection.read_only and track.is_online)
+            and (not track.is_missing or track.is_online)
         ):
             self._request_play(track)
+
+    def keyPressEvent(self, event: QKeyEvent) -> None:  # noqa: N802
+        """Keep keyboard playback explicit: Enter plays, Space never does."""
+
+        if event.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
+            index = self.currentIndex()
+            track = self.model.track_at(index.row()) if index.isValid() else None
+            if track is not None:
+                if track.needs_online_recovery:
+                    if self._playback_enabled:
+                        self.online_recovery_requested.emit(track)
+                    event.accept()
+                    return
+                self._request_play(track)
+                event.accept()
+                return
+        super().keyPressEvent(event)
 
     def _request_play(self, track: Track) -> None:
         if not self._playback_enabled:
@@ -387,25 +446,14 @@ class TrackTable(QTableView):
         viewport_width = max(1, self.viewport().width())
         width = max(1, viewport_width - 16)
         profile_width = self._responsive_reference_width or viewport_width
-        self._column_profile = (
-            "narrow"
-            if profile_width < 950
-            else "standard"
-            if profile_width < 1220
-            else "wide"
-        )
+        self._column_profile = ResponsiveColumnPolicy.profile_for_width(profile_width).name
         self.setColumnHidden(
             int(TrackColumn.FAVORITE),
-            self._column_profile == "narrow" or self.adapter.collection.read_only,
+            self._column_profile == "narrow" or not self.adapter.collection.can_mutate_favorites,
         )
         self.setColumnHidden(int(TrackColumn.ALBUM), self._column_profile == "narrow")
         self.setColumnHidden(int(TrackColumn.SOURCE), self._column_profile != "wide")
-        if self._column_profile == "narrow":
-            widths = self._narrow_column_widths(width)
-        elif self._column_profile == "standard":
-            widths = self._standard_column_widths(width)
-        else:
-            widths = self._wide_column_widths(width)
+        widths = ResponsiveColumnPolicy.widths(self._column_profile, width)
         header = self.header
         for column, column_width in widths.items():
             header.setSectionResizeMode(int(column), QHeaderView.ResizeMode.Fixed)

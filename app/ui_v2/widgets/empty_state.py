@@ -37,11 +37,12 @@ class EmptyState(QWidget):
 
     def set_state(self, state: str, detail: str = "") -> None:
         content = {
-            "empty": ("没有可显示的歌曲", "尝试调整搜索内容或添加音乐文件。"),
-            "loading": ("正在加载歌曲", "正在准备歌曲列表。"),
-            "error": ("无法显示歌曲", "请稍后重试。"),
+            "empty": ("没有可显示的歌曲", "尝试调整搜索内容或添加音乐文件。", "playlist"),
+            "loading": ("正在加载歌曲", "正在准备歌曲列表。", "library"),
+            "error": ("无法显示歌曲", "请稍后重试。", "missing"),
         }
-        title, default_detail = content.get(state, content["empty"])
+        title, default_detail, icon_name = content.get(state, content["empty"])
+        self.empty_icon_name = icon_name
         self.title_label.setText(title)
         self.detail_label.setText(detail or default_detail)
 

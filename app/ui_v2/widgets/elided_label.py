@@ -12,10 +12,18 @@ class ElidedLabel(QLabel):
         super().__init__(parent)
         self._full_text = ""
         self._max_lines = max(1, int(max_lines))
+        self._refreshing = False
         self.setTextFormat(Qt.TextFormat.PlainText)
         self.setWordWrap(self._max_lines > 1)
-        if self._max_lines > 1:
-            self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)
+        horizontal_policy = (
+            QSizePolicy.Policy.Ignored
+            if self._max_lines == 1
+            else QSizePolicy.Policy.Expanding
+        )
+        self.setSizePolicy(
+            horizontal_policy,
+            QSizePolicy.Policy.Minimum if self._max_lines > 1 else QSizePolicy.Policy.Preferred,
+        )
 
     @property
     def full_text(self) -> str:
@@ -31,16 +39,37 @@ class ElidedLabel(QLabel):
         self._refresh_text()
 
     def _refresh_text(self) -> None:
+        if self._refreshing:
+            return
+        self._refreshing = True
+        try:
+            self._refresh_text_impl()
+        finally:
+            self._refreshing = False
+
+    def _refresh_text_impl(self) -> None:
         available = max(0, self.contentsRect().width())
         metrics = QFontMetrics(self.font())
         if self._max_lines == 1:
-            self.setText(metrics.elidedText(self._full_text, Qt.TextElideMode.ElideRight, available))
+            text = metrics.elidedText(self._full_text, Qt.TextElideMode.ElideRight, available)
+            if self.text() != text:
+                self.setText(text)
             return
 
         if not self._full_text:
-            self.setText("")
+            if self.text():
+                self.setText("")
             return
         remaining = self._full_text.strip()
+        if metrics.horizontalAdvance(remaining) <= available:
+            if self.text() != remaining:
+                self.setText(remaining)
+            line_height = metrics.lineSpacing()
+            if self.minimumHeight() != line_height + 2:
+                self.setMinimumHeight(line_height + 2)
+            if self.maximumHeight() != line_height + 4:
+                self.setMaximumHeight(line_height + 4)
+            return
         lines: list[str] = []
         for line_index in range(self._max_lines):
             if not remaining:
@@ -64,7 +93,13 @@ class ElidedLabel(QLabel):
                 best = boundary
             lines.append(remaining[:best].rstrip())
             remaining = remaining[best:].lstrip()
-        self.setText("\n".join(lines))
+        text = "\n".join(lines)
+        if self.text() != text:
+            self.setText(text)
         line_height = metrics.lineSpacing()
-        self.setMinimumHeight(line_height * min(self._max_lines, max(1, len(lines))) + 2)
-        self.setMaximumHeight(line_height * self._max_lines + 4)
+        minimum_height = line_height * min(self._max_lines, max(1, len(lines))) + 2
+        maximum_height = line_height * self._max_lines + 4
+        if self.minimumHeight() != minimum_height:
+            self.setMinimumHeight(minimum_height)
+        if self.maximumHeight() != maximum_height:
+            self.setMaximumHeight(maximum_height)

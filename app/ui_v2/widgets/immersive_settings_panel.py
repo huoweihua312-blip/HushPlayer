@@ -49,7 +49,7 @@ class ImmersiveSettingsPanel(QFrame):
         form.setHorizontalSpacing(12)
         form.setVerticalSpacing(10)
         self.theme_combo = self._combo((("跟随窗口", ""), ("深色", "dark"), ("浅色", "light")))
-        self.background_combo = self._combo((("封面背景", "artwork"), ("渐变背景", "gradient"), ("纯色背景", "solid"), ("透明背景", "transparent")))
+        self.background_combo = self._combo((("封面背景", "artwork"), ("渐变背景", "gradient"), ("纯色背景", "solid"), ("透明背景", "transparent"), ("自定义图片", "custom")))
         self.background_opacity_slider = self._slider(0, 100)
         self.overlay_strength_slider = self._slider(15, 85)
         self.control_surface_opacity_slider = self._slider(20, 80)
@@ -114,8 +114,7 @@ class ImmersiveSettingsPanel(QFrame):
         layout.addWidget(self.header_widget)
         layout.addWidget(self.scroll_area, 1)
         layout.addWidget(self.footer_widget)
-        self.close_button.clicked.connect(self.hide)
-        self.close_button.clicked.connect(self.closed)
+        self.close_button.clicked.connect(self.request_close)
         self.exit_immersive_button.clicked.connect(self.exit_requested)
         for combo in (self.theme_combo, self.background_combo, self.weight_combo, self.text_protection_combo):
             combo.currentIndexChanged.connect(self.changed)
@@ -244,6 +243,10 @@ class ImmersiveSettingsPanel(QFrame):
 
     def set_reduce_motion(self, enabled: bool) -> None:
         self.advanced_disclosure.set_reduce_motion(enabled)
+
+    def request_close(self) -> None:
+        self.hide()
+        self.closed.emit()
 
     def any_popup_open(self) -> bool:
         return any(combo.view().isVisible() for combo in (self.theme_combo, self.background_combo, self.weight_combo, self.text_protection_combo))

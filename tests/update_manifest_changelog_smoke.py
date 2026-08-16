@@ -153,6 +153,9 @@ def main() -> None:
     current_release_document = dict(current_document)
     current_release_document["version"] = current_version
     current_release_document["numeric_version"] = current_numeric_version
+    current_release_document["package_filename"] = (
+        f"HushPlayer-{current_version}-win-x64-update.zip"
+    )
     current_release_document = helper.synchronize_manifest_document(
         current_release_document,
         current_releases,
@@ -160,34 +163,80 @@ def main() -> None:
     helper.validate_prebuild_manifest(current_release_document, current_releases)
     helper.validate_manifest_matches_application(current_release_document)
 
-    previous_version, previous_numeric_version = manifest_version(
-        current_sequence - 1
-    )
-    previous_document = dict(current_document)
-    previous_document["version"] = previous_version
-    previous_document["numeric_version"] = previous_numeric_version
-    previous_document = helper.synchronize_manifest_document(
-        previous_document,
-        current_releases,
-    )
-    helper.validate_prebuild_manifest(previous_document, current_releases)
-    assert_validation_rejected(
-        lambda: helper.validate_manifest_matches_application(previous_document),
-        "version 与 app/core/version.py 不一致",
-    )
+    if current_sequence > 2:
+        previous_version, previous_numeric_version = manifest_version(
+            current_sequence - 1
+        )
+        previous_document = dict(current_document)
+        previous_document["version"] = previous_version
+        previous_document["numeric_version"] = previous_numeric_version
+        for field in (
+            "package_url",
+            "package_size",
+            "package_sha256",
+            "package_filename",
+        ):
+            previous_document.pop(field, None)
+        previous_document = helper.synchronize_manifest_document(
+            previous_document,
+            current_releases,
+        )
+        helper.validate_prebuild_manifest(previous_document, current_releases)
+        assert_validation_rejected(
+            lambda: helper.validate_manifest_matches_application(previous_document),
+            "version 与 app/core/version.py 不一致",
+        )
 
-    stale_version, stale_numeric_version = manifest_version(current_sequence - 2)
-    stale_document = dict(current_document)
-    stale_document["version"] = stale_version
-    stale_document["numeric_version"] = stale_numeric_version
-    stale_document = helper.synchronize_manifest_document(
-        stale_document,
-        current_releases,
-    )
-    assert_validation_rejected(
-        lambda: helper.validate_prebuild_manifest(stale_document, current_releases),
-        "最多只能落后",
-    )
+        stale_version, stale_numeric_version = manifest_version(current_sequence - 2)
+        stale_document = dict(current_document)
+        stale_document["version"] = stale_version
+        stale_document["numeric_version"] = stale_numeric_version
+        for field in (
+            "package_url",
+            "package_size",
+            "package_sha256",
+            "package_filename",
+        ):
+            stale_document.pop(field, None)
+        stale_document = helper.synchronize_manifest_document(
+            stale_document,
+            current_releases,
+        )
+        assert_validation_rejected(
+            lambda: helper.validate_prebuild_manifest(stale_document, current_releases),
+            "最多只能落后",
+        )
+    else:
+        previous_document = dict(current_document)
+        previous_document["version"] = "0.5.0-beta.7"
+        previous_document["numeric_version"] = "0.5.0.7"
+        previous_document = helper.synchronize_manifest_document(
+            previous_document,
+            current_releases,
+        )
+        assert_validation_rejected(
+            lambda: helper.validate_prebuild_manifest(previous_document, current_releases),
+            "major/minor/patch",
+        )
+
+        stale_document = dict(current_document)
+        stale_document["version"] = "0.5.0-beta.6"
+        stale_document["numeric_version"] = "0.5.0.6"
+        for field in (
+            "package_url",
+            "package_size",
+            "package_sha256",
+            "package_filename",
+        ):
+            stale_document.pop(field, None)
+        stale_document = helper.synchronize_manifest_document(
+            stale_document,
+            current_releases,
+        )
+        assert_validation_rejected(
+            lambda: helper.validate_prebuild_manifest(stale_document, current_releases),
+            "major/minor/patch",
+        )
 
     future_version, future_numeric_version = manifest_version(current_sequence + 1)
     with tempfile.TemporaryDirectory(prefix="hushplayer_future_manifest_") as temp_dir:
@@ -204,6 +253,13 @@ def main() -> None:
         future_document = dict(current_document)
         future_document["version"] = future_version
         future_document["numeric_version"] = future_numeric_version
+        for field in (
+            "package_url",
+            "package_size",
+            "package_sha256",
+            "package_filename",
+        ):
+            future_document.pop(field, None)
         future_document = helper.synchronize_manifest_document(
             future_document,
             future_releases,
@@ -225,6 +281,13 @@ def main() -> None:
 
     wrong_architecture = dict(current_document)
     wrong_architecture["architecture"] = "win-arm64"
+    for field in (
+        "package_url",
+        "package_size",
+        "package_sha256",
+        "package_filename",
+    ):
+        wrong_architecture.pop(field, None)
     assert_validation_rejected(
         lambda: helper.validate_prebuild_manifest(
             wrong_architecture,

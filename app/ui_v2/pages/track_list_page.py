@@ -19,6 +19,7 @@ class TrackListPage(QWidget):
     """Preserves one TrackTable model and one view-local adapter state per route."""
 
     track_play_requested = Signal(object, str)
+    track_recovery_requested = Signal(object)
     queue_requested = Signal(object, bool)
     browse_library_requested = Signal()
 
@@ -37,6 +38,7 @@ class TrackListPage(QWidget):
         self._content_safe_bottom = 0
         self.setObjectName("trackListPage")
         self.header = PageHeader(title, self)
+        self.header.set_context("歌单")
         self.search_box = SearchBox(self)
         self.search_box.setMinimumWidth(220)
         self.header.trailing_layout.addWidget(self.search_box)
@@ -44,8 +46,9 @@ class TrackListPage(QWidget):
         self.track_table = TrackTable(adapter, theme, self)
         self.empty_state = EmptyState(self)
         self.view_host = QWidget(self)
+        self.view_host.setObjectName("trackListWorkSurface")
         self.view_stack = QStackedLayout(self.view_host)
-        self.view_stack.setContentsMargins(0, 0, 0, 0)
+        self.view_stack.setContentsMargins(8, 8, 8, 8)
         self.view_stack.addWidget(self.track_table)
         self.view_stack.addWidget(self.empty_state)
         layout = QVBoxLayout(self)
@@ -64,16 +67,27 @@ class TrackListPage(QWidget):
         self.toolbar.play_all_requested.connect(lambda: self._request_queue(False))
         self.toolbar.shuffle_requested.connect(lambda: self._request_queue(True))
         self.track_table.play_requested.connect(self._request_track)
+        self.track_table.online_recovery_requested.connect(self.track_recovery_requested)
         self.empty_state.action_requested.connect(self.browse_library_requested)
         adapter.tracks_reset.connect(self._on_tracks_reset)
         self.set_theme(theme)
+        self._apply_work_surface_margins()
         self._on_tracks_reset(adapter.tracks())
 
     def set_content_safe_bottom(self, height: int) -> None:
         """Reserve one shared bottom-safe area for the global PlayerBar."""
 
         self._content_safe_bottom = max(0, int(height))
-        self.view_stack.setContentsMargins(0, 0, 0, self._content_safe_bottom)
+        self._apply_work_surface_margins()
+
+    def _apply_work_surface_margins(self) -> None:
+        inset = self._theme.metrics.spacing_sm
+        self.view_stack.setContentsMargins(
+            inset,
+            inset,
+            inset,
+            self._content_safe_bottom + inset,
+        )
 
     def set_theme(self, theme: Theme) -> None:
         self._theme = theme
@@ -99,11 +113,11 @@ class TrackListPage(QWidget):
     def _on_tracks_reset(self, tracks) -> None:
         self.header.set_count(len(tracks))
         has_playable_track = any(
-            not track.is_missing
-            and not (self.adapter.collection.read_only and track.is_online)
+            (not track.is_missing or track.is_online)
+            and self._playback_enabled
             for track in tracks
         )
-        self.toolbar.setEnabled(has_playable_track and self._playback_enabled)
+        self.toolbar.setEnabled(has_playable_track)
         if not tracks:
             self.current_view_state = "empty"
             self.view_stack.setCurrentWidget(self.empty_state)
@@ -115,6 +129,9 @@ class TrackListPage(QWidget):
         self.track_play_requested.emit(self.adapter.tracks(), track_id)
 
     def _request_queue(self, shuffle: bool) -> None:
-        tracks = tuple(track for track in self.adapter.tracks() if not track.is_missing)
+        tracks = tuple(
+            track for track in self.adapter.tracks()
+            if not track.is_missing or track.is_online
+        )
         if tracks:
             self.queue_requested.emit(tracks, shuffle)

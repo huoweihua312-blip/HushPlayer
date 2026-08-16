@@ -29,7 +29,10 @@ class SettingsSidebar(QFrame):
             button = QToolButton(self)
             button.setText(category.title)
             button.setToolTip(category.title)
+            button.setAccessibleName(category.title)
+            button.setAccessibleDescription(f"打开{category.title}设置")
             button.setCheckable(True)
+            button.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
             button.clicked.connect(lambda checked=False, key=category.key: self.category_requested.emit(key))
             self._group.addButton(button)
             self._buttons[category.key] = button
@@ -66,9 +69,9 @@ class SettingsSidebar(QFrame):
             button.setIconSize(QSize(18, 18))
             button.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
             button.setStyleSheet(
-                f"QToolButton {{ min-height: {theme.metrics.control_height}px; max-width: {width - 16}px; text-align: left; padding: 0 8px; border: 0; border-radius: {theme.metrics.radius_sm}px; color: {theme.colors.secondary_text}; }} "
+                f"QToolButton {{ min-height: {theme.metrics.control_height}px; max-width: {width - 16}px; text-align: left; padding: 0 8px; border: 0; border-radius: {theme.metrics.radius_sm}px; color: {theme.colors.secondary_text}; font-weight: 400; }} "
                 f"QToolButton:hover {{ background: {theme.colors.hover_background}; color: {theme.colors.primary_text}; }} "
-                f"QToolButton:checked {{ background: {theme.colors.selected_background}; color: {theme.colors.primary_text}; font-weight: 600; }}"
+                f"QToolButton:checked {{ background: {theme.colors.selected_background}; color: {theme.colors.primary_text}; font-weight: 700; }}"
             )
 
     def _refresh_icons(self) -> None:

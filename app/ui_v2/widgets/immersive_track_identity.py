@@ -11,7 +11,7 @@ from PySide6.QtWidgets import QBoxLayout, QLabel, QSizePolicy, QVBoxLayout, QWid
 from app.ui_v2.models.track import Track
 from app.ui_v2.theme.tokens import Theme
 from app.ui_v2.widgets.artwork_atmosphere import AbstractArtwork
-from app.ui_v2.widgets.track_display import display_track_text
+from app.ui_v2.widgets.track_display import present_track_identity
 
 
 class ElidedTrackLabel(QLabel):
@@ -130,10 +130,20 @@ class ImmersiveTrackIdentity(QWidget):
 
     def set_track(self, track: Track | None) -> None:
         self.cover.set_track(track)
-        title, artist, album = display_track_text(track) if track else ("未播放歌曲", "", "")
-        self.title_label.set_full_text(title)
-        self.artist_label.set_full_text(artist)
-        self.album_label.set_full_text(album)
+        if track is None:
+            self.title_label.set_full_text("未播放歌曲")
+            self.artist_label.set_full_text("")
+            self.album_label.set_full_text("")
+            return
+        identity = present_track_identity(track)
+        self.title_label.set_full_text(identity.title)
+        self.artist_label.set_full_text(identity.artist)
+        self.album_label.set_full_text(identity.album)
+        if identity.availability.is_visible:
+            self.album_label.setToolTip(
+                f"{identity.metadata}\n状态: {identity.availability.label}\n"
+                f"{identity.availability.tooltip}"
+            )
 
     def set_theme(self, theme: Theme) -> None:
         self._theme = theme
@@ -145,14 +155,22 @@ class ImmersiveTrackIdentity(QWidget):
         self.artist_label.setMinimumHeight(self.artist_label.fontMetrics().height())
         self.album_label.setMinimumHeight(self.album_label.fontMetrics().height())
 
-    def apply_responsive_layout(self, width: int, compact: bool, artwork_percent: int = 100) -> None:
+    def apply_responsive_layout(
+        self,
+        width: int,
+        compact: bool,
+        artwork_percent: int = 100,
+        *,
+        reference_width: int | None = None,
+    ) -> None:
+        size_reference = max(int(width), int(reference_width or width))
         if compact:
-            extent = 150 if width < 900 else 205
-        elif width < 980:
+            extent = 150 if size_reference < 900 else 205
+        elif size_reference < 980:
             extent = 230
-        elif width < 1400:
+        elif size_reference < 1400:
             extent = 285
-        elif width < 1700:
+        elif size_reference < 1700:
             extent = 330
         else:
             extent = 335

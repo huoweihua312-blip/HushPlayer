@@ -17,6 +17,9 @@ from pathlib import Path
 
 
 _WAIT_TIMEOUT_MS = 120_000
+_REPLACE_RETRY_TIMEOUT_MS = 30_000
+_REPLACE_RETRY_INITIAL_DELAY_MS = 100
+_REPLACE_RETRY_MAX_DELAY_MS = 1_000
 _REQUIRED_FILES = {"HushPlayer.exe", "HushPlayerUpdater.exe"}
 _DETACHED_PROCESS = 0x00000008
 _CREATE_NEW_PROCESS_GROUP = 0x00000200
@@ -27,6 +30,25 @@ _MAX_PACKAGE_UNCOMPRESSED_BYTES = 2 * 1024 * 1024 * 1024
 
 class UpdateApplyError(RuntimeError):
     pass
+
+
+def _updater_process_directory() -> Path:
+    """Return the directory containing the detached updater executable."""
+
+    if getattr(sys, "frozen", False):
+        return Path(sys.executable).resolve().parent
+    return Path(__file__).resolve().parent
+
+
+def _set_safe_updater_working_directory() -> None:
+    """Avoid keeping the user's install directory open as the process CWD."""
+
+    try:
+        os.chdir(_updater_process_directory())
+    except OSError:
+        # The replace retry remains the final safety net if changing the CWD
+        # is unavailable in an unusual launch environment.
+        return
 
 
 def _safe_member_name(name: str) -> str:
@@ -69,6 +91,27 @@ def _wait_for_parent(pid: int) -> None:
             raise UpdateApplyError("等待 HushPlayer 退出超时。")
     finally:
         ctypes.windll.kernel32.CloseHandle(handle)
+
+
+def _replace_with_retry(source: Path, destination: Path) -> None:
+    """Replace a Windows directory after short-lived child-process locks clear."""
+
+    deadline = time.monotonic() + (_REPLACE_RETRY_TIMEOUT_MS / 1000)
+    delay = _REPLACE_RETRY_INITIAL_DELAY_MS / 1000
+    while True:
+        try:
+            os.replace(source, destination)
+            return
+        except OSError:
+            # A PermissionError is how Python exposes the Windows sharing and
+            # directory-lock errors raised while a child still has the old
+            # install directory as its working directory.  The bounded retry
+            # also tolerates antivirus/indexer handles without hiding a
+            # permanent failure indefinitely.
+            if time.monotonic() >= deadline:
+                raise
+            time.sleep(delay)
+            delay = min(delay * 2, _REPLACE_RETRY_MAX_DELAY_MS / 1000)
 
 
 def _extract_package(package: Path, install_dir: Path) -> Path:
@@ -156,17 +199,17 @@ def apply_update(
         shutil.rmtree(backup_dir, ignore_errors=True)
     cleanup_backup = False
     try:
-        os.replace(install_dir, backup_dir)
+        _replace_with_retry(install_dir, backup_dir)
         try:
-            os.replace(stage_dir, install_dir)
+            _replace_with_retry(stage_dir, install_dir)
         except OSError:
-            os.replace(backup_dir, install_dir)
+            _replace_with_retry(backup_dir, install_dir)
             raise
         try:
             _start_application(restart_exe, install_dir)
         except UpdateApplyError:
             shutil.rmtree(install_dir, ignore_errors=True)
-            os.replace(backup_dir, install_dir)
+            _replace_with_retry(backup_dir, install_dir)
             raise
         cleanup_backup = True
     finally:
@@ -199,6 +242,7 @@ def parse_arguments(argv: list[str] | None = None) -> argparse.Namespace:
 
 
 def main(argv: list[str] | None = None) -> int:
+    _set_safe_updater_working_directory()
     arguments = parse_arguments(argv)
     install_dir = arguments.install_dir.expanduser().resolve()
     try:

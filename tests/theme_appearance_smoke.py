@@ -39,9 +39,9 @@ def _manifest() -> UpdateManifest:
     return UpdateManifest(
         schema_version=1,
         channel="beta",
-        version="0.5.0-beta.999",
-        numeric_version=(0, 5, 0, 999),
-        numeric_version_text="0.5.0.999",
+        version="0.6.0-beta.999",
+        numeric_version=(0, 6, 0, 999),
+        numeric_version_text="0.6.0.999",
         architecture="win-x64",
         mandatory=False,
         setup_url="https://example.invalid/HushPlayer-test.exe",

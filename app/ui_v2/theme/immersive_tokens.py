@@ -54,7 +54,7 @@ def immersive_mode_button_qss(theme: Theme) -> str:
         "QToolButton#immersiveModeButton:pressed {"
         f"background: {glass.pressed}; border-color: {glass.border_hover};"
         "}"
-        "QToolButton#immersiveModeButton:focus {"
+        "QToolButton#immersiveModeButton[hushKeyboardFocus=\"true\"]:focus {"
         f"border: 1px solid {_accent_focus_color(theme)};"
         "}"
     )
@@ -77,7 +77,7 @@ def immersive_glass_button_qss(theme: Theme) -> str:
         "QToolButton#returnToCurrentLyrics:pressed {"
         f"background: {glass.pressed}; border-color: {glass.border_hover};"
         "}"
-        "QToolButton#returnToCurrentLyrics:focus {"
+        "QToolButton#returnToCurrentLyrics[hushKeyboardFocus=\"true\"]:focus {"
         f"border: 1px solid {_accent_focus_color(theme)};"
         "}"
     )

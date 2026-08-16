@@ -14,8 +14,9 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from PySide6.QtCore import QSize
-from PySide6.QtWidgets import QApplication
+from PySide6.QtWidgets import QApplication, QWidget
 
+from app.core.app_paths import AppPaths
 from app.core.version import APP_NAME, APP_VERSION
 from app.ui_v2.adapters.legacy_settings_bridge import (
     DEFAULT_SETTINGS,
@@ -25,6 +26,7 @@ from app.ui_v2.adapters.legacy_settings_bridge import (
 from app.ui_v2.models.settings_category import SETTINGS_CATEGORIES
 from app.ui_v2.models.settings_edit_session import SettingsEditSession
 from app.ui_v2.models.settings_snapshot import SettingsSnapshot
+from app.ui_v2.pages.online_source_page import OnlineSourcePage
 from app.ui_v2.shell.main_window import MainWindow
 from app.ui_v2.theme.icons import FLUENT_SETTINGS_ASSETS
 
@@ -70,6 +72,49 @@ class SettingsContractTests(unittest.TestCase):
                 bridge.save_snapshot(snapshot)
             self.assertFalse(path.exists())
 
+    def test_bridge_accepts_existing_cache_directory_and_rejects_relative_path(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            settings_path = Path(directory) / "settings.json"
+            cache_path = Path(directory) / "cache"
+            cache_path.mkdir()
+            bridge = LegacySettingsBridge(settings_path)
+            saved = bridge.save_snapshot(
+                bridge.read_snapshot().with_updates({"cache_directory": str(cache_path)})
+            )
+            self.assertEqual(Path(saved.get("cache_directory")), cache_path)
+            with self.assertRaises(SettingsBridgeError):
+                bridge.save_snapshot(
+                    saved.with_updates({"cache_directory": "relative-cache"})
+                )
+
+    def test_app_paths_reads_cache_directory_from_legacy_settings(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            app_data = root / "appdata"
+            custom_cache = root / "custom-cache"
+            custom_cache.mkdir(parents=True)
+            settings = app_data / "data" / "settings.json"
+            settings.parent.mkdir(parents=True)
+            settings.write_text(
+                json.dumps({"cache_directory": str(custom_cache)}),
+                encoding="utf-8",
+            )
+            previous_app_data = os.environ.get("HUSHPLAYER_APP_DATA_DIR")
+            previous_cache = os.environ.get("HUSHPLAYER_CACHE_DIR")
+            os.environ["HUSHPLAYER_APP_DATA_DIR"] = str(app_data)
+            os.environ.pop("HUSHPLAYER_CACHE_DIR", None)
+            try:
+                self.assertEqual(AppPaths.resolve().cache_dir, custom_cache.resolve())
+            finally:
+                if previous_app_data is None:
+                    os.environ.pop("HUSHPLAYER_APP_DATA_DIR", None)
+                else:
+                    os.environ["HUSHPLAYER_APP_DATA_DIR"] = previous_app_data
+                if previous_cache is None:
+                    os.environ.pop("HUSHPLAYER_CACHE_DIR", None)
+                else:
+                    os.environ["HUSHPLAYER_CACHE_DIR"] = previous_cache
+
 
 class SettingsOverlayIntegrationTests(unittest.TestCase):
     @classmethod
@@ -110,13 +155,14 @@ class SettingsOverlayIntegrationTests(unittest.TestCase):
             "playback": "play_circle_20_regular.svg",
             "lyrics": "subtitles_20_regular.svg",
             "library": "library_20_regular.svg",
+            "online_sources": "cloud_20_regular.svg",
             "cache": "database_20_regular.svg",
             "updates": "arrow_sync_20_regular.svg",
             "about": "info_20_regular.svg",
         }
         category_names = [item.icon_name for item in SETTINGS_CATEGORIES]
-        self.assertEqual(len(category_names), 8)
-        self.assertEqual(len(set(category_names)), 8)
+        self.assertEqual(len(category_names), 9)
+        self.assertEqual(len(set(category_names)), 9)
         self.assertEqual({name: FLUENT_SETTINGS_ASSETS[name] for name in category_names}, expected_assets)
         self.assertEqual(FLUENT_SETTINGS_ASSETS["dismiss"], "dismiss_20_regular.svg")
         self.assertTrue(all(name in FLUENT_SETTINGS_ASSETS for name in category_names))
@@ -141,6 +187,19 @@ class SettingsOverlayIntegrationTests(unittest.TestCase):
         self.assertFalse(overlay.close_button.icon().isNull())
         self.assertEqual(overlay.close_button.iconSize(), QSize(18, 18))
 
+    def test_online_sources_is_an_embedded_settings_page(self) -> None:
+        overlay = self.open_overlay()
+        overlay.set_category("online_sources")
+        self.app.processEvents()
+        page = overlay._category_pages["online_sources"]
+        self.assertIsInstance(page, OnlineSourcePage)
+        self.assertTrue(page.isVisible())
+        self.assertTrue(page.add_source_button.isVisible())
+        self.assertTrue(page.select_all_button.isVisible())
+        self.assertTrue(page.clear_button.isVisible())
+        self.assertTrue(page.back_button.isHidden())
+        self.assertEqual(self.window.navigation_adapter.route, "browse")
+
     def test_dismiss_hover_is_neutral_and_keeps_32px_geometry(self) -> None:
         overlay = self.open_overlay()
         button = overlay.close_button
@@ -148,7 +207,10 @@ class SettingsOverlayIntegrationTests(unittest.TestCase):
         stylesheet = button.styleSheet().lower().replace(" ", "")
         self.assertIn("rgba(255,255,255,18)", stylesheet)
         self.assertIn("rgba(255,255,255,28)", stylesheet)
-        self.assertNotIn(overlay._theme.colors.accent.lower(), stylesheet)
+        self.assertIn(
+            f"border:1pxsolid{overlay._theme.colors.focus_ring.lower()}",
+            stylesheet,
+        )
         self.assertEqual(button.minimumSize(), QSize(32, 32))
         self.assertEqual(button.maximumSize(), QSize(32, 32))
         self.app.processEvents()
@@ -165,11 +227,34 @@ class SettingsOverlayIntegrationTests(unittest.TestCase):
         for forbidden in ("HushPlayer UI V2", "设置 3A", "mock", "demo", "preview", "fixture"):
             self.assertNotIn(forbidden.casefold(), visible_text.casefold())
 
-    def test_formal_eight_categories_and_settings_does_not_change_route(self) -> None:
+    def test_about_exposes_published_update_summaries(self) -> None:
+        overlay = self.open_overlay()
+        overlay.set_category("about")
+        self.app.processEvents()
+        changelog = overlay.about_changelog.toPlainText()
+        self.assertIn(APP_VERSION, changelog)
+        self.assertIn("在线更新摘要", changelog)
+        self.assertNotIn("## 未发布", changelog)
+        self.assertNotIn("mock", changelog.casefold())
+
+    def test_cache_directory_uses_two_column_actions_and_restart_feedback(self) -> None:
+        overlay = self.open_overlay()
+        overlay.set_category("cache")
+        self.app.processEvents()
+        self.assertIn("cache_directory", overlay._path_controls)
+        operations = overlay.findChild(QWidget, "settingsCacheOperations")
+        self.assertIsNotNone(operations)
+        with tempfile.TemporaryDirectory() as directory:
+            overlay._path_controls["cache_directory"].picker.set_path(directory)
+            self.assertTrue(overlay.is_dirty)
+            self.assertTrue(overlay.save())
+            self.assertIn("重启后生效", overlay.footer.status_label.text())
+
+    def test_formal_settings_categories_and_settings_does_not_change_route(self) -> None:
         overlay = self.open_overlay()
         self.assertEqual(tuple(item.key for item in SETTINGS_CATEGORIES), (
             "general", "appearance", "playback", "lyrics",
-            "library", "cache", "updates", "about",
+            "library", "online_sources", "cache", "updates", "about",
         ))
         self.assertNotIn("immersive", overlay.sidebar._buttons)
         self.assertEqual(self.window.navigation_adapter.route, "browse")
@@ -232,6 +317,44 @@ class SettingsOverlayIntegrationTests(unittest.TestCase):
         overlay.save_and_close()
         self.assertTrue(overlay.isVisible())
         self.assertTrue(overlay.is_dirty)
+
+    def test_footer_save_keeps_overlay_open_and_clears_dirty_state(self) -> None:
+        overlay = self.open_overlay()
+        control = overlay._controls["auto_scan_music_folders_on_startup"]
+        control.setChecked(not control.isChecked())
+        self.app.processEvents()
+        overlay.footer.save_button.click()
+        self.app.processEvents()
+        self.assertTrue(overlay.isVisible())
+        self.assertFalse(overlay.is_dirty)
+        self.assertEqual(overlay.footer.state, "success")
+        self.assertFalse(overlay.footer.save_button.isEnabled())
+
+    def test_dirty_close_uses_inline_confirmation_and_discard_rolls_back(self) -> None:
+        overlay = self.open_overlay()
+        control = overlay._controls["auto_scan_music_folders_on_startup"]
+        control.setChecked(not control.isChecked())
+        self.app.processEvents()
+        overlay.request_close()
+        self.assertTrue(overlay.isVisible())
+        self.assertTrue(overlay.confirm_dialog.isVisible())
+        self.assertFalse(overlay.confirm_dialog.confirm_button.isVisible())
+        overlay.confirm_dialog.discard_button.click()
+        self.app.processEvents()
+        self.assertFalse(overlay.isVisible())
+        self.assertFalse(self.settings_path.exists())
+
+    def test_topbar_theme_toggle_joins_open_edit_session(self) -> None:
+        overlay = self.open_overlay()
+        original = self.window.theme.mode
+        self.window.toggle_theme()
+        self.app.processEvents()
+        self.assertNotEqual(self.window.theme.mode, original)
+        self.assertTrue(overlay.is_dirty)
+        self.assertFalse(self.settings_path.exists())
+        overlay.cancel_and_close()
+        self.app.processEvents()
+        self.assertEqual(self.window.theme.mode, original)
 
     def test_actions_are_not_dirty_and_unavailable_services_are_disabled(self) -> None:
         overlay = self.open_overlay()

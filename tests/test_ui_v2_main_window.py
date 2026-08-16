@@ -4,7 +4,10 @@ import importlib
 import os
 import sys
 import unittest
+from dataclasses import replace
 from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import Mock
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
@@ -13,12 +16,14 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from PySide6.QtGui import QColor, QPalette
+from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication
 
 from app.ui_v2.models.track import format_duration
 from app.ui_v2.models.track_table_model import TrackColumn
 from app.ui_v2.shell.content_router import ComingSoonPage
 from app.ui_v2.shell.main_window import MainWindow
+from app.ui_v2.widgets.custom_title_bar import _QUIET_ORBIT_LOGO, _QUIET_ORBIT_LOGO_LIGHT
 
 
 class UiV2MainWindowTests(unittest.TestCase):
@@ -120,6 +125,72 @@ class UiV2MainWindowTests(unittest.TestCase):
         self.window.library_adapter.set_favorite(track_id, original)
         self.assertEqual(self.window.playback_adapter.state.is_favorite, original)
 
+    def test_confirmed_library_failure_starts_one_automatic_recovery(self) -> None:
+        source = next(
+            track for track in self.window.library_collection.tracks() if track.is_online
+        )
+        failed = replace(source, availability="playback_error", is_missing=True)
+        self.window.library_collection.update_runtime_track(failed)
+        self.window.playback_adapter.set_queue((failed,))
+        self.window.playback_adapter.play_track(failed.id)
+        self.app.processEvents()
+
+        original_online_adapter = self.window.online_adapter
+        try:
+            apply_remote_state = Mock(return_value=failed)
+            self.window.online_adapter = SimpleNamespace(
+                is_formal=True,
+                apply_remote_state=apply_remote_state,
+            )
+            request_recovery = Mock()
+            self.window._request_online_recovery = request_recovery
+
+            self.window._on_remote_track_state_changed(
+                failed.stable_identity,
+                "playback_error",
+                "媒体无效",
+                {},
+            )
+            self.window._on_remote_track_state_changed(
+                failed.stable_identity,
+                "playback_error",
+                "媒体无效",
+                {},
+            )
+
+            self.assertEqual(apply_remote_state.call_count, 2)
+            request_recovery.assert_called_once_with(failed)
+        finally:
+            self.window.online_adapter = original_online_adapter
+
+    def test_unresolved_library_track_does_not_start_automatic_recovery(self) -> None:
+        source = next(
+            track for track in self.window.library_collection.tracks() if track.is_online
+        )
+        current = replace(source, availability="not_resolved", is_missing=False)
+        self.window.library_collection.update_runtime_track(current)
+        self.window.playback_adapter.set_queue((current,))
+        self.window.playback_adapter.play_track(current.id)
+        self.app.processEvents()
+
+        original_online_adapter = self.window.online_adapter
+        try:
+            self.window.online_adapter = SimpleNamespace(
+                is_formal=True,
+                apply_remote_state=Mock(return_value=current),
+            )
+            request_recovery = Mock()
+            self.window._request_online_recovery = request_recovery
+            self.window._on_remote_track_state_changed(
+                current.stable_identity,
+                "not_resolved",
+                "",
+                {},
+            )
+            request_recovery.assert_not_called()
+        finally:
+            self.window.online_adapter = original_online_adapter
+
     def test_responsive_modes_keep_navigation_and_model_instances(self) -> None:
         self.window.navigation_adapter.set_route("library")
         self.app.processEvents()
@@ -171,6 +242,101 @@ class UiV2MainWindowTests(unittest.TestCase):
             if mode == "dark":
                 self.assertNotIn(light_navigation, sidebar.styleSheet())
 
+    def test_top_bar_exposes_one_settings_entry_and_persists_theme_without_rebuilding_shell(self) -> None:
+        title_bar = self.window.title_bar
+        sidebar = self.window.sidebar
+        player_bar = self.window.player_bar
+        playback_adapter = self.window.playback_adapter
+        route = "library"
+        self.window.navigation_adapter.set_route(route)
+        self.app.processEvents()
+
+        self.assertEqual(title_bar.settings_button.accessibleName(), "设置")
+        self.assertEqual(title_bar.theme_button.accessibleName(), "主题切换")
+        self.assertEqual(title_bar.view_options_button.accessibleName(), "视图选项")
+        self.assertFalse(title_bar.view_options_button.isEnabled())
+        self.assertFalse(sidebar.settings_box.isVisible())
+        self.assertEqual(self.window.settings_shortcut.key().toString(), "Ctrl+,")
+
+        self.window.settings_shortcut.activated.emit()
+        self.app.processEvents()
+        self.assertTrue(self.window.settings_overlay.isVisible())
+        self.window.settings_overlay.cancel_and_close()
+
+        self.window.toggle_theme()
+        QTest.qWait(self.window._THEME_REVEAL_APPLY_DELAY_MS + 40)
+        self.app.processEvents()
+        self.assertEqual(self.window.theme.mode, "light")
+        self.assertIs(self.window.player_bar, player_bar)
+        self.assertIs(self.window.playback_adapter, playback_adapter)
+        self.assertEqual(self.window.navigation_adapter.route, route)
+        self.assertEqual(
+            self.window.settings_bridge.value(self.window._settings_snapshot, "appearance_mode"),
+            "light",
+        )
+
+    def test_theme_transition_keeps_shell_updates_and_uses_light_logo(self) -> None:
+        title_bar = self.window.title_bar
+        library_page = self.window.library_page
+        player_bar = self.window.player_bar
+
+        self.window.set_theme("dark")
+        self.assertFalse(title_bar.brand_mark.pixmap().isNull())
+        self.assertEqual(Path(title_bar.brand_mark.property("hushLogoAsset")), _QUIET_ORBIT_LOGO)
+        self.window.set_theme("light")
+        self.app.processEvents()
+
+        self.assertTrue(self.window.updatesEnabled())
+        self.assertTrue(self.window.root.updatesEnabled())
+        self.assertIs(self.window.library_page, library_page)
+        self.assertIs(self.window.player_bar, player_bar)
+        self.assertEqual(Path(title_bar.brand_mark.property("hushLogoAsset")), _QUIET_ORBIT_LOGO_LIGHT)
+        self.assertTrue(_QUIET_ORBIT_LOGO_LIGHT.is_file())
+
+    def test_mouse_focus_is_hidden_but_keyboard_focus_can_be_marked(self) -> None:
+        button = self.window.title_bar.theme_button
+
+        self.window._set_button_keyboard_focus(button, False)
+        self.assertEqual(button.property("hushKeyboardFocus"), "false")
+        self.window._set_button_keyboard_focus(button, True)
+        self.assertEqual(button.property("hushKeyboardFocus"), "true")
+
+    def test_theme_reveal_is_enabled_and_cleans_up_after_animation(self) -> None:
+        self.window._animate_next_theme_change = True
+        target = "light" if self.window.theme.mode == "dark" else "dark"
+
+        self.window.set_theme(target)
+        self.app.processEvents()
+        self.assertIsNotNone(self.window._theme_reveal_overlay)
+        expected_origin = self.window.title_bar.theme_button.mapTo(
+            self.window,
+            self.window.title_bar.theme_button.rect().center(),
+        )
+        self.assertEqual(self.window._theme_reveal_overlay._origin, expected_origin)
+        QTest.qWait(1260)
+        self.app.processEvents()
+        self.assertIsNone(self.window._theme_reveal_overlay)
+
+    def test_theme_reveal_starts_before_theme_persistence(self) -> None:
+        original_mode = self.window.theme.mode
+
+        self.window.toggle_theme()
+        overlay = self.window._theme_reveal_overlay
+        self.assertIsNotNone(overlay)
+        self.assertEqual(self.window.theme.mode, original_mode)
+        self.assertEqual(overlay._radius, 0.0)
+
+        QTest.qWait(self.window._THEME_REVEAL_APPLY_DELAY_MS + 20)
+        self.app.processEvents()
+        self.assertNotEqual(self.window.theme.mode, original_mode)
+        QTest.qWait(40)
+        self.app.processEvents()
+        self.assertGreater(overlay._radius, 0.0)
+
+        QTest.qWait(1260)
+        self.app.processEvents()
+        self.assertIsNone(self.window._theme_reveal_overlay)
+
     def test_all_navigation_entries_are_clickable_and_route_to_cached_pages(self) -> None:
         sidebar = self.window.sidebar
         long_playlist_name = "一个用于验证提示文本的超长自定义歌单名称"
@@ -192,7 +358,7 @@ class UiV2MainWindowTests(unittest.TestCase):
                 self.assertIs(self.window.router.currentWidget(), self.window.router.browse_page)
             elif route_id == "library":
                 self.assertIs(self.window.router.currentWidget(), self.window.library_page)
-            elif route_id == "liked":
+            elif route_id in {"liked", "online_search"}:
                 self.assertNotIsInstance(self.window.router.currentWidget(), ComingSoonPage)
             else:
                 self.assertIsInstance(self.window.router.currentWidget(), ComingSoonPage)

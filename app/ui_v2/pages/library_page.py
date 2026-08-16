@@ -43,6 +43,7 @@ class LibraryPage(QWidget):
         }
         self.setObjectName("libraryPage")
         self.header = PageHeader("全部歌曲", self)
+        self.header.set_context("资料库")
         self.header.title_label.setMinimumWidth(76)
         self.header.count_label.setMinimumWidth(64)
         self.search_box = None
@@ -71,27 +72,38 @@ class LibraryPage(QWidget):
         self.track_table = TrackTable(adapter, self._theme, self)
         self.empty_state = EmptyState(self)
         self.view_host = QWidget(self)
+        self.view_host.setObjectName("libraryWorkSurface")
         self.view_stack = QStackedLayout(self.view_host)
-        self.view_stack.setContentsMargins(0, 0, 0, 0)
+        self.view_stack.setContentsMargins(8, 8, 8, 8)
         self.view_stack.addWidget(self.track_table)
         self.view_stack.addWidget(self.empty_state)
         layout = QVBoxLayout(self)
         m = self._theme.metrics
         layout.setContentsMargins(m.page_margin, m.spacing_lg, m.page_margin, m.page_margin)
-        layout.setSpacing(m.spacing_lg)
+        layout.setSpacing(m.spacing_md)
         layout.addWidget(self.header)
         layout.addWidget(self.view_host, 1)
         if self.search_box is not None:
             self.search_box.text_changed.connect(self.adapter.set_query)
         self.adapter.tracks_reset.connect(self._on_tracks_reset)
         self.set_theme(self._theme)
+        self._apply_work_surface_margins()
         self._on_tracks_reset(self.adapter.tracks())
 
     def set_content_safe_bottom(self, height: int) -> None:
         """Reserve the shared bottom-safe area above the global PlayerBar."""
 
         self._content_safe_bottom = max(0, int(height))
-        self.view_stack.setContentsMargins(0, 0, 0, self._content_safe_bottom)
+        self._apply_work_surface_margins()
+
+    def _apply_work_surface_margins(self) -> None:
+        inset = self._theme.metrics.spacing_sm
+        self.view_stack.setContentsMargins(
+            inset,
+            inset,
+            inset,
+            self._content_safe_bottom + inset,
+        )
 
     def set_responsive_reference_width(self, width: int) -> None:
         """Resize the table without replacing its model or adapter."""

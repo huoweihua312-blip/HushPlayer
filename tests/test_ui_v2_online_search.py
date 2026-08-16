@@ -12,6 +12,9 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
+from PySide6.QtCore import Qt
+from PySide6.QtGui import QColor, QPalette
+from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication
 
 from app.ui_v2.adapters.library_collection import LibraryCollectionAdapter
@@ -22,6 +25,7 @@ from app.ui_v2.models.online_track_model import ONLINE_PLAYING_ROLE, OnlineColum
 from app.ui_v2.pages.online_search_page import OnlineSearchPage
 from app.ui_v2.pages.online_source_page import OnlineSourcePage
 from app.ui_v2.shell.main_window import MainWindow
+from app.ui_v2.widgets.settings_control_factory import ToolbarComboBox
 
 
 class OnlineAdapterTests(unittest.TestCase):
@@ -97,12 +101,16 @@ class OnlineAdapterTests(unittest.TestCase):
         self.adapter.set_source_enabled(source_id, False)
         self.assertEqual(next(source for source in self.adapter.sources() if source.id == source_id).status, "disabled")
         self.assertTrue(
-            all(track.availability == "unavailable" for track in self.adapter.results() if track.source_id == source_id)
+            all(
+                track.availability == "source_unavailable"
+                for track in self.adapter.results()
+                if track.source_id == source_id
+            )
         )
 
     def test_favorite_playlist_download_and_mock_play_requests(self) -> None:
         self._search()
-        available = next(track for track in self.adapter.results() if track.availability == "available")
+        available = next(track for track in self.adapter.results() if track.availability == "not_resolved")
         self.adapter.toggle_favorite(available.id)
         self.assertTrue(next(track for track in self.adapter.results() if track.id == available.id).is_favorite)
         self.assertTrue(self.collection.track_for_id(available.id).is_favorite)
@@ -126,7 +134,9 @@ class OnlineAdapterTests(unittest.TestCase):
         self.adapter.play_requested.connect(requested.append)
         self.assertTrue(self.adapter.request_play(available.id))
         self.assertEqual(requested[0].id, available.id)
-        unavailable = next(track for track in self.adapter.results() if track.availability == "unavailable")
+        unavailable = next(
+            track for track in self.adapter.results() if track.availability == "source_unavailable"
+        )
         self.assertFalse(self.adapter.request_play(unavailable.id))
 
 
@@ -158,7 +168,7 @@ class OnlineSearchPageTests(unittest.TestCase):
         return next(
             page.result_table.model.index(row, int(OnlineColumn.TITLE))
             for row, track in enumerate(page.result_table.model.tracks())
-            if track.availability == "available"
+            if track.availability == "not_resolved"
         )
 
     def _complete_search(self, page: OnlineSearchPage, query: str = "Paper Moon") -> None:
@@ -169,6 +179,7 @@ class OnlineSearchPageTests(unittest.TestCase):
 
     def test_page_states_model_reuse_history_and_context_menu(self) -> None:
         page = self._search_page()
+        self.assertFalse(page.history_view.isVisible())
         model = page.result_table.model
         self._complete_search(page)
         self.assertTrue(page.result_table.isVisible())
@@ -188,7 +199,7 @@ class OnlineSearchPageTests(unittest.TestCase):
         unavailable_index = next(
             model.index(row, int(OnlineColumn.TITLE))
             for row, track in enumerate(model.tracks())
-            if track.availability == "unavailable"
+            if track.availability == "source_unavailable"
         )
         menu = page.result_table.build_context_menu(unavailable_index)
         self.assertFalse(next(action for action in menu.actions() if action.text() == "播放").isEnabled())
@@ -196,8 +207,25 @@ class OnlineSearchPageTests(unittest.TestCase):
 
     def test_result_filter_sort_and_source_selector_status(self) -> None:
         page = self._search_page()
+        self.assertEqual(
+            page.source_selector.toolButtonStyle(),
+            Qt.ToolButtonStyle.ToolButtonTextBesideIcon,
+        )
+        enabled_count = sum(source.enabled for source in self.window.online_adapter.sources())
+        self.assertEqual(page.source_selector.text(), "来源")
+        self.assertGreaterEqual(page.source_selector.minimumWidth(), 120)
+        self.assertEqual(page.source_selector._count_badge.text(), str(enabled_count))
+        self.assertTrue(page.source_selector._count_badge.isVisible())
+        self.assertIn("调整本次搜索范围", page.source_selector.toolTip())
+        self.assertIn(str(enabled_count), page.source_selector.toolTip())
+        page.set_responsive_reference_width(900)
+        self.assertFalse(page.source_selector._count_badge.isVisible())
+        page.set_responsive_reference_width(1100)
+        self.assertTrue(page.source_selector._count_badge.isVisible())
         model = page.result_table.model
-        self._complete_search(page, "筛选排序")
+        self._complete_search(page, "Paper Moon")
+        self.assertEqual(page.result_toolbar.sort_selector.currentData(), "relevance")
+        self.assertIn("paper moon", model.tracks()[0].title.casefold())
         source_index = page.result_toolbar.source_filter.findData("archive")
         page.result_toolbar.source_filter.setCurrentIndex(source_index)
         self.assertIs(page.result_table.model, model)
@@ -212,7 +240,7 @@ class OnlineSearchPageTests(unittest.TestCase):
         source_action = next(
             action
             for action in page.source_selector._menu.actions()
-            if action.text().startswith("Mock Catalog")
+            if action.text().startswith("North Catalog")
         )
         self.assertIn("已完成", source_action.text())
         self.assertIn("16 条", source_action.text())
@@ -222,9 +250,82 @@ class OnlineSearchPageTests(unittest.TestCase):
         self.app.processEvents()
         self.assertFalse(page.source_selector._menu.actions()[0].isEnabled())
 
+    def test_toolbar_selects_reuse_themed_combo_popup_and_keyboard_contract(self) -> None:
+        page = self._search_page()
+        self._complete_search(page, "工具栏")
+        controls = (page.result_toolbar.source_filter, page.result_toolbar.sort_selector)
+        self.assertTrue(all(isinstance(control, ToolbarComboBox) for control in controls))
+        self.assertEqual(controls[0].accessibleName(), "来源筛选")
+        self.assertEqual(controls[1].accessibleName(), "排序方式")
+        self.assertTrue(all(control.native_arrow_suppressed for control in controls))
+        self.assertTrue(all(control.height() == self.window.theme.metrics.control_height for control in controls))
+
+        for mode in ("light", "dark"):
+            self.window.set_theme(mode)
+            theme = self.window.theme
+            for control in controls:
+                palette = control.view().palette()
+                self.assertEqual(
+                    palette.color(QPalette.ColorRole.Base),
+                    QColor(theme.colors.surface_elevated),
+                )
+                self.assertEqual(
+                    palette.color(QPalette.ColorRole.Highlight),
+                    QColor(theme.colors.selected_background),
+                )
+                self.assertIn("down-arrow", control.styleSheet())
+                self.assertIn("image: none", control.styleSheet())
+
+        sort = page.result_toolbar.sort_selector
+        sort.setCurrentIndex(0)
+        sort.setFocus()
+        self.app.processEvents()
+        self.assertTrue(sort.property("focusVisible"))
+        QTest.keyClick(sort, Qt.Key.Key_Space)
+        self.app.processEvents()
+        self.assertTrue(sort.popup_open)
+        self.assertTrue(sort.property("popupOpen"))
+        QTest.keyClick(sort, Qt.Key.Key_Escape)
+        self.app.processEvents()
+        self.assertFalse(sort.popup_open)
+        QTest.keyClick(sort, Qt.Key.Key_Down)
+        self.assertEqual(sort.currentData(), "title")
+        QTest.keyClick(sort, Qt.Key.Key_Return)
+        self.app.processEvents()
+        self.assertTrue(sort.popup_open)
+        sort.hidePopup()
+
+        self.window.resize(900, 600)
+        self.app.processEvents()
+        self.assertTrue(page.result_toolbar.source_filter.isVisible())
+        self.assertTrue(page.result_toolbar.sort_selector.isVisible())
+        self.assertEqual(page.result_toolbar.source_filter.width(), 128)
+        self.assertEqual(page.result_toolbar.sort_selector.width(), 104)
+        self.assertFalse(page.result_table.horizontalScrollBar().isVisible())
+
+    def test_results_promote_table_and_keep_source_controls_in_toolbar(self) -> None:
+        page = self._search_page()
+        self._complete_search(page, "Paper Moon")
+        self.assertTrue(page.result_table.isVisible())
+        self.assertFalse(page.detail_label.isVisible())
+        self.assertFalse(page.scope_label.isVisible())
+        self.assertFalse(page.source_summary_label.isVisible())
+        self.assertTrue(page.result_toolbar.isVisible())
+        self.assertTrue(page.result_toolbar.source_filter.isVisible())
+        self.assertTrue(page.result_toolbar.sort_selector.isVisible())
+        self.assertGreaterEqual(page.result_table.minimumHeight(), 220)
+
+        self.window.online_adapter.load_mock_scenario("empty")
+        self._complete_search(page, "没有结果")
+        self.assertFalse(page.result_table.isVisible())
+        self.assertTrue(page.detail_label.isVisible())
+
     def test_recommended_query_and_return_to_history(self) -> None:
         page = self._search_page()
-        page.recommendation_buttons[0].click()
+        self.assertFalse(hasattr(page, "recommendation_buttons"))
+        self.assertFalse(hasattr(page, "manage_sources_button"))
+        page.search_bar.set_text("夜航")
+        page.search_bar.search_requested.emit()
         self.assertEqual(page.search_bar.line_edit.text(), "夜航")
         self.window.online_adapter.complete_for_test()
         self.window.online_adapter.load_mock_scenario("empty")
@@ -261,6 +362,12 @@ class OnlineSearchPageTests(unittest.TestCase):
         self.app.processEvents()
         self.assertIsInstance(self.window.router.currentWidget(), OnlineSourcePage)
         source_page = self.window.router.currentWidget()
+        self.assertEqual(source_page.header_surface.objectName(), "onlineSourceHeaderSurface")
+        self.assertEqual(source_page.list_surface.objectName(), "onlineSourceListSurface")
+        self.assertEqual(
+            source_page.add_source_button.toolButtonStyle(),
+            Qt.ToolButtonStyle.ToolButtonTextBesideIcon,
+        )
         first_row = next(iter(source_page._rows.values()))
         original = first_row._enabled
         first_row.toggle_requested.emit(first_row.source_id, not original)

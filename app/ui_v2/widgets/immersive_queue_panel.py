@@ -1,411 +1,359 @@
-"""Formal immersive playback queue shown inside a stable floating panel."""
+"""Queue floating panel backed by the one production playback queue."""
 
 from __future__ import annotations
 
-from PySide6.QtCore import QAbstractListModel, QModelIndex, QRect, QSize, Qt, Signal
-from PySide6.QtGui import QColor, QFont, QFontMetrics, QPainter, QPainterPath
-from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QListView, QStyle, QStyledItemDelegate, QVBoxLayout, QWidget
+import hashlib
+
+from PySide6.QtCore import QAbstractListModel, QModelIndex, QSize, QSortFilterProxyModel, Qt, Signal
+from PySide6.QtGui import QFont, QFontMetrics, QPainter, QPixmap
+from PySide6.QtWidgets import (
+    QAbstractItemView,
+    QFrame,
+    QHBoxLayout,
+    QLabel,
+    QListView,
+    QStyledItemDelegate,
+    QStyle,
+    QStyleOptionViewItem,
+    QToolButton,
+    QVBoxLayout,
+    QWidget,
+)
 
 from app.ui_v2.adapters.playback_adapter import PlaybackAdapter
 from app.ui_v2.models.track import Track, format_duration
-from app.ui_v2.theme.immersive_tokens import IMMERSIVE_GLASS
+from app.ui_v2.theme.icons import fluent_icon, icon
 from app.ui_v2.theme.tokens import Theme
-from app.ui_v2.widgets.immersive_side_drawer import ImmersiveFloatingPanel
-from app.ui_v2.widgets.placeholder_cover import cover_pixmap
-from app.ui_v2.widgets.track_display import display_track_text
+from app.ui_v2.widgets.artwork_thumbnail import ArtworkThumbnail
+from app.ui_v2.widgets.artwork_thumbnail import artwork_pixmap_for_track
+from app.ui_v2.widgets.track_display import present_track_identity
 
 
-class _QueueTrackModel(QAbstractListModel):
-    """A projection of adapter-owned tracks, not a second queue or model."""
+class QueueTrackModel(QAbstractListModel):
+    """Formal full-queue model projected from one PlaybackAdapter queue."""
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self._tracks: tuple[Track, ...] = ()
+        self._current_id = ""
 
     def rowCount(self, parent: QModelIndex = QModelIndex()) -> int:  # noqa: N802
         return 0 if parent.isValid() else len(self._tracks)
 
-    def data(self, index: QModelIndex, role: int = Qt.ItemDataRole.DisplayRole):  # noqa: N802
-        if not index.isValid() or not 0 <= index.row() < len(self._tracks):
+    def data(self, index: QModelIndex, role: int = Qt.ItemDataRole.DisplayRole):
+        if not index.isValid() or not (0 <= index.row() < len(self._tracks)):
             return None
         track = self._tracks[index.row()]
-        title, artist, _album = display_track_text(track)
         if role == Qt.ItemDataRole.UserRole:
             return track
-        if role == Qt.ItemDataRole.ToolTipRole:
-            return title if not artist else f"{title}\n{artist}"
         if role == Qt.ItemDataRole.DisplayRole:
-            return title
+            return present_track_identity(track).title
+        if role == Qt.ItemDataRole.ToolTipRole:
+            return present_track_identity(track).title
         return None
 
-    def set_tracks(self, tracks: tuple[Track, ...]) -> None:
-        if tracks == self._tracks:
+    def track_at(self, row: int) -> Track | None:
+        return self._tracks[row] if 0 <= row < len(self._tracks) else None
+
+    @property
+    def current_id(self) -> str:
+        return self._current_id
+
+    def set_tracks(self, tracks: tuple[Track, ...], current_id: str) -> None:
+        self.beginResetModel()
+        self._tracks = tuple(tracks)
+        self._current_id = str(current_id or "")
+        self.endResetModel()
+
+
+class _UpcomingQueueProxy(QSortFilterProxyModel):
+    """Keep the current summary row out of the upcoming list without losing it from the source model."""
+
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self._current_id = ""
+        self.setFilterRole(Qt.ItemDataRole.UserRole)
+
+    def set_current_id(self, current_id: str) -> None:
+        normalized = str(current_id or "")
+        if normalized == self._current_id:
             return
-        old_tracks = self._tracks
-        prefix = 0
-        while (
-            prefix < len(old_tracks)
-            and prefix < len(tracks)
-            and old_tracks[prefix].id == tracks[prefix].id
-        ):
-            prefix += 1
-        suffix = 0
-        while (
-            suffix < len(old_tracks) - prefix
-            and suffix < len(tracks) - prefix
-            and old_tracks[len(old_tracks) - suffix - 1].id == tracks[len(tracks) - suffix - 1].id
-        ):
-            suffix += 1
+        self._current_id = normalized
+        self.invalidateFilter()
 
-        remove_count = len(old_tracks) - prefix - suffix
-        insert_values = tracks[prefix : len(tracks) - suffix if suffix else len(tracks)]
-        values = list(old_tracks)
-        if remove_count:
-            self.beginRemoveRows(QModelIndex(), prefix, prefix + remove_count - 1)
-            del values[prefix : prefix + remove_count]
-            self._tracks = tuple(values)
-            self.endRemoveRows()
-        if insert_values:
-            self.beginInsertRows(QModelIndex(), prefix, prefix + len(insert_values) - 1)
-            values[prefix:prefix] = insert_values
-            self._tracks = tuple(values)
-            self.endInsertRows()
-
-        self._tracks = tracks
-        if tracks:
-            top_left = self.index(0, 0)
-            bottom_right = self.index(len(tracks) - 1, 0)
-            self.dataChanged.emit(
-                top_left,
-                bottom_right,
-                [Qt.ItemDataRole.DisplayRole, Qt.ItemDataRole.ToolTipRole, Qt.ItemDataRole.UserRole],
-            )
-
-    def track_at(self, index: QModelIndex) -> Track | None:
-        value = self.data(index, Qt.ItemDataRole.UserRole)
-        return value if isinstance(value, Track) else None
+    def filterAcceptsRow(self, source_row: int, source_parent: QModelIndex) -> bool:  # noqa: N802
+        if not self._current_id:
+            return True
+        index = self.sourceModel().index(source_row, 0, source_parent)
+        track = index.data(Qt.ItemDataRole.UserRole)
+        return not isinstance(track, Track) or track.id != self._current_id
 
 
-class _QueueTrackDelegate(QStyledItemDelegate):
-    """Paint fixed queue rows lazily so a long real queue stays lightweight."""
+class _QueueDelegate(QStyledItemDelegate):
+    """Paint stable queue rows without letting the system draw blue selection."""
 
     def __init__(self, theme: Theme, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self._theme = theme
-        self._current_track_id = ""
-        self._current_playing = False
+        self._pixmaps: dict[tuple[str, str], QPixmap] = {}
+
+    def clear_cache(self) -> None:
+        self._pixmaps.clear()
 
     def set_theme(self, theme: Theme) -> None:
         self._theme = theme
+        self.clear_cache()
+        self.parent().viewport().update() if self.parent() is not None else None
 
-    def set_current_track(self, track: Track | None, *, playing: bool) -> None:
-        self._current_track_id = track.id if track is not None else ""
-        self._current_playing = bool(playing)
+    def sizeHint(self, option: QStyleOptionViewItem, index) -> QSize:  # noqa: N802
+        return QSize(0, 62)
 
-    def sizeHint(self, option, index):  # noqa: N802
-        return QSize(max(1, option.rect.width()), 62)
-
-    def paint(self, painter: QPainter, option, index) -> None:  # noqa: N802
+    def paint(self, painter: QPainter, option: QStyleOptionViewItem, index) -> None:  # noqa: N802
         track = index.data(Qt.ItemDataRole.UserRole)
         if not isinstance(track, Track):
             return
         painter.save()
-        painter.setClipRect(option.rect)
-        row = option.rect.adjusted(0, 1, 0, -1)
-        # This delegate owns the entire row, including the current-track row.
-        # There are no child labels layered above this paint path.
-        painter.setCompositionMode(QPainter.CompositionMode.CompositionMode_Source)
-        painter.fillRect(option.rect, QColor(0, 0, 0, 0))
-        painter.setCompositionMode(QPainter.CompositionMode.CompositionMode_SourceOver)
-        selected = bool(option.state & QStyle.StateFlag.State_Selected)
-        current = track.id == self._current_track_id
-        if current:
-            current_surface = QColor(self._theme.colors.playing_background)
-            current_surface.setAlpha(220 if self._current_playing else 150)
-            painter.fillRect(row, current_surface)
-        elif selected:
-            selected_surface = QColor(self._theme.colors.surface_selected)
-            selected_surface.setAlpha(220)
-            painter.fillRect(row, selected_surface)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        rect = option.rect.adjusted(4, 3, -4, -3)
+        if option.state & QStyle.StateFlag.State_Selected:
+            background = self._theme.colors.selected_background
+            border = self._theme.colors.accent
         elif option.state & QStyle.StateFlag.State_MouseOver:
-            hover_surface = QColor(self._theme.colors.surface_hover)
-            hover_surface.setAlpha(150)
-            painter.fillRect(row, hover_surface)
+            background = self._theme.colors.hover_background
+            border = self._theme.colors.hover_background
         else:
-            normal_surface = QColor(self._theme.colors.surface_primary)
-            normal_surface.setAlpha(160)
-            painter.fillRect(row, normal_surface)
-        if current:
-            painter.fillRect(QRect(row.left() + 4, row.top() + 12, 2, max(1, row.height() - 24)), QColor(
-                self._theme.colors.accent if self._current_playing else IMMERSIVE_GLASS.secondary_text
-            ))
-        artwork_rect = QRect(row.left() + 10, row.top() + 11, 40, 40)
-        artwork = cover_pixmap(track.stable_id, 40, 40)
-        path = QPainterPath()
-        path.addRoundedRect(artwork_rect, 7, 7)
-        painter.setClipPath(path)
-        painter.drawPixmap(artwork_rect, artwork)
-        painter.setClipping(False)
-        title, artist, _album = display_track_text(track)
+            background = self._theme.colors.surface_elevated
+            border = self._theme.colors.surface_elevated
+        painter.setPen(border)
+        painter.setBrush(background)
+        painter.drawRoundedRect(rect, 8, 8)
+
+        artwork_rect = rect.adjusted(8, 8, 0, -8)
+        artwork_rect.setWidth(46)
+        artwork_key = (
+            hashlib.sha256(bytes(track.artwork_data or b"")).hexdigest()
+            if track.artwork_data
+            else str(track.artwork_path or "")
+        )
+        key = (track.stable_id, artwork_key)
+        pixmap = self._pixmaps.get(key)
+        if pixmap is None:
+            pixmap = artwork_pixmap_for_track(track, 46, 46)
+            self._pixmaps[key] = pixmap
+        painter.drawPixmap(artwork_rect, pixmap)
+
+        identity = present_track_identity(track)
+        title = identity.title
+        text_left = artwork_rect.right() + 12
         duration = format_duration(track.duration_ms)
-        duration_rect = QRect(row.right() - 52, row.top(), 44, row.height())
-        text_rect = QRect(artwork_rect.right() + 10, row.top() + 9, max(1, duration_rect.left() - artwork_rect.right() - 18), 22)
-        artist_rect = QRect(text_rect.left(), text_rect.bottom(), text_rect.width(), 20)
-        title_font = QFont(painter.font())
-        title_font.setPointSize(max(8, self._theme.fonts.body))
-        title_font.setWeight(QFont.Weight.Medium)
+        duration_width = 48
+        text_width = max(80, rect.right() - text_left - duration_width - 10)
+        title_font = option.font
+        title_font.setWeight(QFont.Weight.DemiBold)
         painter.setFont(title_font)
-        painter.setPen(QColor(self._theme.colors.text_primary))
-        painter.drawText(text_rect, Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter, QFontMetrics(title_font).elidedText(title, Qt.TextElideMode.ElideRight, text_rect.width()))
-        artist_font = QFont(painter.font())
-        artist_font.setPointSize(max(7, self._theme.fonts.caption))
+        painter.setPen(self._theme.colors.text_primary)
+        title_text = QFontMetrics(title_font).elidedText(
+            title, Qt.TextElideMode.ElideRight, text_width
+        )
+        painter.drawText(text_left, rect.top() + 25, title_text)
+        artist_font = option.font
+        artist_font.setPointSize(max(8, artist_font.pointSize() - 1))
         painter.setFont(artist_font)
-        painter.setPen(QColor(self._theme.colors.text_secondary))
-        painter.drawText(artist_rect, Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter, QFontMetrics(artist_font).elidedText(artist, Qt.TextElideMode.ElideRight, artist_rect.width()))
-        painter.drawText(duration_rect, Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter, duration)
-        if selected and option.state & QStyle.StateFlag.State_HasFocus:
-            painter.setPen(QColor(self._theme.colors.focus_ring))
-            painter.drawRoundedRect(row.adjusted(1, 1, -1, -1), 6, 6)
+        painter.setPen(self._theme.colors.text_secondary)
+        metadata_text = QFontMetrics(artist_font).elidedText(
+            identity.metadata, Qt.TextElideMode.ElideRight, text_width
+        )
+        painter.drawText(text_left, rect.top() + 44, metadata_text)
+        painter.setPen(self._theme.colors.text_tertiary)
+        painter.drawText(rect.right() - duration_width, rect.top() + 35, duration)
         painter.restore()
 
 
-class QueueTrackList(QListView):
-    """Vertical-only virtual list retaining a small queue count compatibility API."""
+class ImmersiveQueuePanel(QFrame):
+    """A stable right-floating projection of the adapter-owned queue."""
 
-    track_selected = Signal(object)
-    track_activated = Signal(object)
+    closed = Signal()
+    selection_changed = Signal(str)
 
-    def __init__(self, theme: Theme, parent: QWidget | None = None, *, interactive: bool = True) -> None:
+    def __init__(self, playback: PlaybackAdapter, theme: Theme, parent: QWidget | None = None) -> None:
         super().__init__(parent)
+        self.playback = playback
         self._theme = theme
-        self._interactive = bool(interactive)
-        self._current_track: Track | None = None
-        self.setObjectName("immersiveQueueList")
+        self._selected_track_id = ""
+        self.setObjectName("immersiveQueuePanel")
+        self.setMinimumWidth(310)
+        self.setMaximumWidth(410)
         self.setFrameShape(QFrame.Shape.NoFrame)
-        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
-        self.setAttribute(Qt.WidgetAttribute.WA_NoSystemBackground, True)
-        self.viewport().setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
-        self.viewport().setAttribute(Qt.WidgetAttribute.WA_NoSystemBackground, True)
-        self.viewport().setAutoFillBackground(False)
-        self.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        self.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
-        self.setHorizontalScrollMode(QListView.ScrollMode.ScrollPerPixel)
-        self.setVerticalScrollMode(QListView.ScrollMode.ScrollPerPixel)
-        self.setSelectionMode(
-            QListView.SelectionMode.SingleSelection if self._interactive else QListView.SelectionMode.NoSelection
-        )
-        self.setFocusPolicy(Qt.FocusPolicy.StrongFocus if self._interactive else Qt.FocusPolicy.NoFocus)
-        self.setMouseTracking(self._interactive)
-        self.setCursor(Qt.CursorShape.PointingHandCursor if self._interactive else Qt.CursorShape.ArrowCursor)
-        self.model_view = _QueueTrackModel(self)
-        self.delegate = _QueueTrackDelegate(theme, self)
-        self.setModel(self.model_view)
-        self.setItemDelegate(self.delegate)
-        if self._interactive:
-            self.clicked.connect(self._emit_selected)
-            self.doubleClicked.connect(self._emit_activated)
-        self.set_theme(theme)
 
-    def count(self) -> int:
-        return self.model_view.rowCount()
+        self.title_label = QLabel("播放队列", self)
+        self.count_label = QLabel(self)
+        self.context_label = QLabel("当前播放上下文", self)
+        self.close_button = QToolButton(self)
+        self.close_button.setObjectName("immersiveQueueClose")
+        self.close_button.setFixedSize(32, 32)
+        self.close_button.setIconSize(QSize(17, 17))
+        self.close_button.clicked.connect(self.closed)
 
-    def set_tracks(self, tracks: tuple[Track, ...]) -> None:
-        self.model_view.set_tracks(tracks)
+        self.current_section_label = QLabel("正在播放", self)
+        self.current_row = QFrame(self)
+        self.current_row.setObjectName("immersiveQueueCurrentRow")
+        self.current_artwork = ArtworkThumbnail(theme, self.current_row, size=46)
+        self.current_title_label = QLabel(self.current_row)
+        self.current_artist_label = QLabel(self.current_row)
+        self.current_playing_label = QLabel("播放中", self.current_row)
+        current_text = QVBoxLayout()
+        current_text.setContentsMargins(0, 0, 0, 0)
+        current_text.setSpacing(2)
+        current_text.addWidget(self.current_title_label)
+        current_text.addWidget(self.current_artist_label)
+        current_text.addWidget(self.current_playing_label)
+        current_layout = QHBoxLayout(self.current_row)
+        current_layout.setContentsMargins(10, 8, 10, 8)
+        current_layout.setSpacing(10)
+        current_layout.addWidget(self.current_artwork)
+        current_layout.addLayout(current_text, 1)
 
-    @property
-    def current_track(self) -> Track | None:
-        return self._current_track
+        self.next_section_label = QLabel("接下来播放", self)
+        self.model = QueueTrackModel(self)
+        self._upcoming_model = _UpcomingQueueProxy(self)
+        self._upcoming_model.setSourceModel(self.model)
+        self.list_widget = QListView(self)
+        self.list_widget.setObjectName("immersiveQueueList")
+        self.list_widget.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
+        self.list_widget.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+        self.list_widget.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        self.list_widget.setMouseTracking(True)
+        self.list_widget.setUniformItemSizes(True)
+        self.list_widget.setVerticalScrollMode(QAbstractItemView.ScrollMode.ScrollPerPixel)
+        self._delegate = _QueueDelegate(theme, self.list_widget)
+        self.list_widget.setItemDelegate(self._delegate)
+        self.list_widget.setModel(self._upcoming_model)
+        self.list_widget.selectionModel().selectionChanged.connect(self._on_selection_changed)
+        self.list_widget.doubleClicked.connect(self._play_item)
+        self.list_widget.activated.connect(self._play_item)
+        self.view = self.list_widget
 
-    def set_current_track(self, track: Track | None, *, playing: bool) -> None:
-        self._current_track = track
-        self.delegate.set_current_track(track, playing=playing)
-        self.set_tracks((track,) if track is not None else ())
-        self.viewport().update()
-
-    def keyPressEvent(self, event) -> None:  # noqa: N802
-        if not self._interactive:
-            event.ignore()
-            return
-        if event.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
-            track = self.model_view.track_at(self.currentIndex())
-            if track is not None:
-                self.track_activated.emit(track)
-                event.accept()
-                return
-        super().keyPressEvent(event)
-
-    def _emit_selected(self, index: QModelIndex) -> None:
-        track = self.model_view.track_at(index)
-        if track is not None:
-            self.track_selected.emit(track)
-
-    def _emit_activated(self, index: QModelIndex) -> None:
-        track = self.model_view.track_at(index)
-        if track is not None:
-            self.track_activated.emit(track)
-
-    def set_theme(self, theme: Theme) -> None:
-        self._theme = theme
-        self.delegate.set_theme(theme)
-        self.setStyleSheet(
-            "QListView#immersiveQueueList { background: transparent; border: 0; outline: 0; } "
-            "QListView#immersiveQueueList::item { background: transparent; } "
-            "QListView#immersiveQueueList::item:selected, QListView#immersiveQueueList::item:hover { background: transparent; } "
-            "QAbstractScrollArea#immersiveQueueList::viewport { background: transparent; } "
-            "QScrollBar:horizontal { height: 0; } "
-            "QScrollBar:vertical { width: 8px; background: transparent; } "
-            f"QScrollBar::handle:vertical {{ min-height: 28px; border-radius: 4px; background: {theme.colors.border_strong}; }} "
-            "QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0; }"
-        )
-        self.viewport().setStyleSheet("background: transparent; border: 0;")
-        self.viewport().update()
-
-
-class QueueDrawerContent(QWidget):
-    """Current and next sections rendered from the adapter without a copied queue."""
-
-    def __init__(self, playback: PlaybackAdapter, theme: Theme, parent: QWidget | None = None) -> None:
-        super().__init__(parent)
-        self.playback = playback
-        self._theme = theme
-        self.setObjectName("queueDrawerContent")
-        self.current_section = QFrame(self)
-        self.current_section.setObjectName("immersiveQueueSection")
-        self.current_title = QLabel("正在播放", self.current_section)
-        self.current_title.setObjectName("immersiveQueueSectionTitle")
-        self.current_list = QueueTrackList(theme, self.current_section, interactive=False)
-        self.current_list.setFixedHeight(62)
-        self.current_layout = QVBoxLayout(self.current_section)
-        self.current_layout.setContentsMargins(10, 4, 10, 0)
-        self.current_layout.setSpacing(0)
-        self.current_layout.addWidget(self.current_title)
-        self.current_layout.addWidget(self.current_list)
-        self.next_section = QFrame(self)
-        self.next_section.setObjectName("immersiveQueueSection")
-        self.next_title = QLabel("接下来播放", self.next_section)
-        self.next_title.setObjectName("immersiveQueueSectionTitle")
-        self.next_list = QueueTrackList(theme, self.next_section)
-        self.list_widget = self.next_list
-        self.next_layout = QVBoxLayout(self.next_section)
-        self.next_layout.setContentsMargins(10, 8, 10, 10)
-        self.next_layout.setSpacing(3)
-        self.next_layout.addWidget(self.next_title)
-        self.next_layout.addWidget(self.next_list, 1)
-        self.empty_label = QLabel("播放队列为空", self)
-        self.empty_label.setObjectName("immersiveQueueEmpty")
+        self.empty_label = QLabel("接下来没有歌曲", self)
         self.empty_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.next_rows: list[Track] = []
-        self.track_rows: list[object] = []
-        self.selected_track: Track | None = None
+        self.empty_label.hide()
+        self.footer_label = QLabel(self)
+        self.footer_label.setObjectName("immersiveQueueFooter")
+
+        heading = QHBoxLayout()
+        heading.setContentsMargins(0, 0, 0, 0)
+        heading.addWidget(self.title_label)
+        heading.addWidget(self.count_label)
+        heading.addStretch(1)
+        heading.addWidget(self.close_button)
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(0)
-        layout.addWidget(self.current_section)
-        layout.addWidget(self.next_section, 1)
+        layout.setContentsMargins(18, 16, 14, 14)
+        layout.setSpacing(8)
+        layout.addLayout(heading)
+        layout.addWidget(self.context_label)
+        layout.addWidget(self.current_section_label)
+        layout.addWidget(self.current_row)
+        layout.addWidget(self.next_section_label)
+        layout.addWidget(self.list_widget, 1)
         layout.addWidget(self.empty_label, 1)
-        playback.track_changed.connect(lambda _track: self.refresh())
+        layout.addWidget(self.footer_label)
+
+        playback.track_changed.connect(self.refresh)
         playback.queue_changed.connect(lambda _queue: self.refresh())
-        playback.playing_changed.connect(lambda _playing: self.refresh())
-        self.next_list.track_selected.connect(self._select_track)
-        self.next_list.track_activated.connect(self._play_selected_track)
+        playback.shuffle_changed.connect(lambda _enabled: self.refresh())
+        playback.repeat_mode_changed.connect(lambda _mode: self.refresh())
+        playback.playback_status_changed.connect(lambda _status, _detail: self.refresh())
+        self.refresh()
         self.set_theme(theme)
 
-    def _select_track(self, track: Track) -> None:
-        self.selected_track = track
-
-    def _play_selected_track(self, track: Track) -> None:
-        self.selected_track = track
-        self.playback.play_track(track.id)
-
-    def refresh(self) -> None:
-        tracks = tuple(self.playback.queue_tracks)
-        current_track = self.playback.state.current_track
-        current_index = self.playback.state.current_index
-        if (
-            not 0 <= current_index < len(tracks)
-            or current_track is None
-            or tracks[current_index].id != current_track.id
-        ):
-            current_index = next(
-                (index for index, track in enumerate(tracks) if current_track and track.id == current_track.id),
-                -1,
-            )
-        current = tracks[current_index] if current_index >= 0 else None
-        next_tracks = tracks[current_index + 1 :] if current_index >= 0 else tracks
-        self.current_list.set_current_track(current, playing=self.playback.state.is_playing)
-        self.next_rows = list(next_tracks)
-        self.track_rows = ([current] if current is not None else []) + list(next_tracks)
-        self.next_list.set_tracks(next_tracks)
-        if self.selected_track is not None:
-            selected_row = next(
-                (row for row, track in enumerate(next_tracks) if track.id == self.selected_track.id),
-                -1,
-            )
-            if selected_row >= 0:
-                self.next_list.setCurrentIndex(self.next_list.model_view.index(selected_row, 0))
-            else:
-                self.next_list.clearSelection()
-                self.selected_track = None
-        self.current_section.setVisible(current is not None)
-        self.next_section.setVisible(bool(next_tracks))
-        self.empty_label.setVisible(not tracks)
+    @property
+    def selected_track_id(self) -> str:
+        return self._selected_track_id
 
     def set_theme(self, theme: Theme) -> None:
         self._theme = theme
-        for section in (self.current_section, self.next_section):
-            section.setStyleSheet("QFrame#immersiveQueueSection { background: transparent; border: 0; }")
-        for label in (self.current_title, self.next_title):
-            label.setStyleSheet(
-                f"font-size: {theme.fonts.caption}px; font-weight: 600; color: {IMMERSIVE_GLASS.secondary_text};"
-            )
-        self.empty_label.setStyleSheet(
-            f"font-size: {theme.fonts.body}px; color: {IMMERSIVE_GLASS.secondary_text};"
+        self._delegate.set_theme(theme)
+        colors = theme.colors
+        self.setStyleSheet(
+            f"QFrame#immersiveQueuePanel {{ background: {colors.surface_elevated}; border: 1px solid {colors.divider}; border-radius: 14px; }}"
+            f"QFrame#immersiveQueueCurrentRow {{ background: {colors.playing_background}; border: 1px solid {colors.accent}; border-radius: 9px; }}"
+            f"QLabel {{ background: transparent; color: {colors.text_primary}; }}"
+            f"QListView {{ background: transparent; border: 0; outline: 0; padding: 0; }}"
+            f"QListView::item {{ background: transparent; padding: 0; border: 0; }}"
+            f"QToolButton {{ border: 0; border-radius: 16px; background: transparent; }}"
+            f"QToolButton:hover {{ background: {colors.surface_hover}; }}"
+            f"QToolButton[hushKeyboardFocus=\"true\"]:focus {{ border: 1px solid {colors.focus_ring}; }}"
         )
-        self.next_list.set_theme(theme)
-        self.current_list.set_theme(theme)
+        self.title_label.setStyleSheet(
+            f"font-size: {theme.fonts.section_title}px; font-weight: 650; color: {colors.text_primary};"
+        )
+        for label in (self.count_label, self.context_label, self.current_artist_label, self.footer_label):
+            label.setStyleSheet(f"font-size: {theme.fonts.caption}px; color: {colors.text_secondary};")
+        self.current_section_label.setStyleSheet(
+            f"font-size: {theme.fonts.caption}px; font-weight: 650; color: {colors.text_primary};"
+        )
+        self.next_section_label.setStyleSheet(
+            f"font-size: {theme.fonts.caption}px; font-weight: 650; color: {colors.text_primary};"
+        )
+        self.current_title_label.setStyleSheet(
+            f"font-size: {theme.fonts.body}px; font-weight: 650; color: {colors.text_primary};"
+        )
+        self.current_playing_label.setStyleSheet(
+            f"font-size: {theme.fonts.caption}px; color: {colors.accent};"
+        )
+        self.empty_label.setStyleSheet(
+            f"font-size: {theme.fonts.body}px; color: {colors.text_secondary};"
+        )
+        self.close_button.setIcon(icon("window_close", theme))
+        self.close_button.setToolTip("关闭队列")
+        self.current_artwork.set_theme(theme)
 
+    def refresh(self, *_args) -> None:
+        tracks = tuple(self.playback.display_queue_tracks)
+        current = self.playback.state.current_track
+        current_id = current.id if current is not None else ""
+        self.count_label.setText(f"{len(tracks)} 首")
+        self.current_row.setVisible(current is not None)
+        self.current_section_label.setVisible(current is not None)
+        if current is not None:
+            identity = present_track_identity(current)
+            self.current_artwork.set_track(current)
+            self.current_title_label.setText(identity.title)
+            self.current_artist_label.setText(identity.metadata)
+            self.current_title_label.setToolTip(identity.title)
+            self.current_artist_label.setToolTip(identity.metadata)
+            status = self.playback.state.status
+            status_label = {
+                "resolving": "准备播放…",
+                "buffering": "缓冲中…",
+                "unavailable": "来源不可用",
+                "error": "播放失败",
+                "paused": "已暂停",
+            }.get(status, "播放中" if self.playback.state.is_playing else "已暂停")
+            self.current_playing_label.setText(status_label)
+            self.current_playing_label.setToolTip(
+                self.playback.state.status_detail or status_label
+            )
+        self._delegate.clear_cache()
+        self.model.set_tracks(tracks, current_id)
+        self._upcoming_model.set_current_id(current_id)
+        upcoming_count = self._upcoming_model.rowCount()
+        self.next_section_label.setVisible(bool(upcoming_count) or current is not None)
+        self.list_widget.setVisible(bool(upcoming_count))
+        self.empty_label.setVisible(not upcoming_count)
+        if not upcoming_count:
+            self.empty_label.setText("队列中没有接下来的歌曲" if current is not None else "播放队列为空")
+        self.footer_label.setText(
+            f"第 {self.playback.state.current_index + 1} / {len(tracks)} 首" if current is not None else ""
+        )
+        self._selected_track_id = ""
 
-class QueueFloatingPanel(ImmersiveFloatingPanel):
-    """Stable floating Queue panel backed by the shared playback adapter."""
+    def _on_selection_changed(self) -> None:
+        index = self.list_widget.currentIndex()
+        track = index.data(Qt.ItemDataRole.UserRole) if index.isValid() else None
+        self._selected_track_id = track.id if isinstance(track, Track) else ""
+        self.selection_changed.emit(self._selected_track_id)
 
-    def __init__(self, playback: PlaybackAdapter, theme: Theme, parent: QWidget | None = None) -> None:
-        super().__init__("播放队列", theme, parent)
-        self.playback = playback
-        self.content = QueueDrawerContent(playback, theme, self.content_host)
-        self.set_content(self.content)
-        self.list_widget = self.content.list_widget
-        self.scroll_area = self.list_widget
-        self.empty_label = self.content.empty_label
-        self.current_section = self.content.current_section
-        self.next_section = self.content.next_section
-        self.refresh()
-        playback.track_changed.connect(lambda _track: self._refresh_count())
-        playback.queue_changed.connect(lambda _queue: self._refresh_count())
-
-    @property
-    def current_track(self) -> Track | None:
-        return self.content.current_list.current_track
-
-    @property
-    def next_rows(self) -> list[Track]:
-        return self.content.next_rows
-
-    @property
-    def track_rows(self) -> list[object]:
-        return self.content.track_rows
-
-    def refresh(self) -> None:
-        self.content.refresh()
-        self._refresh_count()
-
-    def _refresh_count(self) -> None:
-        self.set_count(f"{len(self.playback.queue_tracks)} 首" if self.playback.queue_tracks else "")
-
-    def set_theme(self, theme: Theme) -> None:
-        super().set_theme(theme)
-        if hasattr(self, "content"):
-            self.content.set_theme(theme)
-
-
-ImmersiveQueuePanel = QueueFloatingPanel
-QueueDrawer = QueueFloatingPanel
+    def _play_item(self, index: QModelIndex) -> None:
+        track = index.data(Qt.ItemDataRole.UserRole) if index.isValid() else None
+        if isinstance(track, Track):
+            self.playback.play_track(track.id)

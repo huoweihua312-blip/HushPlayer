@@ -13,6 +13,7 @@ from app.ui_v2.theme.icons import icon
 from app.ui_v2.theme.tokens import Theme
 from app.ui_v2.widgets.artwork_thumbnail import ArtworkThumbnail
 from app.ui_v2.widgets.elided_label import ElidedLabel
+from app.ui_v2.widgets.quiet_context_menu import apply_menu_theme
 
 
 class PlaylistHeader(QWidget):
@@ -67,6 +68,9 @@ class PlaylistHeader(QWidget):
         self.favorite_button.setCheckable(True)
         self.favorite_button.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
         self.favorite_button.toggled.connect(self.favorite_requested)
+        # Playlist-level favourite state has no formal persistence contract;
+        # keep the compatibility handle but do not expose a local-only action.
+        self.favorite_button.setVisible(False)
         self.more_button = QToolButton(self)
         self.more_button.setObjectName("playlistHeroMore")
         self.more_button.setText("")
@@ -82,7 +86,7 @@ class PlaylistHeader(QWidget):
         self.rename_button.clicked.connect(self.rename_requested)
         self.delete_button.clicked.connect(self.delete_requested)
 
-        self._more_menu = QMenu(self)
+        self._more_menu = apply_menu_theme(QMenu(self), theme)
         add_action = self._more_menu.addAction("添加歌曲")
         rename_action = self._more_menu.addAction("重命名")
         self._more_menu.addSeparator()
@@ -97,7 +101,6 @@ class PlaylistHeader(QWidget):
         actions.setSpacing(8)
         actions.addWidget(self.play_button)
         actions.addWidget(self.shuffle_button)
-        actions.addWidget(self.favorite_button)
         actions.addWidget(self.more_button)
         actions.addStretch(1)
 
@@ -114,17 +117,18 @@ class PlaylistHeader(QWidget):
         details.addStretch(1)
 
         layout = QHBoxLayout(self)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(20)
+        layout.setContentsMargins(24, 20, 24, 20)
+        layout.setSpacing(22)
         layout.addWidget(self.artwork, 0, Qt.AlignmentFlag.AlignTop)
         layout.addLayout(details, 1)
+        self.setMinimumHeight(200)
         self.set_theme(theme)
         self.set_playlist(None, ())
 
     def set_read_only(self, value: bool) -> None:
         self._read_only = bool(value)
-        self.favorite_button.setVisible(not self._read_only)
-        self.favorite_button.setEnabled(not self._read_only)
+        self.favorite_button.setVisible(False)
+        self.favorite_button.setEnabled(False)
         self.favorite_button.setToolTip(
             "只读模式不可修改歌单收藏" if self._read_only else "收藏歌单"
         )
@@ -180,6 +184,11 @@ class PlaylistHeader(QWidget):
         metrics = theme.metrics
         colors = theme.colors
         self.artwork.set_theme(theme)
+        apply_menu_theme(self._more_menu, theme)
+        self.setStyleSheet(
+            f"QWidget#playlistHero {{ background: {colors.surface_primary}; border: 1px solid {colors.border}; "
+            f"border-radius: {metrics.radius_lg}px; }}"
+        )
         self.eyebrow_label.setStyleSheet(
             f"font-size: {theme.fonts.caption}px; font-weight: 600; color: {colors.accent};"
         )

@@ -33,6 +33,25 @@ def _resolved_environment_path(name: str) -> Path | None:
     return Path(value).expanduser().resolve()
 
 
+def _configured_cache_path(application_data_dir: Path) -> Path | None:
+    """Read the optional user-selected cache directory without importing UI settings."""
+
+    settings_path = application_data_dir / "data" / "settings.json"
+    try:
+        document = json.loads(settings_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError, TypeError):
+        return None
+    if not isinstance(document, dict):
+        return None
+    value = str(document.get("cache_directory") or "").strip()
+    if not value:
+        return None
+    candidate = Path(value).expanduser()
+    if not candidate.is_absolute():
+        return None
+    return candidate.resolve()
+
+
 def ensure_qt_application_identity() -> None:
     """Keep QStandardPaths stable in development and frozen runtimes."""
 
@@ -90,6 +109,8 @@ class AppPaths:
 
         cache_dir = _resolved_environment_path("HUSHPLAYER_CACHE_DIR")
         if cache_dir is None:
+            cache_dir = _configured_cache_path(application_data_dir)
+        if cache_dir is None:
             location = QStandardPaths.writableLocation(
                 QStandardPaths.StandardLocation.CacheLocation
             )
@@ -132,6 +153,84 @@ class AppPaths:
     @property
     def bundled_source_runtime_dir(self) -> Path:
         return self.resource_path("source_runtime")
+
+    @property
+    def source_runtime_dependencies_dir(self) -> Path:
+        """Resolve Node dependencies independently from the active checkout.
+
+        Release bundles keep dependencies beside ``source_runtime``. During
+        development, a worktree may intentionally omit ignored ``node_modules``;
+        in that case prefer the stable local runtime location and then a matching
+        sibling runtime bundle. Only the dependency directory is shared; source
+        files and the registry remain in the formal AppData locations.
+        """
+
+        configured = _resolved_environment_path(
+            "HUSHPLAYER_SOURCE_RUNTIME_DEPENDENCIES_DIR"
+        )
+        if configured is not None:
+            return configured
+
+        bundled_dependencies = self.bundled_source_runtime_dir / "node_modules"
+        if bundled_dependencies.is_dir():
+            return bundled_dependencies.resolve()
+
+        stable_dependencies = (
+            self.cache_dir.parent / "runtime" / "source_runtime" / "node_modules"
+        ).resolve()
+        if stable_dependencies.is_dir():
+            return stable_dependencies
+
+        discovered = self._discover_sibling_runtime_dependencies()
+        return discovered or bundled_dependencies.resolve()
+
+    def _discover_sibling_runtime_dependencies(self) -> Path | None:
+        """Find a compatible development runtime without naming a checkout."""
+
+        current_runtime = self.bundled_source_runtime_dir
+        current_manifest = current_runtime / "package.json"
+        try:
+            current_manifest_document = json.loads(
+                current_manifest.read_text(encoding="utf-8")
+            )
+        except OSError:
+            current_manifest_document = {}
+        except (TypeError, ValueError):
+            current_manifest_document = {}
+
+        try:
+            candidates = sorted(
+                self.bundled_resource_dir.parent.iterdir(),
+                key=lambda item: item.name.casefold(),
+            )
+        except OSError:
+            return None
+
+        for candidate_root in candidates:
+            if not candidate_root.is_dir() or candidate_root.resolve() == self.bundled_resource_dir.resolve():
+                continue
+            candidate_runtime = candidate_root / "source_runtime"
+            candidate_dependencies = candidate_runtime / "node_modules"
+            candidate_manifest = candidate_runtime / "package.json"
+            if not (
+                candidate_dependencies.is_dir()
+                and (candidate_runtime / "runner.js").is_file()
+                and candidate_manifest.is_file()
+            ):
+                continue
+            if current_manifest_document:
+                try:
+                    candidate_document = json.loads(
+                        candidate_manifest.read_text(encoding="utf-8")
+                    )
+                    if candidate_document.get("dependencies") != current_manifest_document.get(
+                        "dependencies"
+                    ):
+                        continue
+                except (OSError, TypeError, ValueError):
+                    continue
+            return candidate_dependencies.resolve()
+        return None
 
     @property
     def bundled_node_executable(self) -> Path:

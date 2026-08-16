@@ -48,7 +48,8 @@ class SourceStatusBadge(QLabel):
             "disabled": colors.disabled_text,
         }.get(self._status, colors.secondary_text)
         self.setStyleSheet(
-            f"padding: 2px 6px; border-radius: {self._theme.metrics.radius_sm}px; "
-            f"background: {self._theme.colors.elevated_background}; color: {color}; "
-            f"font-size: {self._theme.fonts.caption}px;"
+            f"padding: 3px 8px; border: 1px solid {self._theme.colors.border}; "
+            f"border-radius: {self._theme.metrics.radius_sm}px; "
+            f"background: {self._theme.colors.surface_secondary}; color: {color}; "
+            f"font-size: {self._theme.fonts.caption}px; font-weight: 600;"
         )

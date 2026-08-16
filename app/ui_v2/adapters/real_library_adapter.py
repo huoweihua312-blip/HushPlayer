@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import os
 from collections import defaultdict
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime
 from typing import Iterable
 
@@ -24,7 +24,7 @@ from app.ui_v2.adapters.playlist_adapter import PlaylistAdapter
 from app.ui_v2.models.album import Album
 from app.ui_v2.models.artist import Artist
 from app.ui_v2.models.playlist import Playlist, PlaylistEntry
-from app.ui_v2.models.track import Track
+from app.ui_v2.models.track import Track, artwork_url_from_payload
 
 
 def ui_v2_data_mode() -> str:
@@ -52,7 +52,7 @@ class RealLibraryData:
     playlist_track_ids: dict[str, tuple[str, ...]]
 
 
-class _SnapshotWorker(QObject):
+class _SnapshotThread(QThread):
     completed = Signal(int, object, str)
 
     def __init__(
@@ -60,13 +60,13 @@ class _SnapshotWorker(QObject):
         generation: int,
         repository: LibraryRepository,
         remote_tracks: RemoteTrackStore,
+        parent: QObject | None = None,
     ) -> None:
-        super().__init__()
+        super().__init__(parent)
         self._generation = generation
         self._repository = repository
         self._remote_tracks = remote_tracks
 
-    @Slot()
     def run(self) -> None:
         try:
             snapshot = self._repository.load_snapshot()
@@ -117,14 +117,15 @@ class RealLibraryAdapter(QObject):
         self._remote_tracks = remote_tracks or RemoteTrackStore(
             data_dir / "remote_tracks.json"
         )
-        self._thread: QThread | None = None
-        self._worker: _SnapshotWorker | None = None
+        self._thread: _SnapshotThread | None = None
+        self._retired_threads: list[_SnapshotThread] = []
         self._generation = 0
         self._pending_generation = 0
         self._state = "idle"
         self._last_error = ""
         self._data = self._empty_data()
         self._closed = False
+        self.playlist_adapter.playlists_changed.connect(self._on_playlists_changed)
 
     @property
     def repository(self) -> LibraryRepository:
@@ -186,6 +187,16 @@ class RealLibraryAdapter(QObject):
             self._data.playlist_track_ids.get(str(playlist_id), ())
         )
 
+    def _on_playlists_changed(self, playlists: object) -> None:
+        """Keep the read projection current after an approved playlist edit."""
+
+        values = tuple(playlists or ())
+        self._data = replace(
+            self._data,
+            playlists=values,
+            playlist_track_ids={item.id: item.track_ids for item in values},
+        )
+
     def track_by_id(self, track_id: str) -> Track | None:
         return self._data.tracks_by_id.get(str(track_id or ""))
 
@@ -211,7 +222,9 @@ class RealLibraryAdapter(QObject):
     ) -> RealLibraryData:
         """Pure worker-side mapping with one-time membership and stats indexes."""
 
-        favorite_members = _favorite_members(snapshot)
+        legacy_aliases = _legacy_remote_aliases(remote_tracks)
+        legacy_target_ids = set(legacy_aliases)
+        favorite_members = _favorite_members(snapshot, legacy_aliases)
         stats_by_path = snapshot.song_stats
         tracks: list[Track] = []
         local_ids_by_path: dict[str, list[str]] = defaultdict(list)
@@ -260,12 +273,46 @@ class RealLibraryAdapter(QObject):
         for stable_id, record in remote_tracks.items():
             if not isinstance(record, dict) or not str(stable_id or ""):
                 continue
+            if stable_id in legacy_target_ids:
+                continue
             track_id = str(stable_id)
             if track_id in tracks_by_id:
                 continue
             favorite_at = favorite_members.get(("remote", track_id))
             local_path = str(record.get("local_path") or "")
             source_id = str(record.get("source_id") or "remote")
+            stored_state = str(
+                record.get("runtime_availability")
+                or record.get("availability")
+                or ""
+            ).strip()
+            availability = stored_state or ("playable" if local_path else "not_resolved")
+            confirmed_error = {
+                "unavailable",
+                "source_unavailable",
+                "source-unavailable",
+                "resolve_failed",
+                "resolve-failed",
+                "permission_denied",
+                "permission-denied",
+                "playback_error",
+                "playback-error",
+            }
+            remote_payload = RemoteTrackStore.to_online_track(track_id, record)
+            playback_source = record.get("playback_source")
+            legacy_target = str(record.get("replaced_by") or "").strip()
+            if not playback_source and legacy_target and legacy_target in remote_tracks:
+                playback_source = _legacy_playback_source(
+                    legacy_target,
+                    remote_tracks.get(legacy_target),
+                )
+            if isinstance(playback_source, dict) and playback_source:
+                remote_payload["playback_source"] = dict(playback_source)
+                # A selected or legacy replacement source is eligible for the
+                # normal queue path; a later resolver failure can still open
+                # the explicit recovery action.
+                availability = "playable"
+            artwork_url = artwork_url_from_payload(remote_payload) or artwork_url_from_payload(record)
             track = Track(
                 id=track_id,
                 title=str(record.get("title") or "未知歌曲"),
@@ -277,15 +324,25 @@ class RealLibraryAdapter(QObject):
                 source_type="online",
                 added_at=_timestamp(record.get("added_at")),
                 is_favorite=favorite_at is not None,
-                is_missing=not bool(local_path),
+                # A persisted remote membership is not proof that its source
+                # is unavailable. Runtime failures are transient and normally
+                # do not live in the remote-track record.
+                is_missing=availability in confirmed_error,
                 is_loading=False,
                 artwork_path=None,
                 stable_identity=track_id,
                 favorite_added_at=_timestamp(favorite_at) if favorite_at else None,
                 artwork_key=str(record.get("artwork") or track_id),
-                availability="downloaded" if local_path else "source-unavailable",
+                availability=availability,
                 local_path=local_path,
                 remote_identity=track_id,
+                remote_track_id=str(
+                    record.get("remote_id")
+                    or record.get("songmid")
+                    or track_id
+                ),
+                remote_payload=remote_payload,
+                artwork_url=artwork_url,
             )
             tracks.append(track)
             tracks_by_id[track.id] = track
@@ -294,6 +351,7 @@ class RealLibraryAdapter(QObject):
             snapshot,
             tracks_by_id,
             local_ids_by_path,
+            legacy_aliases,
         )
         artists, artist_track_ids, albums, album_track_ids = _map_entities(tracks)
         favorites = tuple(
@@ -327,24 +385,18 @@ class RealLibraryAdapter(QObject):
         if self._closed or self._thread is not None:
             return
         self._set_state("loading", "正在加载音乐库。")
-        # The worker may still be unwinding a read when the window closes.
-        # Keep the QThread independent of the widget tree; it deletes itself
-        # once finished rather than being destroyed with a running MainWindow.
-        thread = QThread()
-        worker = _SnapshotWorker(
+        # The adapter owns the task thread. Keeping the task and its Python
+        # wrapper together avoids a worker QObject being deleted after its
+        # thread event loop has already stopped.
+        thread = _SnapshotThread(
             generation,
             self._repository,
             self._remote_tracks,
+            self,
         )
-        worker.moveToThread(thread)
-        thread.started.connect(worker.run)
-        worker.completed.connect(self._on_worker_completed)
-        worker.completed.connect(thread.quit)
-        thread.finished.connect(worker.deleteLater)
-        thread.finished.connect(thread.deleteLater)
+        thread.completed.connect(self._on_worker_completed)
         thread.finished.connect(self._on_thread_finished)
         self._thread = thread
-        self._worker = worker
         thread.start()
 
     @Slot(int, object, str)
@@ -363,14 +415,22 @@ class RealLibraryAdapter(QObject):
         self._data = data
         self._last_error = ""
         self.collection.set_tracks(data.tracks)
-        self.playlist_adapter.set_playlists(data.playlists, read_only=True)
+        self.playlist_adapter.set_playlists(
+            data.playlists,
+            read_only=True,
+            can_mutate=self.playlist_adapter.mutation_backend is not None,
+        )
         self._set_state("empty" if not data.tracks else "loaded", "")
         self.data_loaded.emit()
 
     @Slot()
     def _on_thread_finished(self) -> None:
+        thread = self._thread
         self._thread = None
-        self._worker = None
+        if thread is not None:
+            # Keep the Python wrapper alive until the adapter itself is
+            # destroyed; Qt parent ownership handles the stopped C++ object.
+            self._retired_threads.append(thread)
         if self._closed or not self._pending_generation:
             return
         generation = self._pending_generation
@@ -393,7 +453,10 @@ class RealLibraryAdapter(QObject):
         return RealLibraryData((), (), (), (), (), (), {}, {}, {}, {})
 
 
-def _favorite_members(snapshot: LibrarySnapshot) -> dict[tuple[str, str], int]:
+def _favorite_members(
+    snapshot: LibrarySnapshot,
+    legacy_aliases: dict[str, str] | None = None,
+) -> dict[tuple[str, str], int]:
     liked = snapshot.playlists.playlists.get("liked", {})
     members = liked.get("members", ()) if isinstance(liked, dict) else ()
     result: dict[tuple[str, str], int] = {}
@@ -403,6 +466,8 @@ def _favorite_members(snapshot: LibrarySnapshot) -> dict[tuple[str, str], int]:
         kind = str(member.get("kind") or "")
         identifier = str(member.get("id") or "")
         if kind in {"local", "remote"} and identifier:
+            if kind == "remote" and legacy_aliases:
+                identifier = legacy_aliases.get(identifier, identifier)
             result[(kind, identifier)] = _nonnegative_int(member.get("added_at"))
     return result
 
@@ -411,6 +476,7 @@ def _map_playlists(
     snapshot: LibrarySnapshot,
     tracks_by_id: dict[str, Track],
     local_ids_by_path: dict[str, list[str]],
+    legacy_aliases: dict[str, str] | None = None,
 ) -> tuple[tuple[Playlist, ...], dict[str, tuple[str, ...]]]:
     values: list[Playlist] = []
     track_ids_by_playlist: dict[str, tuple[str, ...]] = {}
@@ -424,6 +490,8 @@ def _map_playlists(
                 continue
             kind = str(member.get("kind") or "")
             identifier = str(member.get("id") or "")
+            if kind == "remote" and legacy_aliases:
+                identifier = legacy_aliases.get(identifier, identifier)
             member_ids = (
                 local_ids_by_path.get(identifier, ())
                 if kind == "local"
@@ -453,6 +521,31 @@ def _map_playlists(
             entry.track_id for entry in entries
         )
     return tuple(values), track_ids_by_playlist
+
+
+def _legacy_remote_aliases(remote_tracks: dict[str, dict]) -> dict[str, str]:
+    """Map historical replacement targets back to their original identity."""
+
+    aliases: dict[str, str] = {}
+    for original_id, record in remote_tracks.items():
+        if not isinstance(record, dict):
+            continue
+        target_id = str(record.get("replaced_by") or "").strip()
+        if not target_id or target_id not in remote_tracks or target_id == original_id:
+            continue
+        aliases.setdefault(target_id, str(original_id))
+    return aliases
+
+
+def _legacy_playback_source(stable_id: str, record: dict | None) -> dict:
+    """Convert an old replacement target into a source-only payload."""
+
+    if not isinstance(record, dict):
+        return {}
+    nested = record.get("playback_source")
+    if isinstance(nested, dict) and nested:
+        return dict(nested)
+    return RemoteTrackStore.to_online_track(stable_id, record)
 
 
 def _map_entities(

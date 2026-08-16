@@ -167,8 +167,10 @@ class UiV2RealPlaybackTests(unittest.TestCase):
         root = Path(self.temporary_directory.name)
         self.first_path = root / "first.wav"
         self.second_path = root / "second.wav"
+        self.third_path = root / "third.wav"
         _write_wav(self.first_path)
         _write_wav(self.second_path)
+        _write_wav(self.third_path)
         self.player = _FakeMediaPlayer()
         self.output = _FakeAudioOutput()
         self.controller = ProductionPlaybackController(
@@ -179,6 +181,7 @@ class UiV2RealPlaybackTests(unittest.TestCase):
         self.adapter = PlaybackAdapter(timer_enabled=False, controller=self.controller)
         self.first = _track("first", self.first_path)
         self.second = _track("second", self.second_path)
+        self.third = _track("third", self.third_path)
 
     def tearDown(self) -> None:
         self.controller.shutdown()
@@ -208,6 +211,46 @@ class UiV2RealPlaybackTests(unittest.TestCase):
         self.assertEqual(self.adapter.state.current_track, self.second)
         self.assertEqual(Path(self.player.source().toLocalFile()), self.second_path)
 
+    def test_display_queue_tracks_follow_context_without_reordering_membership(self) -> None:
+        self.adapter.set_queue((self.first, self.second))
+        self.adapter.play_track("first")
+        self.assertEqual(
+            [track.id for track in self.adapter.display_queue_tracks],
+            ["first", "second"],
+        )
+
+        self.adapter.play_next()
+        self.assertEqual(
+            [track.id for track in self.adapter.display_queue_tracks],
+            ["second", "first"],
+        )
+        self.assertEqual(
+            [track.id for track in self.adapter.queue_tracks],
+            ["first", "second"],
+        )
+
+    def test_display_queue_tracks_match_the_next_shuffle_item(self) -> None:
+        self.adapter.set_queue((self.first, self.second, self.third))
+        self.adapter.play_track("first")
+        self.adapter.toggle_shuffle()
+
+        displayed_next = self.adapter.display_queue_tracks[1].id
+        self.adapter.play_next()
+        self.assertEqual(self.adapter.state.current_track.id, displayed_next)
+        self.assertEqual(self.adapter.display_queue_tracks[0].id, displayed_next)
+
+    def test_track_changed_is_published_after_the_new_media_source_is_selected(self) -> None:
+        self.adapter.set_queue((self.first, self.second))
+        self.adapter.play_track("first")
+        observed_sources: list[str] = []
+        self.controller.track_changed.connect(
+            lambda _item: observed_sources.append(self.player.source().toLocalFile())
+        )
+
+        self.adapter.play_next()
+
+        self.assertEqual(Path(observed_sources[-1]), self.second_path)
+
     def test_end_of_media_is_deduplicated_and_mode_state_follows_controller(self) -> None:
         self.adapter.set_queue((self.first, self.second))
         self.adapter.play_track("first")
@@ -226,15 +269,17 @@ class UiV2RealPlaybackTests(unittest.TestCase):
         self.assertTrue(self.adapter.state.shuffle_enabled)
         self.assertEqual(self.controller.play_mode, "shuffle")
 
-    def test_online_tracks_are_not_placed_in_the_formal_local_queue(self) -> None:
+    def test_online_tracks_join_the_formal_mixed_queue_but_need_a_resolver(self) -> None:
         online = _track("remote", self.first_path, online=True)
         errors: list[str] = []
         self.adapter.error_occurred.connect(errors.append)
         self.adapter.set_queue((online, self.first))
-        self.assertEqual([track.id for track in self.adapter.queue_tracks], ["first"])
+        self.assertEqual(
+            [track.id for track in self.adapter.queue_tracks], ["remote", "first"]
+        )
         self.adapter.play_track("remote")
         self.assertFalse(self.adapter.state.is_playing)
-        self.assertEqual(errors, ["Online playback is not available in this version."])
+        self.assertEqual(errors, ["暂时无法播放这首在线歌曲。"])
 
     def test_missing_or_failed_local_media_does_not_leave_playing_state(self) -> None:
         missing = _track("missing", self.first_path.parent / "missing.wav")

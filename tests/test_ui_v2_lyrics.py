@@ -3,7 +3,9 @@ from __future__ import annotations
 import importlib
 import os
 import sys
+import tempfile
 import unittest
+from dataclasses import replace
 from pathlib import Path
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
@@ -12,9 +14,9 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from PySide6.QtCore import QPoint, QPointF, Qt
+from PySide6.QtCore import QPoint, QPointF, QObject, Qt, Signal
 from PySide6.QtGui import QWheelEvent
-from PySide6.QtWidgets import QApplication, QSlider
+from PySide6.QtWidgets import QApplication, QLineEdit, QSlider
 
 from app.ui_v2.adapters.lyrics_adapter import LyricsAdapter
 from app.ui_v2.mock.track_factory import create_mock_tracks
@@ -22,6 +24,25 @@ from app.ui_v2.models.track_table_model import TrackColumn
 from app.ui_v2.pages.lyrics_page import LyricsPage
 from app.ui_v2.shell.main_window import MainWindow
 from app.ui_v2.widgets.lyrics_canvas_v2 import LyricsCanvasV2, ResponsiveLyricsMetrics
+
+
+class FakeLyricsService(QObject):
+    statusChanged = Signal(int, str, str)
+    lyricsReady = Signal(int, str, dict)
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.generation = 0
+        self.requests = []
+        self.cancel_count = 0
+
+    def request_lyrics(self, item) -> int:
+        self.generation += 1
+        self.requests.append(item)
+        return self.generation
+
+    def cancel(self) -> None:
+        self.cancel_count += 1
 
 
 class LyricsAdapterTests(unittest.TestCase):
@@ -82,6 +103,82 @@ class LyricsAdapterTests(unittest.TestCase):
         self.assertTrue(self.adapter.document.has_romanization)
         self.adapter.toggle_romanization()
         self.assertTrue(self.adapter.display_options["romanization"])
+
+    def test_formal_adapter_loads_actual_local_lrc_instead_of_mock_text(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="hushplayer-v2-lyrics-") as root:
+            song_path = Path(root) / "actual-song.mp3"
+            lyric_path = song_path.with_suffix(".lrc")
+            song_path.write_bytes(b"fixture")
+            lyric_path.write_text(
+                "[00:00.00]真实第一行\n[00:02.00]真实第二行\n",
+                encoding="utf-8",
+            )
+            service = FakeLyricsService()
+            adapter = LyricsAdapter(lyrics_service=service)
+            track = replace(
+                self.track,
+                source_id="local",
+                source_name="本地音乐",
+                source_type="local",
+                local_path=str(song_path),
+                duration_ms=5_000,
+            )
+
+            adapter.set_track(track)
+
+            self.assertEqual(service.requests, [])
+            self.assertEqual(adapter.state.phase, "ready")
+            self.assertEqual(
+                [line.text for line in adapter.document.lines],
+                ["真实第一行", "真实第二行"],
+            )
+            self.assertNotIn("雾落在清晨的海岸", adapter.document.lines[0].text)
+            self.assertEqual(adapter.document.lines[0].segments[0].text, "真")
+
+    def test_formal_adapter_rejects_stale_online_lyrics_by_identity_and_generation(self) -> None:
+        service = FakeLyricsService()
+        adapter = LyricsAdapter(lyrics_service=service)
+        first = replace(
+            self.track,
+            source_type="online",
+            source_id="fixture",
+            source_name="Fixture",
+            stable_identity="remote:fixture:first",
+            remote_identity="first",
+            remote_track_id="first",
+            remote_payload={"id": "first"},
+        )
+        second = replace(
+            first,
+            id="second",
+            stable_identity="remote:fixture:second",
+            remote_identity="second",
+            remote_track_id="second",
+            remote_payload={"id": "second"},
+        )
+
+        adapter.set_track(first)
+        first_generation = service.generation
+        adapter.set_track(second)
+        second_generation = service.generation
+        service.lyricsReady.emit(
+            first_generation,
+            first.stable_identity,
+            {"text": "过期歌词", "source": "stale"},
+        )
+        self.assertIsNone(adapter.document)
+        service.lyricsReady.emit(
+            second_generation,
+            second.stable_identity,
+            {
+                "text": "[00:00.00]真实在线歌词",
+                "source": "Fixture",
+            },
+        )
+
+        self.assertEqual(adapter.state.phase, "ready")
+        self.assertEqual(adapter.document.lines[0].text, "真实在线歌词")
+        self.assertNotIn("雾落在清晨的海岸", adapter.document.lines[0].text)
 
 
 class LyricsPageTests(unittest.TestCase):
@@ -180,6 +277,104 @@ class LyricsPageTests(unittest.TestCase):
             self.assertEqual(id(page.lyrics_view), canvas_id)
             self.assertLessEqual(page._content_container.maximumWidth(), 1020)
             self.assertLessEqual(page.lyrics_view.maximumWidth(), 980)
+
+    def test_browse_scroll_is_continuous_and_playback_follow_returns_cleanly(self) -> None:
+        self._play_library_track()
+        page = self._lyrics_page()
+        canvas = page.lyrics_view
+        self.window.resize(1200, 800)
+        self.app.processEvents()
+        event = QWheelEvent(
+            QPointF(80, 80), QPointF(80, 80), QPoint(), QPoint(0, -120),
+            Qt.MouseButton.NoButton, Qt.KeyboardModifier.NoModifier,
+            Qt.ScrollPhase.ScrollUpdate, False,
+        )
+        canvas.wheelEvent(event)
+        canvas.repaint()
+        self.app.processEvents()
+        first_offset = canvas.last_metrics["browse_offset"]
+        canvas.wheelEvent(event)
+        canvas.repaint()
+        self.app.processEvents()
+        second_offset = canvas.last_metrics["browse_offset"]
+        self.assertTrue(canvas.browsing)
+        self.assertGreater(second_offset, first_offset)
+        self.assertGreater(canvas.last_metrics["browse_content_height"], canvas.height())
+        canvas.return_to_current()
+        self.assertFalse(canvas.browsing)
+        self.assertFalse(canvas.return_button.isVisible())
+
+    def test_browsing_keeps_character_highlight_running(self) -> None:
+        self._play_library_track()
+        page = self._lyrics_page()
+        canvas = page.lyrics_view
+        line = next(line for line in canvas.document.lines if line.segments)
+        segment = line.segments[0]
+        self.window.navigation_adapter.set_route("immersive_lyrics")
+        self.app.processEvents()
+        canvas = self.window.router.currentWidget().canvas
+        canvas.set_active_line(line)
+        canvas.set_active_segment(line, 0, 0.0)
+        canvas.set_playback_active(True)
+        canvas._set_playback_anchor(
+            segment.start_ms + max(1, (segment.end_ms - segment.start_ms) // 2)
+            if segment.end_ms is not None
+            else segment.start_ms + 400
+        )
+        canvas._begin_browse()
+        canvas._on_highlight_tick()
+        self.assertTrue(canvas.browsing)
+        self.assertGreater(canvas._active_segment_progress, 0.0)
+
+    def test_search_inputs_are_vertically_centered(self) -> None:
+        for control in self.window.findChildren(QLineEdit):
+            self.assertTrue(
+                control.alignment() & Qt.AlignmentFlag.AlignVCenter,
+                control.objectName() or "unnamed QLineEdit",
+            )
+
+    def test_search_inputs_use_optical_baseline_compensation(self) -> None:
+        controls = self.window.findChildren(QLineEdit)
+        self.assertTrue(controls)
+        for control in controls:
+            self.assertEqual(control.textMargins().top(), -2, control.objectName())
+            self.assertEqual(control.textMargins().bottom(), 2, control.objectName())
+
+    def test_immersive_overlay_releases_content_input_when_closed(self) -> None:
+        self._play_library_track()
+        self.window.navigation_adapter.set_route("immersive_lyrics")
+        self.app.processEvents()
+        shell = self.window.router.currentWidget()
+        self.assertTrue(
+            shell.overlay_host.testAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+        )
+        shell.show_settings_panel()
+        self.app.processEvents()
+        self.assertFalse(
+            shell.overlay_host.testAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+        )
+        shell.hide_settings_panel()
+        self.app.processEvents()
+        self.assertTrue(
+            shell.overlay_host.testAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+        )
+
+    def test_immersive_volume_and_mute_controls_share_playback_state(self) -> None:
+        self._play_library_track()
+        self.window.navigation_adapter.set_route("immersive_lyrics")
+        self.app.processEvents()
+        shell = self.window.router.currentWidget()
+        controls = shell.controls
+        adapter = self.window.playback_adapter
+        adapter.set_muted(True)
+        self.app.processEvents()
+        self.assertTrue(adapter.state.is_muted)
+        self.assertEqual(controls.volume_button.toolTip(), "取消静音")
+        controls.volume_button.click()
+        self.assertFalse(adapter.state.is_muted)
+        adapter.set_volume(31)
+        self.app.processEvents()
+        self.assertEqual(controls.volume_slider.value(), 31)
 
     def test_distance_hierarchy_segments_and_light_readability(self) -> None:
         self._play_library_track()

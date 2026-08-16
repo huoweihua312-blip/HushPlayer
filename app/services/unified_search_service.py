@@ -277,8 +277,8 @@ class UnifiedSearchService(QObject):
             capabilities = source.get("capabilities")
             capabilities = capabilities if isinstance(capabilities, dict) else {}
             unavailable_reason = ""
-            if not bool(source.get("enabled", True)):
-                unavailable_reason = "已禁用，请在来源管理中启用"
+            if source.get("enabled") is not True:
+                unavailable_reason = "已禁用，可在来源管理中重新启用"
             elif source.get("scanError"):
                 unavailable_reason = "能力检测失败"
             elif not source.get("fileExists", True):
@@ -292,9 +292,12 @@ class UnifiedSearchService(QObject):
                     "name": source_name,
                     "selectable": selectable,
                     "reason": unavailable_reason,
+                    "sourceUrl": str(source.get("sourceUrl") or ""),
+                    "contentPolicy": str(source.get("contentPolicy") or ""),
+                    "capabilities": dict(capabilities),
                 }
             )
-            if selectable:
+            if selectable and source.get("enabled") is True:
                 searchable_sources.append(dict(source))
 
         self._source_catalog = catalog
@@ -320,9 +323,9 @@ class UnifiedSearchService(QObject):
             if selectable_ids:
                 self.statusChanged.emit(f"已加载 {len(selectable_ids)} 个可搜索来源。")
             elif catalog:
-                self.statusChanged.emit("当前自定义来源均不可用于搜索。")
+                self.statusChanged.emit("当前在线来源均不可用于搜索，可在来源管理中检查。")
             else:
-                self.statusChanged.emit("没有已启用的自定义来源。")
+                self.statusChanged.emit("没有已注册的自定义来源。")
             return
         if request_generation != self._generation:
             return
@@ -341,9 +344,7 @@ class UnifiedSearchService(QObject):
             if selectable_ids:
                 self.statusChanged.emit("请至少选择一个搜索来源。")
             elif catalog:
-                self.statusChanged.emit(
-                    "没有可搜索的在线来源；请在来源管理中启用可搜索来源。"
-                )
+                self.statusChanged.emit("没有可搜索的在线来源；部分来源当前不可用。")
             else:
                 self.statusChanged.emit("没有已启用且支持搜索的自定义来源。")
             self._emit_results(final=True)

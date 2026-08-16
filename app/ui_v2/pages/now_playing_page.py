@@ -17,13 +17,15 @@ from app.ui_v2.theme.icons import fluent_icon, icon
 from app.ui_v2.theme.tokens import Theme
 from app.ui_v2.widgets.artwork_thumbnail import ArtworkThumbnail
 from app.ui_v2.widgets.elided_label import ElidedLabel
-from app.ui_v2.widgets.track_display import display_track_text
+from app.ui_v2.widgets.track_display import present_track_identity
 
 
 class NowPlayingPage(QFrame):
     """Large artwork and metadata view for the immersive shell."""
 
     queue_requested = Signal()
+    lyrics_requested = Signal()
+    more_requested = Signal()
 
     def __init__(self, playback: PlaybackAdapter, theme: Theme, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -50,6 +52,10 @@ class NowPlayingPage(QFrame):
         self.detail_label = QLabel(self)
         self.detail_label.setObjectName("nowPlayingDetail")
         self.detail_label.setWordWrap(True)
+        self.error_label = QLabel(self)
+        self.error_label.setObjectName("nowPlayingError")
+        self.error_label.setWordWrap(True)
+        self.error_label.hide()
         self.favorite_button = QToolButton(self)
         self.favorite_button.setObjectName("nowPlayingFavorite")
         self.favorite_button.setFixedSize(38, 38)
@@ -59,6 +65,16 @@ class NowPlayingPage(QFrame):
         self.queue_button.setFixedSize(38, 38)
         self.queue_button.setIconSize(QSize(20, 20))
         self.queue_button.clicked.connect(self.queue_requested)
+        self.lyrics_button = QToolButton(self)
+        self.lyrics_button.setObjectName("nowPlayingLyrics")
+        self.lyrics_button.setFixedSize(38, 38)
+        self.lyrics_button.setIconSize(QSize(20, 20))
+        self.lyrics_button.clicked.connect(self.lyrics_requested)
+        self.more_button = QToolButton(self)
+        self.more_button.setObjectName("nowPlayingMore")
+        self.more_button.setFixedSize(38, 38)
+        self.more_button.setIconSize(QSize(20, 20))
+        self.more_button.clicked.connect(self.more_requested)
 
         self._meta_group = QWidget(self)
         self._meta_group.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
@@ -69,11 +85,14 @@ class NowPlayingPage(QFrame):
         meta_layout.addWidget(self.artist_label)
         meta_layout.addWidget(self.album_label)
         meta_layout.addWidget(self.detail_label)
+        meta_layout.addWidget(self.error_label)
         actions = QHBoxLayout()
         actions.setContentsMargins(0, 10, 0, 0)
         actions.setSpacing(8)
         actions.addWidget(self.favorite_button)
         actions.addWidget(self.queue_button)
+        actions.addWidget(self.lyrics_button)
+        actions.addWidget(self.more_button)
         actions.addStretch(1)
         meta_layout.addLayout(actions)
         self._meta_layout = meta_layout
@@ -92,6 +111,8 @@ class NowPlayingPage(QFrame):
         self.playback.track_changed.connect(self._on_track_changed)
         self.playback.favorite_changed.connect(self._on_favorite_changed)
         self.playback.playing_changed.connect(self._on_playing_changed)
+        self.playback.playback_status_changed.connect(self._on_playback_status_changed)
+        self.playback.error_occurred.connect(self._on_playback_error)
         self._on_track_changed(self.playback.state.current_track)
         self._on_favorite_changed(self.playback.state.is_favorite)
         self._on_playing_changed(self.playback.state.is_playing)
@@ -102,18 +123,23 @@ class NowPlayingPage(QFrame):
         colors = theme.colors
         self.setStyleSheet(
             f"QFrame#nowPlayingPage {{ background: transparent; }}"
-            f"QLabel#nowPlayingTitle {{ color: {colors.text_primary}; font-size: 32px; font-weight: 600; }}"
-            f"QLabel#nowPlayingArtist {{ color: {colors.text_secondary}; font-size: 19px; }}"
-            f"QLabel#nowPlayingAlbum {{ color: {colors.text_tertiary}; font-size: 15px; }}"
-            f"QLabel#nowPlayingDetail {{ color: {colors.text_secondary}; font-size: 13px; }}"
+            f"QLabel#nowPlayingTitle {{ color: {colors.text_primary}; font-size: {theme.fonts.page_title}px; font-weight: 600; }}"
+            f"QLabel#nowPlayingArtist {{ color: {colors.text_secondary}; font-size: {theme.fonts.secondary}px; }}"
+            f"QLabel#nowPlayingAlbum {{ color: {colors.text_tertiary}; font-size: {theme.fonts.body}px; }}"
+            f"QLabel#nowPlayingDetail {{ color: {colors.text_secondary}; font-size: {theme.fonts.caption}px; }}"
+            f"QLabel#nowPlayingError {{ color: {colors.danger}; font-size: {theme.fonts.caption}px; }}"
             f"QToolButton {{ border: 0; border-radius: 19px; background: transparent; }}"
             f"QToolButton:hover {{ background: {colors.surface_hover}; }}"
         )
         self.artwork.set_theme(theme)
         self.favorite_button.setIcon(fluent_icon("favorite_filled" if self.playback.state.is_favorite else "favorite", theme, "selected" if self.playback.state.is_favorite else "normal", size=20))
         self.queue_button.setIcon(fluent_icon("queue", theme, size=20))
+        self.lyrics_button.setIcon(fluent_icon("lyrics", theme, size=20))
+        self.more_button.setIcon(fluent_icon("more", theme, size=20))
         self.favorite_button.setToolTip("取消收藏" if self.playback.state.is_favorite else "收藏")
         self.queue_button.setToolTip("播放队列")
+        self.lyrics_button.setToolTip("歌词")
+        self.more_button.setToolTip("歌词快捷设置")
 
     def set_responsive_reference_width(self, width: int, height: int | None = None) -> None:
         width = max(1, int(width))
@@ -163,24 +189,59 @@ class NowPlayingPage(QFrame):
         self.favorite_button.setEnabled(not bool(read_only) and self.playback.state.current_track is not None)
 
     def _on_track_changed(self, track: Track | None) -> None:
+        self.error_label.hide()
         self.artwork.set_track(track)
-        title, artist, album = display_track_text(track) if track else ("未选择歌曲", "选择一首歌曲开始播放", "")
-        self.title_label.set_full_text(title)
-        self.artist_label.set_full_text(artist)
-        self.album_label.set_full_text(album)
+        if track is None:
+            self.title_label.set_full_text("未选择歌曲")
+            self.artist_label.set_full_text("选择一首歌曲开始播放")
+            self.album_label.set_full_text("")
+        else:
+            identity = present_track_identity(track)
+            self.title_label.set_full_text(identity.title)
+            self.artist_label.set_full_text(identity.artist)
+            self.album_label.set_full_text(identity.album)
+            if identity.availability.is_visible:
+                self.album_label.setToolTip(
+                    f"{identity.metadata}\n状态: {identity.availability.label}\n"
+                    f"{identity.availability.tooltip}"
+                )
         if track is None:
             self.detail_label.setText("选择一首歌曲开始播放")
         else:
-            self.detail_label.setText(f"{format_duration(track.duration_ms)} · {'播放中' if self.playback.state.is_playing else '已暂停'}")
+            self._refresh_playback_detail()
         enabled = track is not None
         self.favorite_button.setEnabled(enabled)
         self.queue_button.setEnabled(True)
+        self.lyrics_button.setEnabled(True)
+        self.more_button.setEnabled(True)
 
     def _on_favorite_changed(self, favorite: bool) -> None:
         self.favorite_button.setIcon(fluent_icon("favorite_filled" if favorite else "favorite", self._theme, "selected" if favorite else "normal", size=20))
         self.favorite_button.setToolTip("取消收藏" if favorite else "收藏")
 
     def _on_playing_changed(self, _playing: bool) -> None:
+        self._refresh_playback_detail()
+
+    def _on_playback_status_changed(self, _status: str, _detail: str) -> None:
+        self._refresh_playback_detail()
+
+    def _refresh_playback_detail(self) -> None:
         track = self.playback.state.current_track
-        if track is not None:
-            self.detail_label.setText(f"{format_duration(track.duration_ms)} · {'播放中' if self.playback.state.is_playing else '已暂停'}")
+        if track is None:
+            return
+        state = self.playback.state
+        label = {
+            "resolving": "准备播放",
+            "buffering": "缓冲中",
+            "unavailable": "来源不可用",
+            "error": "播放失败",
+            "playing": "播放中",
+            "paused": "已暂停",
+        }.get(state.status, "播放中" if state.is_playing else "已暂停")
+        self.detail_label.setText(f"{format_duration(track.duration_ms)} · {label}")
+        self.detail_label.setToolTip(state.status_detail or label)
+
+    def _on_playback_error(self, message: str) -> None:
+        detail = str(message or "播放失败，请检查音频文件或输出设备")
+        self.error_label.setText(f"播放遇到问题 · {detail}")
+        self.error_label.show()

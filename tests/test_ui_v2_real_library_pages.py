@@ -11,7 +11,7 @@ from unittest.mock import patch
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QEvent, Qt
 from PySide6.QtWidgets import QApplication
 
 from app.ui_v2.models.track_table_model import TrackColumn
@@ -79,10 +79,25 @@ class RealLibraryPageTests(unittest.TestCase):
         self.assertEqual(self.window.real_library_adapter.state, "loaded")
 
     def tearDown(self) -> None:
-        self.window.close()
-        self.app.processEvents()
+        self._dispose_window()
         self.environment.stop()
         self.temporary_directory.cleanup()
+
+    def _dispose_window(self) -> None:
+        """Finish Qt deferred deletion before the next real-mode fixture starts."""
+
+        window = getattr(self, "window", None)
+        self.window = None
+        if window is None:
+            return
+        window.close()
+        adapter = getattr(window, "real_library_adapter", None)
+        if adapter is not None:
+            self.app.removePostedEvents(adapter, QEvent.Type.MetaCall)
+        window.deleteLater()
+        self.app.processEvents()
+        self.app.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+        self.app.processEvents()
 
     def _create_audio(self, relative_path: str) -> Path:
         path = self.root / relative_path
@@ -180,6 +195,7 @@ class RealLibraryPageTests(unittest.TestCase):
         self.assertEqual(self.window.data_mode, "real")
         self.assertTrue(self.window.library_collection.read_only)
         self.assertTrue(self.window.playlist_adapter.read_only)
+        self.assertTrue(self.window.playlist_adapter.can_mutate)
         self.assertEqual(self.window.library_page.track_table.model.rowCount(), 3)
         self.assertEqual(len(adapter.tracks()), 3)
 
@@ -204,7 +220,7 @@ class RealLibraryPageTests(unittest.TestCase):
         playlist_page = self.window.router.page_for_route("playlist:commute")
         self.assertEqual([track.title for track in playlist_page.adapter.tracks()], ["Beta", "Alpha", "Remote"])
         self.assertIs(playlist_page, self.window.router.page_for_route("playlist:commute"))
-        self.assertTrue(playlist_page.playlist_header.more_button.isHidden())
+        self.assertFalse(playlist_page.playlist_header.more_button.isHidden())
 
     def test_search_and_sort_reuse_mapped_tracks_without_refreshing_repository(self) -> None:
         adapter = self.window.real_library_adapter
@@ -224,29 +240,42 @@ class RealLibraryPageTests(unittest.TestCase):
         self.assertEqual(tuple(track.id for track in adapter.tracks()), original)
         self.assertEqual(adapter.state, "loaded")
 
-    def test_real_mode_hides_or_rejects_every_library_write_entry(self) -> None:
+    def test_real_mode_keeps_library_read_only_and_allows_playlist_management(self) -> None:
         library_table = self.window.library_page.track_table
         menu = library_table.build_context_menu(library_table.model.index(0, 0))
         self.assertIsNotNone(menu)
         self.assertEqual(
             [action.text() for action in menu.actions()],
-            ["播放", "查看歌曲信息"],
+            ["播放", "取消收藏", "添加到歌单", "查看歌曲信息"],
         )
         menu.deleteLater()
-        self.assertTrue(self.window.player_bar.favorite_button.isHidden())
-        self.assertTrue(self.window.library_page.track_table.isColumnHidden(int(TrackColumn.FAVORITE)))
-        self.assertTrue(self.window.sidebar.new_playlist_button.isHidden())
-        self.assertNotIn("online_search", self.window.sidebar._items)
+        self.assertFalse(self.window.player_bar.favorite_button.isHidden())
+        library_table.set_responsive_reference_width(1200)
+        self.assertFalse(self.window.library_page.track_table.isColumnHidden(int(TrackColumn.FAVORITE)))
+        self.assertFalse(self.window.sidebar.new_playlist_button.isHidden())
+        self.assertIn("online_search", self.window.sidebar._items)
         first = self.window.library_collection.tracks()[0]
-        self.assertFalse(self.window.library_collection.set_favorite(first.id, not first.is_favorite))
-        self.assertIsNone(self.window.playlist_adapter.create_playlist("不可写"))
-        self.assertFalse(self.window.playlist_adapter.rename_playlist("commute", "不可写"))
-        self.assertFalse(self.window.playlist_adapter.delete_playlist("commute"))
-        self.assertEqual(self.window.playlist_adapter.add_tracks("commute", (first.id,)), 0)
-        self.assertFalse(self.window.playlist_adapter.remove_track("commute", first.id))
+        self.assertTrue(self.window.library_collection.set_favorite(first.id, not first.is_favorite))
+        created = self.window.playlist_adapter.create_playlist("可写歌单")
+        self.assertIsNotNone(created)
+        assert created is not None
+        self.assertTrue(self.window.playlist_adapter.rename_playlist(created.id, "可写歌单已重命名"))
+        self.assertEqual(self.window.playlist_adapter.add_tracks(created.id, (first.id,)), 1)
+        self.assertTrue(self.window.playlist_adapter.remove_track(created.id, first.id))
+        self.assertTrue(self.window.playlist_adapter.delete_playlist(created.id))
+        self.assertFalse(self.window.playlist_adapter.rename_playlist("liked", "不可修改"))
+        self.assertFalse(self.window.playlist_adapter.delete_playlist("liked"))
         playlist_page = self.window.router.page_for_route("playlist:commute")
         self.assertTrue(playlist_page.playlist_header.favorite_button.isHidden())
-        self.assertTrue(playlist_page.track_table.isColumnHidden(int(TrackColumn.FAVORITE)))
+        playlist_page.track_table.set_responsive_reference_width(1200)
+        self.assertFalse(playlist_page.track_table.isColumnHidden(int(TrackColumn.FAVORITE)))
+        playlist_menu = playlist_page.track_table.build_context_menu(
+            playlist_page.track_table.model.index(0, 0)
+        )
+        self.assertIsNotNone(playlist_menu)
+        assert playlist_menu is not None
+        self.assertIn("从当前歌单移除", [action.text() for action in playlist_menu.actions()])
+        playlist_menu.deleteLater()
 
     def test_real_browse_uses_read_only_local_sections_without_playback_writes(self) -> None:
         browse = self.window.router.browse_page
@@ -274,9 +303,8 @@ class RealLibraryPageTests(unittest.TestCase):
         self.assertEqual(self.before_state, _file_state(self.document_paths))
 
     def test_error_view_shows_retry_instead_of_mock_fallback(self) -> None:
-        self.window.close()
-        self.app.processEvents()
         self.library_file.write_text("[", encoding="utf-8")
+        self._dispose_window()
         self.window = MainWindow()
         self.assertTrue(
             self._wait_for(lambda: self.window.real_library_adapter.state == "error")
@@ -290,21 +318,19 @@ class RealLibraryPageTests(unittest.TestCase):
         )
 
     def test_mock_mode_remains_the_default_interactive_preview(self) -> None:
-        self.window.close()
-        self.app.processEvents()
+        self._dispose_window()
         os.environ["HUSHPLAYER_UI_V2_DATA_MODE"] = "mock"
         self.window = MainWindow()
         self.assertEqual(self.window.data_mode, "mock")
         self.assertIsNone(self.window.real_library_adapter)
         self.assertEqual(len(self.window.library_collection.tracks()), 1000)
-        # Low-frequency routes remain available to the router but are not
-        # permanently surfaced in the approved compact sidebar.
+        # Online discovery is an approved read-only navigation surface.
         self.assertIn(
             "online_search",
             tuple(item.route_id for item in self.window.navigation_adapter.items()),
         )
-        self.assertNotIn("online_search", self.window.sidebar._items)
-        self.assertTrue(self.window.sidebar.new_playlist_button.isHidden())
+        self.assertIn("online_search", self.window.sidebar._items)
+        self.assertFalse(self.window.sidebar.new_playlist_button.isHidden())
 
 
 if __name__ == "__main__":

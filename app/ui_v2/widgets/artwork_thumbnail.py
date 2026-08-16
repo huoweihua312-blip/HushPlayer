@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import hashlib
+from pathlib import Path
+
 from PySide6.QtCore import QRectF, Qt
 from PySide6.QtGui import QColor, QPainter, QPainterPath, QPen, QPixmap
 from PySide6.QtWidgets import QLabel, QWidget
@@ -10,6 +13,69 @@ from app.ui_v2.models.track import Track
 from app.ui_v2.theme.tokens import Theme
 from app.ui_v2.widgets.placeholder_cover import cover_pixmap
 from app.ui_v2.widgets.track_display import display_track_text
+
+
+_ARTWORK_CACHE: dict[tuple[str, str, int, int], QPixmap] = {}
+_ARTWORK_SOURCE_CACHE: dict[
+    tuple[str, str, str, int, int], tuple[str, QPixmap]
+] = {}
+_ARTWORK_SOURCE_CACHE_LIMIT = 128
+
+
+def artwork_pixmap_for_track(track: Track | None, width: int, height: int) -> QPixmap:
+    """Return real track artwork when available, otherwise the one formal fallback."""
+
+    width = max(1, int(width))
+    height = max(1, int(height))
+    if track is None:
+        return cover_pixmap("hushplayer", width, height)
+
+    data = bytes(track.artwork_data or b"")
+    source_cache_key = (
+        track.stable_id,
+        str(track.artwork_path or ""),
+        str(track.artwork_key or ""),
+        len(data),
+        id(data) if data else 0,
+    )
+    cached_source = _ARTWORK_SOURCE_CACHE.get(source_cache_key)
+    if cached_source is not None:
+        source_key, source = cached_source
+    else:
+        source_key = ""
+        source = QPixmap()
+        if data:
+            source_key = hashlib.sha256(data).hexdigest()[:20]
+            source.loadFromData(data)
+        if source.isNull() and track.artwork_path:
+            path = Path(track.artwork_path)
+            if path.is_file():
+                source_key = f"file:{path}"
+                source.load(str(path))
+        if not source.isNull():
+            _ARTWORK_SOURCE_CACHE[source_cache_key] = (source_key, source)
+            if len(_ARTWORK_SOURCE_CACHE) > _ARTWORK_SOURCE_CACHE_LIMIT:
+                oldest_key = next(iter(_ARTWORK_SOURCE_CACHE))
+                _ARTWORK_SOURCE_CACHE.pop(oldest_key, None)
+    if source.isNull():
+        return cover_pixmap(track.stable_id, width, height)
+
+    cache_key = (track.stable_id, source_key, width, height)
+    cached = _ARTWORK_CACHE.get(cache_key)
+    if cached is not None and not cached.isNull():
+        return cached
+    scaled = source.scaled(
+        width,
+        height,
+        Qt.AspectRatioMode.KeepAspectRatioByExpanding,
+        Qt.TransformationMode.SmoothTransformation,
+    )
+    if scaled.size() != source.size() or scaled.width() != width or scaled.height() != height:
+        left = max(0, (scaled.width() - width) // 2)
+        top = max(0, (scaled.height() - height) // 2)
+        scaled = scaled.copy(left, top, width, height)
+    _ARTWORK_CACHE[cache_key] = scaled
+    return scaled
 
 
 class ArtworkThumbnail(QLabel):
@@ -43,7 +109,13 @@ class ArtworkThumbnail(QLabel):
                 f"border: 0; "
                 f"border-radius: 5px;"
             )
-        self._refresh_artwork()
+        # Theme changes only restyle the surface.  The artwork pixmap itself
+        # is theme-independent, so keep it in place to avoid decoding covers
+        # again while a library or favorites page is repainting.
+        if self._track is None:
+            self._refresh_artwork()
+        else:
+            self.update()
 
     def set_track(self, track: Track | None) -> None:
         self._track = track
@@ -60,10 +132,11 @@ class ArtworkThumbnail(QLabel):
         self._refresh_artwork()
 
     def _refresh_artwork(self) -> None:
-        if self._track is None:
-            pixmap = self._empty_pixmap()
-        else:
-            pixmap = cover_pixmap(self._track.stable_id, self._size, self._size)
+        pixmap = (
+            artwork_pixmap_for_track(self._track, self._size, self._size)
+            if self._track is not None
+            else self._empty_pixmap()
+        )
         self._artwork_pixmap = pixmap
         self.setPixmap(pixmap)
         self.update()

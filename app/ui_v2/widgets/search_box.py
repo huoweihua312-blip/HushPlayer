@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
-from PySide6.QtCore import QSize, Signal
+from PySide6.QtCore import QSize, Qt, Signal
 from PySide6.QtWidgets import QHBoxLayout, QLineEdit, QToolButton, QWidget
 
 from app.ui_v2.theme.icons import search
 from app.ui_v2.theme.tokens import Theme
+from app.ui_v2.widgets.line_edit import apply_optical_vertical_center
 
 
 class SearchBox(QWidget):
@@ -19,6 +20,7 @@ class SearchBox(QWidget):
         self.search_icon.setEnabled(False)
         self.line_edit = QLineEdit(self)
         self.line_edit.setObjectName("searchInput")
+        apply_optical_vertical_center(self.line_edit)
         self.line_edit.setPlaceholderText("搜索歌曲、歌手、专辑")
         self.line_edit.textChanged.connect(self.text_changed)
         layout = QHBoxLayout(self)

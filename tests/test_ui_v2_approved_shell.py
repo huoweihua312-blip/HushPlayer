@@ -14,7 +14,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from PySide6.QtCore import QSize, Qt
+from PySide6.QtCore import QPoint, QSize, Qt
 from PySide6.QtGui import QColor
 from PySide6.QtWidgets import QApplication, QHBoxLayout, QVBoxLayout
 
@@ -31,7 +31,8 @@ from app.ui_v2.theme.icons import (
 )
 from app.ui_v2.theme.tokens import get_theme
 import app.ui_v2.widgets.navigation_item as navigation_item_module
-from app.ui_v2.widgets.cover_card import CoverCard
+from app.ui_v2.widgets.cover_card import CoverCard, CoverCardPlayButton
+from app.ui_v2.widgets.artwork_thumbnail import ArtworkThumbnail
 from app.ui_v2.widgets.placeholder_cover import placeholder_cover_index
 from app.ui_v2.widgets.playback_button import PlayerIconButton
 from app.ui_v2.shell.main_window import MainWindow
@@ -57,40 +58,65 @@ class ApprovedShellMigrationTests(unittest.TestCase):
         self.assertEqual(title_bar.height(), 59)
         self.assertEqual(self.window.windowTitle(), "HushPlayer UI V2")
         self.assertTrue(self.window.windowFlags() & Qt.WindowType.FramelessWindowHint)
-        self.assertEqual(title_bar.search_input.placeholderText(), "搜索")
+        self.assertEqual(title_bar.search_input.placeholderText(), "搜索歌曲、歌手或专辑")
+        self.assertTrue(title_bar.search_input.isClearButtonEnabled())
+        self.assertEqual(title_bar.search_input.accessibleName(), "全局搜索")
         self.assertEqual(
             {button.toolTip() for button in (
                 title_bar.back_button, title_bar.forward_button, title_bar.settings_button,
-                title_bar.notifications_button, title_bar.avatar_button, title_bar.minimize_button,
+                title_bar.theme_button, title_bar.view_options_button, title_bar.minimize_button,
                 title_bar.maximize_button, title_bar.close_button,
             )},
-            {"返回", "前进", "设置", "通知", "用户", "最小化", "最大化", "关闭"},
+            {"返回", "前进", "设置", "切换到浅色模式", "视图选项（暂不可用）", "最小化", "最大化", "关闭"},
         )
         self.assertEqual(title_bar.back_button.iconSize(), QSize(16, 16))
         self.assertEqual(title_bar.forward_button.iconSize(), QSize(16, 16))
         self.assertEqual(title_bar.search_icon.iconSize(), QSize(16, 16))
         for button in (
+            title_bar.back_button,
+            title_bar.forward_button,
             title_bar.settings_button,
-            title_bar.notifications_button,
-            title_bar.avatar_button,
+            title_bar.theme_button,
+            title_bar.minimize_button,
+            title_bar.maximize_button,
+            title_bar.close_button,
         ):
-            self.assertEqual(button.iconSize(), QSize(17, 17))
+            self.assertEqual(button.size(), QSize(32, 32))
+        for button in (
+            title_bar.settings_button,
+            title_bar.theme_button,
+            title_bar.view_options_button,
+        ):
+            self.assertEqual(button.iconSize(), QSize(18, 18))
+        self.assertIn("border-radius: 8px", title_bar.styleSheet())
+        self.assertFalse(title_bar.notifications_button.isVisible())
+        self.assertFalse(title_bar.avatar_button.isVisible())
+        self.assertTrue(title_bar.brand.isVisible())
+        self.assertEqual(title_bar.brand_label.text(), "HushPlayer")
         sidebar = self.window.sidebar
         self.assertEqual(sidebar.width(), 220)
         self.assertEqual(sidebar.brand_label.text(), "HushPlayer")
-        self.assertEqual(set(sidebar._items), {"library", "browse", "liked", "settings"})
-        self.assertNotIn("online_search", sidebar._items)
+        self.assertEqual(
+            set(sidebar._items),
+            {"library", "browse", "online_search", "liked", "settings"},
+        )
+        self.assertFalse(sidebar.settings_box.isVisible())
 
     def test_browse_sections_cover_cards_and_stable_cover_mapping(self) -> None:
         page = self.window.router.browse_page
         self.assertIs(self.window.router.currentWidget(), page)
         self.assertEqual(set(page.sections), {"recent_added", "recommended", "recent_played"})
-        self.assertEqual(page.target_card_count, 5)
+        self.assertEqual(page.intro_surface.objectName(), "browseIntroSurface")
+        self.assertEqual(page.target_card_count, 4)
+        self.assertFalse(page.sections["recommended"].refresh_button.icon().isNull())
         for section in page.sections.values():
             visible_cards = [card for card in section.cards if not card.isHidden()]
-            self.assertEqual(len(visible_cards), 5)
+            self.assertEqual(len(visible_cards), 4)
             self.assertTrue(all(isinstance(card, CoverCard) for card in visible_cards))
+            self.assertTrue(all(isinstance(card.play_button, CoverCardPlayButton) for card in visible_cards))
             for card in visible_cards:
+                self.assertIsInstance(card.artwork, ArtworkThumbnail)
+                self.assertTrue(card.artwork._clip_artwork)
                 self.assertEqual(
                     placeholder_cover_index(card.track.stable_id),
                     placeholder_cover_index(card.track.stable_id),
@@ -105,6 +131,26 @@ class ApprovedShellMigrationTests(unittest.TestCase):
                         visible_label,
                     )
 
+    def test_browse_uses_a_safe_six_card_density_at_1440px(self) -> None:
+        page = self.window.router.browse_page
+        self.window.resize(1440, 900)
+        self.app.processEvents()
+        self.assertEqual(page.target_card_count, 6)
+        for section in page.sections.values():
+            visible_cards = [card for card in section.cards if not card.isHidden()]
+            self.assertEqual(len(visible_cards), 6)
+            self.assertLessEqual(
+                max(card.geometry().right() for card in visible_cards),
+                section.row.contentsRect().right(),
+            )
+
+    def test_track_selection_uses_surface_and_accent_rail_without_cell_frame(self) -> None:
+        source = inspect.getsource(self.window.library_page.track_table.delegate.__class__)
+        self.assertIn("RenderHint(QPainter.RenderHint.Antialiasing, True)", source)
+        self.assertIn("colors.focus_ring", source)
+        self.assertNotIn("State_HasFocus", source)
+        self.assertNotIn("drawRoundedRect(rect.adjusted(2, 2, -2, -2)", source)
+
     def test_sidebar_uses_qt_elision_and_keeps_playlist_tooltip(self) -> None:
         sidebar = self.window.sidebar
         self.window.resize(1200, 800)
@@ -116,11 +162,14 @@ class ApprovedShellMigrationTests(unittest.TestCase):
         self.assertEqual(item.toolTip(), full_name)
         self.assertEqual(item._full_title, full_name)
         self.assertIn("…", item.text())
-        for width in (900, 1200):
-            self.window.resize(width, 600 if width == 900 else 800)
+        for width, compact in ((900, True), (1200, False)):
+            self.window.resize(width, 600 if compact else 800)
             self.app.processEvents()
             self.assertEqual(item.toolTip(), full_name)
-            self.assertIn("…", item.text())
+            if compact:
+                self.assertEqual(item.text(), "")
+            else:
+                self.assertIn("…", item.text())
 
     def test_sidebar_uses_formal_icons_and_approved_row_geometry(self) -> None:
         sidebar = self.window.sidebar
@@ -131,14 +180,16 @@ class ApprovedShellMigrationTests(unittest.TestCase):
         self.assertEqual(sidebar.brand.layout().contentsMargins().left(), 28)
         self.assertEqual(sidebar.brand.height(), 84)
         self.assertEqual(sidebar.library_box.layout().contentsMargins().left(), 18)
+        self.assertEqual(sidebar.library_box.layout().contentsMargins().top(), 20)
         self.assertEqual(sidebar.library_box.layout().contentsMargins().right(), 14)
-        self.assertEqual(sidebar.settings_box.height(), 72)
-        self.assertEqual(sidebar.settings_box.geometry().bottom(), sidebar.contentsRect().bottom())
+        self.assertFalse(sidebar.settings_box.isVisible())
+        self.assertFalse(sidebar._items["settings"].isVisible())
         self.assertTrue(sidebar.playlist_section.layout().itemAt(1).widget() is sidebar.scroll_area)
         self.assertEqual(
             {
                 "library": sidebar._items["library"].item.icon_name,
                 "browse": sidebar._items["browse"].item.icon_name,
+                "online_search": sidebar._items["online_search"].item.icon_name,
                 "liked": sidebar._items["liked"].item.icon_name,
                 "settings": sidebar._items["settings"].item.icon_name,
                 "more": sidebar.more_playlists_button.item.icon_name,
@@ -146,6 +197,7 @@ class ApprovedShellMigrationTests(unittest.TestCase):
             {
                 "library": "library",
                 "browse": "browse",
+                "online_search": "search",
                 "liked": "favorite",
                 "settings": "settings",
                 "more": "playlist_more",
@@ -154,6 +206,7 @@ class ApprovedShellMigrationTests(unittest.TestCase):
         expected_icon_sizes = {
             "library": QSize(18, 18),
             "browse": QSize(18, 18),
+            "online_search": QSize(17, 17),
             "liked": QSize(18, 18),
             "settings": QSize(18, 18),
         }
@@ -172,6 +225,18 @@ class ApprovedShellMigrationTests(unittest.TestCase):
         selected.set_selected(True)
         self.assertEqual(selected.contentsRect(), unselected_contents)
         self.assertNotIn("border-left", selected.styleSheet())
+        self.assertNotIn("border-left-color", selected.styleSheet())
+        self.assertIn("border: 1px solid transparent", selected.styleSheet())
+        self.assertIn(
+            "QToolButton:focus { border-color: transparent; }",
+            selected.styleSheet(),
+        )
+        selected._focus_visible = True
+        selected._refresh_visuals()
+        self.assertIn(
+            f"QToolButton:focus {{ border-color: {get_theme('dark').colors.focus_ring}; }}",
+            selected.styleSheet(),
+        )
         source = inspect.getsource(navigation_item_module.NavigationItem)
         self.assertNotIn("def paintEvent", source)
         self.assertNotIn("QPainter", source)
@@ -194,7 +259,7 @@ class ApprovedShellMigrationTests(unittest.TestCase):
     def test_approved_svg_icon_sources_and_cache_contract(self) -> None:
         icon_dir = PROJECT_ROOT / "app" / "ui_v2" / "assets" / "icons"
         svg_paths = sorted(icon_dir.glob("*.svg"))
-        self.assertEqual(len(svg_paths), 23)
+        self.assertEqual(len(svg_paths), 25)
         for path in svg_paths:
             source = path.read_text(encoding="utf-8")
             self.assertTrue(source.isascii(), path.name)
@@ -281,6 +346,38 @@ class ApprovedShellMigrationTests(unittest.TestCase):
         self.assertGreater(palette.normal.lightness(), QColor(get_theme("dark").colors.text_secondary).lightness())
         self.assertLess(palette.normal.lightness(), palette.hover.lightness())
 
+    def test_compact_shell_uses_the_approved_icon_rail_without_hiding_player_actions(self) -> None:
+        self.window.resize(900, 600)
+        self.app.processEvents()
+
+        sidebar = self.window.sidebar
+        title_bar = self.window.title_bar
+        bar = self.window.player_bar
+        self.assertTrue(sidebar.compact)
+        self.assertEqual(sidebar.width(), 76)
+        self.assertFalse(sidebar.brand_label.isVisible())
+        self.assertFalse(title_bar.brand_label.isVisible())
+        self.assertFalse(sidebar.library_caption.isVisible())
+        self.assertFalse(sidebar.playlist_caption.isVisible())
+        self.assertEqual(title_bar._sidebar_spacer.width(), 76)
+        for item in (*sidebar._items.values(), *sidebar._playlist_items.values(), sidebar.more_playlists_button):
+            self.assertEqual(item.toolButtonStyle(), Qt.ToolButtonStyle.ToolButtonIconOnly)
+        self.assertFalse(sidebar.scroll_area.horizontalScrollBar().isVisible())
+        self.assertTrue(all(button.isVisible() for button in (
+            bar.shuffle_button, bar.repeat_button, bar.queue_button, bar.lyrics_button,
+        )))
+        self.assertFalse(bar.more_button.isVisible())
+
+    def test_player_bar_enters_compact_mode_before_1024px_layout_is_crowded(self) -> None:
+        self.window.resize(1024, 700)
+        self.app.processEvents()
+        bar = self.window.player_bar
+        self.assertTrue(bar.compact)
+        self.assertTrue(bar.favorite_button.isVisible())
+        self.assertLessEqual(
+            bar.favorite_button.geometry().right(), bar.transport_row.width()
+        )
+
     def test_playerbar_uses_only_the_fixed_local_fluent_manifest(self) -> None:
         manifest_path = PROJECT_ROOT / "app" / "ui_v2" / "assets" / "icons" / "fluent_player" / "MANIFEST.json"
         manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
@@ -346,6 +443,9 @@ class ApprovedShellMigrationTests(unittest.TestCase):
 
     def test_player_side_regions_center_natural_width_in_double_stretch_outers(self) -> None:
         bar = self.window.player_bar
+        self.assertIn("QWidget#trackRegionInner", bar.styleSheet())
+        self.assertIn("background: transparent", bar.styleSheet())
+        self.assertIn("border: 0", bar.styleSheet())
         self.window.playback_adapter.play()
         for outer, inner, layout in (
             (bar.track_region, bar.track_inner, bar.track_region_layout),
@@ -418,6 +518,11 @@ class ApprovedShellMigrationTests(unittest.TestCase):
         self.assertIs(bar.utility_region.parentWidget(), bar)
         self.assertIs(bar.transport_row.parentWidget(), bar.center_region)
         self.assertIs(bar.progress_row.parentWidget(), bar.center_region)
+        self.assertIs(bar.favorite_button.parentWidget(), bar.transport_row)
+        self.assertLess(
+            bar.favorite_button.mapTo(bar, bar.favorite_button.rect().center()).x(),
+            bar.shuffle_button.mapTo(bar, bar.shuffle_button.rect().center()).x(),
+        )
         self.assertNotEqual(bar.track_region.parentWidget(), bar.transport_row)
         self.assertNotEqual(bar.utility_region.parentWidget(), bar.transport_row)
         self.assertEqual(bar.track_region.height(), bar.contentsRect().height())
@@ -431,7 +536,11 @@ class ApprovedShellMigrationTests(unittest.TestCase):
         self.assertEqual(metadata_layout.count(), 2)
         self.assertEqual(metadata_layout.stretch(0), 0)
         self.assertEqual(metadata_layout.stretch(1), 0)
-        self.assertEqual(bar.metadata.height(), 40)
+        self.assertEqual(bar.metadata.height(), 64)
+        self.assertEqual(bar.artist_label._max_lines, 2)
+        bar.artist_label.set_full_text("短艺术家 · 短专辑")
+        self.app.processEvents()
+        self.assertEqual(bar.artist_label.text(), "短艺术家 · 短专辑")
         self.assertIs(bar.title_label.parentWidget(), bar.metadata)
         self.assertIs(bar.artist_label.parentWidget(), bar.metadata)
         self.window.playback_adapter.play()
@@ -445,7 +554,7 @@ class ApprovedShellMigrationTests(unittest.TestCase):
             self.assertLessEqual(abs(metadata_center - track_center), 2)
             self.assertGreaterEqual(artist_top - title_bottom, 1)
             self.assertLessEqual(artist_top - title_bottom, 4)
-            self.assertEqual(bar.metadata.height(), 40)
+            self.assertEqual(bar.metadata.height(), 64)
 
     def test_player_empty_artwork_and_repeat_states_are_explicit(self) -> None:
         bar = self.window.player_bar
@@ -481,7 +590,7 @@ class ApprovedShellMigrationTests(unittest.TestCase):
         player_bar = self.window.player_bar
         adapter = self.window.playback_adapter
         model = self.window.library_page.track_table.model
-        for width, expected_cards, compact in ((900, 3, True), (1200, 5, False), (1600, 7, False)):
+        for width, expected_cards, compact in ((900, 3, True), (1200, 4, False), (1600, 7, False)):
             self.window.resize(width, 600 if width == 900 else 800)
             self.app.processEvents()
             self.assertEqual(page.target_card_count, expected_cards)
@@ -491,7 +600,20 @@ class ApprovedShellMigrationTests(unittest.TestCase):
             self.assertIs(self.window.library_page.track_table.model, model)
             self.assertIs(self.window.player_bar, player_bar)
         self.assertEqual(self.window.sidebar.brand_label.text(), "HushPlayer")
-        self.assertFalse(player_bar.more_button.isHidden())
+        self.assertTrue(player_bar.more_button.isHidden())
+
+    def test_browse_content_keeps_a_safe_right_inset(self) -> None:
+        page = self.window.router.browse_page
+        self.window.resize(1200, 800)
+        self.app.processEvents()
+        viewport = page.scroll_area.viewport()
+        minimum_inset = get_theme("dark").metrics.page_margin
+        for section in page.sections.values():
+            origin = section.mapTo(viewport, QPoint(0, 0))
+            self.assertLessEqual(
+                origin.x() + section.width(),
+                viewport.width() - minimum_inset,
+            )
 
     def test_content_safe_area_is_owned_by_the_shared_router_contract(self) -> None:
         expected = get_theme("dark").metrics.player_bar_height + get_theme("dark").metrics.content_safe_bottom

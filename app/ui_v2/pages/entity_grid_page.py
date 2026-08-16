@@ -37,6 +37,7 @@ class EntityGridPage(QWidget):
         self._card_factory: Callable[[object], QWidget] | None = None
         self._card_updater: Callable[[QWidget, object], None] | None = None
         self._compact = False
+        self._reference_width = 1200
         self._reflowing = False
         self._reflow_pending = False
         self.header = PageHeader(title, self)
@@ -110,11 +111,13 @@ class EntityGridPage(QWidget):
             card.set_theme(theme)
 
     def set_responsive_reference_width(self, width: int) -> None:
-        compact = width < 950
+        self._reference_width = max(1, int(width))
+        compact = self._reference_width < 950
         if compact != self._compact:
             self._compact = compact
             self._schedule_reflow()
         self.search_box.setMinimumWidth(160 if compact else 220)
+        self._schedule_reflow()
 
     def resizeEvent(self, event) -> None:  # noqa: N802
         super().resizeEvent(event)
@@ -133,7 +136,12 @@ class EntityGridPage(QWidget):
         try:
             while self.grid.count():
                 self.grid.takeAt(0)
-            columns = 1 if self._compact or self.view_toggle.mode == "list" else 2
+            if self._compact or self.view_toggle.mode == "list":
+                columns = 1
+            elif self._reference_width >= 1450:
+                columns = 4
+            else:
+                columns = 3
             for index, entity in enumerate(self._entities):
                 card = self._cards[getattr(entity, "id")]
                 self.grid.addWidget(card, index // columns, index % columns)

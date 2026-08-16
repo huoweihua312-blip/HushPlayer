@@ -16,6 +16,7 @@ from app.core.app_paths import AppPaths
 from app.services.library_repository import LibraryRepository
 from app.services.production_playback_controller import ProductionPlaybackController
 from app.services.remote_track_store import RemoteTrackStore
+from app.services.online_discovery_runtime import OnlineDiscoveryRuntime
 from app.startup import UI_FLAVOR_V2, create_application_context
 from app.ui_v2.adapters.lyrics_adapter import LyricsAdapter
 from app.ui_v2.adapters.playback_adapter import PlaybackAdapter
@@ -36,6 +37,7 @@ class UiV2RuntimeServices:
     remote_tracks: RemoteTrackStore
     playback_adapter: PlaybackAdapter
     lyrics_adapter: LyricsAdapter
+    online_discovery: OnlineDiscoveryRuntime | None = None
 
 
 def normalize_ui_v2_data_mode(value: str | None) -> str:
@@ -55,20 +57,43 @@ def build_ui_v2_runtime_services(
 
     resolved = paths or AppPaths.resolve()
     data_dir = resolved.data_dir
+    repository = LibraryRepository(
+        data_dir / "library.json",
+        data_dir / "playlists.json",
+        data_dir / "stats.json",
+    )
+    remote_tracks = RemoteTrackStore(data_dir / "remote_tracks.json")
+    online_discovery = OnlineDiscoveryRuntime(
+        resolved,
+        repository,
+        remote_tracks,
+    )
+    if playback_adapter is None:
+        controller = ProductionPlaybackController(
+            online_resolver=online_discovery.playback_resolver,
+            online_audio_cache=online_discovery.online_audio_cache,
+            online_cache_allowed=online_discovery.online_source_allows_audio_cache,
+        )
+        playback_adapter = PlaybackAdapter(
+            timer_enabled=False,
+            controller=controller,
+        )
+    elif playback_adapter.controller is not None:
+        playback_adapter.controller.set_online_resolver(
+            online_discovery.playback_resolver
+        )
     return UiV2RuntimeServices(
         paths=resolved,
         settings_path=data_dir / "settings.json",
-        repository=LibraryRepository(
-            data_dir / "library.json",
-            data_dir / "playlists.json",
-            data_dir / "stats.json",
+        repository=repository,
+        remote_tracks=remote_tracks,
+        playback_adapter=playback_adapter,
+        lyrics_adapter=lyrics_adapter or LyricsAdapter(
+            lyrics_service=online_discovery.lyrics_service,
+            lyrics_cache_dir=resolved.cache_dir / "lyrics",
+            lyrics_bindings_path=resolved.data_dir / "lyrics_bindings.json",
         ),
-        remote_tracks=RemoteTrackStore(data_dir / "remote_tracks.json"),
-        playback_adapter=playback_adapter or PlaybackAdapter(
-            timer_enabled=False,
-            controller=ProductionPlaybackController(),
-        ),
-        lyrics_adapter=lyrics_adapter or LyricsAdapter(),
+        online_discovery=online_discovery,
     )
 
 
@@ -90,7 +115,6 @@ def create_ui_v2_main_window(
         return MainWindow(
             data_mode=UI_V2_DATA_MODE_MOCK,
             settings_path=isolated_settings,
-            force_dark_theme=True,
         )
 
     runtime = services or build_ui_v2_runtime_services()
@@ -103,7 +127,7 @@ def create_ui_v2_main_window(
         remote_tracks=runtime.remote_tracks,
         playback_adapter=runtime.playback_adapter,
         lyrics_adapter=runtime.lyrics_adapter,
-        force_dark_theme=True,
+        online_discovery=runtime.online_discovery,
     )
 
 
@@ -132,9 +156,17 @@ def run_ui_v2_application(
 ) -> int:
     """Run UI V2 without maintaining a second QApplication flow."""
 
+    isolated_settings = None
+    if normalize_ui_v2_data_mode(data_mode) == UI_V2_DATA_MODE_MOCK:
+        isolated_settings = (
+            Path(os.environ.get("TEMP", tempfile.gettempdir()))
+            / "HushPlayer-ui-v2"
+            / f"mock-settings-{os.getpid()}.json"
+        )
     context = create_application_context(
         argv if argv is not None else sys.argv,
         ui_flavor=UI_FLAVOR_V2,
+        settings_path=str(isolated_settings) if isolated_settings is not None else None,
     )
     window = create_ui_v2_main_window(
         data_mode=data_mode,

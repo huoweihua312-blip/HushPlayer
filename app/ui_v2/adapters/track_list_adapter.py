@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable, Iterable
+from collections.abc import Callable
 
 from PySide6.QtCore import QObject, Qt, Signal
 
@@ -98,7 +98,7 @@ class TrackListAdapter(QObject):
 
     def request_play(self, track_id: str) -> None:
         track = self.collection.track_for_id(track_id)
-        if track is None or track.is_missing:
+        if track is None or (track.is_missing and not track.is_online):
             return
         self.collection.set_playing_track(track.id)
         self.play_requested.emit(track.id)
@@ -133,11 +133,12 @@ class TrackListAdapter(QObject):
 
     def _rebuild_visible_tracks(self, emit: bool = True) -> None:
         reverse = self._sort_order == Qt.SortOrder.DescendingOrder
-        self._visible_tracks = sorted(
+        visible_tracks = sorted(
             (track for track in self.collection.tracks() if self._matches(track)),
             key=lambda track: self._sort_value(track, self._sort_column),
             reverse=reverse,
         )
+        self._visible_tracks = visible_tracks
         if emit:
             self.tracks_reset.emit(tuple(self._visible_tracks))
 

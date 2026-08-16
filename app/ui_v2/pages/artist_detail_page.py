@@ -28,6 +28,7 @@ from app.ui_v2.theme.tokens import Theme
 from app.ui_v2.widgets.artist_album_card import ArtistAlbumCard
 from app.ui_v2.widgets.artist_hero import ArtistHero
 from app.ui_v2.widgets.empty_state import EmptyState
+from app.ui_v2.widgets.quiet_context_menu import apply_menu_theme
 from app.ui_v2.widgets.track_table import TrackTable
 from app.ui_v2.widgets.track_display import display_track_text
 
@@ -452,7 +453,7 @@ class ArtistDetailPage(QWidget):
             self.queue_requested.emit(tracks, shuffle)
 
     def _show_more_menu(self) -> None:
-        menu = QMenu(self)
+        menu = apply_menu_theme(QMenu(self), self._theme)
         action = menu.addAction("复制艺人名称")
         action.triggered.connect(lambda: self._copy_artist_name())
         menu.exec(self.hero.action_row.more_button.mapToGlobal(self.hero.action_row.more_button.rect().bottomLeft()))

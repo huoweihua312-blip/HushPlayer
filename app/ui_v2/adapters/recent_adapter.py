@@ -44,6 +44,15 @@ class RecentAdapter(TrackListAdapter):
     def recent_for_track(self, track_id: str) -> RecentPlay | None:
         return self.collection.recent_for_track(track_id)
 
+    def row_metadata(self, track: Track) -> str:
+        """Expose only recorded recent metadata; never synthesize play counts."""
+
+        entry = self.collection.recent_for_track(track.id)
+        if entry is None:
+            return ""
+        timestamp = entry.last_played_at.strftime("%m-%d %H:%M")
+        return f"{timestamp}  ·  播放 {entry.play_count} 次"
+
     def _is_recent_in_range(self, track: Track) -> bool:
         entry = self.collection.recent_for_track(track.id)
         if entry is None:

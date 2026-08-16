@@ -33,6 +33,7 @@ from app.ui_v2.startup import (
     build_ui_v2_runtime_services,
     create_ui_v2_main_window,
 )
+from app.ui_v2.theme.tokens import get_theme
 
 
 def _write_json(path: Path, value) -> None:
@@ -66,13 +67,13 @@ class StartupArgumentTests(unittest.TestCase):
     def setUpClass(cls) -> None:
         cls.app = QApplication.instance() or QApplication([])
 
-    def test_no_arguments_keep_legacy_ui_as_default(self) -> None:
+    def test_no_arguments_start_quiet_orbit_as_default(self) -> None:
         with patch.object(main, "run_legacy_application", return_value=0) as legacy, patch.object(
             main, "run_ui_v2_from_main", return_value=0
         ) as ui_v2:
             self.assertEqual(main.main(["main.py"]), 0)
-        legacy.assert_called_once()
-        ui_v2.assert_not_called()
+        legacy.assert_not_called()
+        ui_v2.assert_called_once_with(["main.py"], data_mode="real")
 
     def test_ui_v2_argument_uses_opt_in_v2_entry(self) -> None:
         with patch.object(main, "run_legacy_application", return_value=0) as legacy, patch.object(
@@ -113,13 +114,15 @@ class StartupArgumentTests(unittest.TestCase):
         self.assertFalse(second.created_application)
 
     def test_v2_theme_is_installed_by_flavor_before_window_creation(self) -> None:
-        apply_ui_theme(self.app, "ui-v2")
+        with tempfile.TemporaryDirectory() as temporary:
+            settings_path = str(Path(temporary) / "settings.json")
+            apply_ui_theme(self.app, "ui-v2", settings_path=settings_path)
         self.assertEqual(self.app.property("hushUiFlavor"), "ui-v2")
         self.assertEqual(self.app.property("hushUiV2ThemeMode"), "dark")
-        self.assertIn("#111214", self.app.styleSheet())
+        self.assertIn(get_theme("dark").colors.app_background, self.app.styleSheet())
         apply_ui_theme(self.app, "legacy")
         self.assertEqual(self.app.property("hushUiFlavor"), "legacy")
-        self.assertNotIn("#111214", self.app.styleSheet())
+        self.assertNotIn(get_theme("dark").colors.app_background, self.app.styleSheet())
 
     def test_ui_v2_startup_failure_returns_clear_error(self) -> None:
         stderr = io.StringIO()
@@ -254,7 +257,7 @@ class ProductionRuntimeTests(unittest.TestCase):
         self.assertTrue(self.window.playlist_adapter.read_only)
         self.assertEqual(self.window.settings_bridge.value(self.window._settings_snapshot, "volume"), 42)
 
-    def test_production_v2_stays_dark_when_persisted_appearance_is_light(self) -> None:
+    def test_production_v2_uses_persisted_light_appearance(self) -> None:
         self.window.close()
         self.app.processEvents()
         _write_json(self.settings_file, {"appearance_mode": "light", "volume": 42})
@@ -263,8 +266,8 @@ class ProductionRuntimeTests(unittest.TestCase):
             services=self.services,
             initialize_storage=False,
         )
-        self.assertEqual(self.window.theme.mode, "dark")
-        self.assertEqual(self.window.immersive_lyrics_options.theme, "dark")
+        self.assertEqual(self.window.theme.mode, "light")
+        self.assertEqual(self.window.immersive_lyrics_options.theme, "light")
 
     def test_real_read_only_player_keeps_navigation_entry_points_enabled(self) -> None:
         bar = self.window.player_bar
@@ -315,12 +318,18 @@ class ProductionRuntimeTests(unittest.TestCase):
         self.assertEqual(self.repository.load_count, 1)
 
     def test_real_read_only_mode_disables_write_and_network_surfaces(self) -> None:
-        self.assertNotIn("online_search", self.window.sidebar._items)
-        self.assertTrue(self.window.sidebar.new_playlist_button.isHidden())
+        self.assertIn("online_search", self.window.sidebar._items)
+        self.assertFalse(self.window.sidebar.new_playlist_button.isHidden())
         self.assertFalse(self.window.library_collection.set_favorite("missing", True))
-        self.assertIsNone(self.window.playlist_adapter.create_playlist("No write"))
-        self.assertFalse(self.window.playlist_adapter.delete_playlist("road"))
-        self.assertEqual(self.before_state, _file_state(self.document_paths))
+        created = self.window.playlist_adapter.create_playlist("生产歌单")
+        self.assertIsNotNone(created)
+        assert created is not None
+        self.assertTrue(self.window.playlist_adapter.rename_playlist(created.id, "生产歌单已重命名"))
+        self.assertTrue(self.window.playlist_adapter.delete_playlist(created.id))
+        self.assertEqual(
+            {path: self.before_state[path] for path in (self.library_file, self.stats_file, self.remote_file, self.settings_file)},
+            {path: _file_state(self.document_paths)[path] for path in (self.library_file, self.stats_file, self.remote_file, self.settings_file)},
+        )
 
     def test_empty_real_library_starts_with_formal_empty_state(self) -> None:
         self.window.close()

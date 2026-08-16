@@ -7,6 +7,7 @@ callbacks; they never open or write ``settings.json`` themselves.
 from __future__ import annotations
 
 import json
+import os
 from copy import deepcopy
 from pathlib import Path
 from typing import Any, Callable
@@ -18,6 +19,32 @@ from app.services.lyrics_timing import normalize_lyrics_timing_offsets
 from app.ui.immersive_appearance import APPEARANCE_SETTING_KEYS, ImmersiveAppearanceConfig
 from app.ui.theme_manager import normalize_appearance_mode
 from app.ui_v2.models.settings_snapshot import SettingsSnapshot
+
+
+IMMERSIVE_BACKGROUND_VISUAL_MODES = frozenset(
+    {"artwork", "gradient", "solid", "transparent", "custom"}
+)
+_LEGACY_BACKGROUND_TO_VISUAL_MODE = {
+    "cover": "artwork",
+    "default": "solid",
+    "translucent": "transparent",
+    "custom": "custom",
+}
+
+
+def normalize_immersive_background_visual_mode(
+    value: Any,
+    legacy_mode: Any = "cover",
+) -> str:
+    """Resolve the V2 visual mode while preserving the legacy setting key."""
+
+    visual_mode = str(value or "").strip().casefold()
+    if visual_mode in IMMERSIVE_BACKGROUND_VISUAL_MODES:
+        return visual_mode
+    return _LEGACY_BACKGROUND_TO_VISUAL_MODE.get(
+        str(legacy_mode or "cover").strip().casefold(),
+        "artwork",
+    )
 
 
 DEFAULT_SETTINGS: dict[str, Any] = {
@@ -36,7 +63,9 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "music_scan_import_mode": "pending",
     "auto_check_updates_on_startup": False,
     "update_check_delay_seconds": 15,
+    "cache_directory": "",
     "immersive_background_mode": "cover",
+    "immersive_background_visual_mode": "artwork",
     "immersive_background_custom_path": "",
     "immersive_background_blur": 40,
     "immersive_background_darkness": 68,
@@ -91,6 +120,10 @@ def load_settings_document(path: Path) -> dict[str, Any]:
 
     if APPEARANCE_SETTING_KEYS.intersection(result):
         result.update(ImmersiveAppearanceConfig.from_settings(result).to_settings())
+    result["immersive_background_visual_mode"] = normalize_immersive_background_visual_mode(
+        result.get("immersive_background_visual_mode"),
+        result.get("immersive_background_mode", DEFAULT_SETTINGS["immersive_background_mode"]),
+    )
     if "lyrics_timing_offsets_ms" in result:
         result["lyrics_timing_offsets_ms"] = normalize_lyrics_timing_offsets(
             result["lyrics_timing_offsets_ms"]
@@ -160,6 +193,9 @@ class LegacySettingsBridge(QObject):
         mode = document.get("appearance_mode", DEFAULT_SETTINGS["appearance_mode"])
         if mode not in {"system", "light", "dark"}:
             errors["appearance_mode"] = "主题值无效。"
+        visual_mode = document.get("immersive_background_visual_mode")
+        if visual_mode is not None and str(visual_mode).strip().casefold() not in IMMERSIVE_BACKGROUND_VISUAL_MODES:
+            errors["immersive_background_visual_mode"] = "沉浸背景显示模式无效。"
         try:
             opacity = int(document.get("floating_lyrics_opacity", 100))
         except (TypeError, ValueError):
@@ -193,6 +229,15 @@ class LegacySettingsBridge(QObject):
         folders = document.get("music_scan_folders", [])
         if not isinstance(folders, list) or any(not isinstance(item, str) for item in folders):
             errors["music_scan_folders"] = "音乐文件夹列表无效。"
+        cache_directory = str(document.get("cache_directory", "") or "").strip()
+        if cache_directory:
+            candidate = Path(cache_directory).expanduser()
+            if not candidate.is_absolute():
+                errors["cache_directory"] = "缓存目录必须是绝对路径。"
+            elif not candidate.is_dir():
+                errors["cache_directory"] = "缓存目录不存在，请先选择现有文件夹。"
+            elif not os.access(candidate, os.W_OK):
+                errors["cache_directory"] = "缓存目录不可写，请选择其他文件夹。"
         return errors
 
     def save_snapshot(self, snapshot: SettingsSnapshot) -> SettingsSnapshot:

@@ -14,9 +14,16 @@ if str(PROJECT_ROOT) not in sys.path:
 from PySide6.QtGui import QColor
 from PySide6.QtWidgets import QApplication
 
-from app.ui_v2.theme.icons import favorite, online, search
-from app.ui_v2.theme.styles import build_stylesheet
-from app.ui_v2.theme.tokens import ThemeColors, ThemeFonts, ThemeMetrics, get_theme
+from app.ui_v2.theme.icons import favorite, icon, online, search
+from app.ui_v2.theme.styles import build_dialog_stylesheet, build_stylesheet
+from app.ui_v2.theme.tokens import (
+    ThemeColors,
+    ThemeFonts,
+    ThemeMetrics,
+    font_family_qss,
+    get_theme,
+    resolve_font_family,
+)
 
 
 class UiV2ThemeTests(unittest.TestCase):
@@ -53,13 +60,42 @@ class UiV2ThemeTests(unittest.TestCase):
         theme = get_theme("dark")
         stylesheet = build_stylesheet(theme)
         self.assertIn(theme.colors.accent, stylesheet)
+        self.assertIn("QWidget#libraryWorkSurface", stylesheet)
+        self.assertIn("QWidget#trackListWorkSurface", stylesheet)
+        self.assertIn("QWidget#collectionActionRow", stylesheet)
+        self.assertIn("QWidget#onlineSourcePage", stylesheet)
+        self.assertIn('QPushButton[hushKeyboardFocus="true"]:focus', stylesheet)
+        self.assertIn('QToolButton[hushKeyboardFocus="true"]:focus', stylesheet)
+        self.assertIn("QPushButton:focus, QToolButton:focus", stylesheet)
         self.assertIn(f"font-size: {theme.fonts.body}px", stylesheet)
-        self.assertIn("font-weight: 500", stylesheet)
-        self.assertGreaterEqual(theme.fonts.body, 16)
+        self.assertGreaterEqual(theme.fonts.body, 15)
         self.assertGreaterEqual(theme.fonts.caption, 13)
+        dialog_stylesheet = build_dialog_stylesheet(theme)
+        self.assertIn('QDialog QPushButton[role="primary"]', dialog_stylesheet)
+        self.assertIn("QDialog QFrame#settingsCard", dialog_stylesheet)
+        self.assertIn("QDialog QProgressBar::chunk", dialog_stylesheet)
         self.assertFalse(favorite(theme).isNull())
         self.assertFalse(online(theme, "hover").isNull())
         self.assertFalse(search(theme, "disabled").isNull())
+        self.assertFalse(icon("moon", get_theme("dark")).isNull())
+        self.assertFalse(icon("sun", get_theme("light")).isNull())
+
+    def test_bundled_chinese_font_is_available_to_source_and_packaged_builds(self) -> None:
+        font_root = PROJECT_ROOT / "app" / "ui_v2" / "assets" / "fonts"
+        regular_path = font_root / "SourceHanSansSC-Regular.otf"
+        medium_path = font_root / "SourceHanSansSC-Medium.otf"
+        bold_path = font_root / "SourceHanSansSC-Bold.otf"
+        license_path = font_root / "SourceHanSansSC-OFL.txt"
+        self.assertTrue(regular_path.is_file())
+        self.assertTrue(medium_path.is_file())
+        self.assertTrue(bold_path.is_file())
+        self.assertGreater(regular_path.stat().st_size, 1_000_000)
+        self.assertGreater(medium_path.stat().st_size, 1_000_000)
+        self.assertGreater(bold_path.stat().st_size, 1_000_000)
+        self.assertTrue(license_path.is_file())
+        self.assertIn("SIL OPEN FONT LICENSE", license_path.read_text(encoding="utf-8"))
+        self.assertIn('"Source Han Sans SC"', font_family_qss())
+        self.assertEqual(resolve_font_family(), "Source Han Sans SC")
 
     def test_light_and_dark_row_state_colors_are_distinct_and_restrained(self) -> None:
         for mode in ("light", "dark"):
@@ -70,6 +106,12 @@ class UiV2ThemeTests(unittest.TestCase):
         self.assertLess(
             QColor(dark.selected_background).saturation(),
             QColor(dark.accent).saturation(),
+        )
+        self.assertLessEqual(QColor(dark.app_background).saturation(), 5)
+        self.assertLessEqual(QColor(dark.content_background).saturation(), 5)
+        self.assertGreater(
+            QColor(dark.content_background).lightness(),
+            QColor(dark.app_background).lightness(),
         )
 
 

@@ -10,6 +10,7 @@ import sys
 import tempfile
 import threading
 import time
+import zipfile
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
@@ -29,6 +30,7 @@ from app.services.app_update_service import (
     AppUpdateService,
     UpdateManifest,
     UpdateValidationError,
+    _detached_working_directory,
     parse_update_manifest,
     select_update_release_notes,
     verify_installer_file,
@@ -445,6 +447,13 @@ def release_history_checks(setup: bytes) -> None:
     assert select_update_release_notes(same_version) == ()
 
 
+def detached_updater_working_directory_check(root: Path) -> None:
+    install_dir = root / "HushPlayer Application"
+    helper = root / "updates" / "HushPlayerUpdater-123.exe"
+    assert _detached_working_directory(str(helper)) == str(helper.parent.resolve())
+    assert _detached_working_directory(str(helper)) != str(install_dir.resolve())
+
+
 def configure_manifest_route(
     server: FixtureServer,
     document: dict,
@@ -778,6 +787,7 @@ def manifest_source_fallback_checks(
 
 def service_checks(root: Path, server: FixtureServer, setup: bytes) -> None:
     update_dir = root / "updates"
+    running_install_dir = root / "running-install"
     user_sentinel = root / "user-data-do-not-touch.json"
     user_sentinel.write_text('{"preserved": true}', encoding="utf-8")
     launcher_ok = [False]
@@ -792,6 +802,7 @@ def service_checks(root: Path, server: FixtureServer, setup: bytes) -> None:
         updates_dir=update_dir,
         allow_insecure_localhost=True,
         installer_launcher=launcher,
+        application_dir=running_install_dir,
     )
     available: list[tuple[UpdateManifest, bool]] = []
     no_updates: list[bool] = []
@@ -941,7 +952,11 @@ def service_checks(root: Path, server: FixtureServer, setup: bytes) -> None:
     }
     expected_playback_state = dict(fake_playback_state)
     assert not service.launch_verified_installer()
-    assert launcher_calls and launcher_calls[-1][1] == list(service.INSTALLER_ARGUMENTS)
+    expected_installer_arguments = list(service.INSTALLER_ARGUMENTS)
+    expected_installer_arguments.append(
+        f'/DIR="{running_install_dir.resolve()}"'
+    )
+    assert launcher_calls and launcher_calls[-1][1] == expected_installer_arguments
     assert not launched
     assert exit_probe.close_count == 0
     assert fake_playback_state == expected_playback_state
@@ -1003,6 +1018,82 @@ def service_checks(root: Path, server: FixtureServer, setup: bytes) -> None:
     verify_installer_file(redirected_path, redirect_manifest)
 
     service.shutdown()
+
+
+def package_fallback_checks(root: Path, server: FixtureServer, setup: bytes) -> None:
+    """Keep the full installer path available beside a verified ZIP update."""
+
+    package_name = f"HushPlayer-{fixture_release(1)[0]}-win-x64-update.zip"
+    package_path = root / package_name
+    with zipfile.ZipFile(package_path, "w", compression=zipfile.ZIP_STORED) as archive:
+        archive.writestr("HushPlayer.exe", b"portable executable" * 128)
+        archive.writestr("HushPlayerUpdater.exe", b"portable updater" * 128)
+    package = package_path.read_bytes()
+    server.routes["/fallback-package.zip"] = {
+        "body": package,
+        "content_type": "application/zip",
+    }
+    server.routes["/fallback-setup.exe"] = {
+        "body": setup,
+        "content_type": "application/octet-stream",
+    }
+    document = manifest_document(
+        f"{server.base_url}/fallback-setup.exe",
+        setup,
+    )
+    document.update(
+        {
+            "package_url": f"{server.base_url}/fallback-package.zip",
+            "package_size": len(package),
+            "package_sha256": hashlib.sha256(package).hexdigest(),
+            "package_filename": package_name,
+        }
+    )
+    manifest = parse_update_manifest(
+        encoded_manifest(document),
+        allow_insecure_localhost=True,
+    )
+    launcher_calls: list[tuple[str, list[str]]] = []
+
+    def launcher(path: str, arguments: list[str]):
+        launcher_calls.append((path, list(arguments)))
+        return True, 12345
+
+    service = AppUpdateService(
+        updates_dir=root / "fallback-updates",
+        allow_insecure_localhost=True,
+        installer_launcher=launcher,
+        application_dir=root / "running-install",
+    )
+    verified: list[tuple[UpdateManifest, str]] = []
+    service.downloadVerified.connect(
+        lambda item, path: verified.append((item, path))
+    )
+    assert service.start_download(manifest)
+    assert wait_until(lambda: len(verified) == 1)
+    package_verified_path = service.verified_package_path
+    assert package_verified_path is not None and package_verified_path.is_file()
+
+    assert service.start_installer_download(manifest)
+    assert wait_until(lambda: len(verified) == 2)
+    assert service.verified_installer_path is not None
+    assert service.verified_installer_path.is_file()
+    assert package_verified_path.is_file()
+    assert service.launch_verified_installer()
+    assert launcher_calls
+    assert launcher_calls[-1][0].endswith(manifest.installer_filename)
+    assert f'/DIR="{(root / "running-install").resolve()}"' in launcher_calls[-1][1]
+
+    dialog = UpdateDialog(service, manifest)
+    try:
+        assert dialog.install_button.isEnabled()
+        assert dialog.fallback_install_button is not None
+        assert dialog.fallback_install_button.isEnabled()
+    finally:
+        dialog.close()
+        dialog.deleteLater()
+        QCoreApplication.sendPostedEvents(dialog, QEvent.Type.DeferredDelete)
+        service.shutdown()
 
 
 def shutdown_callback_check(root: Path, server: FixtureServer, setup: bytes) -> None:
@@ -1108,8 +1199,10 @@ def main() -> None:
         with tempfile.TemporaryDirectory(prefix="hushplayer_app_update_") as temp_dir:
             root = Path(temp_dir)
             service_checks(root, server, setup)
+            package_fallback_checks(root, server, setup)
             manifest_source_fallback_checks(root, server, setup)
             shutdown_callback_check(root, server, setup)
+            detached_updater_working_directory_check(root)
     finally:
         server.close()
     update_dialog_history_layout_check(setup)

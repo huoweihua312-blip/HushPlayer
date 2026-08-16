@@ -81,7 +81,9 @@ class UiV2TrackModelTests(unittest.TestCase):
     def test_missing_and_online_statuses_are_exposed(self) -> None:
         missing_row = next(row for row, track in enumerate(self.model.tracks()) if track.is_missing)
         online_row = next(row for row, track in enumerate(self.model.tracks()) if track.is_online)
-        self.assertFalse(bool(self.model.flags(self.model.index(missing_row, 0)) & Qt.ItemFlag.ItemIsEnabled))
+        missing_flags = self.model.flags(self.model.index(missing_row, 0))
+        self.assertTrue(bool(missing_flags & Qt.ItemFlag.ItemIsEnabled))
+        self.assertTrue(bool(missing_flags & Qt.ItemFlag.ItemIsSelectable))
         self.assertIn("在线", self.model.index(online_row, int(TrackColumn.SOURCE)).data(Qt.ItemDataRole.ToolTipRole))
 
 

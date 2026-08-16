@@ -184,7 +184,14 @@ class MediaItem:
             provider_data = dict(raw) if isinstance(raw, dict) else dict(track)
         extra = dict(inherited_extra)
         extra["provider_data"] = provider_data
-        stable_id = _first_text(track, "remoteStableId")
+        # ``remoteStableId`` is the RemoteTrackStore membership key. Queue
+        # items may additionally carry the V2 Track identity explicitly; keep
+        # the older source/id identity for generic online payloads.
+        stable_id = _first_text(track, "remote_stable_id", "queue_stable_id")
+        if not stable_id and "availability" in track:
+            stable_id = _first_text(track, "remoteStableId")
+        if not stable_id:
+            stable_id = _first_text(inherited_extra, "remote_stable_id")
         if stable_id:
             extra["remote_stable_id"] = stable_id
         raw_mapping = track.get("raw")
@@ -245,6 +252,9 @@ class MediaItem:
     @property
     def stable_identity(self) -> str:
         if self.media_type == "online":
+            persisted_identity = str(self.extra.get("remote_stable_id") or "").strip()
+            if persisted_identity:
+                return persisted_identity
             return f"remote:{self.source_id.casefold()}:{self.track_id}"
         if self.local_file_path:
             return f"local:{self.local_file_path.casefold()}"

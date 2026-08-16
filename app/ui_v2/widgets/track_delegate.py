@@ -9,10 +9,16 @@ from PySide6.QtGui import QColor, QFont, QPainter, QPainterPath, QPen
 from PySide6.QtWidgets import QStyle, QStyledItemDelegate
 
 from app.ui_v2.models.track import Track
-from app.ui_v2.models.track_table_model import PLAYING_ROLE, TRACK_ROLE, TrackColumn
+from app.ui_v2.models.track_table_model import (
+    PLAYBACK_ACTIVE_ROLE,
+    PLAYING_ROLE,
+    TRACK_ROLE,
+    TrackColumn,
+)
 from app.ui_v2.theme.icons import fluent_icon, paint_icon
 from app.ui_v2.theme.tokens import Theme
-from app.ui_v2.widgets.placeholder_cover import cover_pixmap
+from app.ui_v2.widgets.artwork_thumbnail import artwork_pixmap_for_track
+from app.ui_v2.widgets.track_display import present_track_identity
 
 
 class RowVisualState(str, Enum):
@@ -20,8 +26,14 @@ class RowVisualState(str, Enum):
     HOVER = "hover"
     SELECTED = "selected"
     PLAYING = "playing"
+    PAUSED = "paused"
     SELECTED_PLAYING = "selected_playing"
+    SELECTED_PAUSED = "selected_paused"
     DISABLED = "disabled"
+    SELECTED_DISABLED = "selected_disabled"
+    HOVER_DISABLED = "hover_disabled"
+    CURRENT_PLAYING = "playing"
+    CURRENT_PAUSED = "paused"
 
 
 class TrackDelegate(QStyledItemDelegate):
@@ -43,22 +55,39 @@ class TrackDelegate(QStyledItemDelegate):
         if not isinstance(track, Track):
             return
         painter.save()
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
         rect = QRectF(option.rect)
         selected = bool(option.state & QStyle.StateFlag.State_Selected)
         table = self.parent()
         is_row_hovered = getattr(table, "is_row_hovered", lambda _row: False)
         hovered = bool(is_row_hovered(index.row()))
         playing = bool(index.data(PLAYING_ROLE))
+        playback_active = bool(index.data(PLAYBACK_ACTIVE_ROLE))
         colors = self._theme.colors
-        state = self.row_visual_state(track, selected, hovered, playing)
+        state = self.row_visual_state(track, selected, hovered, playing, playback_active)
         painter.fillRect(rect, self.background_color(state))
 
         column = TrackColumn(index.column())
-        disabled = state == RowVisualState.DISABLED
+        disabled = state in {
+            RowVisualState.DISABLED,
+            RowVisualState.SELECTED_DISABLED,
+            RowVisualState.HOVER_DISABLED,
+        }
         text_color = QColor(colors.disabled_text if disabled else colors.primary_text)
         secondary_color = QColor(colors.disabled_text if disabled else colors.secondary_text)
         icon_state = "disabled" if disabled else "selected" if playing else "hover" if hovered else "normal"
+        identity = present_track_identity(track)
         content = rect.adjusted(10, 0, -10, 0)
+        if selected and not playing and column == TrackColumn.STATUS:
+            marker = QRectF(
+                rect.left() + 4,
+                rect.top() + 9,
+                3,
+                max(6, rect.height() - 18),
+            )
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.setBrush(QColor(colors.focus_ring))
+            painter.drawRoundedRect(marker, 1.5, 1.5)
         if (
             state in {RowVisualState.PLAYING, RowVisualState.SELECTED_PLAYING}
             and column == TrackColumn.STATUS
@@ -68,8 +97,14 @@ class TrackDelegate(QStyledItemDelegate):
                 QColor(colors.accent),
             )
         if column == TrackColumn.STATUS:
-            if playing:
+            if identity.availability.is_confirmed_error and not playing:
+                paint_icon(painter, "missing", self._icon_rect(content, 17), self._theme, "disabled")
+            elif identity.availability.is_resolving and not playing:
+                self._draw_loading_indicator(painter, content)
+            elif playing and playback_active:
                 paint_icon(painter, "playing", self._icon_rect(content, 18), self._theme, "selected")
+            elif playing:
+                paint_icon(painter, "pause", self._icon_rect(content, 17), self._theme, "selected")
             elif hovered:
                 paint_icon(painter, "play", self._icon_rect(content, 16), self._theme, "hover")
             else:
@@ -121,7 +156,7 @@ class TrackDelegate(QStyledItemDelegate):
             self._draw_text(
                 painter,
                 QRectF(left, content.top(), content.right() - left, content.height()),
-                index.data(Qt.ItemDataRole.DisplayRole) or "",
+                identity.title,
                 title_color,
             )
         elif column == TrackColumn.DURATION:
@@ -143,14 +178,23 @@ class TrackDelegate(QStyledItemDelegate):
         selected: bool,
         hovered: bool,
         playing: bool,
+        playback_active: bool = True,
     ) -> RowVisualState:
         """Resolve row presentation in the documented, stable priority order."""
+        if track.is_missing and selected:
+            return RowVisualState.SELECTED_DISABLED
+        if track.is_missing and hovered:
+            return RowVisualState.HOVER_DISABLED
         if track.is_missing:
             return RowVisualState.DISABLED
+        if playing and not playback_active and selected:
+            return RowVisualState.SELECTED_PAUSED
         if selected and playing:
             return RowVisualState.SELECTED_PLAYING
         if selected:
             return RowVisualState.SELECTED
+        if playing and not playback_active:
+            return RowVisualState.PAUSED
         if playing:
             return RowVisualState.PLAYING
         if hovered:
@@ -160,12 +204,16 @@ class TrackDelegate(QStyledItemDelegate):
     def background_color(self, state: RowVisualState) -> QColor:
         colors = self._theme.colors
         values = {
-            RowVisualState.NORMAL: colors.content_background,
+            RowVisualState.NORMAL: colors.surface_primary,
             RowVisualState.HOVER: colors.hover_background,
             RowVisualState.SELECTED: colors.selected_background,
             RowVisualState.PLAYING: self._playing_surface(),
+            RowVisualState.PAUSED: self._paused_surface(),
             RowVisualState.SELECTED_PLAYING: colors.selected_background,
-            RowVisualState.DISABLED: colors.content_background,
+            RowVisualState.SELECTED_PAUSED: colors.selected_background,
+            RowVisualState.DISABLED: colors.surface_primary,
+            RowVisualState.SELECTED_DISABLED: colors.selected_background,
+            RowVisualState.HOVER_DISABLED: colors.hover_background,
         }
         return QColor(values[state])
 
@@ -174,6 +222,11 @@ class TrackDelegate(QStyledItemDelegate):
 
         color = QColor(self._theme.colors.accent)
         color.setAlpha(4)
+        return color
+
+    def _paused_surface(self) -> QColor:
+        color = QColor(self._theme.colors.surface_secondary)
+        color.setAlpha(160)
         return color
 
     @staticmethod
@@ -205,7 +258,7 @@ class TrackDelegate(QStyledItemDelegate):
             painter.drawEllipse(QRectF(rect.left() + offset, center_y - 2, 4, 4))
 
     def _draw_artwork(self, painter: QPainter, rect: QRectF, track: Track) -> None:
-        pixmap = cover_pixmap(track.stable_id, int(rect.width()), int(rect.height()))
+        pixmap = artwork_pixmap_for_track(track, int(rect.width()), int(rect.height()))
         path = QPainterPath()
         path.addRoundedRect(rect, 5, 5)
         painter.save()

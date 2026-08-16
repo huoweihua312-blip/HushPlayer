@@ -10,7 +10,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from urllib.parse import unquote, urlparse
 
-from PySide6.QtCore import QFile, QIODevice, QObject, QUrl, Signal
+from PySide6.QtCore import QFile, QIODevice, QObject, QTimer, QUrl, Signal
 from PySide6.QtNetwork import QNetworkAccessManager, QNetworkReply, QNetworkRequest
 
 from app.models.media_item import MediaItem
@@ -104,7 +104,10 @@ class OnlineAudioCacheService(QObject):
         self._jobs: dict[str, _CacheJob] = {}
         self._closed = False
         self._initialize_database()
-        self._cleanup_startup_artifacts()
+        # Startup cleanup can scan the cache directory and touch several
+        # SQLite rows. Let the first window paint before doing that work; all
+        # public database methods still remain synchronous and safe.
+        QTimer.singleShot(0, self._cleanup_startup_artifacts)
 
     @contextmanager
     def _database_connection(self):

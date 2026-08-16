@@ -49,7 +49,8 @@ MAX_NOTES_PER_RELEASE = 50
 MAX_NOTE_LENGTH = 1000
 MANIFEST_SCHEMA_VERSION = 1
 RELEASE_DOWNLOAD_BASE_URL = (
-    "https://gitcode.com/gcw_iPVB8B5g/HushPlayer-updates/releases/download"
+    "https://api.gitcode.com/api/v5/repos/gcw_iPVB8B5g/"
+    "HushPlayer-updates/releases"
 )
 _SHA256_PATTERN = re.compile(r"^[0-9a-fA-F]{64}$")
 
@@ -259,15 +260,15 @@ def expected_package_filename() -> str:
 
 def default_staged_setup_url() -> str:
     return (
-        f"{RELEASE_DOWNLOAD_BASE_URL}/v{APP_VERSION}/"
-        f"{expected_installer_filename()}"
+        f"{RELEASE_DOWNLOAD_BASE_URL}/v{APP_VERSION}/attach_files/"
+        f"{expected_installer_filename()}/download"
     )
 
 
 def default_staged_package_url() -> str:
     return (
-        f"{RELEASE_DOWNLOAD_BASE_URL}/v{APP_VERSION}/"
-        f"{expected_package_filename()}"
+        f"{RELEASE_DOWNLOAD_BASE_URL}/v{APP_VERSION}/attach_files/"
+        f"{expected_package_filename()}/download"
     )
 
 
@@ -543,7 +544,11 @@ def validate_final_manifest(
             "安装包文件名与当前版本或架构不一致。"
         )
     setup_url = _validate_https_url(document.get("setup_url"))
-    if Path(urlparse(setup_url).path).name != expected_filename:
+    setup_path = urlparse(setup_url).path.rstrip("/")
+    if not (
+        Path(setup_path).name == expected_filename
+        or setup_path.endswith(f"/{expected_filename}/download")
+    ):
         raise ChangelogValidationError(
             "更新清单 setup_url 文件名与当前版本或架构不一致。"
         )
@@ -565,6 +570,15 @@ def validate_final_manifest(
         package = Path(package_path)
         if not package.is_file() or package.name != expected_package_filename():
             raise ChangelogValidationError("应用内更新包文件名或文件不存在。")
+        package_url = _validate_https_url(document.get("package_url"))
+        package_path = urlparse(package_url).path.rstrip("/")
+        if not (
+            Path(package_path).name == expected_package_filename()
+            or package_path.endswith(f"/{expected_package_filename()}/download")
+        ):
+            raise ChangelogValidationError(
+                "更新清单 package_url 文件名与当前版本或架构不一致。"
+            )
         if document["package_size"] != package.stat().st_size:
             raise ChangelogValidationError(
                 "更新清单 package_size 与应用内更新包实际大小不一致。"

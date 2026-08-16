@@ -26,3 +26,5 @@ class PlaybackState:
     is_favorite: bool = False
     shuffle_enabled: bool = False
     repeat_mode: RepeatMode = RepeatMode.ALL
+    status: str = "idle"
+    status_detail: str = ""

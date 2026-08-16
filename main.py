@@ -20,7 +20,7 @@ def parse_startup_arguments(argv: Sequence[str] | None = None):
     parser.add_argument(
         "--ui-v2",
         action="store_true",
-        help="Start the opt-in UI V2 shell. The legacy UI remains the default.",
+        help="Keep the explicit Quiet Orbit compatibility switch.",
     )
     parser.add_argument(
         "--mock",
@@ -144,15 +144,10 @@ def run_ui_v2_from_main(
 
 def main(argv: Sequence[str] | None = None) -> int:
     arguments = parse_startup_arguments(argv if argv is not None else sys.argv)
-    if arguments.ui_v2:
-        return run_ui_v2_from_main(
-            argv if argv is not None else sys.argv,
-            data_mode="mock" if arguments.mock else "real",
-        )
-    if arguments.mock:
-        print("[startup] --mock requires --ui-v2", file=sys.stderr)
-        return 2
-    return run_legacy_application(argv if argv is not None else sys.argv)
+    return run_ui_v2_from_main(
+        argv if argv is not None else sys.argv,
+        data_mode="mock" if arguments.mock else "real",
+    )
 
 
 if __name__ == "__main__":

@@ -4,8 +4,10 @@ import hashlib
 import importlib.util
 import json
 import sys
+import subprocess
 import tempfile
 import zipfile
+from unittest.mock import patch
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -132,6 +134,101 @@ def updater_swap_checks(root: Path) -> None:
     assert not list(root.glob(".HushPlayer-backup-*"))
 
 
+def updater_working_directory_check() -> None:
+    updater = _load_module(
+        "hushplayer_packaged_updater_working_directory_smoke",
+        PROJECT_ROOT / "packaging" / "hushplayer_updater.py",
+    )
+    expected_source_dir = (PROJECT_ROOT / "packaging").resolve()
+    assert updater._updater_process_directory() == expected_source_dir
+
+    helper_path = expected_source_dir / "HushPlayerUpdater.exe"
+    with patch.object(updater.sys, "frozen", True, create=True), patch.object(
+        updater.sys, "executable", str(helper_path)
+    ):
+        assert updater._updater_process_directory() == expected_source_dir
+
+
+def updater_replace_retry_checks(root: Path) -> None:
+    updater = _load_module(
+        "hushplayer_packaged_updater_retry_smoke",
+        PROJECT_ROOT / "packaging" / "hushplayer_updater.py",
+    )
+    install_dir = root / "HushPlayer-retry"
+    install_dir.mkdir()
+    (install_dir / "HushPlayer.exe").write_bytes(b"old executable")
+    (install_dir / "HushPlayerUpdater.exe").write_bytes(b"old updater")
+    package = root / "retry-swap.zip"
+    _create_package(package)
+
+    real_replace = updater.os.replace
+    calls = 0
+
+    def fail_once(source, destination):
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            raise PermissionError("directory is temporarily locked")
+        return real_replace(source, destination)
+
+    updater._wait_for_parent = lambda _pid: None
+    updater._start_application = lambda _executable, _working_dir: None
+    with patch.object(updater.os, "replace", fail_once):
+        updater.apply_update(
+            parent_pid=12345,
+            install_dir=install_dir,
+            package=package,
+            restart_exe=install_dir / "HushPlayer.exe",
+        )
+    assert calls >= 3
+    assert (install_dir / "HushPlayer.exe").read_bytes() == bytes(
+        index % 251 for index in range(8192)
+    )
+
+    locked_dir = root / "HushPlayer-permanent-lock"
+    locked_dir.mkdir()
+    (locked_dir / "HushPlayer.exe").write_bytes(b"must remain")
+    (locked_dir / "HushPlayerUpdater.exe").write_bytes(b"old updater")
+    updater._REPLACE_RETRY_TIMEOUT_MS = 10
+
+    def always_locked(_source, _destination):
+        raise PermissionError("directory remains locked")
+
+    with patch.object(updater.os, "replace", always_locked), patch.object(
+        updater.time, "sleep", return_value=None
+    ):
+        try:
+            updater.apply_update(
+                parent_pid=12345,
+                install_dir=locked_dir,
+                package=package,
+                restart_exe=locked_dir / "HushPlayer.exe",
+            )
+        except PermissionError:
+            pass
+        else:
+            raise AssertionError("permanently locked install unexpectedly replaced")
+    assert (locked_dir / "HushPlayer.exe").read_bytes() == b"must remain"
+    assert not list(root.glob(".HushPlayer-backup-*"))
+
+    if updater.os.name == "nt":
+        live_install = root / "HushPlayer-live-lock"
+        live_backup = root / "HushPlayer-live-backup"
+        live_install.mkdir()
+        (live_install / "HushPlayer.exe").write_bytes(b"live install")
+        holder = subprocess.Popen(
+            [sys.executable, "-c", "import time; time.sleep(0.4)"],
+            cwd=str(live_install),
+        )
+        try:
+            updater._REPLACE_RETRY_TIMEOUT_MS = 5_000
+            updater._replace_with_retry(live_install, live_backup)
+        finally:
+            holder.wait(timeout=5)
+        assert live_backup.is_dir()
+        assert not live_install.exists()
+
+
 def payload_builder_checks(root: Path) -> None:
     builder = _load_module(
         "hushplayer_payload_builder_smoke",
@@ -155,6 +252,8 @@ def main() -> None:
         root = Path(temporary)
         package_manifest_checks(root)
         updater_swap_checks(root)
+        updater_working_directory_check()
+        updater_replace_retry_checks(root)
         payload_builder_checks(root)
     print("in-app update smoke: OK")
 

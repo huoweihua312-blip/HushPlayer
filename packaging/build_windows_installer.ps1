@@ -75,6 +75,8 @@ $UpdatePackage = Join-Path $ProjectRoot (
 )
 if (-not (Test-Path -LiteralPath $UpdatePackage -PathType Leaf)) {
     $UpdatePackage = $null
+} else {
+    $UpdatePackage = Get-Item -LiteralPath $UpdatePackage
 }
 
 $AppVersionDefine = '/DMyAppVersion=' + [string]$VersionMetadata.app_version
