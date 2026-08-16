@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import importlib
 import os
 import sys
 import tempfile
@@ -483,7 +482,7 @@ class LyricsPageTests(unittest.TestCase):
                 f"{width}x{height}: center={rect.center().y()} target={target} canvas={canvas.size()}",
             )
 
-    def test_state_view_and_legacy_imports(self) -> None:
+    def test_state_view(self) -> None:
         page = self._lyrics_page()
         self._play_library_track()
         page.adapter.load_mock_scenario("failed")
@@ -492,10 +491,6 @@ class LyricsPageTests(unittest.TestCase):
         page.adapter.load_mock_scenario("instrumental")
         self.assertIs(page.content_stack.currentWidget(), page.state_view)
         self.assertIn("纯音乐", page.state_view.title_label.text())
-        legacy_main = importlib.import_module("main")
-        legacy_window = importlib.import_module("app.ui.main_window")
-        self.assertTrue(callable(legacy_main.main))
-        self.assertTrue(hasattr(legacy_window, "MainWindow"))
 
 
 if __name__ == "__main__":

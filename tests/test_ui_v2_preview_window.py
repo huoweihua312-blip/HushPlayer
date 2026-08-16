@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import importlib
 import os
 import sys
 import unittest
@@ -85,13 +84,6 @@ class UiV2PreviewWindowTests(unittest.TestCase):
         self.assertEqual(table.header.sortIndicatorSection(), title_column)
         window.close()
         window.deleteLater()
-
-    def test_legacy_main_and_main_window_remain_importable(self) -> None:
-        legacy_main = importlib.import_module("main")
-        legacy_window_module = importlib.import_module("app.ui.main_window")
-        self.assertTrue(callable(legacy_main.main))
-        self.assertTrue(hasattr(legacy_window_module, "MainWindow"))
-
 
 if __name__ == "__main__":
     unittest.main()

@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import importlib
 import os
 import sys
 import unittest
@@ -386,10 +385,6 @@ class OnlineSearchPageTests(unittest.TestCase):
             self.assertIs(page.result_table.model, result_model)
             self.assertFalse(page.result_table.horizontalScrollBar().isVisible())
             self.assertEqual(page.search_bar.line_edit.text(), "长文本")
-        legacy_main = importlib.import_module("main")
-        legacy_window = importlib.import_module("app.ui.main_window")
-        self.assertTrue(callable(legacy_main.main))
-        self.assertTrue(hasattr(legacy_window, "MainWindow"))
 
 
 if __name__ == "__main__":

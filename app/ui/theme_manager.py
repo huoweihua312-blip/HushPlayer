@@ -8,17 +8,15 @@ from PySide6.QtCore import QEvent, QObject, Qt, Signal
 from PySide6.QtGui import QColor, QGuiApplication, QPalette
 from PySide6.QtWidgets import QApplication, QDialog
 
+from app.models.appearance_settings import (
+    APPEARANCE_MODES,
+    DEFAULT_APPEARANCE_MODE,
+    normalize_appearance_mode,
+)
 from app.ui.design_system import get_theme_tokens, set_active_theme_tokens
 
 
-APPEARANCE_MODES = ("dark", "light", "system")
-DEFAULT_APPEARANCE_MODE = "dark"
 _APPLICATION_THEME_MANAGERS: dict[int, "ThemeManager"] = {}
-
-
-def normalize_appearance_mode(value) -> str:
-    value = str(value or "").strip().lower()
-    return value if value in APPEARANCE_MODES else DEFAULT_APPEARANCE_MODE
 
 
 def resolve_system_appearance(app: QApplication | None = None) -> str:

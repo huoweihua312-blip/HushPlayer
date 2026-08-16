@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections import OrderedDict
-from dataclasses import dataclass, replace
+from dataclasses import replace
 from pathlib import Path
 
 from PySide6.QtCore import QObject, QRunnable, QSize, Qt, QThreadPool, QTimer, Signal
@@ -21,142 +21,15 @@ from PySide6.QtWidgets import (
 )
 
 from app.services.lyrics_timing import normalize_lyrics_offset_ms
+from app.models.appearance_settings import (
+    APPEARANCE_SETTING_KEYS,
+    BACKGROUND_FILL_MODES,
+    BACKGROUND_MODES,
+    ImmersiveAppearanceConfig,
+    _bounded_int,
+)
 from app.ui.design_system import ACTIVE_THEME_TOKENS, UI_RADII
 from app.ui.theme_manager import get_application_theme_manager
-
-
-BACKGROUND_MODES = {"default", "cover", "translucent", "custom"}
-BACKGROUND_FILL_MODES = {"cover", "contain"}
-APPEARANCE_SETTING_KEYS = {
-    "immersive_background_mode",
-    "immersive_background_custom_path",
-    "immersive_background_blur",
-    "immersive_background_darkness",
-    "immersive_background_image_opacity",
-    "immersive_background_transparency",
-    "immersive_background_fill_mode",
-    "immersive_lyrics_font_scale",
-    "immersive_cover_background_enabled",
-    "immersive_background_alpha",
-}
-
-
-def _bounded_int(value, default: int, minimum: int, maximum: int) -> int:
-    if isinstance(value, bool):
-        return int(default)
-    try:
-        number = int(value)
-    except (TypeError, ValueError):
-        return int(default)
-    return max(int(minimum), min(int(maximum), number))
-
-
-@dataclass(frozen=True, slots=True)
-class ImmersiveAppearanceConfig:
-    background_mode: str = "cover"
-    custom_image_path: str = ""
-    blur_radius: int = 40
-    darkness: int = 68
-    image_opacity: int = 100
-    background_transparency: int = 38
-    fill_mode: str = "cover"
-    lyrics_font_scale: int = 100
-
-    @classmethod
-    def defaults(cls) -> "ImmersiveAppearanceConfig":
-        return cls()
-
-    @classmethod
-    def from_settings(cls, settings: dict | None) -> "ImmersiveAppearanceConfig":
-        document = settings if isinstance(settings, dict) else {}
-        defaults = cls.defaults()
-
-        raw_mode = document.get("immersive_background_mode")
-        if isinstance(raw_mode, str) and raw_mode.strip().casefold() in BACKGROUND_MODES:
-            mode = raw_mode.strip().casefold()
-        else:
-            legacy_cover = document.get("immersive_cover_background_enabled", True)
-            if not isinstance(legacy_cover, bool):
-                legacy_cover = True
-            mode = "cover" if legacy_cover else "default"
-
-        raw_path = document.get("immersive_background_custom_path", "")
-        custom_path = raw_path.strip() if isinstance(raw_path, str) else ""
-
-        darkness_source = document.get(
-            "immersive_background_darkness",
-            document.get("immersive_background_alpha", defaults.darkness),
-        )
-        fill_mode = document.get("immersive_background_fill_mode", defaults.fill_mode)
-        if not isinstance(fill_mode, str) or fill_mode.strip().casefold() not in BACKGROUND_FILL_MODES:
-            fill_mode = defaults.fill_mode
-        else:
-            fill_mode = fill_mode.strip().casefold()
-
-        font_scale = _bounded_int(
-            document.get("immersive_lyrics_font_scale", defaults.lyrics_font_scale),
-            defaults.lyrics_font_scale,
-            70,
-            160,
-        )
-        font_scale = max(70, min(160, int(round(font_scale / 5.0) * 5)))
-
-        return cls(
-            background_mode=mode,
-            custom_image_path=custom_path,
-            blur_radius=_bounded_int(
-                document.get("immersive_background_blur", defaults.blur_radius),
-                defaults.blur_radius,
-                0,
-                40,
-            ),
-            darkness=_bounded_int(darkness_source, defaults.darkness, 0, 90),
-            image_opacity=_bounded_int(
-                document.get(
-                    "immersive_background_image_opacity",
-                    defaults.image_opacity,
-                ),
-                defaults.image_opacity,
-                20,
-                100,
-            ),
-            background_transparency=_bounded_int(
-                document.get(
-                    "immersive_background_transparency",
-                    defaults.background_transparency,
-                ),
-                defaults.background_transparency,
-                0,
-                85,
-            ),
-            fill_mode=fill_mode,
-            lyrics_font_scale=font_scale,
-        )
-
-    def to_settings(self) -> dict:
-        return {
-            "immersive_background_mode": self.background_mode,
-            "immersive_background_custom_path": self.custom_image_path,
-            "immersive_background_blur": int(self.blur_radius),
-            "immersive_background_darkness": int(self.darkness),
-            "immersive_background_image_opacity": int(self.image_opacity),
-            "immersive_background_transparency": int(
-                self.background_transparency
-            ),
-            "immersive_background_fill_mode": self.fill_mode,
-            "immersive_lyrics_font_scale": int(self.lyrics_font_scale),
-            # 兼容旧版本：新字段优先，旧字段仅作为降级读取入口。
-            "immersive_cover_background_enabled": self.background_mode == "cover",
-            "immersive_background_alpha": int(self.darkness),
-        }
-
-    def background_render_signature(self) -> tuple:
-        return (
-            self.background_mode,
-            self.custom_image_path,
-            int(self.blur_radius),
-            self.fill_mode,
-        )
 
 
 class _RenderSignals(QObject):

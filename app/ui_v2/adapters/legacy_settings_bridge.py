@@ -15,9 +15,12 @@ from typing import Any, Callable
 from PySide6.QtCore import QObject, Signal
 
 from app.core.app_paths import AppPaths
+from app.models.appearance_settings import (
+    APPEARANCE_SETTING_KEYS,
+    ImmersiveAppearanceConfig,
+    normalize_appearance_mode,
+)
 from app.services.lyrics_timing import normalize_lyrics_timing_offsets
-from app.ui.immersive_appearance import APPEARANCE_SETTING_KEYS, ImmersiveAppearanceConfig
-from app.ui.theme_manager import normalize_appearance_mode
 from app.ui_v2.models.settings_snapshot import SettingsSnapshot
 
 

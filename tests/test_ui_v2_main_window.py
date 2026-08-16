@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-import importlib
 import os
 import sys
+import tempfile
 import unittest
 from dataclasses import replace
 from pathlib import Path
@@ -32,7 +32,12 @@ class UiV2MainWindowTests(unittest.TestCase):
         cls.app = QApplication.instance() or QApplication([])
 
     def setUp(self) -> None:
-        self.window = MainWindow()
+        settings_path = (
+            Path(tempfile.gettempdir())
+            / "HushPlayer-ui-v2-tests"
+            / f"main-window-{os.getpid()}-{id(self)}.json"
+        )
+        self.window = MainWindow(settings_path=settings_path)
         self.window.show()
         self.app.processEvents()
 
@@ -418,17 +423,13 @@ class UiV2MainWindowTests(unittest.TestCase):
         self.assertFalse(player_bar.progress_slider.isEnabled())
         self.assertTrue(player_bar.volume_slider.isEnabled())
 
-    def test_light_dark_and_legacy_imports_remain_available(self) -> None:
+    def test_light_dark_theme_preserves_library_model(self) -> None:
         model = self.window.library_page.track_table.model
         self.window.set_theme("light")
         self.assertEqual(self.window.theme.mode, "light")
         self.window.set_theme("dark")
         self.assertEqual(self.window.theme.mode, "dark")
         self.assertIs(self.window.library_page.track_table.model, model)
-        legacy_main = importlib.import_module("main")
-        legacy_window = importlib.import_module("app.ui.main_window")
-        self.assertTrue(callable(legacy_main.main))
-        self.assertTrue(hasattr(legacy_window, "MainWindow"))
 
 
 if __name__ == "__main__":

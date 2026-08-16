@@ -42,9 +42,7 @@ from app.core.version import (
     UPDATE_CHANNEL,
     numeric_version_text,
 )
-from app.ui import main_window as main_window_module
-from app.ui.main_window import MainWindow
-from app.ui.update_dialog import UpdateDialog
+from app.ui_v2.dialogs.update_dialog import UpdateDialog
 
 
 class FixtureServer:
@@ -827,20 +825,8 @@ def service_checks(root: Path, server: FixtureServer, setup: bytes) -> None:
     service.installerLaunchFailed.connect(launch_failures.append)
     service.installerLaunched.connect(launched.append)
 
-    class ExitProbe:
-        def __init__(self) -> None:
-            self.close_count = 0
-
-        def close(self) -> None:
-            self.close_count += 1
-
-    exit_probe = ExitProbe()
-    service.installerLaunched.connect(
-        lambda path: MainWindow.on_update_installer_launched(exit_probe, path)
-    )
     assert not service.launch_verified_installer()
     assert launch_failures and "尚未完成校验" in launch_failures[-1]
-    assert exit_probe.close_count == 0
 
     server.routes["/setup.exe"] = {
         "body": setup,
@@ -958,13 +944,11 @@ def service_checks(root: Path, server: FixtureServer, setup: bytes) -> None:
     )
     assert launcher_calls and launcher_calls[-1][1] == expected_installer_arguments
     assert not launched
-    assert exit_probe.close_count == 0
     assert fake_playback_state == expected_playback_state
 
     launcher_ok[0] = True
     assert service.launch_verified_installer()
     assert launched
-    assert exit_probe.close_count == 1
     assert fake_playback_state == expected_playback_state
 
     dialog = UpdateDialog(service, manifest)
@@ -1161,39 +1145,12 @@ def update_dialog_history_layout_check(setup: bytes) -> None:
         service.shutdown()
 
 
-def ui_notification_policy_check() -> None:
-    warnings: list[tuple] = []
-
-    class FakeMessageBox:
-        @staticmethod
-        def warning(*args):
-            warnings.append(args)
-
-    class MessageProbe:
-        @staticmethod
-        def update_message_parent():
-            return None
-
-    original_message_box = main_window_module.QMessageBox
-    main_window_module.QMessageBox = FakeMessageBox
-    try:
-        probe = MessageProbe()
-        MainWindow.on_update_check_failed(probe, "自动失败", False)
-        assert warnings == []
-        MainWindow.on_update_check_failed(probe, "手动失败", True)
-        assert len(warnings) == 1
-        assert warnings[0][1:] == ("检查更新失败", "手动失败")
-    finally:
-        main_window_module.QMessageBox = original_message_box
-
-
 def main() -> None:
     app = QApplication.instance() or QApplication([])
     _ = app
     setup = b"MZ" + bytes((index % 251 for index in range(8190)))
     parser_checks(setup)
     release_history_checks(setup)
-    ui_notification_policy_check()
     server = FixtureServer()
     try:
         with tempfile.TemporaryDirectory(prefix="hushplayer_app_update_") as temp_dir:

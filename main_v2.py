@@ -1,4 +1,4 @@
-"""Development launcher for the opt-in UI V2 shell."""
+"""Development launcher for the UI V2 shell."""
 
 from __future__ import annotations
 

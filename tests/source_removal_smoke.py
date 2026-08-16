@@ -13,7 +13,6 @@ if str(PROJECT_ROOT) not in sys.path:
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from app.services.source_registry import SourceRegistryError, SourceRegistryManager
-import app.ui.online_source_pages as online_source_pages
 
 
 def write_registry(manager: SourceRegistryManager, sources: list[dict]) -> None:
@@ -106,16 +105,11 @@ def test_registry_rollback(root: Path) -> None:
     assert manager.list_sources()[0]["id"] == "rollback"
 
 
-def test_manager_ui_removed() -> None:
-    assert not hasattr(online_source_pages, "SourceManagerPage")
-
-
 def main() -> int:
     with tempfile.TemporaryDirectory(prefix="hushplayer_remove_source_") as temp_dir:
         root = Path(temp_dir)
         test_registry_removal(root / "registry")
         test_registry_rollback(root / "rollback")
-        test_manager_ui_removed()
     print("source removal smoke: OK")
     return 0
 

@@ -68,19 +68,13 @@ class StartupArgumentTests(unittest.TestCase):
         cls.app = QApplication.instance() or QApplication([])
 
     def test_no_arguments_start_quiet_orbit_as_default(self) -> None:
-        with patch.object(main, "run_legacy_application", return_value=0) as legacy, patch.object(
-            main, "run_ui_v2_from_main", return_value=0
-        ) as ui_v2:
+        with patch.object(main, "run_ui_v2_from_main", return_value=0) as ui_v2:
             self.assertEqual(main.main(["main.py"]), 0)
-        legacy.assert_not_called()
         ui_v2.assert_called_once_with(["main.py"], data_mode="real")
 
     def test_ui_v2_argument_uses_opt_in_v2_entry(self) -> None:
-        with patch.object(main, "run_legacy_application", return_value=0) as legacy, patch.object(
-            main, "run_ui_v2_from_main", return_value=0
-        ) as ui_v2:
+        with patch.object(main, "run_ui_v2_from_main", return_value=0) as ui_v2:
             self.assertEqual(main.main(["main.py", "--ui-v2"]), 0)
-        legacy.assert_not_called()
         ui_v2.assert_called_once()
 
     def test_ui_v2_mock_argument_selects_the_isolated_mock_factory(self) -> None:
@@ -116,13 +110,10 @@ class StartupArgumentTests(unittest.TestCase):
     def test_v2_theme_is_installed_by_flavor_before_window_creation(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             settings_path = str(Path(temporary) / "settings.json")
-            apply_ui_theme(self.app, "ui-v2", settings_path=settings_path)
+            apply_ui_theme(self.app, settings_path=settings_path)
         self.assertEqual(self.app.property("hushUiFlavor"), "ui-v2")
         self.assertEqual(self.app.property("hushUiV2ThemeMode"), "dark")
         self.assertIn(get_theme("dark").colors.app_background, self.app.styleSheet())
-        apply_ui_theme(self.app, "legacy")
-        self.assertEqual(self.app.property("hushUiFlavor"), "legacy")
-        self.assertNotIn(get_theme("dark").colors.app_background, self.app.styleSheet())
 
     def test_ui_v2_startup_failure_returns_clear_error(self) -> None:
         stderr = io.StringIO()

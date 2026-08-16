@@ -80,7 +80,7 @@ from app.ui_v2.models.track import Track, artwork_url_from_payload
 from app.ui_v2.shell.content_router import ContentRouter
 from app.ui_v2.shell.navigation_sidebar import NavigationSidebar
 from app.ui_v2.shell.player_bar import PlayerBar
-from app.ui.update_dialog import UpdateDialog
+from app.ui_v2.dialogs.update_dialog import UpdateDialog
 from app.ui_v2.widgets.custom_title_bar import CustomTitleBar
 from app.ui_v2.widgets.online_recovery_dialog import OnlineRecoveryCandidateDialog
 from app.ui_v2.widgets.settings_overlay import SettingsOverlay

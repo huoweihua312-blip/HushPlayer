@@ -1,4 +1,4 @@
-"""Production-capable startup helpers for the opt-in UI V2 shell."""
+"""Production-capable startup helpers for the formal UI V2 shell."""
 
 from __future__ import annotations
 
@@ -17,7 +17,7 @@ from app.services.library_repository import LibraryRepository
 from app.services.production_playback_controller import ProductionPlaybackController
 from app.services.remote_track_store import RemoteTrackStore
 from app.services.online_discovery_runtime import OnlineDiscoveryRuntime
-from app.startup import UI_FLAVOR_V2, create_application_context
+from app.startup import create_application_context
 from app.ui_v2.adapters.lyrics_adapter import LyricsAdapter
 from app.ui_v2.adapters.playback_adapter import PlaybackAdapter
 from app.ui_v2.shell.main_window import MainWindow
@@ -137,7 +137,59 @@ def install_ui_v2_smoke_exit(
     *,
     environment_key: str = "HUSHPLAYER_UI_V2_SMOKE_EXIT_MS",
 ) -> None:
+    _install_packaging_node_smoke(app, window)
+    _install_startup_smoke_exit(app, window)
     smoke_exit_text = str(os.environ.get(environment_key) or "").strip()
+    if not smoke_exit_text:
+        return
+    try:
+        smoke_exit_ms = max(100, int(smoke_exit_text))
+    except ValueError:
+        return
+    QTimer.singleShot(smoke_exit_ms, window.close)
+    QTimer.singleShot(smoke_exit_ms + 50, app.quit)
+
+
+def _install_packaging_node_smoke(app: QApplication, window: MainWindow) -> None:
+    smoke_exit_text = str(
+        os.environ.get("HUSHPLAYER_PACKAGING_SMOKE_EXIT_MS") or ""
+    ).strip()
+    if not smoke_exit_text:
+        return
+    try:
+        smoke_exit_ms = max(500, int(smoke_exit_text))
+    except ValueError:
+        smoke_exit_ms = 0
+    if not smoke_exit_ms:
+        return
+
+    def fail_packaging_node_smoke(message: str) -> None:
+        print(f"[packaging-smoke] Node runner failed: {message}", file=sys.stderr)
+        app.exit(2)
+
+    def start_packaging_node_smoke() -> None:
+        runtime = getattr(window, "online_discovery", None)
+        client = getattr(runtime, "client", None)
+        if client is None:
+            fail_packaging_node_smoke("online source client is unavailable")
+            return
+        client.sourceReady.connect(
+            lambda _data: print("[packaging-smoke] Node runner ready")
+        )
+        client.processError.connect(fail_packaging_node_smoke)
+        client.requestFailed.connect(
+            lambda _request_id, _action, message: fail_packaging_node_smoke(message)
+        )
+        client.ping(timeout_ms=max(1000, smoke_exit_ms - 1000))
+
+    QTimer.singleShot(0, start_packaging_node_smoke)
+    QTimer.singleShot(smoke_exit_ms, window.close)
+
+
+def _install_startup_smoke_exit(app: QApplication, window: MainWindow) -> None:
+    smoke_exit_text = str(
+        os.environ.get("HUSHPLAYER_STARTUP_SMOKE_EXIT_MS") or ""
+    ).strip()
     if not smoke_exit_text:
         return
     try:
@@ -165,7 +217,6 @@ def run_ui_v2_application(
         )
     context = create_application_context(
         argv if argv is not None else sys.argv,
-        ui_flavor=UI_FLAVOR_V2,
         settings_path=str(isolated_settings) if isolated_settings is not None else None,
     )
     window = create_ui_v2_main_window(
