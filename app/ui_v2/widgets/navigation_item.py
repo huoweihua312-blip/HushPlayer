@@ -34,6 +34,7 @@ class NavigationItem(QToolButton):
         self._selected = False
         self._focus_visible = False
         self._full_title = item.title
+        self._badge_text = ""
         self._custom_icon: QIcon | None = None
         self.setText(item.title)
         self.setToolTip(item.title)
@@ -72,6 +73,12 @@ class NavigationItem(QToolButton):
         if self._selected == selected:
             return
         self._selected = selected
+        self._refresh_visuals()
+
+    def set_badge_text(self, text: str = "") -> None:
+        """Append a small count to a route title without changing its identity."""
+
+        self._badge_text = str(text or "").strip()
         self._refresh_visuals()
 
     def set_custom_icon(self, custom_icon: QIcon) -> None:
@@ -126,8 +133,13 @@ class NavigationItem(QToolButton):
     def _refresh_visuals(self) -> None:
         c = self._theme.colors
         focus_border = c.focus_ring if self._focus_visible else "transparent"
-        self.setAccessibleName(self._full_title)
-        self.setAccessibleDescription(f"打开{self._full_title}")
+        accessible_title = (
+            f"{self._full_title} {self._badge_text}".strip()
+            if self._badge_text
+            else self._full_title
+        )
+        self.setAccessibleName(accessible_title)
+        self.setAccessibleDescription(f"打开{accessible_title}")
         icon_state = "selected" if self._selected else "normal"
         if self._custom_icon is not None:
             self.setIcon(self._custom_icon)
@@ -166,8 +178,9 @@ class NavigationItem(QToolButton):
         horizontal_padding = 24
         icon_and_gap = self.iconSize().width() + 10
         available = max(0, contents.width() - horizontal_padding - icon_and_gap)
-        self.setText(
-            self.fontMetrics().elidedText(
-                self._full_title, Qt.TextElideMode.ElideRight, available
-            )
+        full_text = (
+            f"{self._full_title} {self._badge_text}".strip()
+            if self._badge_text
+            else self._full_title
         )
+        self.setText(self.fontMetrics().elidedText(full_text, Qt.TextElideMode.ElideRight, available))

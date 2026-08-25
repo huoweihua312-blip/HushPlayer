@@ -158,7 +158,7 @@ class ImmersiveLyricsPage(QWidget):
         self.settings_panel.hide()
         self._controls_hide_timer = QTimer(self)
         self._controls_hide_timer.setSingleShot(True)
-        self._controls_hide_timer.setInterval(1500)
+        self._controls_hide_timer.setInterval(2600)
         self._controls_hide_timer.timeout.connect(self.hide_controls_preview)
         self._connect_components()
         self._connect_adapters()
@@ -179,14 +179,25 @@ class ImmersiveLyricsPage(QWidget):
         self.header_back_button = self._header_button("back", "返回普通页面")
         self.header_now_playing = self._header_mode_button("正在播放", "正在播放", "now_playing", 112)
         self.header_lyrics = self._header_mode_button("歌词", "歌词", "lyrics", 82)
+        self.header_translation_button = self._header_toggle_button("翻译", "显示或隐藏翻译", 64)
+        self.header_romanization_button = self._header_toggle_button("罗马音", "显示或隐藏罗马音", 76)
+        self.header_fullscreen_button = self._header_text_button("全屏", "进入全屏（F11）", 60)
         self.header_back_button.clicked.connect(self.immersive_exit_requested)
         self.header_now_playing.clicked.connect(lambda: self.mode_changed.emit("now_playing"))
         self.header_lyrics.clicked.connect(lambda: self.mode_changed.emit("lyrics"))
+        self.header_translation_button.toggled.connect(self.set_translation_visible)
+        self.header_romanization_button.toggled.connect(self.set_romanization_visible)
+        self.header_fullscreen_button.clicked.connect(self.toggle_fullscreen)
         layout.addWidget(self.header_back_button)
         layout.addStretch(1)
         layout.addWidget(self.header_now_playing)
         layout.addSpacing(24)
         layout.addWidget(self.header_lyrics)
+        layout.addSpacing(8)
+        layout.addWidget(self.header_translation_button)
+        layout.addWidget(self.header_romanization_button)
+        layout.addSpacing(8)
+        layout.addWidget(self.header_fullscreen_button)
         self._window_buttons: list[QToolButton] = []
         for name, tip, callback in (
             ("window_minimize", "最小化", lambda: self.window().showMinimized()),
@@ -226,6 +237,22 @@ class ImmersiveLyricsPage(QWidget):
         button.setCursor(Qt.CursorShape.PointingHandCursor)
         return button
 
+    def _header_toggle_button(self, text: str, tooltip: str, width: int) -> QToolButton:
+        button = self._header_text_button(text, tooltip, width)
+        button.setObjectName("immersiveToggleButton")
+        button.setCheckable(True)
+        return button
+
+    def _header_text_button(self, text: str, tooltip: str, width: int) -> QToolButton:
+        button = QToolButton(self)
+        button.setObjectName("immersiveTextButton")
+        button.setText(text)
+        button.setFixedSize(width, 36)
+        button.setToolTip(tooltip)
+        button.setAccessibleName(text)
+        button.setCursor(Qt.CursorShape.PointingHandCursor)
+        return button
+
     def _style_header(self, theme: Theme) -> None:
         colors = theme.colors
         self.header.setStyleSheet(
@@ -238,6 +265,15 @@ class ImmersiveLyricsPage(QWidget):
             f"QToolButton#immersiveModeButton:checked {{ background: transparent; color: {colors.text_primary}; "
             f"border-bottom: 2px solid {colors.accent}; }}"
             f"QToolButton#immersiveModeButton:pressed {{ background: transparent; }}"
+            f"QToolButton#immersiveToggleButton, QToolButton#immersiveTextButton {{ min-width: 0; "
+            f"padding: 0 8px; border: 1px solid transparent; border-radius: 16px; background: transparent; "
+            f"color: {colors.text_secondary}; }}"
+            f"QToolButton#immersiveToggleButton:hover, QToolButton#immersiveTextButton:hover {{ "
+            f"background: {colors.surface_hover}; color: {colors.text_primary}; }}"
+            f"QToolButton#immersiveToggleButton:checked {{ background: {colors.selected_background}; "
+            f"border-color: {colors.border}; color: {colors.text_primary}; }}"
+            f"QToolButton#immersiveToggleButton:pressed, QToolButton#immersiveTextButton:pressed {{ "
+            f"background: {colors.surface_pressed}; }}"
             f"QToolButton#immersiveModeButton[hushKeyboardFocus=\"true\"]:focus {{ background: transparent; border-bottom: 2px solid {colors.focus_ring}; }}"
         )
         for name, button in (("back", self.header_back_button), ("window_minimize", self._window_buttons[0]), ("window_maximize", self._window_buttons[1]), ("window_close", self._window_buttons[2])):
@@ -245,6 +281,7 @@ class ImmersiveLyricsPage(QWidget):
         self.header_now_playing.setIcon(fluent_immersive_interactive_icon("now_playing", theme, 18))
         self.header_lyrics.setIcon(fluent_immersive_interactive_icon("lyrics", theme, 18))
         self._sync_mode_buttons()
+        self._sync_fullscreen_button()
 
     def _toggle_host_maximized(self) -> None:
         window = self.window()
@@ -273,6 +310,17 @@ class ImmersiveLyricsPage(QWidget):
             return
         self.header_now_playing.setChecked(self._mode == "now_playing")
         self.header_lyrics.setChecked(self._mode == "lyrics")
+        self._sync_display_buttons()
+
+    def _sync_display_buttons(self) -> None:
+        options = self.lyrics_adapter.display_options
+        for button, value in (
+            (self.header_translation_button, options.get("translation", True)),
+            (self.header_romanization_button, options.get("romanization", False)),
+        ):
+            previous = button.blockSignals(True)
+            button.setChecked(bool(value))
+            button.blockSignals(previous)
 
     def toggle_queue_panel(self) -> None:
         if self.queue_panel.isVisible():
@@ -369,6 +417,7 @@ class ImmersiveLyricsPage(QWidget):
         self.settings_panel.closed.connect(self._on_settings_panel_closed)
         self.settings_panel.save_requested.connect(self._save_quick_settings)
         self.settings_panel.cancel_requested.connect(self._cancel_quick_settings)
+        self.settings_panel.reset_requested.connect(self._reset_quick_settings)
         tracked_widgets = [self, self.content, self.canvas, self.controls, self.header]
         tracked_widgets.extend(self.findChildren(QWidget))
         seen_widgets: set[int] = set()
@@ -380,6 +429,7 @@ class ImmersiveLyricsPage(QWidget):
             widget.installEventFilter(self)
         self._fullscreen_action = QAction(self)
         self._fullscreen_action.setShortcut("F11")
+        self._fullscreen_action.setShortcutContext(Qt.ShortcutContext.WindowShortcut)
         self._fullscreen_action.triggered.connect(self.toggle_fullscreen)
         self.addAction(self._fullscreen_action)
 
@@ -421,10 +471,12 @@ class ImmersiveLyricsPage(QWidget):
     def set_translation_visible(self, visible: bool) -> None:
         if bool(self.lyrics_adapter.display_options["translation"]) != bool(visible):
             self.lyrics_adapter.toggle_translation()
+        self._sync_display_buttons()
 
     def set_romanization_visible(self, visible: bool) -> None:
         if bool(self.lyrics_adapter.display_options["romanization"]) != bool(visible):
             self.lyrics_adapter.toggle_romanization()
+        self._sync_display_buttons()
 
     def set_background_mode(self, mode: str) -> None:
         normalized = mode if mode in {"artwork", "gradient", "solid", "transparent", "custom"} else "artwork"
@@ -576,7 +628,17 @@ class ImmersiveLyricsPage(QWidget):
 
     def set_host_fullscreen(self, enabled: bool) -> None:
         self._host_fullscreen = bool(enabled)
+        self._sync_fullscreen_button()
         self._apply_responsive_layout()
+
+    def _sync_fullscreen_button(self) -> None:
+        if not hasattr(self, "header_fullscreen_button"):
+            return
+        text = "退出全屏" if self._host_fullscreen else "全屏"
+        tooltip = f"{text}（F11）"
+        self.header_fullscreen_button.setText(text)
+        self.header_fullscreen_button.setToolTip(tooltip)
+        self.header_fullscreen_button.setAccessibleName(tooltip)
 
     def set_active(self, active: bool) -> None:
         self._active = bool(active)
@@ -635,6 +697,15 @@ class ImmersiveLyricsPage(QWidget):
         self._apply_responsive_layout()
         self.wake_controls()
 
+    def _reset_quick_settings(self) -> None:
+        """Preview the documented immersive defaults without saving immediately."""
+
+        self.apply_options(ImmersiveLyricsOptions(theme=self._theme.mode))
+        sync_session = getattr(self.settings_panel, "_sync_session_from_controls", None)
+        if callable(sync_session):
+            sync_session()
+        self.wake_controls()
+
     def _apply_formal_settings(self, values: dict[str, object]) -> None:
         if self._settings_apply_callback is not None and not self._applying_options:
             self._settings_apply_callback(dict(values))
@@ -655,6 +726,14 @@ class ImmersiveLyricsPage(QWidget):
         local_position = self.mapFromGlobal(QCursor.pos())
         return self.controls.geometry().contains(local_position)
 
+    def _cursor_near_controls(self) -> bool:
+        """Return whether the pointer is close enough to intentionally wake controls."""
+
+        if not self.controls.geometry().isValid():
+            return False
+        local_position = self.mapFromGlobal(QCursor.pos())
+        return self.controls.geometry().adjusted(-140, -90, 140, 90).contains(local_position)
+
     def _update_controls_hover(self) -> None:
         if not self._active:
             return
@@ -663,8 +742,10 @@ class ImmersiveLyricsPage(QWidget):
             self.controls.show()
             self._controls_hide_timer.stop()
             return
-        # Mouse tracking keeps the controls discoverable after auto-hide;
-        # moving anywhere in the immersive surface wakes them immediately.
+        # Only movement near the control band should wake a hidden control layer;
+        # moving the pointer while reading lyrics must not interrupt the view.
+        if not self.controls.isVisible() and not self._cursor_near_controls():
+            return
         self.controls.show()
         self._schedule_controls_hide()
 
@@ -747,6 +828,7 @@ class ImmersiveLyricsPage(QWidget):
         # Immersive global scale belongs to ImmersiveLyricsOptions.  The shared
         # adapter only owns translation and romanization visibility here.
         self.canvas.set_display_options(options, update_font_scale=False)
+        self._sync_display_buttons()
 
     def _on_playing_changed(self, playing: bool) -> None:
         self.canvas.set_playback_active(playing)
@@ -774,7 +856,6 @@ class ImmersiveLyricsPage(QWidget):
         self.set_auto_hide_controls(panel.auto_hide_check.isChecked())
         self.set_background_blur(panel.background_blur_slider.value())
         self.set_background_transparency(panel.background_transparency_slider.value())
-        self.set_background_opacity(panel.background_image_opacity_slider.value())
         self.set_overlay_strength(max(15, panel.background_darkness_slider.value()))
         self.set_background_custom_path(panel.custom_path)
         self._preview_formal_settings()
@@ -805,7 +886,6 @@ class ImmersiveLyricsPage(QWidget):
             (panel.inactive_opacity_slider, self.options.inactive_lyric_opacity),
             (panel.background_blur_slider, self.options.background_blur),
             (panel.background_darkness_slider, self.options.background_darkness),
-            (panel.background_image_opacity_slider, self.options.background_image_opacity),
             (panel.background_transparency_slider, self.options.background_transparency),
         ):
             previous = slider.blockSignals(True)

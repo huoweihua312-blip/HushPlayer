@@ -52,7 +52,9 @@ class LyricsQuickSettingsFloatingPanel(ImmersiveSettingsPanel):
         self._add_section(form, "背景细节")
         self.background_blur_slider = self._slider(0, 100)
         self.background_darkness_slider = self._slider(0, 100)
-        self.background_image_opacity_slider = self._slider(0, 100)
+        # The base panel already owns the persisted image-opacity control.
+        # Keep the compatibility attribute without rendering a duplicate slider.
+        self.background_image_opacity_slider = self.background_opacity_slider
         self.background_transparency_slider = self._slider(0, 100)
         self.custom_path_button = QToolButton(self.content_widget)
         self.custom_path_button.setText("选择背景图片")
@@ -72,8 +74,7 @@ class LyricsQuickSettingsFloatingPanel(ImmersiveSettingsPanel):
         for label, control in (
             ("背景模糊", self._slider_row(self.background_blur_slider, "%")),
             ("背景暗度", self._slider_row(self.background_darkness_slider, "%")),
-            ("图片不透明度", self._slider_row(self.background_image_opacity_slider, "%")),
-            ("背景透明度", self._slider_row(self.background_transparency_slider, "%")),
+            ("背景层透明度", self._slider_row(self.background_transparency_slider, "%")),
             ("自定义图片", path_actions),
             ("图片路径", self.custom_path_label),
         ):
@@ -81,7 +82,6 @@ class LyricsQuickSettingsFloatingPanel(ImmersiveSettingsPanel):
         for slider in (
             self.background_blur_slider,
             self.background_darkness_slider,
-            self.background_image_opacity_slider,
             self.background_transparency_slider,
         ):
             slider.valueChanged.connect(self.changed)

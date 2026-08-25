@@ -46,6 +46,7 @@ from PySide6.QtWidgets import (
     QDialog,
     QHBoxLayout,
     QMainWindow,
+    QMessageBox,
     QToolTip,
     QVBoxLayout,
     QWidget,
@@ -87,6 +88,10 @@ from app.ui_v2.dialogs.update_dialog import UpdateDialog
 from app.ui_v2.widgets.custom_title_bar import CustomTitleBar
 from app.ui_v2.widgets.online_recovery_dialog import OnlineRecoveryCandidateDialog
 from app.ui_v2.widgets.settings_overlay import SettingsOverlay
+from app.ui_v2.widgets.track_action_dialogs import (
+    PlaylistSelectionDialog,
+    TrackInfoDialog,
+)
 from app.ui_v2.theme.styles import build_application_palette, build_stylesheet
 from app.ui_v2.theme.tokens import Theme, get_theme
 
@@ -413,6 +418,13 @@ class MainWindow(QMainWindow):
             not is_real_library or self.playback_adapter.has_real_backend
         )
         self.sidebar = NavigationSidebar(self.navigation_adapter, self._theme, self)
+        if self.music_import_service is not None:
+            self.sidebar.set_pending_count(
+                len(self.music_import_service.pending_records())
+            )
+            self.music_import_service.pending_changed.connect(
+                lambda records: self.sidebar.set_pending_count(len(records or ()))
+            )
         self.router = ContentRouter(
             self.library_page,
             self.navigation_adapter,
@@ -449,6 +461,7 @@ class MainWindow(QMainWindow):
         self.settings_overlay: SettingsOverlay | None = None
         self._update_dialog: UpdateDialog | None = None
         self._pending_recovery_tracks: dict[int, Track] = {}
+        self._track_info_dialog: TrackInfoDialog | None = None
         self._automatic_recovery_identities: set[str] = set()
         self._keyboard_focus_navigation = False
         QApplication.instance().installEventFilter(self)
@@ -462,7 +475,7 @@ class MainWindow(QMainWindow):
             self.real_library_adapter.state_changed.connect(self._on_real_library_state)
             self.real_library_adapter.data_loaded.connect(self._on_real_library_loaded)
             self.library_page.empty_state.action_requested.connect(
-                self.real_library_adapter.refresh
+                self._on_library_empty_action
             )
             # RealLibraryAdapter already performs the projection on its worker
             # thread. Start it here so existing startup/load-state contracts
@@ -964,6 +977,10 @@ class MainWindow(QMainWindow):
             self.navigation_adapter.can_go_forward,
         )
         self.router.track_play_requested.connect(self._play_tracks)
+        self.router.track_action_requested.connect(self._on_track_action)
+        self.router.track_browse_requested.connect(
+            lambda track_id: self._on_track_action("show_info", track_id)
+        )
         self.router.queue_requested.connect(self._play_queue)
         self.router.online_play_requested.connect(self._play_online_track)
         self.router.online_recovery_requested.connect(self._request_online_recovery)
@@ -1158,6 +1175,8 @@ class MainWindow(QMainWindow):
 
     def _show_pending_status(self, text: str) -> None:
         page = self._pending_page()
+        if page is None and self.music_import_service is not None:
+            page = self.router.page_for_route("pending_imports")
         if page is not None and hasattr(page, "set_status"):
             page.set_status(text)
 
@@ -1180,7 +1199,19 @@ class MainWindow(QMainWindow):
         service = self.music_import_service
         if service is None or not isinstance(paths, (list, tuple)):
             return
-        result = service.ignore_pending(str(path) for path in paths)
+        clean_paths = [str(path) for path in paths if str(path).strip()]
+        if not clean_paths:
+            return
+        dialog = QMessageBox(self)
+        dialog.setWindowTitle("忽略待导入歌曲")
+        dialog.setText(f"确定要忽略选中的 {len(clean_paths)} 首歌曲吗？")
+        dialog.setInformativeText("忽略只会从待导入列表移除，不会删除本地音频文件。")
+        confirm = dialog.addButton("继续忽略", QMessageBox.ButtonRole.AcceptRole)
+        dialog.addButton("取消", QMessageBox.ButtonRole.RejectRole)
+        dialog.exec()
+        if dialog.clickedButton() is not confirm:
+            return
+        result = service.ignore_pending(clean_paths)
         if result.get("ok"):
             self._show_pending_status(
                 f"已忽略 {int(result.get('ignored', 0) or 0)} 首歌曲。"
@@ -1457,6 +1488,47 @@ class MainWindow(QMainWindow):
         )
         self.playback_adapter.play_track(track.id)
 
+    def _on_track_action(self, action: str, track_id: str) -> None:
+        """Handle lightweight track actions without touching playback context."""
+
+        track = self.library_collection.track_for_id(str(track_id or ""))
+        if track is None:
+            return
+        if action == "show_info":
+            dialog = self._track_info_dialog
+            if dialog is None:
+                dialog = TrackInfoDialog(self._theme, track, self)
+                dialog.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose, True)
+                dialog.destroyed.connect(
+                    lambda _object=None: setattr(self, "_track_info_dialog", None)
+                )
+                self._track_info_dialog = dialog
+            else:
+                dialog.set_track(track)
+                dialog.set_theme(self._theme)
+            dialog.show()
+            dialog.raise_()
+            dialog.activateWindow()
+            return
+        if action != "add_to_playlist":
+            return
+        if not self.playlist_adapter.can_mutate:
+            self._show_action_message("当前运行模式不支持修改歌单。")
+            return
+        dialog = PlaylistSelectionDialog(self._theme, self.playlist_adapter.playlists(), self)
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return
+        playlist_id = dialog.selected_playlist_id
+        if not playlist_id:
+            return
+        added = self.playlist_adapter.add_tracks(playlist_id, (track.id,))
+        playlist = self.playlist_adapter.playlist_for_id(playlist_id)
+        playlist_name = playlist.name if playlist is not None else "歌单"
+        if added:
+            self._show_action_message(f"已添加到歌单：{playlist_name}")
+        else:
+            self._show_action_message("歌曲已经在该歌单中，未重复添加。")
+
     @property
     def recovery_status_message(self) -> str:
         return getattr(self, "_recovery_status_message", "")
@@ -1525,6 +1597,20 @@ class MainWindow(QMainWindow):
             self,
             QRect(),
             3500,
+        )
+
+    def _show_action_message(self, message: str) -> None:
+        """Show a short confirmation for non-playback actions."""
+
+        text = str(message or "").strip()
+        if not text or not self.isVisible():
+            return
+        QToolTip.showText(
+            self.mapToGlobal(QPoint(max(24, self.width() // 2), 72)),
+            text,
+            self,
+            QRect(),
+            3000,
         )
 
     def _on_playback_track_changed(self, track) -> None:
@@ -1639,11 +1725,20 @@ class MainWindow(QMainWindow):
             self.library_page.empty_state.set_action("重试")
             self.library_page.set_view_state("error", detail)
             return
-        self.library_page.empty_state.set_action("")
+        has_tracks = bool(self.library_collection.tracks())
+        self.library_page.empty_state.set_action("" if has_tracks else "添加音乐文件夹")
         self.library_page.set_view_state(
             "content" if state == "loaded" else "empty",
             detail,
         )
+
+    def _on_library_empty_action(self) -> None:
+        """Route the empty-library action to the appropriate safe next step."""
+
+        if self.library_page.current_view_state == "error" and self.real_library_adapter is not None:
+            self.real_library_adapter.refresh()
+            return
+        self.open_settings_overlay()
 
     def _on_real_library_loaded(self) -> None:
         """Refresh the local playback projection after the read-only snapshot arrives."""

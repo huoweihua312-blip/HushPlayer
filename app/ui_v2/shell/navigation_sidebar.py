@@ -92,6 +92,16 @@ class NavigationSidebar(QFrame):
         self._add_static_item("browse", primary_layout, 42)
         if any(item.route_id == "online_search" for item in adapter.items()):
             self._add_static_item("online_search", primary_layout, 42)
+        self.more_navigation_button = QToolButton(self.primary_section)
+        self.more_navigation_button.setObjectName("sidebarMoreButton")
+        self.more_navigation_button.setText("更多")
+        self.more_navigation_button.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
+        self.more_navigation_button.setIconSize(QSize(18, 18))
+        self.more_navigation_button.setFixedHeight(42)
+        self.more_navigation_button.setToolTip("更多页面")
+        self.more_navigation_button.setAccessibleName("更多页面")
+        self.more_navigation_button.clicked.connect(self._show_more_navigation_menu)
+        primary_layout.addWidget(self.more_navigation_button)
 
         self.playlist_section = QWidget(self)
         self.playlist_section.setObjectName("navigationPlaylistSection")
@@ -185,6 +195,13 @@ class NavigationSidebar(QFrame):
     def item_count(self) -> int:
         return len(self._items) + len(self._playlist_items)
 
+    def set_pending_count(self, count: int) -> None:
+        """Keep the pending-import route discoverable without adding a new badge widget."""
+
+        item = self._items.get("pending_imports")
+        if item is not None:
+            item.set_badge_text(str(max(0, int(count))) if int(count) > 0 else "")
+
     def set_theme(self, theme: Theme) -> None:
         self._theme = theme
         c = theme.colors
@@ -198,6 +215,10 @@ class NavigationSidebar(QFrame):
             f"QScrollArea#navigationScrollArea QScrollBar::add-line:vertical, QScrollArea#navigationScrollArea QScrollBar::sub-line:vertical {{ height: 0; }}"
             f"QScrollArea#navigationScrollArea QScrollBar::add-page:vertical, QScrollArea#navigationScrollArea QScrollBar::sub-page:vertical {{ background: transparent; }}"
             f"QWidget#navigationSettingsBox {{ border-top: 1px solid {c.border}; }}"
+            f"QToolButton#sidebarMoreButton {{ text-align: left; padding: 0 10px; border: 1px solid transparent; "
+            f"border-radius: {theme.metrics.radius_md}px; color: {c.secondary_text}; background: transparent; }}"
+            f"QToolButton#sidebarMoreButton:hover {{ color: {c.primary_text}; background: {c.hover_background}; border-color: {c.border}; }}"
+            f"QToolButton#sidebarMoreButton[active=\"true\"] {{ color: {c.primary_text}; background: {c.selected_background}; font-weight: 600; }}"
             f"QLabel#navigationBrandMark {{ background: transparent; }}"
             f"QLabel#navigationBrandLabel {{ color: {c.text_primary}; font-size: 17px; font-weight: 600; }}"
         )
@@ -219,6 +240,7 @@ class NavigationSidebar(QFrame):
         self.more_playlists_button.set_theme(theme)
         self.playlist_add_button.setIcon(icon("add", theme, "normal"))
         self.playlist_add_button.setIconSize(QSize(17, 17))
+        self.more_navigation_button.setIcon(icon("more", theme, "normal"))
         self.playlist_add_button.setStyleSheet(
             f"QToolButton#playlistAddButton {{ border: 1px solid {c.border}; border-radius: {theme.metrics.radius_sm}px; "
             f"background: {c.surface_secondary}; color: {c.secondary_text}; }}"
@@ -244,6 +266,11 @@ class NavigationSidebar(QFrame):
         for item in (*self._items.values(), *self._playlist_items.values()):
             item.set_compact(compact)
         self.more_playlists_button.set_compact(compact)
+        self.more_navigation_button.setToolButtonStyle(
+            Qt.ToolButtonStyle.ToolButtonIconOnly
+            if compact
+            else Qt.ToolButtonStyle.ToolButtonTextBesideIcon
+        )
         self.playlist_add_button.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonIconOnly)
 
     def create_mock_playlist(self, name: str = "") -> str:
@@ -270,6 +297,21 @@ class NavigationSidebar(QFrame):
         label.setObjectName("navigationCaption")
         self._section_labels.append(label)
         return label
+
+    def _show_more_navigation_menu(self) -> None:
+        routes = {"recent", "artists", "albums", "lyrics"}
+        menu = apply_menu_theme(QMenu(self), self._theme)
+        for item in self.adapter.items():
+            if item.route_id not in routes:
+                continue
+            action = menu.addAction(item.title)
+            action.setIcon(icon(item.icon_name, self._theme, "normal"))
+            action.triggered.connect(
+                lambda checked=False, route=item.route_id: self.adapter.set_route(route)
+            )
+        if menu.actions():
+            menu.exec(self.more_navigation_button.mapToGlobal(self.more_navigation_button.rect().bottomLeft()))
+        menu.deleteLater()
 
     def _add_static_item(self, route_id: str, layout: QVBoxLayout, height: int) -> NavigationItem:
         value = next(item for item in self.adapter.items() if item.route_id == route_id)
@@ -320,6 +362,11 @@ class NavigationSidebar(QFrame):
             item.set_selected(route == route_id)
         for playlist_id, item in self._playlist_items.items():
             item.set_selected(route_id == f"playlist:{playlist_id}")
+        self.more_navigation_button.setProperty(
+            "active", route_id in {"recent", "artists", "albums", "lyrics"}
+        )
+        self.more_navigation_button.style().unpolish(self.more_navigation_button)
+        self.more_navigation_button.style().polish(self.more_navigation_button)
 
     def _apply_surface_backgrounds(self, background: str) -> None:
         for surface in (

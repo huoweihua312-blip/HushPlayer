@@ -15,6 +15,7 @@ class ImmersiveSettingsPanel(QFrame):
 
     changed = Signal()
     exit_requested = Signal()
+    reset_requested = Signal()
     closed = Signal()
 
     def __init__(self, theme: Theme, parent: QWidget | None = None) -> None:
@@ -68,7 +69,7 @@ class ImmersiveSettingsPanel(QFrame):
         for label, control in (
             ("主题", self.theme_combo),
             ("背景", self.background_combo),
-            ("背景透明度", self._slider_row(self.background_opacity_slider, "%")),
+            ("图片不透明度", self._slider_row(self.background_opacity_slider, "%")),
             ("遮罩强度", self._slider_row(self.overlay_strength_slider, "%")),
             ("控制层透明度", self._slider_row(self.control_surface_opacity_slider, "%")),
         ):
@@ -105,9 +106,13 @@ class ImmersiveSettingsPanel(QFrame):
         self.footer_widget.setObjectName("immersiveSettingsFooter")
         self.exit_immersive_button = QToolButton(self.footer_widget)
         self.exit_immersive_button.setText("退出沉浸")
+        self.reset_button = QToolButton(self.footer_widget)
+        self.reset_button.setText("恢复默认")
+        self.reset_button.setAccessibleName("恢复沉浸歌词默认设置")
         footer = QHBoxLayout(self.footer_widget)
         footer.setContentsMargins(14, 8, 14, 12)
         footer.addWidget(self.exit_immersive_button)
+        footer.addWidget(self.reset_button)
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
@@ -116,6 +121,7 @@ class ImmersiveSettingsPanel(QFrame):
         layout.addWidget(self.footer_widget)
         self.close_button.clicked.connect(self.request_close)
         self.exit_immersive_button.clicked.connect(self.exit_requested)
+        self.reset_button.clicked.connect(self.reset_requested)
         for combo in (self.theme_combo, self.background_combo, self.weight_combo, self.text_protection_combo):
             combo.currentIndexChanged.connect(self.changed)
         for slider in (

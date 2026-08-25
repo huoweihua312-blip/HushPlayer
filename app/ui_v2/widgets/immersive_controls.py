@@ -106,6 +106,8 @@ class ImmersiveControls(QWidget):
             button.setIcon(icon(name, self._theme))
         button.setIconSize(QSize(18, 18))
         button.setToolTip(tooltip)
+        button.setAccessibleName(tooltip)
+        button.setAccessibleDescription(f"沉浸歌词：{tooltip}")
         button.setCursor(Qt.CursorShape.PointingHandCursor)
         button.setMinimumSize(34, 34)
         return button
