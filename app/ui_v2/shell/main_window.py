@@ -60,6 +60,7 @@ from app.services.library_repository import LibraryRepository
 from app.services.music_folder_scan import MusicFolderImportService
 from app.services.online_discovery_runtime import OnlineDiscoveryRuntime
 from app.services.remote_track_store import RemoteTrackStore
+from app.startup_diagnostics import StartupDiagnostics
 from app.ui_v2.adapters.library_adapter import LibraryAdapter
 from app.ui_v2.adapters.library_collection import LibraryCollectionAdapter
 from app.ui_v2.adapters.lyrics_adapter import LyricsAdapter
@@ -82,6 +83,7 @@ from app.ui_v2.models.settings_snapshot import SettingsSnapshot
 from app.ui_v2.models.track import Track, artwork_url_from_payload
 from app.ui_v2.shell.close_behavior_controller import CloseBehaviorController
 from app.ui_v2.shell.content_router import ContentRouter
+from app.ui_v2.shell.desktop_lyrics_window import DesktopLyricsWindow
 from app.ui_v2.shell.navigation_sidebar import NavigationSidebar
 from app.ui_v2.shell.player_bar import PlayerBar
 from app.ui_v2.dialogs.update_dialog import UpdateDialog
@@ -228,8 +230,10 @@ class MainWindow(QMainWindow):
         online_discovery: OnlineDiscoveryRuntime | None = None,
         force_dark_theme: bool = False,
         close_behavior_controller: CloseBehaviorController | None = None,
+        startup_diagnostics: StartupDiagnostics | None = None,
     ) -> None:
         super().__init__(parent)
+        self._startup_diagnostics = startup_diagnostics
         self.setWindowFlags(self.windowFlags() | Qt.WindowType.FramelessWindowHint)
         self.data_mode = _resolve_data_mode(data_mode)
         self._force_dark_theme = bool(force_dark_theme)
@@ -277,6 +281,8 @@ class MainWindow(QMainWindow):
             parent=self,
         )
         self._settings_snapshot = self.settings_bridge.read_snapshot()
+        if self._startup_diagnostics is not None:
+            self._startup_diagnostics.mark("main_window.settings_snapshot")
         application = QApplication.instance()
         if application is None:
             raise RuntimeError("HushPlayer requires a QApplication before creating MainWindow.")
@@ -290,6 +296,8 @@ class MainWindow(QMainWindow):
         self._user_close_requested = False
         self._close_finalized = False
         self._startup_scan_timer: QTimer | None = None
+        self.desktop_lyrics_window: DesktopLyricsWindow | None = None
+        self._desktop_lyrics_auto_opened = False
         appearance_mode = str(
             self.settings_bridge.value(self._settings_snapshot, "appearance_mode")
             or "dark"
@@ -344,6 +352,8 @@ class MainWindow(QMainWindow):
         else:
             self.online_discovery = None
             self.music_import_service = None
+        if self._startup_diagnostics is not None:
+            self._startup_diagnostics.mark("main_window.service_graph")
         self.library_collection = LibraryCollectionAdapter(
             () if is_real_library else create_mock_tracks(1000),
             self,
@@ -407,6 +417,8 @@ class MainWindow(QMainWindow):
         )
         if lyrics_adapter is not None and lyrics_adapter.parent() is None:
             lyrics_adapter.setParent(self)
+        if self._startup_diagnostics is not None:
+            self._startup_diagnostics.mark("main_window.adapters")
         self.immersive_lyrics_options = ImmersiveLyricsOptions(theme=self._theme.mode)
         self._apply_settings_values(self._settings_snapshot.to_dict())
         self.playback_adapter.set_volume(
@@ -458,6 +470,8 @@ class MainWindow(QMainWindow):
             else None
         )
         self._build_shell()
+        if self._startup_diagnostics is not None:
+            self._startup_diagnostics.mark("main_window.pages_and_player")
         self.settings_overlay: SettingsOverlay | None = None
         self._update_dialog: UpdateDialog | None = None
         self._pending_recovery_tracks: dict[int, Track] = {}
@@ -471,16 +485,25 @@ class MainWindow(QMainWindow):
         self.resize(1200, 800)
         self.set_theme(self._theme.mode)
         self._update_window_shape()
+        if self._startup_diagnostics is not None:
+            self._startup_diagnostics.mark("main_window.shell_ready")
         if self.real_library_adapter is not None:
             self.real_library_adapter.state_changed.connect(self._on_real_library_state)
             self.real_library_adapter.data_loaded.connect(self._on_real_library_loaded)
             self.library_page.empty_state.action_requested.connect(
                 self._on_library_empty_action
             )
-            # RealLibraryAdapter already performs the projection on its worker
-            # thread. Start it here so existing startup/load-state contracts
-            # remain immediate while disk work stays off the UI thread.
-            self.real_library_adapter.load()
+            # The snapshot work is already on a worker thread. Queue its
+            # first start until the shell has had one event-loop turn so the
+            # main window can paint before disk projection begins.
+            # Use a second zero-timeout turn so the runner's first-paint
+            # callback can run before even the worker thread is started.
+            QTimer.singleShot(
+                0,
+                lambda: QTimer.singleShot(0, self._start_real_library_load),
+            )
+            if self._startup_diagnostics is not None:
+                self._startup_diagnostics.mark("main_window.library_load_queued")
             self.online_adapter.remote_collection_changed.connect(
                 self.real_library_adapter.refresh
             )
@@ -497,6 +520,13 @@ class MainWindow(QMainWindow):
                     self._auto_scan_music_folders_on_startup
                 )
                 self._startup_scan_timer.start()
+
+    def _start_real_library_load(self) -> None:
+        """Start the first library snapshot after the initial shell can paint."""
+
+        if self._close_finalized or self.real_library_adapter is None:
+            return
+        self.real_library_adapter.load()
 
     @property
     def theme(self) -> Theme:
@@ -558,6 +588,8 @@ class MainWindow(QMainWindow):
             self.sidebar.set_theme(self._theme)
             self.router.set_theme(self._theme)
             self.player_bar.set_theme(self._theme)
+            if self.desktop_lyrics_window is not None:
+                self.desktop_lyrics_window.set_theme(self._theme)
             if self.settings_overlay is not None:
                 self.settings_overlay.set_theme(self._theme)
             self.router.set_content_safe_bottom(
@@ -682,6 +714,22 @@ class MainWindow(QMainWindow):
             self.settings_overlay.sync_geometry(self.body.rect())
         self._update_window_shape()
 
+    def showEvent(self, event) -> None:  # noqa: N802
+        super().showEvent(event)
+        if self._desktop_lyrics_auto_opened:
+            return
+        self._desktop_lyrics_auto_opened = True
+        if bool(
+            self.settings_bridge.value(
+                self._settings_snapshot,
+                "floating_lyrics_auto_open",
+            )
+        ):
+            QTimer.singleShot(
+                0,
+                lambda: QTimer.singleShot(0, self._show_desktop_lyrics),
+            )
+
     def _update_window_shape(self) -> None:
         """Clip the normal window to a rounded shell while preserving full-screen geometry."""
 
@@ -746,6 +794,8 @@ class MainWindow(QMainWindow):
         QApplication.instance().removeEventFilter(self)
         if self.settings_overlay is not None and self.settings_overlay.isVisible():
             self.settings_overlay.cancel_and_close()
+        if self.desktop_lyrics_window is not None:
+            self.desktop_lyrics_window.close()
         if self.real_library_adapter is not None:
             self.real_library_adapter.shutdown()
         if self._startup_scan_timer is not None:
@@ -960,6 +1010,9 @@ class MainWindow(QMainWindow):
         self.sidebar.settings_requested.connect(self.open_settings_overlay)
         self.settings_shortcut = QShortcut(QKeySequence("Ctrl+,"), self)
         self.settings_shortcut.activated.connect(self.open_settings_overlay)
+        self.desktop_lyrics_shortcut = QShortcut(QKeySequence("Ctrl+Alt+L"), self)
+        self.desktop_lyrics_shortcut.setContext(Qt.ShortcutContext.ApplicationShortcut)
+        self.desktop_lyrics_shortcut.activated.connect(self._toggle_desktop_lyrics)
         self.previous_track_shortcut = QShortcut(QKeySequence("Ctrl+Alt+Left"), self)
         self.previous_track_shortcut.setContext(Qt.ShortcutContext.WindowShortcut)
         self.previous_track_shortcut.activated.connect(self.playback_adapter.play_previous)
@@ -1060,9 +1113,15 @@ class MainWindow(QMainWindow):
 
         self.title_bar.set_search_context(route_id)
 
-    def open_settings_overlay(self) -> None:
+    def open_settings_overlay(self, category: str | None = None) -> None:
         """Show the one cached Settings surface without changing the route."""
 
+        if category:
+            # The request can originate from the always-on-top desktop lyrics
+            # window while the main shell is behind another application.
+            self.show()
+            self.raise_()
+            self.activateWindow()
         immersive_page = self.router._pages.get("immersive_lyrics")
         if self._presentation_mode is not ShellPresentationMode.NORMAL and immersive_page is not None:
             if hasattr(immersive_page, "hide_settings_panel"):
@@ -1077,9 +1136,13 @@ class MainWindow(QMainWindow):
             )
             self.settings_overlay.saved.connect(self._on_settings_saved)
         elif self.settings_overlay.isVisible():
+            if category:
+                self.settings_overlay.set_category(category)
             self.settings_overlay.raise_()
             return
         self.settings_overlay.open()
+        if category:
+            self.settings_overlay.set_category(category)
         self.settings_overlay.raise_()
 
     def _set_update_status(self, message: str, *, state: str = "success") -> None:
@@ -1299,6 +1362,8 @@ class MainWindow(QMainWindow):
         self.immersive_lyrics_options.background_custom_path = str(
             values.get("immersive_background_custom_path", "") or ""
         )
+        if self.desktop_lyrics_window is not None:
+            self.desktop_lyrics_window.apply_settings(values)
 
     def _apply_settings_snapshot(self, values: dict[str, object]) -> None:
         """Preview or apply a Settings snapshot without creating another shell."""
@@ -1792,11 +1857,62 @@ class MainWindow(QMainWindow):
     def _on_player_bar_action(self, action: str) -> None:
         if action == "lyrics":
             self.navigation_adapter.set_route("immersive_lyrics")
+        elif action == "desktop_lyrics":
+            self._toggle_desktop_lyrics()
         elif action == "queue":
             self.navigation_adapter.set_route("immersive_now_playing")
             page = self.router._pages.get("immersive_lyrics")
             if page is not None and hasattr(page, "show_queue_panel"):
                 page.show_queue_panel()
+
+    def _ensure_desktop_lyrics_window(self) -> DesktopLyricsWindow:
+        window = self.desktop_lyrics_window
+        if window is not None:
+            return window
+        window = DesktopLyricsWindow(
+            self.playback_adapter,
+            self.lyrics_adapter,
+            self._theme,
+        )
+        window.settings_requested.connect(
+            lambda: self.open_settings_overlay("lyrics")
+        )
+        window.position_changed.connect(self._persist_desktop_lyrics_position)
+        window.visible_changed.connect(self._on_desktop_lyrics_visibility_changed)
+        self.desktop_lyrics_window = window
+        window.apply_settings(self._settings_snapshot.to_dict())
+        return window
+
+    def _show_desktop_lyrics(self) -> None:
+        if self._close_finalized:
+            return
+        self._ensure_desktop_lyrics_window().show_for_current_screen()
+
+    def _toggle_desktop_lyrics(self) -> None:
+        if self._close_finalized:
+            return
+        window = self._ensure_desktop_lyrics_window()
+        if window.isVisible():
+            window.hide()
+        else:
+            window.show_for_current_screen()
+
+    def _on_desktop_lyrics_visibility_changed(self, visible: bool) -> None:
+        if hasattr(self, "player_bar"):
+            self.player_bar.desktop_lyrics_button.set_active(bool(visible))
+
+    def _persist_desktop_lyrics_position(self, x: int, y: int) -> None:
+        if self._close_finalized:
+            return
+        try:
+            self._settings_snapshot = self.settings_bridge.save_snapshot(
+                self._settings_snapshot.with_updates(
+                    {"floating_lyrics_x": int(x), "floating_lyrics_y": int(y)}
+                )
+            )
+        except Exception:
+            # Dragging must never surface a modal error or affect playback.
+            return
 
     def _open_now_playing(self) -> None:
         self.navigation_adapter.set_route("immersive_now_playing")

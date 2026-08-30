@@ -371,6 +371,10 @@ class PlayerBar(QFrame):
             "lyrics", "歌词", self._theme, self.utility_inner, size=32, icon_canvas_size=18,
             asset_family="fluent_player",
         )
+        self.desktop_lyrics_button = PlayerIconButton(
+            "lyrics", "桌面歌词", self._theme, self.utility_inner, size=32, icon_canvas_size=18,
+            asset_family="fluent_player",
+        )
         self.volume_button = PlayerIconButton(
             "volume", "音量", self._theme, self.utility_inner, size=32, icon_canvas_size=18,
             asset_family="fluent_player",
@@ -392,6 +396,9 @@ class PlayerBar(QFrame):
         # is intentionally not part of the visible PlayerBar layout.
         self.more_button.setVisible(False)
         self.lyrics_button.clicked.connect(lambda: self.mock_action_requested.emit("lyrics"))
+        self.desktop_lyrics_button.clicked.connect(
+            lambda: self.mock_action_requested.emit("desktop_lyrics")
+        )
         self.queue_button.clicked.connect(lambda: self.mock_action_requested.emit("queue"))
         self.volume_button.clicked.connect(self._toggle_mute)
         self.volume_group = QWidget(self.utility_inner)
@@ -403,6 +410,7 @@ class PlayerBar(QFrame):
         volume_layout.addWidget(self.volume_slider)
         utility_layout.addWidget(self.queue_button)
         utility_layout.addWidget(self.lyrics_button)
+        utility_layout.addWidget(self.desktop_lyrics_button)
         utility_layout.addWidget(self.volume_group)
         # Like TrackRegion, tools retain their intrinsic width and sit at the
         # visual centre of the complete right grid column rather than its edge.
@@ -427,7 +435,8 @@ class PlayerBar(QFrame):
         self._buttons = (
             self.favorite_button, self.shuffle_button, self.previous_button,
             self.play_button, self.next_button, self.repeat_button,
-            self.lyrics_button, self.queue_button, self.volume_button, self.more_button,
+            self.lyrics_button, self.desktop_lyrics_button, self.queue_button,
+            self.volume_button, self.more_button,
         )
         self._configure_accessibility()
         for widget in (
@@ -460,6 +469,7 @@ class PlayerBar(QFrame):
             (self.repeat_button, "循环模式"),
             (self.queue_button, "播放队列"),
             (self.lyrics_button, "歌词"),
+            (self.desktop_lyrics_button, "桌面歌词"),
             (self.volume_button, "音量"),
             (self.more_button, "更多"),
         )
@@ -643,7 +653,12 @@ class PlayerBar(QFrame):
         # Real read-only mode still needs to expose page entry points while no
         # playback capability has been connected yet.
         navigation_enabled = bool(enabled) or self._read_only
-        for button in (self.lyrics_button, self.queue_button, self.more_button):
+        for button in (
+            self.lyrics_button,
+            self.desktop_lyrics_button,
+            self.queue_button,
+            self.more_button,
+        ):
             button.setEnabled(navigation_enabled)
         self.favorite_button.setEnabled(bool(enabled) and self._favorite_available)
         self.progress_slider.setEnabled(

@@ -10,6 +10,12 @@ from typing import Literal
 ThemeMode = Literal["light", "dark"]
 
 
+OPEN_FONT_FAMILIES = (
+    "Source Han Sans SC",
+    "Noto Sans SC",
+)
+
+
 FONT_FALLBACKS = (
     # Source Han Sans SC is bundled under SIL OFL 1.1.  Its static Medium and
     # Bold faces remain visibly distinct on Windows instead of relying on a

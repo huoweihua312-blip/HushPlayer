@@ -22,6 +22,7 @@ from app.models.appearance_settings import (
 )
 from app.services.lyrics_timing import normalize_lyrics_timing_offsets
 from app.ui_v2.models.settings_snapshot import SettingsSnapshot
+from app.ui_v2.theme.tokens import OPEN_FONT_FAMILIES
 
 
 IMMERSIVE_BACKGROUND_VISUAL_MODES = frozenset(
@@ -62,6 +63,11 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "floating_lyrics_opacity": 100,
     "floating_lyrics_font_size": 42,
     "floating_lyrics_width": 980,
+    "floating_lyrics_height": 135,
+    "floating_lyrics_font_family": OPEN_FONT_FAMILIES[0],
+    "floating_lyrics_x": -1,
+    "floating_lyrics_y": -1,
+    "floating_lyrics_passthrough": True,
     "music_scan_folders": [],
     "music_scan_import_mode": "pending",
     "auto_check_updates_on_startup": False,
@@ -118,6 +124,8 @@ def load_settings_document(path: Path) -> dict[str, Any]:
         "floating_lyrics_font_size": 42,
         "floating_lyrics_width": 980,
         "floating_lyrics_height": 135,
+        "floating_lyrics_x": -1,
+        "floating_lyrics_y": -1,
         "update_check_delay_seconds": 15,
     }
     for key, default in integer_defaults.items():
@@ -142,6 +150,19 @@ def load_settings_document(path: Path) -> dict[str, Any]:
         result["auto_check_updates_on_startup"], bool
     ):
         result["auto_check_updates_on_startup"] = False
+    font_family = str(
+        result.get("floating_lyrics_font_family", DEFAULT_SETTINGS["floating_lyrics_font_family"])
+    ).strip()
+    result["floating_lyrics_font_family"] = (
+        font_family if font_family in OPEN_FONT_FAMILIES else DEFAULT_SETTINGS["floating_lyrics_font_family"]
+    )
+    if "floating_lyrics_passthrough" in result and not isinstance(
+        result["floating_lyrics_passthrough"], bool
+    ):
+        result["floating_lyrics_passthrough"] = True
+    result["floating_lyrics_passthrough"] = bool(
+        result.get("floating_lyrics_passthrough", DEFAULT_SETTINGS["floating_lyrics_passthrough"])
+    )
     if "remember_close_choice" in result and not isinstance(
         result["remember_close_choice"], bool
     ):
@@ -244,6 +265,23 @@ class LegacySettingsBridge(QObject):
             width = -1
         if not 420 <= width <= 1600:
             errors["floating_lyrics_width"] = "桌面歌词宽度需在 420 到 1600 px 之间。"
+        try:
+            height = int(document.get("floating_lyrics_height", 135))
+        except (TypeError, ValueError):
+            height = -1
+        if not 90 <= height <= 320:
+            errors["floating_lyrics_height"] = "桌面歌词高度需在 90 到 320 px 之间。"
+        for key, title in (("floating_lyrics_x", "横坐标"), ("floating_lyrics_y", "纵坐标")):
+            try:
+                coordinate = int(document.get(key, -1))
+            except (TypeError, ValueError):
+                coordinate = -2
+            if not -100_000 <= coordinate <= 100_000:
+                errors[key] = f"桌面歌词{title}无效。"
+        if document.get("floating_lyrics_font_family", DEFAULT_SETTINGS["floating_lyrics_font_family"]) not in OPEN_FONT_FAMILIES:
+            errors["floating_lyrics_font_family"] = "桌面歌词只能使用随应用分发的开放字体。"
+        if not isinstance(document.get("floating_lyrics_passthrough", True), bool):
+            errors["floating_lyrics_passthrough"] = "桌面歌词鼠标穿透设置无效。"
         try:
             delay = int(document.get("update_check_delay_seconds", 15))
         except (TypeError, ValueError):

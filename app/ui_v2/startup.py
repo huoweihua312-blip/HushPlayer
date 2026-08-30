@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import sys
 import tempfile
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Sequence
@@ -18,6 +19,7 @@ from app.services.production_playback_controller import ProductionPlaybackContro
 from app.services.remote_track_store import RemoteTrackStore
 from app.services.online_discovery_runtime import OnlineDiscoveryRuntime
 from app.startup import create_application_context
+from app.startup_diagnostics import StartupDiagnostics
 from app.ui_v2.adapters.lyrics_adapter import LyricsAdapter
 from app.ui_v2.adapters.playback_adapter import PlaybackAdapter
 from app.ui_v2.shell.main_window import MainWindow
@@ -52,10 +54,13 @@ def build_ui_v2_runtime_services(
     *,
     playback_adapter: PlaybackAdapter | None = None,
     lyrics_adapter: LyricsAdapter | None = None,
+    startup_diagnostics: StartupDiagnostics | None = None,
 ) -> UiV2RuntimeServices:
     """Create the single formal service set used by production UI V2."""
 
     resolved = paths or AppPaths.resolve()
+    if startup_diagnostics is not None:
+        startup_diagnostics.mark("runtime_paths.resolve")
     data_dir = resolved.data_dir
     repository = LibraryRepository(
         data_dir / "library.json",
@@ -68,6 +73,8 @@ def build_ui_v2_runtime_services(
         repository,
         remote_tracks,
     )
+    if startup_diagnostics is not None:
+        startup_diagnostics.mark("runtime_services.online_discovery")
     if playback_adapter is None:
         controller = ProductionPlaybackController(
             online_resolver=online_discovery.playback_resolver,
@@ -78,6 +85,8 @@ def build_ui_v2_runtime_services(
             timer_enabled=False,
             controller=controller,
         )
+        if startup_diagnostics is not None:
+            startup_diagnostics.mark("runtime_services.playback_adapter")
     elif playback_adapter.controller is not None:
         playback_adapter.controller.set_online_resolver(
             online_discovery.playback_resolver
@@ -102,6 +111,7 @@ def create_ui_v2_main_window(
     data_mode: str = UI_V2_DATA_MODE_REAL,
     services: UiV2RuntimeServices | None = None,
     initialize_storage: bool = True,
+    startup_diagnostics: StartupDiagnostics | None = None,
 ) -> MainWindow:
     """Build the V2 shell through one injectable production path."""
 
@@ -115,12 +125,19 @@ def create_ui_v2_main_window(
         return MainWindow(
             data_mode=UI_V2_DATA_MODE_MOCK,
             settings_path=isolated_settings,
+            startup_diagnostics=startup_diagnostics,
         )
 
-    runtime = services or build_ui_v2_runtime_services()
+    runtime = (
+        build_ui_v2_runtime_services(startup_diagnostics=startup_diagnostics)
+        if services is None
+        else services
+    )
     if initialize_storage:
         runtime.paths.initialize_user_storage()
-    return MainWindow(
+        if startup_diagnostics is not None:
+            startup_diagnostics.mark("runtime_storage.initialize")
+    window = MainWindow(
         data_mode=UI_V2_DATA_MODE_REAL,
         settings_path=runtime.settings_path,
         repository=runtime.repository,
@@ -128,7 +145,11 @@ def create_ui_v2_main_window(
         playback_adapter=runtime.playback_adapter,
         lyrics_adapter=runtime.lyrics_adapter,
         online_discovery=runtime.online_discovery,
+        startup_diagnostics=startup_diagnostics,
     )
+    if startup_diagnostics is not None:
+        startup_diagnostics.mark("main_window.construct")
+    return window
 
 
 def install_ui_v2_smoke_exit(
@@ -208,6 +229,7 @@ def run_ui_v2_application(
 ) -> int:
     """Run UI V2 without maintaining a second QApplication flow."""
 
+    startup_diagnostics = StartupDiagnostics(time.perf_counter())
     isolated_settings = None
     if normalize_ui_v2_data_mode(data_mode) == UI_V2_DATA_MODE_MOCK:
         isolated_settings = (
@@ -218,12 +240,30 @@ def run_ui_v2_application(
     context = create_application_context(
         argv if argv is not None else sys.argv,
         settings_path=str(isolated_settings) if isolated_settings is not None else None,
+        startup_started_at=startup_diagnostics.started_at,
+        startup_diagnostics=startup_diagnostics,
     )
-    window = create_ui_v2_main_window(
-        data_mode=data_mode,
-        initialize_storage=initialize_storage,
-    )
+    try:
+        window = create_ui_v2_main_window(
+            data_mode=data_mode,
+            initialize_storage=initialize_storage,
+            startup_diagnostics=startup_diagnostics,
+        )
+    except Exception:
+        startup_diagnostics.mark("main_window.construct_failed")
+        startup_diagnostics.write(context.paths.log_dir)
+        raise
     window.setWindowIcon(context.icon)
     window.show()
+    startup_diagnostics.mark("main_window.show")
     install_ui_v2_smoke_exit(context.app, window)
-    return context.app.exec()
+
+    def record_first_paint() -> None:
+        startup_diagnostics.mark("event_loop.first_paint")
+        startup_diagnostics.write(context.paths.log_dir)
+
+    QTimer.singleShot(0, record_first_paint)
+    exit_code = context.app.exec()
+    startup_diagnostics.mark("event_loop.exit")
+    startup_diagnostics.write(context.paths.log_dir)
+    return exit_code

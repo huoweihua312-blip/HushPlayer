@@ -14,6 +14,7 @@ from PySide6.QtGui import QFont, QGuiApplication, QIcon
 from PySide6.QtWidgets import QApplication
 
 from app.core.app_paths import APP_NAME, APP_VERSION, AppPaths
+from app.startup_diagnostics import StartupDiagnostics
 
 
 UI_FLAVOR_V2 = "ui-v2"
@@ -82,22 +83,31 @@ def create_application_context(
     *,
     startup_started_at: float | None = None,
     settings_path: str | None = None,
+    startup_diagnostics: StartupDiagnostics | None = None,
 ) -> ApplicationContext:
     """Create or reuse the one QApplication used by the UI V2 entrypoint."""
 
     configure_process_metadata()
     configure_qt_runtime()
+    if startup_diagnostics is not None:
+        startup_diagnostics.mark("process_metadata_and_qt_runtime")
     paths = AppPaths.resolve()
+    if startup_diagnostics is not None:
+        startup_diagnostics.mark("app_paths.resolve")
     app = QApplication.instance()
     created = False
     if app is None:
         app = QApplication(list(argv) if argv is not None else sys.argv)
         created = True
+    if startup_diagnostics is not None:
+        startup_diagnostics.mark("qapplication.create_or_reuse")
     if not isinstance(app, QApplication):
         raise RuntimeError("HushPlayer requires a QApplication for UI startup.")
     app.setApplicationName(APP_NAME)
     app.setApplicationVersion(APP_VERSION)
     apply_ui_theme(app, settings_path=settings_path)
+    if startup_diagnostics is not None:
+        startup_diagnostics.mark("ui_theme_and_settings")
     icon = QIcon(str(paths.resource_path("assets", "icons", "HushPlayer.ico")))
     app.setWindowIcon(icon)
     if startup_started_at is not None:

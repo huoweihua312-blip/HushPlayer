@@ -38,7 +38,7 @@ from app.ui_v2.models.settings_edit_session import SettingsEditSession
 from app.ui_v2.models.settings_snapshot import SettingsSnapshot
 from app.ui_v2.pages.online_source_page import OnlineSourcePage
 from app.ui_v2.theme.icons import fluent_settings_icon, fluent_settings_interactive_icon
-from app.ui_v2.theme.tokens import Theme
+from app.ui_v2.theme.tokens import OPEN_FONT_FAMILIES, Theme
 from app.ui_v2.widgets.settings_control_factory import (
     SettingsControlFactory,
     SettingSlider,
@@ -451,11 +451,13 @@ class SettingsOverlay(QWidget):
         immersive.add_row(self._slider_row("immersive_lyrics_font_scale", "沉浸歌词字号比例", "沿用现有 70% 到 160% 范围。", 70, 160, "%"))
         layout.addWidget(immersive)
 
-        floating = self._track_section(self._section("桌面歌词", "调整现有桌面歌词窗口的默认外观。"))
+        floating = self._track_section(self._section("桌面歌词", "调整桌面歌词窗口的外观；显示后可从边缘进入交互并拖动位置。"))
         floating.add_row(self._combo_row("floating_lyrics_color", "默认歌词颜色", "保存后应用到桌面歌词窗口。", (("白色", "white"), ("黑色", "black"), ("黄色", "yellow"), ("蓝色", "blue"), ("绿色", "green"), ("粉色", "pink"), ("紫色", "purple"))))
+        floating.add_row(self._combo_row("floating_lyrics_font_family", "歌词字体", "仅提供随应用分发且具有开放授权的字体。", tuple((family, family) for family in OPEN_FONT_FAMILIES)))
         floating.add_row(self._slider_row("floating_lyrics_opacity", "默认不透明度", "保留现有 20% 到 100% 范围。", 20, 100, "%"))
         floating.add_row(self._slider_row("floating_lyrics_font_size", "默认字号", "保留现有 22 到 84 px 范围。", 22, 84, " px"))
         floating.add_row(self._slider_row("floating_lyrics_width", "默认宽度", "保留现有 420 到 1600 px 范围。", 420, 1600, " px"))
+        floating.add_row(self._toggle_row("floating_lyrics_passthrough", "默认鼠标穿透", "默认不拦截其他应用；进入窗口边缘后可临时操作工具栏。"))
         layout.addWidget(floating)
 
     def _build_library(self, layout: QVBoxLayout) -> None:
