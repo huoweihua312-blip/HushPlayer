@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import sqlite3
+from dataclasses import replace
 from pathlib import Path
 
 from PySide6.QtCore import QObject
 
-from app.core.app_paths import AppPaths
+from app.core.app_paths import AppPaths, temporary_cache_path
 from app.services.library_repository import LibraryRepository
 from app.services.lyrics_cache import LyricsCache
 from app.models.media_item import MediaItem
@@ -72,13 +74,31 @@ class OnlineDiscoveryRuntime(QObject):
             source_catalog_provider=lambda: self.search_service.source_catalog,
             source_catalog_loaded=lambda: self.search_service.source_catalog_loaded,
         )
+        effective_cache_dir = Path(paths.cache_dir)
+        try:
+            online_audio_cache = OnlineAudioCacheService(
+                effective_cache_dir / "audio",
+                self,
+            )
+        except (OSError, sqlite3.Error):
+            fallback_cache_dir = temporary_cache_path()
+            if fallback_cache_dir == effective_cache_dir:
+                raise
+            effective_cache_dir = fallback_cache_dir
+            online_audio_cache = OnlineAudioCacheService(
+                effective_cache_dir / "audio",
+                self,
+            )
+            self.paths = replace(paths, cache_dir=effective_cache_dir)
+        else:
+            self.paths = paths
         self.lyrics_service = OnlineLyricsService(
             self.client,
-            LyricsCache(Path(paths.cache_dir) / "lyrics" / "online_lyrics.json"),
+            LyricsCache(effective_cache_dir / "lyrics" / "online_lyrics.json"),
             self,
         )
         self.artwork_service = artwork_service or OnlineArtworkService(
-            Path(paths.cache_dir) / "covers",
+            effective_cache_dir / "covers",
             self,
         )
         if self.artwork_service.parent() is None:
@@ -89,10 +109,7 @@ class OnlineDiscoveryRuntime(QObject):
             user_sources_dir=paths.user_sources_dir,
             bundled_runtime_dir=paths.bundled_source_runtime_dir,
         )
-        self.online_audio_cache = OnlineAudioCacheService(
-            Path(paths.cache_dir) / "audio",
-            self,
-        )
+        self.online_audio_cache = online_audio_cache
         self.source_importer = OnlineSourceImporter(
             self.source_registry,
             self.client,

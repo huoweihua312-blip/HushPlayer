@@ -4,6 +4,7 @@ import json
 import os
 import shutil
 import sys
+import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -50,6 +51,12 @@ def _configured_cache_path(application_data_dir: Path) -> Path | None:
     if not candidate.is_absolute():
         return None
     return candidate.resolve()
+
+
+def temporary_cache_path() -> Path:
+    """Return a user-writable cache fallback for restricted Windows profiles."""
+
+    return (Path(tempfile.gettempdir()) / APP_NAME / "cache").resolve()
 
 
 def ensure_qt_application_identity() -> None:
