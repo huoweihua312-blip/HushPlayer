@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 
 from PySide6.QtCore import QEvent, QPoint, QRect, Qt, QTimer, Signal
-from PySide6.QtGui import QColor, QCursor, QFont, QMouseEvent
+from PySide6.QtGui import QColor, QCursor, QFont, QGuiApplication, QMouseEvent
 from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QToolButton, QVBoxLayout, QWidget
 
 from app.ui_v2.adapters.lyrics_adapter import LyricsAdapter
