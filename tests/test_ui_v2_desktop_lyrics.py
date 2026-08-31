@@ -14,6 +14,7 @@ from PySide6.QtWidgets import QApplication
 from app.startup_diagnostics import StartupDiagnostics
 from app.ui_v2.adapters.lyrics_adapter import LyricsAdapter
 from app.ui_v2.adapters.playback_adapter import PlaybackAdapter
+from app.ui_v2.mock.track_factory import create_mock_tracks
 from app.ui_v2.shell.desktop_lyrics_window import (
     DesktopLyricsWindow,
     clamp_desktop_lyrics_position,
@@ -101,6 +102,28 @@ class DesktopLyricsWindowTests(unittest.TestCase):
         self.assertGreaterEqual(changes[0][0], 0)
         self.assertGreaterEqual(changes[0][1], 0)
 
+    def test_only_lyrics_are_rendered_and_empty_state_stays_enabled_but_hidden(self) -> None:
+        track = next(track for track in create_mock_tracks(80) if not track.is_missing)
+        self.lyrics.set_track(track)
+        self.window.show_for_current_screen()
+        self.app.processEvents()
+
+        self.assertTrue(self.window.is_enabled)
+        self.assertTrue(self.window.isVisible())
+        self.assertTrue(self.window._main_label.text())
+        self.assertFalse(hasattr(self.window, "_track_label"))
+        self.assertFalse(hasattr(self.window, "_status_label"))
+        self.assertIn("background: transparent", self.window._surface.styleSheet())
+
+        self.lyrics.load_mock_scenario("empty")
+        self.app.processEvents()
+        self.assertTrue(self.window.is_enabled)
+        self.assertFalse(self.window.isVisible())
+
+    def test_secondary_lyric_has_a_stable_visual_offset(self) -> None:
+        margins = self.window._secondary_layout.contentsMargins()
+        self.assertGreater(margins.left(), margins.right())
+
 
 class DesktopLyricsMainWindowIntegrationTests(unittest.TestCase):
     @classmethod
@@ -116,8 +139,13 @@ class DesktopLyricsMainWindowIntegrationTests(unittest.TestCase):
                 window._on_player_bar_action("desktop_lyrics")
                 self.app.processEvents()
                 self.assertIsNotNone(window.desktop_lyrics_window)
-                self.assertTrue(window.desktop_lyrics_window.isVisible())
+                self.assertTrue(window.desktop_lyrics_window.is_enabled)
+                self.assertFalse(window.desktop_lyrics_window.isVisible())
+                self.assertTrue(window.player_bar.desktop_lyrics_button.active)
                 self.assertEqual(window.navigation_adapter.route, "browse")
+                window._on_player_bar_action("desktop_lyrics")
+                self.assertFalse(window.desktop_lyrics_window.is_enabled)
+                self.assertFalse(window.player_bar.desktop_lyrics_button.active)
             finally:
                 window.close()
                 self.app.processEvents()

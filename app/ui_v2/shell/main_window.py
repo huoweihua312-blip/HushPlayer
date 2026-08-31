@@ -298,6 +298,7 @@ class MainWindow(QMainWindow):
         self._startup_scan_timer: QTimer | None = None
         self.desktop_lyrics_window: DesktopLyricsWindow | None = None
         self._desktop_lyrics_auto_opened = False
+        self._pending_import_status = ""
         appearance_mode = str(
             self.settings_bridge.value(self._settings_snapshot, "appearance_mode")
             or "dark"
@@ -384,7 +385,7 @@ class MainWindow(QMainWindow):
             self.playlist_adapter,
             self,
             include_online=True,
-            include_pending=is_real_library,
+            include_pending=False,
         )
         self.playback_adapter = playback_adapter or PlaybackAdapter(self)
         if playback_adapter is not None and playback_adapter.parent() is None:
@@ -430,13 +431,6 @@ class MainWindow(QMainWindow):
             not is_real_library or self.playback_adapter.has_real_backend
         )
         self.sidebar = NavigationSidebar(self.navigation_adapter, self._theme, self)
-        if self.music_import_service is not None:
-            self.sidebar.set_pending_count(
-                len(self.music_import_service.pending_records())
-            )
-            self.music_import_service.pending_changed.connect(
-                lambda records: self.sidebar.set_pending_count(len(records or ()))
-            )
         self.router = ContentRouter(
             self.library_page,
             self.navigation_adapter,
@@ -1131,10 +1125,24 @@ class MainWindow(QMainWindow):
                 self.settings_bridge,
                 self._theme,
                 online_sources=self.router._online_sources,
+                pending_import_service=self.music_import_service,
                 preview_callback=self._apply_settings_snapshot,
                 parent=self.body,
             )
             self.settings_overlay.saved.connect(self._on_settings_saved)
+            self.settings_overlay.pending_import_requested.connect(
+                self._import_pending_paths
+            )
+            self.settings_overlay.pending_ignore_requested.connect(
+                self._ignore_pending_paths
+            )
+            self.settings_overlay.pending_open_folder_requested.connect(
+                self._open_pending_folder
+            )
+            if self._pending_import_status:
+                self.settings_overlay.pending_imports_page.set_status(
+                    self._pending_import_status
+                )
         elif self.settings_overlay.isVisible():
             if category:
                 self.settings_overlay.set_category(category)
@@ -1234,14 +1242,17 @@ class MainWindow(QMainWindow):
             self.real_library_adapter.refresh()
 
     def _pending_page(self):
+        if self.settings_overlay is not None:
+            page = getattr(self.settings_overlay, "pending_imports_page", None)
+            if page is not None:
+                return page
         return self.router._pages.get("pending_imports")
 
     def _show_pending_status(self, text: str) -> None:
+        self._pending_import_status = str(text or "")
         page = self._pending_page()
-        if page is None and self.music_import_service is not None:
-            page = self.router.page_for_route("pending_imports")
         if page is not None and hasattr(page, "set_status"):
-            page.set_status(text)
+            page.set_status(self._pending_import_status)
 
     def _import_pending_paths(self, paths: object) -> None:
         service = self.music_import_service
@@ -1878,7 +1889,7 @@ class MainWindow(QMainWindow):
             lambda: self.open_settings_overlay("lyrics")
         )
         window.position_changed.connect(self._persist_desktop_lyrics_position)
-        window.visible_changed.connect(self._on_desktop_lyrics_visibility_changed)
+        window.enabled_changed.connect(self._on_desktop_lyrics_enabled_changed)
         self.desktop_lyrics_window = window
         window.apply_settings(self._settings_snapshot.to_dict())
         return window
@@ -1892,14 +1903,14 @@ class MainWindow(QMainWindow):
         if self._close_finalized:
             return
         window = self._ensure_desktop_lyrics_window()
-        if window.isVisible():
-            window.hide()
+        if window.is_enabled:
+            window.hide_for_user()
         else:
             window.show_for_current_screen()
 
-    def _on_desktop_lyrics_visibility_changed(self, visible: bool) -> None:
+    def _on_desktop_lyrics_enabled_changed(self, enabled: bool) -> None:
         if hasattr(self, "player_bar"):
-            self.player_bar.desktop_lyrics_button.set_active(bool(visible))
+            self.player_bar.desktop_lyrics_button.set_active(bool(enabled))
 
     def _persist_desktop_lyrics_position(self, x: int, y: int) -> None:
         if self._close_finalized:

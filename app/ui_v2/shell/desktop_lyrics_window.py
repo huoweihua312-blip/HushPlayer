@@ -50,6 +50,7 @@ class DesktopLyricsWindow(QWidget):
     settings_requested = Signal()
     position_changed = Signal(int, int)
     visible_changed = Signal(bool)
+    enabled_changed = Signal(bool)
     interaction_mode_changed = Signal(bool)
 
     _HOT_ZONE_PX = 24
@@ -73,8 +74,12 @@ class DesktopLyricsWindow(QWidget):
         self._saved_x = -1
         self._saved_y = -1
         self._passthrough = True
+        self._enabled = False
+        self._has_renderable_lyric = False
         self._interaction_mode = False
         self._changing_input_mode = False
+        self._rendered_main: str | None = None
+        self._rendered_secondary: str | None = None
         self._settings = {
             "floating_lyrics_color": "white",
             "floating_lyrics_opacity": 100,
@@ -97,6 +102,10 @@ class DesktopLyricsWindow(QWidget):
         self.setMouseTracking(True)
         self._build_ui()
 
+        self._render_timer = QTimer(self)
+        self._render_timer.setSingleShot(True)
+        self._render_timer.setInterval(0)
+        self._render_timer.timeout.connect(self._render)
         self._cursor_timer = QTimer(self)
         self._cursor_timer.setInterval(self._CURSOR_POLL_MS)
         self._cursor_timer.timeout.connect(self._poll_cursor)
@@ -105,11 +114,11 @@ class DesktopLyricsWindow(QWidget):
         self._interaction_timer.setInterval(self._INTERACTION_IDLE_MS)
         self._interaction_timer.timeout.connect(self._leave_interactive_mode)
 
-        playback_adapter.track_changed.connect(self._render)
-        lyrics_adapter.document_changed.connect(self._render)
-        lyrics_adapter.state_changed.connect(self._render)
-        lyrics_adapter.active_line_changed.connect(self._render)
-        lyrics_adapter.display_options_changed.connect(self._render)
+        playback_adapter.track_changed.connect(self._schedule_render)
+        lyrics_adapter.document_changed.connect(self._schedule_render)
+        lyrics_adapter.state_changed.connect(self._schedule_render)
+        lyrics_adapter.active_line_changed.connect(self._schedule_render)
+        lyrics_adapter.display_options_changed.connect(self._schedule_render)
         self.apply_settings(self._settings)
 
     def _build_ui(self) -> None:
@@ -118,13 +127,9 @@ class DesktopLyricsWindow(QWidget):
         self._surface.setMouseTracking(True)
         self._surface.installEventFilter(self)
         surface_layout = QVBoxLayout(self._surface)
-        surface_layout.setContentsMargins(22, 15, 22, 15)
-        surface_layout.setSpacing(2)
+        surface_layout.setContentsMargins(18, 8, 18, 8)
+        surface_layout.setSpacing(4)
 
-        self._track_label = QLabel(self._surface)
-        self._track_label.setObjectName("desktopLyricsTrack")
-        self._track_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self._track_label.setTextInteractionFlags(Qt.TextInteractionFlag.NoTextInteraction)
         self._main_label = QLabel(self._surface)
         self._main_label.setObjectName("desktopLyricsMain")
         self._main_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -135,23 +140,17 @@ class DesktopLyricsWindow(QWidget):
         self._secondary_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._secondary_label.setWordWrap(True)
         self._secondary_label.setTextInteractionFlags(Qt.TextInteractionFlag.NoTextInteraction)
-        self._status_label = QLabel(self._surface)
-        self._status_label.setObjectName("desktopLyricsStatus")
-        self._status_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self._status_label.setWordWrap(True)
-        self._status_label.setTextInteractionFlags(Qt.TextInteractionFlag.NoTextInteraction)
-        for label in (
-            self._track_label,
-            self._main_label,
-            self._secondary_label,
-            self._status_label,
-        ):
+        for label in (self._main_label, self._secondary_label):
             label.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
 
-        surface_layout.addWidget(self._track_label)
-        surface_layout.addWidget(self._main_label, 1)
-        surface_layout.addWidget(self._secondary_label)
-        surface_layout.addWidget(self._status_label)
+        surface_layout.addStretch(1)
+        surface_layout.addWidget(self._main_label)
+        self._secondary_layout = QHBoxLayout()
+        self._secondary_layout.setContentsMargins(28, 0, 0, 0)
+        self._secondary_layout.setSpacing(0)
+        self._secondary_layout.addWidget(self._secondary_label, 1)
+        surface_layout.addLayout(self._secondary_layout)
+        surface_layout.addStretch(1)
 
         self._toolbar = QFrame(self)
         self._toolbar.setObjectName("desktopLyricsToolbar")
@@ -169,7 +168,7 @@ class DesktopLyricsWindow(QWidget):
         self._settings_button.clicked.connect(self.settings_requested)
         self._reset_button.clicked.connect(self.reset_position)
         self._passthrough_button.clicked.connect(self._toggle_passthrough)
-        self._close_button.clicked.connect(self.close)
+        self._close_button.clicked.connect(self.hide_for_user)
         self._toolbar.hide()
 
     def _toolbar_button(self, text: str, tooltip: str) -> QToolButton:
@@ -226,20 +225,18 @@ class DesktopLyricsWindow(QWidget):
         self._set_passthrough(bool(self._settings["floating_lyrics_passthrough"]))
         if self.isVisible():
             self._place_on_screen()
+        self._schedule_render()
 
     def _apply_visuals(self) -> None:
         color_name = str(self._settings.get("floating_lyrics_color") or "white")
         lyric_color = QColor(DESKTOP_LYRICS_COLORS.get(color_name, DESKTOP_LYRICS_COLORS["white"]))
-        dark_text = color_name == "black"
-        panel = "rgba(238, 240, 244, 0.93)" if dark_text else "rgba(18, 20, 25, 0.86)"
-        border = "rgba(255, 255, 255, 0.20)" if not dark_text else "rgba(20, 22, 28, 0.22)"
-        track_color = "#343840" if dark_text else "rgba(247, 248, 250, 0.68)"
-        secondary = "#50545C" if dark_text else "rgba(247, 248, 250, 0.72)"
-        status = "#656A73" if dark_text else "rgba(247, 248, 250, 0.58)"
+        secondary = (
+            f"rgba({lyric_color.red()}, {lyric_color.green()}, {lyric_color.blue()}, 0.72)"
+        )
         accent = self._theme.colors.accent if self._theme is not None else "#7AA2F7"
         self.setWindowOpacity(int(self._settings.get("floating_lyrics_opacity", 100)) / 100.0)
         self._surface.setStyleSheet(
-            f"QFrame#desktopLyricsSurface {{ background: {panel}; border: 1px solid {border}; border-radius: 16px; }}"
+            "QFrame#desktopLyricsSurface { background: transparent; border: 0; }"
         )
         self._toolbar.setStyleSheet(
             "QFrame#desktopLyricsToolbar { background: rgba(18, 20, 25, 0.94); border: 1px solid rgba(255, 255, 255, 0.18); border-radius: 10px; }"
@@ -250,54 +247,65 @@ class DesktopLyricsWindow(QWidget):
         )
         family = normalize_desktop_lyrics_font(self._settings.get("floating_lyrics_font_family"))
         size = int(self._settings.get("floating_lyrics_font_size", 42))
-        self._track_label.setStyleSheet(f"color: {track_color};")
         self._main_label.setStyleSheet(f"color: {lyric_color.name()};")
         self._secondary_label.setStyleSheet(f"color: {secondary};")
-        self._status_label.setStyleSheet(f"color: {status};")
-        self._track_label.setFont(QFont(family, max(10, min(15, size // 3))))
         self._main_label.setFont(QFont(family, size, QFont.Weight.DemiBold))
         self._secondary_label.setFont(QFont(family, max(14, size // 2), QFont.Weight.Normal))
-        self._status_label.setFont(QFont(family, max(11, min(15, size // 3))))
         self._update_toolbar_geometry()
 
-    def _render(self, *_args) -> None:
-        track = self._playback_adapter.state.current_track
-        title = str(getattr(track, "title", "") or "").strip()
-        artist = str(getattr(track, "artist", "") or "").strip()
-        self._track_label.setText(" · ".join(item for item in (title, artist) if item))
-        line = self._lyrics_adapter.active_line
-        state = self._lyrics_adapter.state
-        if line is not None and str(line.text or "").strip():
-            self._main_label.setText(str(line.text).strip())
-            options = self._lyrics_adapter.display_options
-            secondary: list[str] = []
-            if bool(options.get("translation")) and str(line.translation or "").strip():
-                secondary.append(str(line.translation).strip())
-            if bool(options.get("romanization")) and str(line.romanization or "").strip():
-                secondary.append(str(line.romanization).strip())
-            self._secondary_label.setText("\n".join(secondary))
-            self._status_label.clear()
-            self._render_status_state(state)
-        else:
-            message = str(getattr(state, "message", "") or "").strip()
-            self._main_label.setText(message or "播放歌曲后显示歌词")
-            self._secondary_label.clear()
-            self._status_label.setText("")
-        self._secondary_label.setVisible(bool(self._secondary_label.text()))
+    @property
+    def is_enabled(self) -> bool:
+        """Return the user's logical desktop-lyrics choice, independent of empty lyrics."""
 
-    def _render_status_state(self, state) -> None:
-        phase = str(getattr(state, "phase", "") or "")
-        if phase in {"loading", "failed", "playback_unavailable"} and self._main_label.text():
-            self._status_label.setText(str(getattr(state, "message", "") or ""))
-        elif phase not in {"empty", "instrumental"}:
-            self._status_label.clear()
+        return self._enabled
+
+    def _schedule_render(self, *_args) -> None:
+        if not self._render_timer.isActive():
+            self._render_timer.start()
+
+    def _render(self, *_args) -> None:
+        line = self._lyrics_adapter.active_line
+        main_text = ""
+        secondary_text = ""
+        if line is not None and str(line.text or "").strip():
+            main_text = str(line.text).strip()
+            options = self._lyrics_adapter.display_options
+            if bool(options.get("translation")) and str(line.translation or "").strip():
+                secondary_text = str(line.translation).strip()
+            elif bool(options.get("romanization")) and str(line.romanization or "").strip():
+                secondary_text = str(line.romanization).strip()
+        if main_text != self._rendered_main:
+            self._rendered_main = main_text
+            self._main_label.setText(main_text)
+        if secondary_text != self._rendered_secondary:
+            self._rendered_secondary = secondary_text
+            self._secondary_label.setText(secondary_text)
+            self._secondary_label.setVisible(bool(secondary_text))
+        self._has_renderable_lyric = bool(main_text)
+        self._sync_render_visibility()
+
+    def _sync_render_visibility(self) -> None:
+        should_show = self._enabled and self._has_renderable_lyric
+        if should_show and not self.isVisible():
+            self._place_on_screen()
+            self.show()
+            self.raise_()
+        elif not should_show and self.isVisible():
+            self.hide()
 
     def show_for_current_screen(self) -> None:
+        if not self._enabled:
+            self._enabled = True
+            self.enabled_changed.emit(True)
         self._place_on_screen()
         self._render()
-        self.show()
-        self.raise_()
-        self._cursor_timer.start()
+
+    def hide_for_user(self) -> None:
+        if self._enabled:
+            self._enabled = False
+            self.enabled_changed.emit(False)
+        if self.isVisible():
+            self.hide()
 
     def _place_on_screen(self) -> None:
         # Negative coordinates are valid on a left/top secondary monitor.
@@ -474,7 +482,6 @@ class DesktopLyricsWindow(QWidget):
     def showEvent(self, event) -> None:  # noqa: N802
         super().showEvent(event)
         self._place_on_screen()
-        self._render()
         self._cursor_timer.start()
         self.visible_changed.emit(True)
 
@@ -500,6 +507,9 @@ class DesktopLyricsWindow(QWidget):
         self.visible_changed.emit(False)
 
     def closeEvent(self, event) -> None:  # noqa: N802
+        if self._enabled:
+            self._enabled = False
+            self.enabled_changed.emit(False)
         self._cursor_timer.stop()
         self._interaction_timer.stop()
         event.accept()

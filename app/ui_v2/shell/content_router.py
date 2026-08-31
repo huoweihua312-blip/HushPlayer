@@ -42,7 +42,6 @@ from app.ui_v2.pages.track_list_page import TrackListPage
 from app.ui_v2.theme.icons import icon
 from app.ui_v2.theme.tokens import Theme
 from app.ui_v2.models.immersive_lyrics_options import ImmersiveLyricsOptions
-from app.ui_v2.models.track_table_model import TrackColumn
 from app.services.music_folder_scan import MusicFolderImportService
 
 
@@ -174,9 +173,7 @@ class ContentRouter(QStackedWidget):
         library_page.track_table.mock_action_requested.connect(
             self.track_action_requested
         )
-        library_page.track_table.clicked.connect(
-            lambda index: self._browse_track_from_index(library_page.track_table, index)
-        )
+        library_page.track_table.browse_requested.connect(self.track_browse_requested)
         if hasattr(library_page, "play_requested"):
             library_page.play_requested.connect(
                 lambda: self.queue_requested.emit(library_page.adapter.tracks(), False)
@@ -319,25 +316,11 @@ class ContentRouter(QStackedWidget):
         page.track_play_requested.connect(self.track_play_requested)
         page.queue_requested.connect(self.queue_requested)
         page.track_table.mock_action_requested.connect(self.track_action_requested)
-        page.track_table.clicked.connect(
-            lambda index: self._browse_track_from_index(page.track_table, index)
-        )
+        page.track_table.browse_requested.connect(self.track_browse_requested)
         if hasattr(page, "track_recovery_requested"):
             page.track_recovery_requested.connect(self.online_recovery_requested)
         page.browse_library_requested.connect(lambda: self._navigation.set_route("library"))
         return page
-
-    def _browse_track_from_index(self, table, index) -> None:
-        """Expose single-click browsing while leaving favorite/action clicks local."""
-
-        if not index.isValid() or int(index.column()) in {
-            int(TrackColumn.FAVORITE),
-            int(TrackColumn.MORE),
-        }:
-            return
-        track = table.model.track_at(index.row())
-        if track is not None:
-            self.track_browse_requested.emit(track.id)
 
     def _create_favorites_page(self) -> FavoritesPage:
         return self._wire_track_page(FavoritesPage(self._favorites_adapter, self._theme, self))

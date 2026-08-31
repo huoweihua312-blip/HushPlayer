@@ -332,7 +332,7 @@ class RealLibraryPageTests(unittest.TestCase):
         self.assertIn("online_search", self.window.sidebar._items)
         self.assertFalse(self.window.sidebar.new_playlist_button.isHidden())
 
-    def test_real_mode_exposes_pending_import_route_and_actions(self) -> None:
+    def test_real_mode_exposes_pending_imports_in_settings_not_primary_navigation(self) -> None:
         pending_path = self.data_dir / "pending_imports.json"
         record = {
             "title": "待确认歌曲",
@@ -341,16 +341,21 @@ class RealLibraryPageTests(unittest.TestCase):
             "path": str((self.root / "music" / "pending.mp3").resolve()),
         }
         _write_json(pending_path, [record])
-        page = self.window.router.page_for_route("pending_imports")
+        self.window.open_settings_overlay("pending_imports")
+        self.app.processEvents()
+        overlay = self.window.settings_overlay
+        page = overlay.pending_imports_page
         self.assertEqual(page.list_widget.count(), 1)
-        self.assertIn("pending_imports", {
+        self.assertNotIn("pending_imports", {
             item.route_id for item in self.window.navigation_adapter.items()
         })
-        self.window.navigation_adapter.set_route("pending_imports")
-        self.assertIs(self.window.router.currentWidget(), page)
+        self.assertNotIn("pending_imports", self.window.sidebar._items)
+        self.assertEqual(overlay.current_category, "pending_imports")
+        self.assertIn("1", overlay.sidebar._buttons["pending_imports"].text())
         page.list_widget.item(0).setSelected(True)
         page.import_button.click()
         self.assertEqual(json.loads(pending_path.read_text(encoding="utf-8")), [])
+        self.assertEqual(overlay.sidebar._buttons["pending_imports"].text(), "待导入")
 
 
 if __name__ == "__main__":

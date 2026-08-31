@@ -4,12 +4,13 @@ from __future__ import annotations
 
 from collections.abc import Callable
 
-from PySide6.QtCore import QModelIndex, QRectF, Qt, Signal
+from PySide6.QtCore import QModelIndex, QRectF, Qt, QTimer, Signal
 from PySide6.QtGui import QColor, QContextMenuEvent, QFont, QKeyEvent, QPainter, QPen
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QHeaderView,
     QMenu,
+    QApplication,
     QTableView,
     QWidget,
 )
@@ -130,6 +131,7 @@ class TrackTable(QTableView):
     favorite_toggled = Signal(str, bool)
     mock_action_requested = Signal(str, str)
     artist_requested = Signal(str)
+    browse_requested = Signal(str)
 
     def __init__(self, adapter: LibraryAdapter, theme: Theme, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -148,6 +150,14 @@ class TrackTable(QTableView):
         self._playlist_remove_callback: Callable[[str], None] | None = None
         self._artist_navigation_enabled = False
         self._playback_enabled = True
+        self._pending_browse_track_id = ""
+        self._browse_timer = QTimer(self)
+        self._browse_timer.setSingleShot(True)
+        application = QApplication.instance()
+        self._browse_timer.setInterval(
+            application.doubleClickInterval() if application is not None else 400
+        )
+        self._browse_timer.timeout.connect(self._emit_pending_browse)
         self.setObjectName("trackTable")
         self.setAccessibleName("歌曲列表")
         self.setAccessibleDescription("使用方向键选择歌曲，按 Enter 播放，按空格不改变播放状态")
@@ -167,6 +177,8 @@ class TrackTable(QTableView):
         self.setVerticalScrollMode(QAbstractItemView.ScrollMode.ScrollPerPixel)
         self.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+        self.clicked.connect(self._queue_browse)
+        self.doubleClicked.connect(self._cancel_pending_browse)
         self.doubleClicked.connect(self._on_double_clicked)
         self.customContextMenuRequested.connect(self._show_context_menu)
         header = self.header
@@ -397,6 +409,32 @@ class TrackTable(QTableView):
             and (not track.is_missing or track.is_online)
         ):
             self._request_play(track)
+
+    def _queue_browse(self, index: QModelIndex) -> None:
+        """Delay single-click browsing until Qt's double-click window closes."""
+
+        if not index.isValid() or int(index.column()) in {
+            int(TrackColumn.FAVORITE),
+            int(TrackColumn.MORE),
+        }:
+            self._cancel_pending_browse()
+            return
+        track = self.model.track_at(index.row())
+        if track is None:
+            self._cancel_pending_browse()
+            return
+        self._pending_browse_track_id = track.id
+        self._browse_timer.start()
+
+    def _cancel_pending_browse(self, *_args) -> None:
+        self._browse_timer.stop()
+        self._pending_browse_track_id = ""
+
+    def _emit_pending_browse(self) -> None:
+        track_id = self._pending_browse_track_id
+        self._pending_browse_track_id = ""
+        if track_id and any(track.id == track_id for track in self.model.tracks()):
+            self.browse_requested.emit(track_id)
 
     def keyPressEvent(self, event: QKeyEvent) -> None:  # noqa: N802
         """Keep keyboard playback explicit: Enter plays, Space never does."""

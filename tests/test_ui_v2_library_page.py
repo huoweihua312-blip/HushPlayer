@@ -13,6 +13,7 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QColor
+from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication
 
 from app.ui_v2.adapters.library_adapter import LibraryAdapter
@@ -57,6 +58,30 @@ class UiV2LibraryPageTests(unittest.TestCase):
         menu = self.page.track_table.build_context_menu(index)
         self.assertEqual([action.text() for action in menu.actions()], ["播放", "添加到我喜欢", "添加到歌单", "查看歌曲信息"])
         menu.deleteLater()
+
+    def test_single_click_browses_after_delay_but_double_click_only_plays(self) -> None:
+        table = self.page.track_table
+        table._browse_timer.setInterval(5)
+        index = self._available_index()
+        track_id = table.model.track_at(index.row()).id
+        browsed: list[str] = []
+        played: list[str] = []
+        table.browse_requested.connect(browsed.append)
+        table.play_requested.connect(played.append)
+
+        table.clicked.emit(index)
+        QTest.qWait(15)
+        self.app.processEvents()
+        self.assertEqual(browsed, [track_id])
+        self.assertEqual(played, [])
+
+        browsed.clear()
+        table.clicked.emit(index)
+        table.doubleClicked.emit(index)
+        QTest.qWait(15)
+        self.app.processEvents()
+        self.assertEqual(browsed, [])
+        self.assertEqual(played, [track_id])
 
     def test_missing_favorite_can_be_removed_but_not_added(self) -> None:
         model = self.page.track_table.model

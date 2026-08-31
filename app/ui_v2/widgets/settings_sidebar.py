@@ -47,6 +47,22 @@ class SettingsSidebar(QFrame):
             button.setChecked(True)
             self._refresh_icons()
 
+    def set_category_count(self, category: str, count: int) -> None:
+        button = self._buttons.get(str(category))
+        if button is None:
+            return
+        metadata = next(
+            (item for item in SETTINGS_CATEGORIES if item.key == str(category)),
+            None,
+        )
+        if metadata is None:
+            return
+        total = max(0, int(count))
+        button.setText(f"{metadata.title}  {total}" if total else metadata.title)
+        button.setToolTip(
+            f"{metadata.title}（{total}）" if total else metadata.title
+        )
+
     def set_compact(self, compact: bool) -> None:
         compact = bool(compact)
         if compact == self._compact:

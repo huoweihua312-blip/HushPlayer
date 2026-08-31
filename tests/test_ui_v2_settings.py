@@ -147,7 +147,7 @@ class SettingsOverlayIntegrationTests(unittest.TestCase):
         self.app.processEvents()
         return self.window.settings_overlay
 
-    def test_settings_categories_use_distinct_local_fluent_regular_assets(self) -> None:
+    def test_settings_categories_use_local_fluent_regular_assets(self) -> None:
         overlay = self.open_overlay()
         expected_assets = {
             "general": "settings_20_regular.svg",
@@ -161,7 +161,7 @@ class SettingsOverlayIntegrationTests(unittest.TestCase):
             "about": "info_20_regular.svg",
         }
         category_names = [item.icon_name for item in SETTINGS_CATEGORIES]
-        self.assertEqual(len(category_names), 9)
+        self.assertEqual(len(category_names), 10)
         self.assertEqual(len(set(category_names)), 9)
         self.assertEqual({name: FLUENT_SETTINGS_ASSETS[name] for name in category_names}, expected_assets)
         self.assertEqual(FLUENT_SETTINGS_ASSETS["dismiss"], "dismiss_20_regular.svg")
@@ -254,7 +254,7 @@ class SettingsOverlayIntegrationTests(unittest.TestCase):
         overlay = self.open_overlay()
         self.assertEqual(tuple(item.key for item in SETTINGS_CATEGORIES), (
             "general", "appearance", "playback", "lyrics",
-            "library", "online_sources", "cache", "updates", "about",
+            "library", "pending_imports", "online_sources", "cache", "updates", "about",
         ))
         self.assertNotIn("immersive", overlay.sidebar._buttons)
         self.assertEqual(self.window.navigation_adapter.route, "browse")
@@ -263,6 +263,13 @@ class SettingsOverlayIntegrationTests(unittest.TestCase):
         self.app.processEvents()
         self.assertEqual(self.window.navigation_adapter.route, "browse")
         self.assertTrue(overlay.isVisible())
+
+    def test_settings_sliders_have_no_control_background(self) -> None:
+        overlay = self.open_overlay()
+        slider = overlay._controls["floating_lyrics_font_size"].slider
+        style = slider.styleSheet()
+        self.assertIn("QSlider { background: transparent; border: 0;", style)
+        self.assertIn("QSlider:focus { background: transparent; border: 0;", style)
 
     def test_overlay_is_single_instance_and_resize_keeps_it(self) -> None:
         overlay = self.open_overlay()

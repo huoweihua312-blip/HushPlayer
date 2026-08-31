@@ -37,6 +37,8 @@ from app.ui_v2.models.settings_category import SETTINGS_CATEGORIES, category_for
 from app.ui_v2.models.settings_edit_session import SettingsEditSession
 from app.ui_v2.models.settings_snapshot import SettingsSnapshot
 from app.ui_v2.pages.online_source_page import OnlineSourcePage
+from app.ui_v2.pages.pending_imports_page import PendingImportsPage
+from app.services.music_folder_scan import MusicFolderImportService
 from app.ui_v2.theme.icons import fluent_settings_icon, fluent_settings_interactive_icon
 from app.ui_v2.theme.tokens import OPEN_FONT_FAMILIES, Theme
 from app.ui_v2.widgets.settings_control_factory import (
@@ -171,6 +173,9 @@ class SettingsOverlay(QWidget):
 
     closed = Signal()
     saved = Signal(object)
+    pending_import_requested = Signal(object)
+    pending_ignore_requested = Signal(object)
+    pending_open_folder_requested = Signal(str)
 
     def __init__(
         self,
@@ -178,6 +183,7 @@ class SettingsOverlay(QWidget):
         theme: Theme,
         *,
         online_sources: OnlineSourceAdapter | None = None,
+        pending_import_service: MusicFolderImportService | None = None,
         preview_callback: Callable[[dict[str, Any]], None] | None = None,
         path_chooser: Callable[[str], str] | None = None,
         folder_chooser: Callable[[], str] | None = None,
@@ -187,6 +193,7 @@ class SettingsOverlay(QWidget):
         self.bridge = bridge
         self._theme = theme
         self._online_sources = online_sources
+        self._pending_import_service = pending_import_service
         self._preview_callback = preview_callback
         self._path_chooser = path_chooser
         self._folder_chooser = folder_chooser
@@ -311,6 +318,11 @@ class SettingsOverlay(QWidget):
                 self._category_pages[category.key] = page
                 self.content_stack.addWidget(page)
                 continue
+            if category.key == "pending_imports":
+                page = self._build_pending_imports_page()
+                self._category_pages[category.key] = page
+                self.content_stack.addWidget(page)
+                continue
             page = QWidget(self.content_stack)
             page.setObjectName(f"settingsCategory_{category.key}")
             outer = QVBoxLayout(page)
@@ -347,6 +359,37 @@ class SettingsOverlay(QWidget):
         page.setObjectName("settingsCategory_online_sources")
         page.back_button.hide()
         return page
+
+    def _build_pending_imports_page(self) -> PendingImportsPage:
+        """Reuse the existing review surface inside Settings without a shell route."""
+
+        page = PendingImportsPage(self._theme, self.content_stack)
+        page.header.set_context("设置")
+        page.import_requested.connect(self.pending_import_requested)
+        page.ignore_requested.connect(self.pending_ignore_requested)
+        page.open_folder_requested.connect(self.pending_open_folder_requested)
+        service = self._pending_import_service
+        if service is None:
+            page.set_records(())
+            page.set_status("待导入服务当前不可用。")
+        else:
+            self._sync_pending_records(service.pending_records(), page=page)
+            service.pending_changed.connect(self._sync_pending_records)
+        self.pending_imports_page = page
+        return page
+
+    def _sync_pending_records(
+        self,
+        records: object,
+        *,
+        page: PendingImportsPage | None = None,
+    ) -> None:
+        target = page or getattr(self, "pending_imports_page", None)
+        if target is None:
+            return
+        values = records if isinstance(records, (list, tuple)) else ()
+        target.set_records(values)
+        self.sidebar.set_category_count("pending_imports", len(values))
 
     def _wire_state(self) -> None:
         self.sidebar.category_requested.connect(self.set_category)
@@ -991,8 +1034,8 @@ class SettingsOverlay(QWidget):
             self.about_changelog.setStyleSheet(
                 f"QPlainTextEdit#settingsAboutChangelog {{ min-height: 260px; padding: 12px; border: 1px solid {c.border}; border-radius: {theme.metrics.radius_md}px; background: {c.surface_secondary}; color: {c.primary_text}; selection-background-color: {c.accent}; selection-color: {c.content_background}; font-size: {theme.fonts.body}px; font-weight: 400; }}"
             )
-        for key, page in self._category_pages.items():
-            if key == "online_sources" and hasattr(page, "set_theme"):
+        for page in self._category_pages.values():
+            if hasattr(page, "set_theme"):
                 page.set_theme(theme)
             else:
                 page.setStyleSheet(f"background: {c.content_background};")

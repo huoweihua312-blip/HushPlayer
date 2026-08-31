@@ -292,7 +292,9 @@ class SliderSpinControl(QWidget):
     def __init__(self, minimum: int, maximum: int, value: int, suffix: str, theme: Theme, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self._theme = theme
+        self.setObjectName("settingsSliderControl")
         self.slider = QSlider(Qt.Orientation.Horizontal, self)
+        self.slider.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, False)
         self.slider.setRange(minimum, maximum)
         self.value_label = QLabel(self)
         self.value_label.setObjectName("settingsSliderValue")
@@ -327,15 +329,16 @@ class SliderSpinControl(QWidget):
         self._theme = theme
         self.slider.setFixedHeight(18)
         self.slider.setStyleSheet(
-            f"QSlider {{ background: transparent; }} "
+            f"QSlider {{ background: transparent; border: 0; padding: 0; }} "
             f"QSlider::groove:horizontal {{ height: 4px; border-radius: 2px; background: {theme.colors.border}; }} "
             f"QSlider::sub-page:horizontal {{ background: {theme.colors.accent}; border-radius: 2px; }} "
             f"QSlider::add-page:horizontal {{ background: transparent; border: 0; }} "
-            f"QSlider::handle:horizontal {{ width: 14px; margin: -5px 0; border-radius: 7px; background: {theme.colors.accent}; }} "
+            f"QSlider::handle:horizontal {{ width: 14px; margin: -5px 0; border: 1px solid transparent; border-radius: 7px; background: {theme.colors.accent}; }} "
             f"QSlider::handle:horizontal:hover {{ background: {theme.colors.accent_hover}; }} "
             f"QSlider:disabled::groove:horizontal {{ background: {theme.colors.surface_pressed}; }} "
             f"QSlider:disabled::handle:horizontal {{ background: {theme.colors.disabled_text}; }} "
-            f"QSlider:focus {{ border: 1px solid {theme.colors.focus_ring}; border-radius: {theme.metrics.radius_sm}px; }}"
+            f"QSlider:focus {{ background: transparent; border: 0; }} "
+            f"QSlider:focus::handle:horizontal {{ border: 1px solid {theme.colors.focus_ring}; }}"
         )
         self.value_label.setStyleSheet(
             f"color: {theme.colors.secondary_text}; font-size: {theme.fonts.numeric}px;"
