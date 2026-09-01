@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 import tempfile
 import time
@@ -12,6 +13,7 @@ from PySide6.QtCore import QPoint, QRect, QSize, Qt
 from PySide6.QtWidgets import QApplication
 
 from app.startup_diagnostics import StartupDiagnostics
+from app.ui_v2.adapters.legacy_settings_bridge import SettingsBridgeError
 from app.ui_v2.adapters.lyrics_adapter import LyricsAdapter
 from app.ui_v2.adapters.playback_adapter import PlaybackAdapter
 from app.ui_v2.mock.track_factory import create_mock_tracks
@@ -124,6 +126,18 @@ class DesktopLyricsWindowTests(unittest.TestCase):
         margins = self.window._secondary_layout.contentsMargins()
         self.assertGreater(margins.left(), margins.right())
 
+    def test_font_size_uses_pixels_and_toolbar_has_no_settings_button(self) -> None:
+        self.window.show()
+        self.window.apply_settings({"floating_lyrics_font_size": 22})
+        self.app.processEvents()
+        self.assertEqual(self.window._main_label.font().pixelSize(), 22)
+        self.assertEqual(self.window._secondary_label.font().pixelSize(), 14)
+        self.window.apply_settings({"floating_lyrics_font_size": 84})
+        self.app.processEvents()
+        self.assertEqual(self.window._main_label.font().pixelSize(), 84)
+        self.assertEqual(self.window._secondary_label.font().pixelSize(), 42)
+        self.assertFalse(hasattr(self.window, "_settings_button"))
+
 
 class DesktopLyricsMainWindowIntegrationTests(unittest.TestCase):
     @classmethod
@@ -147,6 +161,91 @@ class DesktopLyricsMainWindowIntegrationTests(unittest.TestCase):
                 self.assertFalse(window.desktop_lyrics_window.is_enabled)
                 self.assertFalse(window.player_bar.desktop_lyrics_button.active)
             finally:
+                window.close()
+                self.app.processEvents()
+
+    def test_right_click_opens_quick_settings_without_toggling_lyrics(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            settings_path = Path(directory) / "settings.json"
+            window = MainWindow(settings_path=settings_path)
+            try:
+                window.resize(1200, 800)
+                window.show()
+                self.app.processEvents()
+                self.assertIsNone(window.desktop_lyrics_window)
+                window.player_bar.desktop_lyrics_button.customContextMenuRequested.emit(
+                    QPoint(4, 4)
+                )
+                self.app.processEvents()
+                popover = window.desktop_lyrics_settings_popover
+                self.assertIsNotNone(popover)
+                self.assertTrue(popover.isVisible())
+                self.assertIsNone(window.desktop_lyrics_window)
+                self.assertEqual(window.navigation_adapter.route, "browse")
+                window.player_bar.desktop_lyrics_button.customContextMenuRequested.emit(
+                    QPoint(4, 4)
+                )
+                self.app.processEvents()
+                self.assertFalse(popover.isVisible())
+            finally:
+                window.close()
+                self.app.processEvents()
+
+    def test_quick_settings_preview_and_save_are_coalesced(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            settings_path = Path(directory) / "settings.json"
+            window = MainWindow(settings_path=settings_path)
+            saves: list[int] = []
+            window.settings_bridge.save_succeeded.connect(
+                lambda snapshot: saves.append(snapshot.get("floating_lyrics_font_size"))
+            )
+            try:
+                desktop = window._ensure_desktop_lyrics_window()
+                popover = window._ensure_desktop_lyrics_settings_popover()
+                popover.set_values(window._settings_snapshot.to_dict())
+                popover.font_size_slider.slider.setValue(50)
+                popover.font_size_slider.slider.setValue(58)
+                popover.font_size_slider.slider.setValue(64)
+                self.app.processEvents()
+                self.assertEqual(desktop._main_label.font().pixelSize(), 64)
+                self.assertTrue(window._desktop_lyrics_settings_save_timer.isActive())
+                self.assertEqual(window._desktop_lyrics_settings_save_timer.interval(), 250)
+                self.assertFalse(settings_path.exists())
+                window._desktop_lyrics_settings_save_timer.stop()
+                self.assertTrue(window._save_pending_desktop_lyrics_settings())
+                document = json.loads(settings_path.read_text(encoding="utf-8"))
+                self.assertEqual(document["floating_lyrics_font_size"], 64)
+                self.assertEqual(saves, [64])
+                style = popover.font_size_slider.slider.styleSheet()
+                self.assertIn("QSlider { background: transparent; border: 0;", style)
+            finally:
+                window.close()
+                self.app.processEvents()
+
+    def test_quick_settings_save_failure_restores_last_saved_value(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            window = MainWindow(settings_path=Path(directory) / "settings.json")
+            desktop = window._ensure_desktop_lyrics_window()
+            popover = window._ensure_desktop_lyrics_settings_popover()
+            original_save = window.settings_bridge.save_snapshot
+            try:
+                popover.set_values(window._settings_snapshot.to_dict())
+                popover.font_size_slider.slider.setValue(72)
+                self.app.processEvents()
+                self.assertEqual(desktop._main_label.font().pixelSize(), 72)
+
+                def fail_save(_snapshot):
+                    raise SettingsBridgeError("无法保存桌面歌词设置")
+
+                window.settings_bridge.save_snapshot = fail_save
+                window._desktop_lyrics_settings_save_timer.stop()
+                self.assertFalse(window._save_pending_desktop_lyrics_settings())
+                self.assertEqual(desktop._main_label.font().pixelSize(), 42)
+                self.assertEqual(popover.font_size_slider.value(), 42)
+                self.assertFalse(popover.error_label.isHidden())
+                self.assertIn("无法保存", popover.error_label.text())
+            finally:
+                window.settings_bridge.save_snapshot = original_save
                 window.close()
                 self.app.processEvents()
 

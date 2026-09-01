@@ -264,9 +264,19 @@ class SettingsOverlayIntegrationTests(unittest.TestCase):
         self.assertEqual(self.window.navigation_adapter.route, "browse")
         self.assertTrue(overlay.isVisible())
 
-    def test_settings_sliders_have_no_control_background(self) -> None:
+    def test_settings_removes_desktop_lyrics_controls_and_keeps_sliders_transparent(self) -> None:
         overlay = self.open_overlay()
-        slider = overlay._controls["floating_lyrics_font_size"].slider
+        for key in (
+            "floating_lyrics_color",
+            "floating_lyrics_font_family",
+            "floating_lyrics_opacity",
+            "floating_lyrics_font_size",
+            "floating_lyrics_width",
+            "floating_lyrics_passthrough",
+        ):
+            self.assertNotIn(key, overlay._controls)
+        self.assertIn("floating_lyrics_auto_open", overlay._controls)
+        slider = overlay._controls["immersive_lyrics_font_scale"].slider
         style = slider.styleSheet()
         self.assertIn("QSlider { background: transparent; border: 0;", style)
         self.assertIn("QSlider:focus { background: transparent; border: 0;", style)

@@ -10,25 +10,11 @@ from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QToolButton, QVBoxLay
 
 from app.ui_v2.adapters.lyrics_adapter import LyricsAdapter
 from app.ui_v2.adapters.playback_adapter import PlaybackAdapter
+from app.ui_v2.models.desktop_lyrics_settings import (
+    DESKTOP_LYRICS_COLORS,
+    normalize_desktop_lyrics_font,
+)
 from app.ui_v2.theme.tokens import OPEN_FONT_FAMILIES, Theme
-
-
-DESKTOP_LYRICS_COLORS: dict[str, str] = {
-    "white": "#F7F7F3",
-    "black": "#101114",
-    "yellow": "#F7D774",
-    "blue": "#8CC8FF",
-    "green": "#8ED9A5",
-    "pink": "#F3A6C7",
-    "purple": "#C7A7FF",
-}
-
-
-def normalize_desktop_lyrics_font(value: object) -> str:
-    """Return only one of the bundled open-font families."""
-
-    candidate = str(value or "").strip()
-    return candidate if candidate in OPEN_FONT_FAMILIES else OPEN_FONT_FAMILIES[0]
 
 
 def clamp_desktop_lyrics_position(position: QPoint, size, available: QRect) -> QPoint:
@@ -47,7 +33,6 @@ def clamp_desktop_lyrics_position(position: QPoint, size, available: QRect) -> Q
 class DesktopLyricsWindow(QWidget):
     """A shared-adapter lyrics overlay with smart input pass-through."""
 
-    settings_requested = Signal()
     position_changed = Signal(int, int)
     visible_changed = Signal(bool)
     enabled_changed = Signal(bool)
@@ -157,15 +142,12 @@ class DesktopLyricsWindow(QWidget):
         toolbar_layout = QHBoxLayout(self._toolbar)
         toolbar_layout.setContentsMargins(6, 4, 6, 4)
         toolbar_layout.setSpacing(3)
-        self._settings_button = self._toolbar_button("设置", "打开桌面歌词设置")
         self._reset_button = self._toolbar_button("归位", "将桌面歌词放回当前屏幕底部中央")
         self._passthrough_button = self._toolbar_button("穿透", "切换鼠标穿透")
         self._close_button = self._toolbar_button("关闭", "隐藏桌面歌词")
-        toolbar_layout.addWidget(self._settings_button)
         toolbar_layout.addWidget(self._reset_button)
         toolbar_layout.addWidget(self._passthrough_button)
         toolbar_layout.addWidget(self._close_button)
-        self._settings_button.clicked.connect(self.settings_requested)
         self._reset_button.clicked.connect(self.reset_position)
         self._passthrough_button.clicked.connect(self._toggle_passthrough)
         self._close_button.clicked.connect(self.hide_for_user)
@@ -247,10 +229,22 @@ class DesktopLyricsWindow(QWidget):
         )
         family = normalize_desktop_lyrics_font(self._settings.get("floating_lyrics_font_family"))
         size = int(self._settings.get("floating_lyrics_font_size", 42))
-        self._main_label.setStyleSheet(f"color: {lyric_color.name()};")
-        self._secondary_label.setStyleSheet(f"color: {secondary};")
-        self._main_label.setFont(QFont(family, size, QFont.Weight.DemiBold))
-        self._secondary_label.setFont(QFont(family, max(14, size // 2), QFont.Weight.Normal))
+        self._main_label.setStyleSheet(
+            f"color: {lyric_color.name()}; font-family: '{family}'; "
+            f"font-size: {size}px; font-weight: 600;"
+        )
+        self._secondary_label.setStyleSheet(
+            f"color: {secondary}; font-family: '{family}'; "
+            f"font-size: {max(14, size // 2)}px; font-weight: 400;"
+        )
+        main_font = QFont(family)
+        main_font.setPixelSize(size)
+        main_font.setWeight(QFont.Weight.DemiBold)
+        secondary_font = QFont(family)
+        secondary_font.setPixelSize(max(14, size // 2))
+        secondary_font.setWeight(QFont.Weight.Normal)
+        self._main_label.setFont(main_font)
+        self._secondary_label.setFont(secondary_font)
         self._update_toolbar_geometry()
 
     @property

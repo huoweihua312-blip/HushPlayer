@@ -40,7 +40,7 @@ from app.ui_v2.pages.online_source_page import OnlineSourcePage
 from app.ui_v2.pages.pending_imports_page import PendingImportsPage
 from app.services.music_folder_scan import MusicFolderImportService
 from app.ui_v2.theme.icons import fluent_settings_icon, fluent_settings_interactive_icon
-from app.ui_v2.theme.tokens import OPEN_FONT_FAMILIES, Theme
+from app.ui_v2.theme.tokens import Theme
 from app.ui_v2.widgets.settings_control_factory import (
     SettingsControlFactory,
     SettingSlider,
@@ -494,14 +494,24 @@ class SettingsOverlay(QWidget):
         immersive.add_row(self._slider_row("immersive_lyrics_font_scale", "沉浸歌词字号比例", "沿用现有 70% 到 160% 范围。", 70, 160, "%"))
         layout.addWidget(immersive)
 
-        floating = self._track_section(self._section("桌面歌词", "调整桌面歌词窗口的外观；显示后可从边缘进入交互并拖动位置。"))
-        floating.add_row(self._combo_row("floating_lyrics_color", "默认歌词颜色", "保存后应用到桌面歌词窗口。", (("白色", "white"), ("黑色", "black"), ("黄色", "yellow"), ("蓝色", "blue"), ("绿色", "green"), ("粉色", "pink"), ("紫色", "purple"))))
-        floating.add_row(self._combo_row("floating_lyrics_font_family", "歌词字体", "仅提供随应用分发且具有开放授权的字体。", tuple((family, family) for family in OPEN_FONT_FAMILIES)))
-        floating.add_row(self._slider_row("floating_lyrics_opacity", "默认不透明度", "保留现有 20% 到 100% 范围。", 20, 100, "%"))
-        floating.add_row(self._slider_row("floating_lyrics_font_size", "默认字号", "保留现有 22 到 84 px 范围。", 22, 84, " px"))
-        floating.add_row(self._slider_row("floating_lyrics_width", "默认宽度", "保留现有 420 到 1600 px 范围。", 420, 1600, " px"))
-        floating.add_row(self._toggle_row("floating_lyrics_passthrough", "默认鼠标穿透", "默认不拦截其他应用；进入窗口边缘后可临时操作工具栏。"))
-        layout.addWidget(floating)
+    def merge_external_snapshot(
+        self,
+        snapshot: SettingsSnapshot,
+        keys: tuple[str, ...] | list[str],
+    ) -> None:
+        """Merge settings saved by a separate quick editor into this session."""
+
+        if self._session is None:
+            return
+        updates = {str(key): snapshot.get(str(key)) for key in keys}
+        self._session.original_snapshot = self._session.original_snapshot.with_updates(updates)
+        self._session.working_snapshot = self._session.working_snapshot.with_updates(updates)
+        self._session.dirty_fields.difference_update(updates)
+        self._session.previewed_fields.difference_update(updates)
+        for key in updates:
+            self._session.validation_errors.pop(key, None)
+        self._sync_controls()
+        self._refresh_state()
 
     def _build_library(self, layout: QVBoxLayout) -> None:
         section = self._track_section(self._section("音乐文件夹", "修改后保存到现有扫描设置；手动扫描仍是独立操作。"))

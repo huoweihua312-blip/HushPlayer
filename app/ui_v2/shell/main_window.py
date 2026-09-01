@@ -74,11 +74,15 @@ from app.ui_v2.adapters.real_library_adapter import (
 )
 from app.ui_v2.adapters.legacy_settings_bridge import (
     LegacySettingsBridge,
+    SettingsBridgeError,
     normalize_immersive_background_visual_mode,
 )
 from app.ui_v2.mock.track_factory import create_mock_tracks
 from app.ui_v2.pages.all_songs_page import AllSongsPage
 from app.ui_v2.models.immersive_lyrics_options import ImmersiveLyricsOptions
+from app.ui_v2.models.desktop_lyrics_settings import (
+    DESKTOP_LYRICS_QUICK_SETTING_KEYS,
+)
 from app.ui_v2.models.settings_snapshot import SettingsSnapshot
 from app.ui_v2.models.track import Track, artwork_url_from_payload
 from app.ui_v2.shell.close_behavior_controller import CloseBehaviorController
@@ -88,6 +92,7 @@ from app.ui_v2.shell.navigation_sidebar import NavigationSidebar
 from app.ui_v2.shell.player_bar import PlayerBar
 from app.ui_v2.dialogs.update_dialog import UpdateDialog
 from app.ui_v2.widgets.custom_title_bar import CustomTitleBar
+from app.ui_v2.widgets.desktop_lyrics_quick_settings import DesktopLyricsQuickSettingsPopover
 from app.ui_v2.widgets.online_recovery_dialog import OnlineRecoveryCandidateDialog
 from app.ui_v2.widgets.settings_overlay import SettingsOverlay
 from app.ui_v2.widgets.track_action_dialogs import (
@@ -297,6 +302,14 @@ class MainWindow(QMainWindow):
         self._close_finalized = False
         self._startup_scan_timer: QTimer | None = None
         self.desktop_lyrics_window: DesktopLyricsWindow | None = None
+        self.desktop_lyrics_settings_popover: DesktopLyricsQuickSettingsPopover | None = None
+        self._desktop_lyrics_settings_pending_snapshot: SettingsSnapshot | None = None
+        self._desktop_lyrics_settings_save_timer = QTimer(self)
+        self._desktop_lyrics_settings_save_timer.setSingleShot(True)
+        self._desktop_lyrics_settings_save_timer.setInterval(250)
+        self._desktop_lyrics_settings_save_timer.timeout.connect(
+            self._save_pending_desktop_lyrics_settings
+        )
         self._desktop_lyrics_auto_opened = False
         self._pending_import_status = ""
         appearance_mode = str(
@@ -584,6 +597,8 @@ class MainWindow(QMainWindow):
             self.player_bar.set_theme(self._theme)
             if self.desktop_lyrics_window is not None:
                 self.desktop_lyrics_window.set_theme(self._theme)
+            if self.desktop_lyrics_settings_popover is not None:
+                self.desktop_lyrics_settings_popover.set_theme(self._theme)
             if self.settings_overlay is not None:
                 self.settings_overlay.set_theme(self._theme)
             self.router.set_content_safe_bottom(
@@ -784,8 +799,13 @@ class MainWindow(QMainWindow):
     def _finalize_close(self) -> None:
         if self._close_finalized:
             return
+        if self._desktop_lyrics_settings_pending_snapshot is not None:
+            self._desktop_lyrics_settings_save_timer.stop()
+            self._save_pending_desktop_lyrics_settings()
         self._close_finalized = True
         QApplication.instance().removeEventFilter(self)
+        if self.desktop_lyrics_settings_popover is not None:
+            self.desktop_lyrics_settings_popover.hide()
         if self.settings_overlay is not None and self.settings_overlay.isVisible():
             self.settings_overlay.cancel_and_close()
         if self.desktop_lyrics_window is not None:
@@ -1073,6 +1093,9 @@ class MainWindow(QMainWindow):
         self.lyrics_adapter.seek_requested.connect(self.playback_adapter.seek)
         self.player_bar.mock_action_requested.connect(self._on_player_bar_action)
         self.player_bar.track_open_requested.connect(self._open_now_playing)
+        self.player_bar.desktop_lyrics_settings_requested.connect(
+            self._toggle_desktop_lyrics_quick_settings
+        )
         self.library_collection.track_updated.connect(self.playback_adapter.update_track)
         if self.online_adapter.is_formal:
             self.online_adapter.track_updated.connect(self.playback_adapter.update_track)
@@ -1885,14 +1908,90 @@ class MainWindow(QMainWindow):
             self.lyrics_adapter,
             self._theme,
         )
-        window.settings_requested.connect(
-            lambda: self.open_settings_overlay("lyrics")
-        )
         window.position_changed.connect(self._persist_desktop_lyrics_position)
         window.enabled_changed.connect(self._on_desktop_lyrics_enabled_changed)
         self.desktop_lyrics_window = window
         window.apply_settings(self._settings_snapshot.to_dict())
         return window
+
+    def _ensure_desktop_lyrics_settings_popover(
+        self,
+    ) -> DesktopLyricsQuickSettingsPopover:
+        popover = self.desktop_lyrics_settings_popover
+        if popover is not None:
+            return popover
+        popover = DesktopLyricsQuickSettingsPopover(self._theme, self)
+        popover.value_changed.connect(self._on_desktop_lyrics_setting_changed)
+        popover.reset_position_requested.connect(
+            self._reset_desktop_lyrics_position_from_quick_settings
+        )
+        self.desktop_lyrics_settings_popover = popover
+        return popover
+
+    def _toggle_desktop_lyrics_quick_settings(self) -> None:
+        if self._close_finalized:
+            return
+        popover = self._ensure_desktop_lyrics_settings_popover()
+        if popover.isVisible():
+            popover.hide()
+            return
+        snapshot = (
+            self._desktop_lyrics_settings_pending_snapshot
+            or self._settings_snapshot
+        )
+        popover.set_values(snapshot.to_dict())
+        popover.show_anchored(self.player_bar.desktop_lyrics_button)
+
+    def _on_desktop_lyrics_setting_changed(self, key: str, value: object) -> None:
+        if self._close_finalized or key not in DESKTOP_LYRICS_QUICK_SETTING_KEYS:
+            return
+        base = (
+            self._desktop_lyrics_settings_pending_snapshot
+            or self._settings_snapshot
+        )
+        candidate = base.with_updates({key: value})
+        errors = self.settings_bridge.validate(candidate.to_dict())
+        if key in errors:
+            if self.desktop_lyrics_settings_popover is not None:
+                self.desktop_lyrics_settings_popover.show_error(errors[key])
+            return
+        self._desktop_lyrics_settings_pending_snapshot = candidate
+        if self.desktop_lyrics_settings_popover is not None:
+            self.desktop_lyrics_settings_popover.show_error("")
+        if self.desktop_lyrics_window is not None:
+            self.desktop_lyrics_window.apply_settings(candidate.to_dict())
+        self._desktop_lyrics_settings_save_timer.start()
+
+    def _save_pending_desktop_lyrics_settings(self) -> bool:
+        candidate = self._desktop_lyrics_settings_pending_snapshot
+        if candidate is None:
+            return True
+        previous = self._settings_snapshot
+        try:
+            saved = self.settings_bridge.save_snapshot(candidate)
+        except SettingsBridgeError as error:
+            self._desktop_lyrics_settings_pending_snapshot = None
+            if self.desktop_lyrics_window is not None:
+                self.desktop_lyrics_window.apply_settings(previous.to_dict())
+            if self.desktop_lyrics_settings_popover is not None:
+                self.desktop_lyrics_settings_popover.set_values(previous.to_dict())
+                self.desktop_lyrics_settings_popover.show_error(str(error))
+            return False
+        self._settings_snapshot = SettingsSnapshot.from_mapping(saved.to_dict())
+        self._desktop_lyrics_settings_pending_snapshot = None
+        if self.desktop_lyrics_settings_popover is not None:
+            self.desktop_lyrics_settings_popover.set_values(saved.to_dict())
+        if self.settings_overlay is not None and self.settings_overlay.isVisible():
+            self.settings_overlay.merge_external_snapshot(
+                saved,
+                DESKTOP_LYRICS_QUICK_SETTING_KEYS,
+            )
+        return True
+
+    def _reset_desktop_lyrics_position_from_quick_settings(self) -> None:
+        if not self._save_pending_desktop_lyrics_settings():
+            return
+        self._ensure_desktop_lyrics_window().reset_position()
 
     def _show_desktop_lyrics(self) -> None:
         if self._close_finalized:
@@ -1921,6 +2020,11 @@ class MainWindow(QMainWindow):
                     {"floating_lyrics_x": int(x), "floating_lyrics_y": int(y)}
                 )
             )
+            if self.settings_overlay is not None and self.settings_overlay.isVisible():
+                self.settings_overlay.merge_external_snapshot(
+                    self._settings_snapshot,
+                    ("floating_lyrics_x", "floating_lyrics_y"),
+                )
         except Exception:
             # Dragging must never surface a modal error or affect playback.
             return
