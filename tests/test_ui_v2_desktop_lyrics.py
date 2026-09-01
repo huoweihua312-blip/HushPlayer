@@ -10,6 +10,7 @@ from pathlib import Path
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PySide6.QtCore import QPoint, QRect, QSize, Qt
+from PySide6.QtGui import QContextMenuEvent, QGuiApplication
 from PySide6.QtWidgets import QApplication
 
 from app.startup_diagnostics import StartupDiagnostics
@@ -126,7 +127,7 @@ class DesktopLyricsWindowTests(unittest.TestCase):
         margins = self.window._secondary_layout.contentsMargins()
         self.assertGreater(margins.left(), margins.right())
 
-    def test_font_size_uses_pixels_and_toolbar_has_no_settings_button(self) -> None:
+    def test_font_size_uses_pixels_and_only_one_lock_button_is_created(self) -> None:
         self.window.show()
         self.window.apply_settings({"floating_lyrics_font_size": 22})
         self.app.processEvents()
@@ -136,7 +137,71 @@ class DesktopLyricsWindowTests(unittest.TestCase):
         self.app.processEvents()
         self.assertEqual(self.window._main_label.font().pixelSize(), 84)
         self.assertEqual(self.window._secondary_label.font().pixelSize(), 42)
+        self.assertFalse(hasattr(self.window, "_toolbar"))
+        self.assertFalse(hasattr(self.window, "_reset_button"))
+        self.assertFalse(hasattr(self.window, "_close_button"))
         self.assertFalse(hasattr(self.window, "_settings_button"))
+        self.assertEqual(self.window._lock_button.size(), QSize(32, 32))
+        self.assertEqual(
+            self.window._lock_button.x(),
+            (self.window.width() - self.window._lock_button.width()) // 2,
+        )
+
+    def test_unlocked_context_click_requests_settings_without_starting_drag(self) -> None:
+        requests: list[QPoint] = []
+        self.window.settings_requested.connect(requests.append)
+        self.window.apply_settings({"floating_lyrics_passthrough": False})
+        self.window.show()
+        self.app.processEvents()
+        local_position = QPoint(120, 70)
+        global_position = self.window.mapToGlobal(local_position)
+        event = QContextMenuEvent(
+            QContextMenuEvent.Reason.Mouse,
+            local_position,
+            global_position,
+        )
+        QApplication.sendEvent(self.window._surface, event)
+        self.assertEqual(requests, [global_position])
+        self.assertIsNone(self.window._drag_offset)
+
+    def test_locked_hover_temporarily_accepts_input_and_lock_button_requests_change(self) -> None:
+        requested_states: list[bool] = []
+        visibility_changes: list[bool] = []
+        self.window.lock_state_change_requested.connect(requested_states.append)
+        self.window.visible_changed.connect(visibility_changes.append)
+        track = next(track for track in create_mock_tracks(80) if not track.is_missing)
+        self.lyrics.set_track(track)
+        self.window.show_for_current_screen()
+        self.app.processEvents()
+        visibility_changes.clear()
+        self.assertTrue(self.window.is_locked)
+        self.assertTrue(
+            bool(self.window.windowFlags() & Qt.WindowType.WindowTransparentForInput)
+        )
+
+        self.window._show_lock_affordance()
+        self.app.processEvents()
+        self.assertTrue(self.window.is_locked)
+        self.assertTrue(self.window._lock_button.isVisible())
+        self.assertFalse(
+            bool(self.window.windowFlags() & Qt.WindowType.WindowTransparentForInput)
+        )
+        self.assertEqual(visibility_changes, [])
+        self.window._lock_button.click()
+        self.assertEqual(requested_states, [False])
+
+        self.window._hide_lock_affordance()
+        self.app.processEvents()
+        self.assertTrue(self.window.is_locked)
+        self.assertFalse(self.window._lock_button.isVisible())
+        self.assertTrue(
+            bool(self.window.windowFlags() & Qt.WindowType.WindowTransparentForInput)
+        )
+        self.assertEqual(visibility_changes, [])
+
+        self.window.apply_settings({"floating_lyrics_passthrough": False})
+        self.window._lock_button.click()
+        self.assertEqual(requested_states, [False, True])
 
 
 class DesktopLyricsMainWindowIntegrationTests(unittest.TestCase):
@@ -187,6 +252,49 @@ class DesktopLyricsMainWindowIntegrationTests(unittest.TestCase):
                 )
                 self.app.processEvents()
                 self.assertFalse(popover.isVisible())
+            finally:
+                window.close()
+                self.app.processEvents()
+
+    def test_desktop_context_request_opens_settings_near_global_position(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            window = MainWindow(settings_path=Path(directory) / "settings.json")
+            try:
+                window.resize(1200, 800)
+                window.show()
+                self.app.processEvents()
+                desktop = window._ensure_desktop_lyrics_window()
+                requested_position = QPoint(420, 360)
+                desktop.settings_requested.emit(requested_position)
+                self.app.processEvents()
+                popover = window.desktop_lyrics_settings_popover
+                self.assertIsNotNone(popover)
+                self.assertTrue(popover.isVisible())
+                screen = QGuiApplication.screenAt(requested_position)
+                if screen is not None:
+                    available = screen.availableGeometry()
+                    self.assertTrue(available.contains(popover.frameGeometry()))
+                self.assertIsNone(desktop._drag_offset)
+                self.assertEqual(window.navigation_adapter.route, "browse")
+            finally:
+                window.close()
+                self.app.processEvents()
+
+    def test_lock_button_uses_existing_preview_and_auto_save_path(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            settings_path = Path(directory) / "settings.json"
+            window = MainWindow(settings_path=settings_path)
+            try:
+                desktop = window._ensure_desktop_lyrics_window()
+                self.assertTrue(desktop.is_locked)
+                desktop._lock_button.click()
+                self.app.processEvents()
+                self.assertFalse(desktop.is_locked)
+                self.assertTrue(window._desktop_lyrics_settings_save_timer.isActive())
+                window._desktop_lyrics_settings_save_timer.stop()
+                self.assertTrue(window._save_pending_desktop_lyrics_settings())
+                document = json.loads(settings_path.read_text(encoding="utf-8"))
+                self.assertFalse(document["floating_lyrics_passthrough"])
             finally:
                 window.close()
                 self.app.processEvents()

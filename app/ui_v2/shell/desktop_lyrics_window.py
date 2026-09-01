@@ -4,8 +4,15 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 
-from PySide6.QtCore import QEvent, QPoint, QRect, Qt, QTimer, Signal
-from PySide6.QtGui import QColor, QCursor, QFont, QGuiApplication, QMouseEvent
+from PySide6.QtCore import QEvent, QPoint, QRect, QSize, Qt, QTimer, Signal
+from PySide6.QtGui import (
+    QColor,
+    QContextMenuEvent,
+    QCursor,
+    QFont,
+    QGuiApplication,
+    QMouseEvent,
+)
 from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QToolButton, QVBoxLayout, QWidget
 
 from app.ui_v2.adapters.lyrics_adapter import LyricsAdapter
@@ -14,6 +21,7 @@ from app.ui_v2.models.desktop_lyrics_settings import (
     DESKTOP_LYRICS_COLORS,
     normalize_desktop_lyrics_font,
 )
+from app.ui_v2.theme.icons import icon
 from app.ui_v2.theme.tokens import OPEN_FONT_FAMILIES, Theme
 
 
@@ -37,8 +45,9 @@ class DesktopLyricsWindow(QWidget):
     visible_changed = Signal(bool)
     enabled_changed = Signal(bool)
     interaction_mode_changed = Signal(bool)
+    settings_requested = Signal(QPoint)
+    lock_state_change_requested = Signal(bool)
 
-    _HOT_ZONE_PX = 24
     _CURSOR_POLL_MS = 160
     _INTERACTION_IDLE_MS = 1_500
 
@@ -58,10 +67,11 @@ class DesktopLyricsWindow(QWidget):
         self._drag_offset: QPoint | None = None
         self._saved_x = -1
         self._saved_y = -1
-        self._passthrough = True
+        self._locked = True
+        self._input_passthrough = True
+        self._suppress_unlock_until_exit = False
         self._enabled = False
         self._has_renderable_lyric = False
-        self._interaction_mode = False
         self._changing_input_mode = False
         self._rendered_main: str | None = None
         self._rendered_secondary: str | None = None
@@ -97,7 +107,7 @@ class DesktopLyricsWindow(QWidget):
         self._interaction_timer = QTimer(self)
         self._interaction_timer.setSingleShot(True)
         self._interaction_timer.setInterval(self._INTERACTION_IDLE_MS)
-        self._interaction_timer.timeout.connect(self._leave_interactive_mode)
+        self._interaction_timer.timeout.connect(self._hide_lock_affordance)
 
         playback_adapter.track_changed.connect(self._schedule_render)
         lyrics_adapter.document_changed.connect(self._schedule_render)
@@ -137,30 +147,14 @@ class DesktopLyricsWindow(QWidget):
         surface_layout.addLayout(self._secondary_layout)
         surface_layout.addStretch(1)
 
-        self._toolbar = QFrame(self)
-        self._toolbar.setObjectName("desktopLyricsToolbar")
-        toolbar_layout = QHBoxLayout(self._toolbar)
-        toolbar_layout.setContentsMargins(6, 4, 6, 4)
-        toolbar_layout.setSpacing(3)
-        self._reset_button = self._toolbar_button("归位", "将桌面歌词放回当前屏幕底部中央")
-        self._passthrough_button = self._toolbar_button("穿透", "切换鼠标穿透")
-        self._close_button = self._toolbar_button("关闭", "隐藏桌面歌词")
-        toolbar_layout.addWidget(self._reset_button)
-        toolbar_layout.addWidget(self._passthrough_button)
-        toolbar_layout.addWidget(self._close_button)
-        self._reset_button.clicked.connect(self.reset_position)
-        self._passthrough_button.clicked.connect(self._toggle_passthrough)
-        self._close_button.clicked.connect(self.hide_for_user)
-        self._toolbar.hide()
-
-    def _toolbar_button(self, text: str, tooltip: str) -> QToolButton:
-        button = QToolButton(self._toolbar)
-        button.setText(text)
-        button.setToolTip(tooltip)
-        button.setAccessibleName(text)
-        button.setFocusPolicy(Qt.FocusPolicy.TabFocus)
-        button.setMinimumSize(42, 30)
-        return button
+        self._lock_button = QToolButton(self)
+        self._lock_button.setObjectName("desktopLyricsLockButton")
+        self._lock_button.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonIconOnly)
+        self._lock_button.setFocusPolicy(Qt.FocusPolicy.TabFocus)
+        self._lock_button.setFixedSize(32, 32)
+        self._lock_button.setIconSize(QSize(17, 17))
+        self._lock_button.clicked.connect(self._request_lock_toggle)
+        self._lock_button.hide()
 
     def set_theme(self, theme: Theme) -> None:
         self._theme = theme
@@ -204,7 +198,7 @@ class DesktopLyricsWindow(QWidget):
             int(self._settings["floating_lyrics_height"]),
         )
         self._apply_visuals()
-        self._set_passthrough(bool(self._settings["floating_lyrics_passthrough"]))
+        self._apply_lock_preference(bool(self._settings["floating_lyrics_passthrough"]))
         if self.isVisible():
             self._place_on_screen()
         self._schedule_render()
@@ -215,18 +209,19 @@ class DesktopLyricsWindow(QWidget):
         secondary = (
             f"rgba({lyric_color.red()}, {lyric_color.green()}, {lyric_color.blue()}, 0.72)"
         )
-        accent = self._theme.colors.accent if self._theme is not None else "#7AA2F7"
         self.setWindowOpacity(int(self._settings.get("floating_lyrics_opacity", 100)) / 100.0)
         self._surface.setStyleSheet(
             "QFrame#desktopLyricsSurface { background: transparent; border: 0; }"
         )
-        self._toolbar.setStyleSheet(
-            "QFrame#desktopLyricsToolbar { background: rgba(18, 20, 25, 0.94); border: 1px solid rgba(255, 255, 255, 0.18); border-radius: 10px; }"
-            f"QToolButton {{ color: #F7F8FA; background: transparent; border: 0; border-radius: 7px; padding: 0 8px; font-size: 12px; }}"
-            f"QToolButton:hover {{ background: {accent}; color: #101114; }}"
-            "QToolButton:pressed { background: rgba(255, 255, 255, 0.22); }"
-            "QToolButton:focus { border: 1px solid rgba(255, 255, 255, 0.78); }"
+        colors = self._theme.colors
+        self._lock_button.setStyleSheet(
+            "QToolButton#desktopLyricsLockButton { background: transparent; border: 0; "
+            "border-radius: 8px; padding: 0; }"
+            f"QToolButton#desktopLyricsLockButton:hover {{ background: {colors.hover_background}; }}"
+            f"QToolButton#desktopLyricsLockButton:pressed {{ background: {colors.surface_pressed}; }}"
+            f"QToolButton#desktopLyricsLockButton:focus {{ border: 1px solid {colors.focus_ring}; }}"
         )
+        self._update_lock_button()
         family = normalize_desktop_lyrics_font(self._settings.get("floating_lyrics_font_family"))
         size = int(self._settings.get("floating_lyrics_font_size", 42))
         self._main_label.setStyleSheet(
@@ -245,13 +240,19 @@ class DesktopLyricsWindow(QWidget):
         secondary_font.setWeight(QFont.Weight.Normal)
         self._main_label.setFont(main_font)
         self._secondary_label.setFont(secondary_font)
-        self._update_toolbar_geometry()
+        self._update_lock_button_geometry()
 
     @property
     def is_enabled(self) -> bool:
         """Return the user's logical desktop-lyrics choice, independent of empty lyrics."""
 
         return self._enabled
+
+    @property
+    def is_locked(self) -> bool:
+        """Return the persisted mouse-pass-through preference."""
+
+        return self._locked
 
     def _schedule_render(self, *_args) -> None:
         if not self._render_timer.isActive():
@@ -327,41 +328,36 @@ class DesktopLyricsWindow(QWidget):
         self._place_on_screen()
         self._emit_position()
 
-    def _update_toolbar_geometry(self) -> None:
-        if not hasattr(self, "_toolbar"):
+    def _update_lock_button_geometry(self) -> None:
+        if not hasattr(self, "_lock_button"):
             return
-        self._toolbar.adjustSize()
-        self._toolbar.setGeometry(
-            max(8, self.width() - self._toolbar.sizeHint().width() - 12),
-            8,
-            self._toolbar.sizeHint().width(),
-            self._toolbar.sizeHint().height(),
-        )
-        self._toolbar.raise_()
+        self._lock_button.move(max(8, (self.width() - self._lock_button.width()) // 2), 6)
+        self._lock_button.raise_()
 
-    def _set_interactive(self) -> None:
-        self._interaction_mode = True
-        self._interaction_timer.stop()
-        self._toolbar.show()
-        self._toolbar.raise_()
-        self._set_passthrough(False)
+    def _apply_lock_preference(self, locked: bool) -> None:
+        locked = bool(locked)
+        changed = locked != self._locked
+        self._locked = locked
+        if changed and locked:
+            self._suppress_unlock_until_exit = self.frameGeometry().contains(QCursor.pos())
+            self._lock_button.hide()
+            self._set_input_passthrough(True)
+        elif changed:
+            self._suppress_unlock_until_exit = False
+            self._set_input_passthrough(False)
+            if self.frameGeometry().contains(QCursor.pos()):
+                self._show_lock_affordance()
+        elif not locked:
+            self._set_input_passthrough(False)
+        elif not self._lock_button.isVisible():
+            self._set_input_passthrough(True)
+        self._update_lock_button()
 
-    def _leave_interactive_mode(self) -> None:
-        if self._drag_offset is not None:
-            return
-        self._toolbar.hide()
-        self._set_passthrough(True)
-        self._interaction_mode = False
-
-    def _set_passthrough(self, enabled: bool) -> None:
+    def _set_input_passthrough(self, enabled: bool) -> None:
         enabled = bool(enabled)
-        if enabled == self._passthrough:
-            self._toolbar.setVisible(not enabled)
-            self._interaction_mode = not enabled
-            self._update_passthrough_button()
+        if enabled == self._input_passthrough:
             return
-        self._passthrough = enabled
-        self._interaction_mode = not enabled
+        self._input_passthrough = enabled
         flags = self.windowFlags()
         if enabled:
             flags |= Qt.WindowType.WindowTransparentForInput
@@ -371,55 +367,54 @@ class DesktopLyricsWindow(QWidget):
         self._changing_input_mode = True
         try:
             self.setWindowFlags(flags)
+            if was_visible:
+                self.show()
+                self.raise_()
+                self._update_lock_button_geometry()
         finally:
             self._changing_input_mode = False
-        self._toolbar.setVisible(not enabled)
-        self._update_passthrough_button()
         self.interaction_mode_changed.emit(not enabled)
-        if was_visible:
-            self.show()
-            self.raise_()
-            self._update_toolbar_geometry()
 
-    def _toggle_passthrough(self) -> None:
-        target_passthrough = not self._passthrough
-        self._set_passthrough(target_passthrough)
-        self._interaction_mode = not target_passthrough
-        if not self._passthrough:
-            self._interaction_timer.stop()
-
-    def _update_passthrough_button(self) -> None:
-        if not hasattr(self, "_passthrough_button"):
+    def _show_lock_affordance(self) -> None:
+        if self._suppress_unlock_until_exit:
             return
-        self._passthrough_button.setText("穿透" if not self._passthrough else "交互")
-        self._passthrough_button.setToolTip(
-            "当前为交互模式，点击后恢复鼠标穿透"
-            if not self._passthrough
-            else "当前为鼠标穿透，点击边缘或使用工具栏进入交互"
-        )
+        self._interaction_timer.stop()
+        if self._locked:
+            self._set_input_passthrough(False)
+        self._lock_button.show()
+        self._lock_button.raise_()
+
+    def _hide_lock_affordance(self) -> None:
+        if self._drag_offset is not None:
+            return
+        self._lock_button.hide()
+        if self._locked:
+            self._set_input_passthrough(True)
+
+    def _request_lock_toggle(self) -> None:
+        self.lock_state_change_requested.emit(not self._locked)
+
+    def _update_lock_button(self) -> None:
+        if not hasattr(self, "_lock_button"):
+            return
+        action = "解锁" if self._locked else "锁定"
+        self._lock_button.setIcon(icon("unlock" if self._locked else "lock", self._theme))
+        self._lock_button.setToolTip(f"{action}桌面歌词")
+        self._lock_button.setAccessibleName(f"{action}桌面歌词")
 
     def _poll_cursor(self) -> None:
         if not self.isVisible():
             return
         cursor = QCursor.pos()
         frame = self.frameGeometry()
-        if self._passthrough:
-            if frame.adjusted(-8, -8, 8, 8).contains(cursor) and self._near_hot_zone(cursor, frame):
-                self._set_interactive()
-            return
         if frame.contains(cursor):
             self._interaction_timer.stop()
-        elif not self._interaction_timer.isActive():
+            if not self._suppress_unlock_until_exit and not self._lock_button.isVisible():
+                self._show_lock_affordance()
+            return
+        self._suppress_unlock_until_exit = False
+        if self._lock_button.isVisible() and not self._interaction_timer.isActive():
             self._interaction_timer.start()
-
-    def _near_hot_zone(self, cursor: QPoint, frame: QRect) -> bool:
-        margin = self._HOT_ZONE_PX
-        return (
-            abs(cursor.x() - frame.left()) <= margin
-            or abs(cursor.x() - frame.right()) <= margin
-            or abs(cursor.y() - frame.top()) <= margin
-            or abs(cursor.y() - frame.bottom()) <= margin
-        )
 
     def _emit_position(self) -> None:
         self._saved_x = int(self.x())
@@ -427,18 +422,14 @@ class DesktopLyricsWindow(QWidget):
         self.position_changed.emit(self._saved_x, self._saved_y)
 
     def mousePressEvent(self, event: QMouseEvent) -> None:  # noqa: N802
-        if (
-            not self._passthrough
-            and event.button() == Qt.MouseButton.LeftButton
-            and not self._toolbar.geometry().contains(event.position().toPoint())
-        ):
+        if not self._locked and event.button() == Qt.MouseButton.LeftButton:
             self._drag_offset = event.globalPosition().toPoint() - self.frameGeometry().topLeft()
             event.accept()
             return
         super().mousePressEvent(event)
 
     def mouseMoveEvent(self, event: QMouseEvent) -> None:  # noqa: N802
-        if self._drag_offset is not None and not self._passthrough:
+        if self._drag_offset is not None and not self._locked:
             self.move(event.globalPosition().toPoint() - self._drag_offset)
             event.accept()
             return
@@ -453,6 +444,11 @@ class DesktopLyricsWindow(QWidget):
         super().mouseReleaseEvent(event)
 
     def eventFilter(self, watched, event) -> bool:  # noqa: N802
+        if watched is self._surface and isinstance(event, QContextMenuEvent):
+            if not self._locked:
+                self.settings_requested.emit(event.globalPos())
+            event.accept()
+            return True
         if watched is self._surface and isinstance(event, QMouseEvent):
             if (
                 event.type() == QEvent.Type.MouseButtonPress
@@ -471,34 +467,29 @@ class DesktopLyricsWindow(QWidget):
     def resizeEvent(self, event) -> None:  # noqa: N802
         super().resizeEvent(event)
         self._surface.setGeometry(self.rect())
-        self._update_toolbar_geometry()
+        self._update_lock_button_geometry()
 
     def showEvent(self, event) -> None:  # noqa: N802
+        input_mode_change = self._changing_input_mode
         super().showEvent(event)
-        self._place_on_screen()
-        self._cursor_timer.start()
-        self.visible_changed.emit(True)
+        if not input_mode_change:
+            self._place_on_screen()
+            self._cursor_timer.start()
+            self.visible_changed.emit(True)
 
     def hideEvent(self, event) -> None:  # noqa: N802
-        if not self._changing_input_mode and not self._passthrough:
-            # Interaction mode is temporary. Reopening from the player bar
-            # should return to the safe default instead of blocking input.
-            self._passthrough = True
-            self._toolbar.hide()
-            self._changing_input_mode = True
-            try:
-                self.setWindowFlags(
-                    self.windowFlags() | Qt.WindowType.WindowTransparentForInput
-                )
-            finally:
-                self._changing_input_mode = False
-            self._update_passthrough_button()
-            self._interaction_mode = False
-        self._cursor_timer.stop()
-        self._interaction_timer.stop()
-        self._drag_offset = None
+        input_mode_change = self._changing_input_mode
+        if not input_mode_change:
+            self._lock_button.hide()
+            self._suppress_unlock_until_exit = False
+            if self._locked:
+                self._set_input_passthrough(True)
+            self._cursor_timer.stop()
+            self._interaction_timer.stop()
+            self._drag_offset = None
         super().hideEvent(event)
-        self.visible_changed.emit(False)
+        if not input_mode_change:
+            self.visible_changed.emit(False)
 
     def closeEvent(self, event) -> None:  # noqa: N802
         if self._enabled:

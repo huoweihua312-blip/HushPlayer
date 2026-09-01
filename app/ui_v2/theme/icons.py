@@ -32,6 +32,8 @@ IconName = Literal[
     "playlist_more",
     "add",
     "lyrics",
+    "lock",
+    "unlock",
     "settings",
     "settings_light",
     "sun",
@@ -647,6 +649,40 @@ def _paint_shape(painter: QPainter, name: IconName, rect: QRectF, color: QColor)
         for row, width in enumerate((0.44, 0.34, 0.48)):
             y = rect.top() + rect.height() * (0.33 + row * 0.18)
             painter.drawLine(rect.left() + rect.width() * 0.29, y, rect.left() + rect.width() * (0.29 + width), y)
+    elif name in ("lock", "unlock"):
+        body = QRectF(
+            rect.left() + rect.width() * 0.18,
+            rect.top() + rect.height() * 0.44,
+            rect.width() * 0.64,
+            rect.height() * 0.43,
+        )
+        painter.drawRoundedRect(body, rect.width() * 0.08, rect.width() * 0.08)
+        shackle = QPainterPath()
+        if name == "lock":
+            shackle.moveTo(body.left() + body.width() * 0.2, body.top())
+            shackle.lineTo(body.left() + body.width() * 0.2, rect.top() + rect.height() * 0.3)
+            shackle.cubicTo(
+                body.left() + body.width() * 0.2,
+                rect.top() + rect.height() * 0.08,
+                body.right() - body.width() * 0.2,
+                rect.top() + rect.height() * 0.08,
+                body.right() - body.width() * 0.2,
+                rect.top() + rect.height() * 0.3,
+            )
+            shackle.lineTo(body.right() - body.width() * 0.2, body.top())
+        else:
+            shackle.moveTo(body.right() - body.width() * 0.2, body.top())
+            shackle.lineTo(body.right() - body.width() * 0.2, rect.top() + rect.height() * 0.29)
+            shackle.cubicTo(
+                body.right() - body.width() * 0.2,
+                rect.top() + rect.height() * 0.08,
+                body.left() + body.width() * 0.2,
+                rect.top() + rect.height() * 0.08,
+                body.left() + body.width() * 0.2,
+                rect.top() + rect.height() * 0.3,
+            )
+        painter.drawPath(shackle)
+        painter.drawPoint(rect.center().x(), body.center().y())
     elif name == "settings":
         # Short, squared teeth and a double ring give this a true gear form
         # instead of the sunburst produced by free-standing radial strokes.

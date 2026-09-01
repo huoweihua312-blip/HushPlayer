@@ -298,7 +298,28 @@ class DesktopLyricsQuickSettingsPopover(QFrame):
             x = max(available.left() + 8, min(x, available.right() - self.width() - 7))
             if y < available.top() + 8:
                 y = anchor_bottom_right.y() + 9
-            y = max(available.top() + 8, min(y, available.bottom() - self.height() - 7))
+        self._show_at(x, y, screen)
+
+    def show_near_global(self, position: QPoint) -> None:
+        """Place the popup near a desktop-lyrics context click."""
+
+        self.adjustSize()
+        screen = QGuiApplication.screenAt(position) or QGuiApplication.primaryScreen()
+        x = int(position.x()) + 10
+        y = int(position.y()) + 10
+        if screen is not None:
+            available = screen.availableGeometry()
+            if x + self.width() > available.right() - 7:
+                x = int(position.x()) - self.width() - 10
+            if y + self.height() > available.bottom() - 7:
+                y = int(position.y()) - self.height() - 10
+        self._show_at(x, y, screen)
+
+    def _show_at(self, x: int, y: int, screen) -> None:
+        if screen is not None:
+            available = screen.availableGeometry()
+            x = max(available.left() + 8, min(int(x), available.right() - self.width() - 7))
+            y = max(available.top() + 8, min(int(y), available.bottom() - self.height() - 7))
         self.move(x, y)
         self.show()
         self.raise_()

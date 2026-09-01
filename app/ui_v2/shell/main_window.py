@@ -1910,6 +1910,12 @@ class MainWindow(QMainWindow):
         )
         window.position_changed.connect(self._persist_desktop_lyrics_position)
         window.enabled_changed.connect(self._on_desktop_lyrics_enabled_changed)
+        window.settings_requested.connect(
+            self._toggle_desktop_lyrics_quick_settings_at
+        )
+        window.lock_state_change_requested.connect(
+            self._on_desktop_lyrics_lock_state_requested
+        )
         self.desktop_lyrics_window = window
         window.apply_settings(self._settings_snapshot.to_dict())
         return window
@@ -1929,18 +1935,41 @@ class MainWindow(QMainWindow):
         return popover
 
     def _toggle_desktop_lyrics_quick_settings(self) -> None:
-        if self._close_finalized:
+        popover = self._prepare_desktop_lyrics_settings_popover()
+        if popover is None:
             return
+        popover.show_anchored(self.player_bar.desktop_lyrics_button)
+
+    def _toggle_desktop_lyrics_quick_settings_at(
+        self,
+        global_position: QPoint,
+    ) -> None:
+        popover = self._prepare_desktop_lyrics_settings_popover()
+        if popover is None:
+            return
+        popover.show_near_global(global_position)
+
+    def _prepare_desktop_lyrics_settings_popover(
+        self,
+    ) -> DesktopLyricsQuickSettingsPopover | None:
+        if self._close_finalized:
+            return None
         popover = self._ensure_desktop_lyrics_settings_popover()
         if popover.isVisible():
             popover.hide()
-            return
+            return None
         snapshot = (
             self._desktop_lyrics_settings_pending_snapshot
             or self._settings_snapshot
         )
         popover.set_values(snapshot.to_dict())
-        popover.show_anchored(self.player_bar.desktop_lyrics_button)
+        return popover
+
+    def _on_desktop_lyrics_lock_state_requested(self, locked: bool) -> None:
+        self._on_desktop_lyrics_setting_changed(
+            "floating_lyrics_passthrough",
+            bool(locked),
+        )
 
     def _on_desktop_lyrics_setting_changed(self, key: str, value: object) -> None:
         if self._close_finalized or key not in DESKTOP_LYRICS_QUICK_SETTING_KEYS:
