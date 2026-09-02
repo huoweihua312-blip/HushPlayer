@@ -95,6 +95,7 @@ class DesktopLyricsWindow(QWidget):
         self._settings_popover_visible = False
         self._right_button_pressed = False
         self._mouse_grabbed = False
+        self._pending_drag_position: QPoint | None = None
         self._enabled = False
         self._has_renderable_lyric = False
         self._changing_input_mode = False
@@ -133,6 +134,9 @@ class DesktopLyricsWindow(QWidget):
         self._interaction_timer.setSingleShot(True)
         self._interaction_timer.setInterval(self._INTERACTION_IDLE_MS)
         self._interaction_timer.timeout.connect(self._hide_lock_affordance)
+        self._drag_move_timer = QTimer(self)
+        self._drag_move_timer.setInterval(16)
+        self._drag_move_timer.timeout.connect(self._apply_pending_drag_move)
 
         playback_adapter.track_changed.connect(self._schedule_render)
         lyrics_adapter.document_changed.connect(self._schedule_render)
@@ -197,6 +201,8 @@ class DesktopLyricsWindow(QWidget):
             self._settings.get("floating_lyrics_font_family"),
             self._settings.get("floating_lyrics_font_size"),
         )
+        previous_saved_position = (self._saved_x, self._saved_y)
+        visible_position = QPoint(self.pos()) if self.isVisible() else None
         self._settings.update(dict(values or {}))
         self._settings["floating_lyrics_font_family"] = normalize_desktop_lyrics_font(
             self._settings.get("floating_lyrics_font_family")
@@ -250,7 +256,10 @@ class DesktopLyricsWindow(QWidget):
             self._apply_visuals()
         self._apply_lock_preference(bool(self._settings["floating_lyrics_passthrough"]))
         if self.isVisible():
-            self._place_on_screen()
+            position_changed = (self._saved_x, self._saved_y) != previous_saved_position
+            self._place_on_screen(
+                preferred_position=visible_position if not position_changed else None
+            )
         if not live_preview:
             self._schedule_render()
 
@@ -424,20 +433,27 @@ class DesktopLyricsWindow(QWidget):
         if self.isVisible():
             self.hide()
 
-    def _place_on_screen(self) -> None:
+    def _place_on_screen(self, preferred_position: QPoint | None = None) -> None:
         # Negative coordinates are valid on a left/top secondary monitor.
         # Only the paired (-1, -1) value means "never positioned".
-        saved = not (self._saved_x == -1 and self._saved_y == -1)
-        saved_point = QPoint(self._saved_x, self._saved_y)
-        screen = QGuiApplication.screenAt(saved_point) if saved else None
+        if preferred_position is not None:
+            screen = QGuiApplication.screenAt(preferred_position)
+            if screen is None:
+                screen = QGuiApplication.screenAt(self.frameGeometry().center())
+            position = QPoint(preferred_position)
+        else:
+            saved = not (self._saved_x == -1 and self._saved_y == -1)
+            saved_point = QPoint(self._saved_x, self._saved_y)
+            screen = QGuiApplication.screenAt(saved_point) if saved else None
+            position = saved_point
+            if not saved:
+                position = QPoint()
         if screen is None:
             screen = QGuiApplication.screenAt(QCursor.pos()) or QGuiApplication.primaryScreen()
         if screen is None:
             return
         available = screen.availableGeometry()
-        if saved:
-            position = saved_point
-        else:
+        if preferred_position is None and self._saved_x == -1 and self._saved_y == -1:
             position = QPoint(
                 available.left() + max(0, (available.width() - self.width()) // 2),
                 available.bottom() - self.height() - 48,
@@ -451,7 +467,7 @@ class DesktopLyricsWindow(QWidget):
         self._emit_position()
 
     def _update_lock_button_geometry(self) -> None:
-        if not hasattr(self, "_lock_button"):
+        if not hasattr(self, "_lock_button") or self._drag_offset is not None:
             return
         frame = self.frameGeometry()
         position = QPoint(
@@ -597,6 +613,11 @@ class DesktopLyricsWindow(QWidget):
         ):
             return False
         self._right_button_pressed = False
+        self._lock_button.hide()
+        self._cursor_timer.stop()
+        self._interaction_timer.stop()
+        self._pending_drag_position = None
+        self._drag_move_timer.start()
         self._drag_offset = event.globalPosition().toPoint() - self.frameGeometry().topLeft()
         try:
             self.grabMouse()
@@ -608,6 +629,11 @@ class DesktopLyricsWindow(QWidget):
 
     def _finish_drag(self, *, persist_position: bool) -> None:
         was_dragging = self._drag_offset is not None
+        pending_position = self._pending_drag_position
+        self._pending_drag_position = None
+        self._drag_move_timer.stop()
+        if was_dragging and pending_position is not None:
+            self.move(pending_position)
         self._drag_offset = None
         if self._mouse_grabbed:
             try:
@@ -617,6 +643,10 @@ class DesktopLyricsWindow(QWidget):
             self._mouse_grabbed = False
         if was_dragging and persist_position:
             self._emit_position()
+        if was_dragging and self.isVisible():
+            self._cursor_timer.start()
+            if not self._locked and not self._settings_popover_visible:
+                self._poll_cursor()
 
     def _handle_right_press(self, event: QMouseEvent) -> bool:
         if (
@@ -665,10 +695,20 @@ class DesktopLyricsWindow(QWidget):
                 self._finish_drag(persist_position=True)
                 event.accept()
                 return
-            self.move(event.globalPosition().toPoint() - self._drag_offset)
+            self._pending_drag_position = event.globalPosition().toPoint() - self._drag_offset
             event.accept()
             return
         super().mouseMoveEvent(event)
+
+    def _apply_pending_drag_move(self) -> None:
+        if self._drag_offset is None or self._locked:
+            self._drag_move_timer.stop()
+            return
+        pending_position = self._pending_drag_position
+        if pending_position is None:
+            return
+        self._pending_drag_position = None
+        self.move(pending_position)
 
     def mouseReleaseEvent(self, event: QMouseEvent) -> None:  # noqa: N802
         if self._handle_right_release(event):

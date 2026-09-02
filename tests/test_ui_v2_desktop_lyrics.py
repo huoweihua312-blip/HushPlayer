@@ -233,6 +233,60 @@ class DesktopLyricsWindowTests(unittest.TestCase):
         )
         self.assertFalse(self.window._render_timer.isActive())
 
+    def test_live_width_expansion_preserves_current_position(self) -> None:
+        self.window.apply_settings(
+            {
+                "floating_lyrics_font_size": 22,
+                "floating_lyrics_width": 420,
+                "floating_lyrics_height": 135,
+            }
+        )
+        self.window.show()
+        self.window.move(40, 40)
+        self.app.processEvents()
+        self.window._main_label.setText("冬至的白雪")
+        self.window._secondary_label.setText("下一句")
+        self.window._secondary_label.setVisible(True)
+        before = QPoint(self.window.pos())
+
+        self.window.apply_settings(
+            {"floating_lyrics_font_size": 84, "floating_lyrics_width": 420},
+            live_preview=True,
+        )
+        self.app.processEvents()
+
+        self.assertGreater(self.window.width(), 420)
+        self.assertEqual(self.window.pos(), before)
+
+    def test_drag_pauses_cursor_polling_and_hides_lock_affordance(self) -> None:
+        self.window.apply_settings({"floating_lyrics_passthrough": False})
+        self.window._render_timer.stop()
+        self.window._has_renderable_lyric = True
+        self.window.show()
+        self.app.processEvents()
+        # Simulate the hover state; offscreen Qt does not always report the
+        # cursor over this separate top-level affordance reliably.
+        self.window._lock_button.show()
+        self.app.processEvents()
+        self.assertTrue(self.window._lock_button.isVisible())
+        local_position = QPoint(100, 60)
+        event = QMouseEvent(
+            QEvent.Type.MouseButtonPress,
+            QPointF(local_position),
+            QPointF(self.window.mapToGlobal(local_position)),
+            Qt.MouseButton.LeftButton,
+            Qt.MouseButton.LeftButton,
+            Qt.KeyboardModifier.NoModifier,
+        )
+
+        self.assertTrue(self.window._begin_drag(event))
+        self.assertFalse(self.window._cursor_timer.isActive())
+        self.assertTrue(self.window._drag_move_timer.isActive())
+        self.assertFalse(self.window._lock_button.isVisible())
+        self.window._finish_drag(persist_position=False)
+        self.assertFalse(self.window._drag_move_timer.isActive())
+        self.assertTrue(self.window._cursor_timer.isActive())
+
     def test_unlocked_right_release_requests_settings_once_without_starting_drag(self) -> None:
         requests: list[QPoint] = []
         self.window.settings_requested.connect(requests.append)
