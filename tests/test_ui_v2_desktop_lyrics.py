@@ -233,7 +233,7 @@ class DesktopLyricsWindowTests(unittest.TestCase):
         )
         self.assertFalse(self.window._render_timer.isActive())
 
-    def test_live_width_expansion_preserves_current_position(self) -> None:
+    def test_live_width_expansion_preserves_visual_center(self) -> None:
         self.window.apply_settings(
             {
                 "floating_lyrics_font_size": 22,
@@ -241,13 +241,15 @@ class DesktopLyricsWindowTests(unittest.TestCase):
                 "floating_lyrics_height": 135,
             }
         )
+        self.window._render_timer.stop()
+        self.window._has_renderable_lyric = True
         self.window.show()
         self.window.move(40, 40)
         self.app.processEvents()
         self.window._main_label.setText("冬至的白雪")
         self.window._secondary_label.setText("下一句")
         self.window._secondary_label.setVisible(True)
-        before = QPoint(self.window.pos())
+        before = QPoint(self.window.frameGeometry().center())
 
         self.window.apply_settings(
             {"floating_lyrics_font_size": 84, "floating_lyrics_width": 420},
@@ -256,7 +258,7 @@ class DesktopLyricsWindowTests(unittest.TestCase):
         self.app.processEvents()
 
         self.assertGreater(self.window.width(), 420)
-        self.assertEqual(self.window.pos(), before)
+        self.assertEqual(self.window.frameGeometry().center(), before)
 
     def test_drag_pauses_cursor_polling_and_hides_lock_affordance(self) -> None:
         self.window.apply_settings({"floating_lyrics_passthrough": False})

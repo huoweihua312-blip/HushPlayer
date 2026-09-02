@@ -202,7 +202,7 @@ class DesktopLyricsWindow(QWidget):
             self._settings.get("floating_lyrics_font_size"),
         )
         previous_saved_position = (self._saved_x, self._saved_y)
-        visible_position = QPoint(self.pos()) if self.isVisible() else None
+        visible_center = QPoint(self.frameGeometry().center()) if self.isVisible() else None
         self._settings.update(dict(values or {}))
         self._settings["floating_lyrics_font_family"] = normalize_desktop_lyrics_font(
             self._settings.get("floating_lyrics_font_family")
@@ -257,9 +257,10 @@ class DesktopLyricsWindow(QWidget):
         self._apply_lock_preference(bool(self._settings["floating_lyrics_passthrough"]))
         if self.isVisible():
             position_changed = (self._saved_x, self._saved_y) != previous_saved_position
-            self._place_on_screen(
-                preferred_position=visible_position if not position_changed else None
-            )
+            if position_changed:
+                self._place_on_screen()
+            elif visible_center is not None:
+                self._restore_window_center(visible_center)
         if not live_preview:
             self._schedule_render()
 
@@ -325,6 +326,7 @@ class DesktopLyricsWindow(QWidget):
     def _apply_content_height_floor(self) -> None:
         """Keep two fixed lyric rows and widen the overlay for long text."""
 
+        visible_center = QPoint(self.frameGeometry().center()) if self.isVisible() else None
         self._sync_surface_geometry()
         surface_layout = self._surface.layout()
         margins = surface_layout.contentsMargins()
@@ -369,6 +371,8 @@ class DesktopLyricsWindow(QWidget):
         if self.width() < required_width:
             self.resize(int(required_width), self.height())
             self._sync_surface_geometry()
+        if visible_center is not None:
+            self._restore_window_center(visible_center)
 
     @property
     def is_enabled(self) -> bool:
@@ -433,32 +437,33 @@ class DesktopLyricsWindow(QWidget):
         if self.isVisible():
             self.hide()
 
-    def _place_on_screen(self, preferred_position: QPoint | None = None) -> None:
+    def _place_on_screen(self) -> None:
         # Negative coordinates are valid on a left/top secondary monitor.
         # Only the paired (-1, -1) value means "never positioned".
-        if preferred_position is not None:
-            screen = QGuiApplication.screenAt(preferred_position)
-            if screen is None:
-                screen = QGuiApplication.screenAt(self.frameGeometry().center())
-            position = QPoint(preferred_position)
-        else:
-            saved = not (self._saved_x == -1 and self._saved_y == -1)
-            saved_point = QPoint(self._saved_x, self._saved_y)
-            screen = QGuiApplication.screenAt(saved_point) if saved else None
-            position = saved_point
-            if not saved:
-                position = QPoint()
+        saved = not (self._saved_x == -1 and self._saved_y == -1)
+        saved_point = QPoint(self._saved_x, self._saved_y)
+        screen = QGuiApplication.screenAt(saved_point) if saved else None
+        position = saved_point
+        if not saved:
+            position = QPoint()
         if screen is None:
             screen = QGuiApplication.screenAt(QCursor.pos()) or QGuiApplication.primaryScreen()
         if screen is None:
             return
         available = screen.availableGeometry()
-        if preferred_position is None and self._saved_x == -1 and self._saved_y == -1:
+        if not saved:
             position = QPoint(
                 available.left() + max(0, (available.width() - self.width()) // 2),
                 available.bottom() - self.height() - 48,
             )
         self.move(clamp_desktop_lyrics_position(position, self.size(), available))
+
+    def _restore_window_center(self, center: QPoint) -> None:
+        """Keep the visible lyric anchor stable after a transparent resize."""
+
+        delta = center - self.frameGeometry().center()
+        if delta != QPoint(0, 0):
+            self.move(self.pos() + delta)
 
     def reset_position(self) -> None:
         self._saved_x = -1
