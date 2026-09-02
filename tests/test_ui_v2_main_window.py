@@ -331,7 +331,7 @@ class UiV2MainWindowTests(unittest.TestCase):
         overlay = self.window._theme_reveal_overlay
         self.assertIsNotNone(overlay)
         self.assertEqual(self.window.theme.mode, original_mode)
-        self.assertEqual(overlay._opacity, 1.0)
+        self.assertEqual(overlay._radius, 0.0)
         self.assertEqual(overlay._animation.state(), QAbstractAnimation.State.Running)
 
         QTest.qWait(self.window._THEME_REVEAL_APPLY_DELAY_MS + 20)
@@ -339,7 +339,7 @@ class UiV2MainWindowTests(unittest.TestCase):
         self.assertNotEqual(self.window.theme.mode, original_mode)
         QTest.qWait(40)
         self.app.processEvents()
-        self.assertLess(overlay._opacity, 1.0)
+        self.assertGreater(overlay._radius, 0.0)
 
         QTest.qWait(overlay._DURATION_MS + 80)
         self.app.processEvents()
