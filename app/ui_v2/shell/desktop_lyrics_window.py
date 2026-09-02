@@ -97,9 +97,12 @@ class DesktopLyricsWindow(QWidget):
         self._mouse_grabbed = False
         self._pending_drag_position: QPoint | None = None
         self._system_drag_active = False
+        self._geometry_update_pending = False
+        self._deferred_settings_resize = False
         self._enabled = False
         self._has_renderable_lyric = False
         self._changing_input_mode = False
+        self._lock_button_closing = False
         self._rendered_main: str | None = None
         self._rendered_secondary: str | None = None
         self._settings = {
@@ -113,6 +116,7 @@ class DesktopLyricsWindow(QWidget):
             "floating_lyrics_y": -1,
             "floating_lyrics_passthrough": True,
         }
+        self._last_applied_layout: tuple[int, int] | None = None
         self.setObjectName("desktopLyricsWindow")
         self.setWindowFlags(
             Qt.WindowType.Tool
@@ -138,6 +142,10 @@ class DesktopLyricsWindow(QWidget):
         self._drag_move_timer = QTimer(self)
         self._drag_move_timer.setInterval(16)
         self._drag_move_timer.timeout.connect(self._apply_pending_drag_move)
+        self._geometry_flush_timer = QTimer(self)
+        self._geometry_flush_timer.setSingleShot(True)
+        self._geometry_flush_timer.setInterval(0)
+        self._geometry_flush_timer.timeout.connect(self._flush_deferred_geometry)
 
         playback_adapter.track_changed.connect(self._schedule_render)
         lyrics_adapter.document_changed.connect(self._schedule_render)
@@ -236,31 +244,46 @@ class DesktopLyricsWindow(QWidget):
         self._saved_y = int(self._settings["floating_lyrics_y"])
         # The persisted height remains the user's baseline; the larger value
         # is only a runtime safety floor for the current lyric layout.
-        self.setMinimumHeight(0)
         target_width = int(self._settings["floating_lyrics_width"])
         target_height = int(self._settings["floating_lyrics_height"])
+        layout_settings = (target_width, target_height)
+        layout_settings_changed = self._last_applied_layout != layout_settings
+        dragging = self._drag_offset is not None
+        self._last_applied_layout = layout_settings
         typography_changed = previous_typography != (
             self._settings["floating_lyrics_color"],
             self._settings["floating_lyrics_font_family"],
             self._settings["floating_lyrics_font_size"],
         )
-        if live_preview:
+        if dragging:
+            if layout_settings_changed:
+                self._deferred_settings_resize = True
+                self._geometry_update_pending = True
+            self._sync_surface_geometry()
+            self._apply_live_preview_visuals(typography_changed=typography_changed)
+        elif live_preview:
             # Keep the current runtime floor during a continuous drag. This
             # prevents the window from repeatedly shrinking and growing while
             # the user is changing the font size or width.
-            self.resize(target_width, max(self.height(), target_height))
-            self._sync_surface_geometry()
+            if layout_settings_changed:
+                self.resize(target_width, max(self.height(), target_height))
+                self._sync_surface_geometry()
             self._apply_live_preview_visuals(typography_changed=typography_changed)
         else:
-            self.resize(target_width, target_height)
-            self._sync_surface_geometry()
+            if layout_settings_changed:
+                self.setMinimumHeight(0)
+                self.resize(target_width, target_height)
+                self._sync_surface_geometry()
             self._apply_visuals()
         self._apply_lock_preference(bool(self._settings["floating_lyrics_passthrough"]))
         if self.isVisible():
             position_changed = (self._saved_x, self._saved_y) != previous_saved_position
             if position_changed:
-                self._place_on_screen()
-            elif visible_center is not None:
+                if self._drag_offset is not None:
+                    self._geometry_update_pending = True
+                else:
+                    self._place_on_screen()
+            elif visible_center is not None and self._drag_offset is None:
                 self._restore_window_center(visible_center)
         if not live_preview:
             self._schedule_render()
@@ -324,11 +347,17 @@ class DesktopLyricsWindow(QWidget):
         self._main_label.setFont(main_font)
         self._secondary_label.setFont(secondary_font)
 
-    def _apply_content_height_floor(self) -> None:
+    def _apply_content_height_floor(self, *, reset_to_settings_size: bool = False) -> None:
         """Keep two fixed lyric rows and widen the overlay for long text."""
 
-        visible_center = QPoint(self.frameGeometry().center()) if self.isVisible() else None
-        self._sync_surface_geometry()
+        dragging = self._drag_offset is not None
+        visible_center = (
+            QPoint(self.frameGeometry().center())
+            if self.isVisible() and not dragging
+            else None
+        )
+        if not dragging:
+            self._sync_surface_geometry()
         surface_layout = self._surface.layout()
         margins = surface_layout.contentsMargins()
         secondary_margins = self._secondary_layout.contentsMargins()
@@ -361,16 +390,27 @@ class DesktopLyricsWindow(QWidget):
             + secondary_height
             + self._GLYPH_SAFETY_PADDING
         )
+
+        if dragging:
+            if self.width() < required_width or self.height() < required:
+                self._geometry_update_pending = True
+            return
+
         self.setMinimumHeight(max(0, int(required)))
-        # Do not shrink during lyric updates. An explicit settings change can
-        # still shrink the window first, after which this floor grows it again
-        # only when the current two rows need more room.
         self._sync_surface_geometry()
-        if self.height() < required:
-            self.resize(self.width(), int(required))
-            self._sync_surface_geometry()
-        if self.width() < required_width:
-            self.resize(int(required_width), self.height())
+        if reset_to_settings_size:
+            desired_width = required_width
+            desired_height = max(
+                int(self._settings.get("floating_lyrics_height", 135)),
+                int(required),
+            )
+        else:
+            # Do not shrink during lyric updates. Explicit settings changes
+            # use reset_to_settings_size=True after their preview is released.
+            desired_width = max(self.width(), required_width)
+            desired_height = max(self.height(), int(required))
+        if self.size() != QSize(int(desired_width), int(desired_height)):
+            self.resize(int(desired_width), int(desired_height))
             self._sync_surface_geometry()
         if visible_center is not None:
             self._restore_window_center(visible_center)
@@ -386,6 +426,28 @@ class DesktopLyricsWindow(QWidget):
         """Return the persisted mouse-pass-through preference."""
 
         return self._locked
+
+    def _schedule_deferred_geometry(self) -> None:
+        if self._geometry_update_pending and not self._geometry_flush_timer.isActive():
+            self._geometry_flush_timer.start()
+
+    def _flush_deferred_geometry(self) -> None:
+        if self._drag_offset is not None:
+            self._schedule_deferred_geometry()
+            return
+        if self._render_timer.isActive():
+            self._geometry_flush_timer.start()
+            return
+        if not self._geometry_update_pending:
+            return
+        reset_to_settings_size = self._deferred_settings_resize
+        self._geometry_update_pending = False
+        self._deferred_settings_resize = False
+        self._apply_content_height_floor(
+            reset_to_settings_size=reset_to_settings_size
+        )
+        self._sync_surface_geometry()
+        self._update_lock_button_geometry()
 
     def _schedule_render(self, *_args) -> None:
         if not self._render_timer.isActive():
@@ -473,7 +535,11 @@ class DesktopLyricsWindow(QWidget):
         self._emit_position()
 
     def _update_lock_button_geometry(self) -> None:
-        if not hasattr(self, "_lock_button") or self._drag_offset is not None:
+        if (
+            not hasattr(self, "_lock_button")
+            or self._lock_button_closing
+            or self._drag_offset is not None
+        ):
             return
         frame = self.frameGeometry()
         position = QPoint(
@@ -663,6 +729,8 @@ class DesktopLyricsWindow(QWidget):
             self._mouse_grabbed = False
         if was_dragging and persist_position:
             self._emit_position()
+        if was_dragging:
+            self._schedule_deferred_geometry()
         if was_dragging and self.isVisible():
             self._cursor_timer.start()
             if not self._locked and not self._settings_popover_visible:
@@ -816,6 +884,7 @@ class DesktopLyricsWindow(QWidget):
             self.visible_changed.emit(False)
 
     def closeEvent(self, event) -> None:  # noqa: N802
+        self._lock_button_closing = True
         if self._enabled:
             self._enabled = False
             self.enabled_changed.emit(False)

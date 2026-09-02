@@ -169,6 +169,67 @@ class DesktopLyricsWindowTests(unittest.TestCase):
         self.assertEqual(self.window.width(), expanded_width)
         self.assertEqual(self.window.height(), expanded_height)
 
+    def test_position_sync_does_not_shrink_runtime_lyric_expansion(self) -> None:
+        self.window.apply_settings(
+            {
+                "floating_lyrics_font_size": 84,
+                "floating_lyrics_width": 420,
+                "floating_lyrics_height": 135,
+            }
+        )
+        self.window._render_timer.stop()
+        self.window.show()
+        self.app.processEvents()
+        self.window._main_label.setText("人" * 20)
+        self.window._secondary_label.setText("下一句")
+        self.window._secondary_label.setVisible(True)
+        self.window._apply_content_height_floor()
+        expanded_width = self.window.width()
+        saved_x = self.window.x()
+        saved_y = self.window.y()
+
+        # Position persistence reapplies the full settings snapshot. It must
+        # not reset the runtime width that was expanded for the long lyric.
+        self.window.apply_settings(
+            {"floating_lyrics_x": saved_x, "floating_lyrics_y": saved_y}
+        )
+
+        self.assertEqual(self.window.width(), expanded_width)
+
+    def test_drag_defers_lyric_geometry_until_release(self) -> None:
+        self.window.apply_settings(
+            {
+                "floating_lyrics_font_size": 22,
+                "floating_lyrics_width": 420,
+                "floating_lyrics_height": 135,
+                "floating_lyrics_passthrough": False,
+            }
+        )
+        self.window._render_timer.stop()
+        self.window.show()
+        self.app.processEvents()
+        self.window._main_label.setText("短句")
+        self.window._secondary_label.setText("下一句")
+        self.window._secondary_label.setVisible(True)
+        self.window._apply_content_height_floor()
+        before_size = QSize(self.window.size())
+        before_center = QPoint(self.window.frameGeometry().center())
+
+        self.window._drag_offset = QPoint(10, 10)
+        self.window._system_drag_active = True
+        self.window._main_label.setText("人" * 40)
+        self.window._apply_content_height_floor()
+
+        self.assertEqual(self.window.size(), before_size)
+        self.assertTrue(self.window._geometry_update_pending)
+
+        self.window._finish_drag(persist_position=False)
+        self.app.processEvents()
+
+        self.assertGreater(self.window.width(), before_size.width())
+        self.assertEqual(self.window.frameGeometry().center(), before_center)
+        self.assertFalse(self.window._geometry_update_pending)
+
     def test_font_size_uses_pixels_and_only_one_lock_button_is_created(self) -> None:
         self.window.show()
         self.window.apply_settings({"floating_lyrics_font_size": 22})
