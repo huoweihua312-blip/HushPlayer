@@ -150,10 +150,12 @@ class LyricsQuickSettingsContent(QWidget):
                     control.slider.styleSheet()
                     + f" QSlider:focus::handle:horizontal {{ border: 2px solid {theme.colors.focus_ring}; }}"
                 )
-                control.spin.setStyleSheet(
-                    control.spin.styleSheet()
-                    + f" QSpinBox:focus {{ border: 1px solid {theme.colors.focus_ring}; }}"
-                )
+                spin = getattr(control, "spin", None)
+                if spin is not None:
+                    spin.setStyleSheet(
+                        spin.styleSheet()
+                        + f" QSpinBox:focus {{ border: 1px solid {theme.colors.focus_ring}; }}"
+                    )
         self.scroll.setStyleSheet(
             "QScrollArea { border: 0; background: transparent; } "
             "QAbstractScrollArea::viewport { background: transparent; } "

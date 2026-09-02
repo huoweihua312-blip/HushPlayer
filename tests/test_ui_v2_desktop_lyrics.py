@@ -11,6 +11,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PySide6.QtCore import QEvent, QPoint, QPointF, QRect, QSize, Qt
 from PySide6.QtGui import QGuiApplication, QMouseEvent
+from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication
 
 from app.startup_diagnostics import StartupDiagnostics
@@ -195,6 +196,40 @@ class DesktopLyricsWindowTests(unittest.TestCase):
             self.window.frameGeometry().left()
             + (self.window.width() - self.window._lock_button.width()) // 2,
         )
+
+    def test_live_preview_updates_font_and_keeps_wrapped_surface_in_sync(self) -> None:
+        self.window.show()
+        self.window.apply_settings(
+            {
+                "floating_lyrics_font_size": 22,
+                "floating_lyrics_width": 980,
+                "floating_lyrics_height": 135,
+            }
+        )
+        self.window._main_label.setText(
+            "人和人之间大杂烩来来浔浔来来浔浔人和人之间大杂烩来来浔浔"
+        )
+        self.window._secondary_label.setText("这段记忆随雪花融化")
+        self.window._secondary_label.setVisible(True)
+        self.window._render_timer.stop()
+
+        self.window.apply_settings(
+            {"floating_lyrics_font_size": 84, "floating_lyrics_width": 420},
+            live_preview=True,
+        )
+        self.app.processEvents()
+
+        wrapped_height = self.window._main_label.fontMetrics().boundingRect(
+            QRect(0, 0, self.window._main_label.width(), 0),
+            Qt.TextFlag.TextWordWrap,
+            self.window._main_label.text(),
+        ).height()
+        self.assertEqual(self.window._main_label.font().pixelSize(), 84)
+        self.assertEqual(self.window.width(), 420)
+        self.assertEqual(self.window._surface.size(), self.window.size())
+        self.assertEqual(self.window._surface.layout().geometry(), self.window._surface.rect())
+        self.assertEqual(self.window._main_label.height(), wrapped_height)
+        self.assertFalse(self.window._render_timer.isActive())
 
     def test_unlocked_right_release_requests_settings_once_without_starting_drag(self) -> None:
         requests: list[QPoint] = []
@@ -452,6 +487,9 @@ class DesktopLyricsMainWindowIntegrationTests(unittest.TestCase):
                 popover.font_size_slider.slider.setValue(58)
                 popover.font_size_slider.slider.setValue(64)
                 self.app.processEvents()
+                self.assertTrue(window._desktop_lyrics_settings_preview_timer.isActive())
+                QTest.qWait(60)
+                self.app.processEvents()
                 self.assertEqual(desktop._main_label.font().pixelSize(), 64)
                 self.assertTrue(window._desktop_lyrics_settings_save_timer.isActive())
                 self.assertEqual(window._desktop_lyrics_settings_save_timer.interval(), 250)
@@ -476,6 +514,7 @@ class DesktopLyricsMainWindowIntegrationTests(unittest.TestCase):
             try:
                 popover.set_values(window._settings_snapshot.to_dict())
                 popover.font_size_slider.slider.setValue(72)
+                QTest.qWait(60)
                 self.app.processEvents()
                 self.assertEqual(desktop._main_label.font().pixelSize(), 72)
 

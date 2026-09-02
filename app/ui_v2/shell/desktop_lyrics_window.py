@@ -180,9 +180,19 @@ class DesktopLyricsWindow(QWidget):
         self._theme = theme
         self._apply_visuals()
 
-    def apply_settings(self, values: Mapping[str, object]) -> None:
+    def apply_settings(
+        self,
+        values: Mapping[str, object],
+        *,
+        live_preview: bool = False,
+    ) -> None:
         """Apply validated-or-defaulted settings without touching playback."""
 
+        previous_typography = (
+            self._settings.get("floating_lyrics_color"),
+            self._settings.get("floating_lyrics_font_family"),
+            self._settings.get("floating_lyrics_font_size"),
+        )
         self._settings.update(dict(values or {}))
         self._settings["floating_lyrics_font_family"] = normalize_desktop_lyrics_font(
             self._settings.get("floating_lyrics_font_family")
@@ -213,26 +223,34 @@ class DesktopLyricsWindow(QWidget):
         )
         self._saved_x = int(self._settings["floating_lyrics_x"])
         self._saved_y = int(self._settings["floating_lyrics_y"])
-        # Clear the previous runtime floor before applying a new font size.
         # The persisted height remains the user's baseline; the larger value
         # is only a runtime safety floor for the current lyric layout.
         self.setMinimumHeight(0)
-        self.resize(
-            int(self._settings["floating_lyrics_width"]),
-            int(self._settings["floating_lyrics_height"]),
+        target_width = int(self._settings["floating_lyrics_width"])
+        target_height = int(self._settings["floating_lyrics_height"])
+        typography_changed = previous_typography != (
+            self._settings["floating_lyrics_color"],
+            self._settings["floating_lyrics_font_family"],
+            self._settings["floating_lyrics_font_size"],
         )
-        self._apply_visuals()
+        if live_preview:
+            # Keep the current runtime floor during a continuous drag. This
+            # prevents the window from repeatedly shrinking and growing while
+            # the user is changing the font size or width.
+            self.resize(target_width, max(self.height(), target_height))
+            self._sync_surface_geometry()
+            self._apply_live_preview_visuals(typography_changed=typography_changed)
+        else:
+            self.resize(target_width, target_height)
+            self._sync_surface_geometry()
+            self._apply_visuals()
         self._apply_lock_preference(bool(self._settings["floating_lyrics_passthrough"]))
         if self.isVisible():
             self._place_on_screen()
-        self._schedule_render()
+        if not live_preview:
+            self._schedule_render()
 
     def _apply_visuals(self) -> None:
-        color_name = str(self._settings.get("floating_lyrics_color") or "white")
-        lyric_color = QColor(DESKTOP_LYRICS_COLORS.get(color_name, DESKTOP_LYRICS_COLORS["white"]))
-        secondary = (
-            f"rgba({lyric_color.red()}, {lyric_color.green()}, {lyric_color.blue()}, 0.72)"
-        )
         self.setWindowOpacity(int(self._settings.get("floating_lyrics_opacity", 100)) / 100.0)
         self._surface.setStyleSheet(
             "QFrame#desktopLyricsSurface { background: transparent; border: 0; }"
@@ -246,8 +264,34 @@ class DesktopLyricsWindow(QWidget):
             "QToolButton#desktopLyricsLockButton:focus { background: transparent; border: 0; }"
         )
         self._update_lock_button()
-        family = normalize_desktop_lyrics_font(self._settings.get("floating_lyrics_font_family"))
+        self._apply_lyrics_fonts()
+        self._apply_content_height_floor()
+        self._update_lock_button_geometry()
+
+    def _apply_live_preview_visuals(self, *, typography_changed: bool) -> None:
+        """Update only typography and geometry during continuous slider drags."""
+
+        if typography_changed:
+            self._apply_lyrics_fonts()
+        self._apply_content_height_floor()
+        self._sync_surface_geometry()
+        self._update_lock_button_geometry()
+
+    def _apply_lyrics_fonts(self) -> None:
+        """Apply the selected lyric font and its matching visual styles."""
+
+        color_name = str(self._settings.get("floating_lyrics_color") or "white")
+        lyric_color = QColor(
+            DESKTOP_LYRICS_COLORS.get(color_name, DESKTOP_LYRICS_COLORS["white"])
+        )
+        family = normalize_desktop_lyrics_font(
+            self._settings.get("floating_lyrics_font_family")
+        )
         size = int(self._settings.get("floating_lyrics_font_size", 42))
+        secondary = f"rgba({lyric_color.red()}, {lyric_color.green()}, {lyric_color.blue()}, 0.72)"
+        # The application-wide QLabel stylesheet supplies a default font size,
+        # so keep the explicit size here and update only these two labels during
+        # a throttled preview tick instead of rebuilding the lyric contents.
         self._main_label.setStyleSheet(
             f"color: {lyric_color.name()}; font-family: '{family}'; "
             f"font-size: {size}px; font-weight: 600;"
@@ -264,12 +308,11 @@ class DesktopLyricsWindow(QWidget):
         secondary_font.setWeight(QFont.Weight.Normal)
         self._main_label.setFont(main_font)
         self._secondary_label.setFont(secondary_font)
-        self._apply_content_height_floor()
-        self._update_lock_button_geometry()
 
     def _apply_content_height_floor(self) -> None:
         """Reserve stable lyric space and enough height for wrapped text."""
 
+        self._sync_surface_geometry()
         surface_layout = self._surface.layout()
         margins = surface_layout.contentsMargins()
         # The layout contains a top stretch, main row, secondary row and a
@@ -310,8 +353,12 @@ class DesktopLyricsWindow(QWidget):
             + self._GLYPH_SAFETY_PADDING
         )
         self.setMinimumHeight(max(0, int(required)))
+        # Raising the minimum can resize the top-level window immediately;
+        # keep the transparent child surface in lockstep with that resize.
+        self._sync_surface_geometry()
         if self.height() < required:
             self.resize(self.width(), int(required))
+            self._sync_surface_geometry()
 
     @property
     def is_enabled(self) -> bool:
@@ -663,9 +710,18 @@ class DesktopLyricsWindow(QWidget):
             self._right_button_pressed = False
         return super().event(event)
 
+    def _sync_surface_geometry(self) -> None:
+        """Keep the transparent child surface aligned after a runtime resize."""
+
+        self._surface.setGeometry(self.rect())
+        layout = self._surface.layout()
+        if layout is not None:
+            layout.setGeometry(self._surface.rect())
+            layout.activate()
+
     def resizeEvent(self, event) -> None:  # noqa: N802
         super().resizeEvent(event)
-        self._surface.setGeometry(self.rect())
+        self._sync_surface_geometry()
         self._update_lock_button_geometry()
 
     def moveEvent(self, event) -> None:  # noqa: N802

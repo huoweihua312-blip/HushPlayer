@@ -174,6 +174,7 @@ class ImmersiveControls(QWidget):
             label.setStyleSheet(f"background: transparent; color: {_rgba(colors.primary_text, 224)}; font-size: {theme.fonts.caption}px;")
         for slider in (self.progress_slider, self.volume_slider):
             slider.setStyleSheet(
+                "QSlider { background: transparent; border: 0; padding: 0; }"
                 "QSlider::groove:horizontal { height: 3px; border: 0; border-radius: 1px; "
                 f"background: {_rgba(colors.primary_text, 112)}; }}"
                 f"QSlider::sub-page:horizontal {{ border-radius: 1px; background: {colors.accent}; }}"

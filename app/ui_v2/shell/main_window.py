@@ -114,6 +114,9 @@ _AUTO_RECOVERY_FAILURE_STATES = frozenset(
         "playback_error",
     }
 )
+_DESKTOP_LYRICS_CONTINUOUS_PREVIEW_KEYS = frozenset(
+    {"floating_lyrics_font_size", "floating_lyrics_width"}
+)
 
 
 class ShellPresentationMode(str, Enum):
@@ -307,6 +310,12 @@ class MainWindow(QMainWindow):
         self.desktop_lyrics_window: DesktopLyricsWindow | None = None
         self.desktop_lyrics_settings_popover: DesktopLyricsQuickSettingsPopover | None = None
         self._desktop_lyrics_settings_pending_snapshot: SettingsSnapshot | None = None
+        self._desktop_lyrics_settings_preview_timer = QTimer(self)
+        self._desktop_lyrics_settings_preview_timer.setSingleShot(True)
+        self._desktop_lyrics_settings_preview_timer.setInterval(40)
+        self._desktop_lyrics_settings_preview_timer.timeout.connect(
+            self._apply_pending_desktop_lyrics_preview
+        )
         self._desktop_lyrics_settings_save_timer = QTimer(self)
         self._desktop_lyrics_settings_save_timer.setSingleShot(True)
         self._desktop_lyrics_settings_save_timer.setInterval(250)
@@ -803,6 +812,7 @@ class MainWindow(QMainWindow):
         if self._close_finalized:
             return
         if self._desktop_lyrics_settings_pending_snapshot is not None:
+            self._desktop_lyrics_settings_preview_timer.stop()
             self._desktop_lyrics_settings_save_timer.stop()
             self._save_pending_desktop_lyrics_settings()
         self._close_finalized = True
@@ -2003,6 +2013,15 @@ class MainWindow(QMainWindow):
             False,
         )
 
+    def _apply_pending_desktop_lyrics_preview(self) -> None:
+        """Apply only the newest continuous desktop-lyrics preview value."""
+
+        candidate = self._desktop_lyrics_settings_pending_snapshot
+        window = self.desktop_lyrics_window
+        if candidate is None or window is None:
+            return
+        window.apply_settings(candidate.to_dict(), live_preview=True)
+
     def _on_desktop_lyrics_setting_changed(self, key: str, value: object) -> None:
         if self._close_finalized or key not in DESKTOP_LYRICS_QUICK_SETTING_KEYS:
             return
@@ -2020,11 +2039,16 @@ class MainWindow(QMainWindow):
         if self.desktop_lyrics_settings_popover is not None:
             self.desktop_lyrics_settings_popover.show_error("")
         if self.desktop_lyrics_window is not None:
-            self.desktop_lyrics_window.apply_settings(candidate.to_dict())
+            if key in _DESKTOP_LYRICS_CONTINUOUS_PREVIEW_KEYS:
+                self._desktop_lyrics_settings_preview_timer.start()
+            else:
+                self._desktop_lyrics_settings_preview_timer.stop()
+                self.desktop_lyrics_window.apply_settings(candidate.to_dict())
         self._sync_desktop_lyrics_tray_state()
         self._desktop_lyrics_settings_save_timer.start()
 
     def _save_pending_desktop_lyrics_settings(self) -> bool:
+        self._desktop_lyrics_settings_preview_timer.stop()
         candidate = self._desktop_lyrics_settings_pending_snapshot
         if candidate is None:
             return True

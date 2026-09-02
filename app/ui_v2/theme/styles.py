@@ -108,6 +108,11 @@ def build_stylesheet(theme: Theme) -> str:
             outline: 1px solid {c.focus_ring};
             outline-offset: 1px;
         }}
+        QSlider {{
+            background: transparent;
+            border: 0;
+            padding: 0;
+        }}
         QToolTip {{
             padding: {m.spacing_xs}px {m.spacing_sm}px;
             border: 1px solid {c.divider};

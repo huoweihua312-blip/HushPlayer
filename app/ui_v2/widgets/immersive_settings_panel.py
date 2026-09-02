@@ -212,6 +212,7 @@ class ImmersiveSettingsPanel(QFrame):
             f"QComboBox {{ min-height: 28px; padding: 0 8px; border: 1px solid {c.border}; border-radius: 5px; background: {c.input_background}; color: {c.primary_text}; }}"
             f"QComboBox:hover {{ border-color: {c.border_strong}; }}"
             f"QComboBox:disabled, QToolButton:disabled {{ color: {c.disabled_text}; }}"
+            "QSlider { background: transparent; border: 0; padding: 0; }"
             f"QSlider::groove:horizontal {{ height: 3px; border: 0; border-radius: 1px; background: {c.border_strong}; }}"
             f"QSlider::sub-page:horizontal {{ border-radius: 1px; background: {c.accent}; }}"
             f"QSlider::handle:horizontal {{ width: 10px; margin: -4px 0; border: 0; border-radius: 5px; background: {c.primary_text}; }}"
