@@ -189,7 +189,10 @@ class ThemeRevealOverlay(QWidget):
     def show_ready(self) -> None:
         self.raise_()
         self.show()
-        self.update()
+        # Paint the initial snapshot before theme polishing starts.  Only this
+        # first frame is synchronous; animation frames still use the reused
+        # off-screen buffer and normal queued updates.
+        self.repaint()
 
     def start_animation(self) -> None:
         if self._animation.state() == QAbstractAnimation.State.Running:
