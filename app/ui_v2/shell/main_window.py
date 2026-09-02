@@ -195,9 +195,24 @@ class ThemeRevealOverlay(QWidget):
         self.repaint()
 
     def start_animation(self) -> None:
-        if self._animation.state() == QAbstractAnimation.State.Running:
+        if self._animation.state() in {
+            QAbstractAnimation.State.Running,
+            QAbstractAnimation.State.Paused,
+        }:
             return
         self._animation.start()
+
+    def pause_for_theme_refresh(self) -> bool:
+        """Freeze the radius while synchronous theme work uses the UI thread."""
+
+        if self._animation.state() != QAbstractAnimation.State.Running:
+            return False
+        self._animation.setPaused(True)
+        return True
+
+    def resume_after_theme_refresh(self, was_running: bool) -> None:
+        if was_running and self._animation.state() == QAbstractAnimation.State.Paused:
+            self._animation.setPaused(False)
 
     def _set_radius(self, value) -> None:
         self._radius = max(0.0, float(value or 0.0))
@@ -219,10 +234,14 @@ class ThemeRevealOverlay(QWidget):
     def _update_origin(self) -> None:
         """Keep the reveal center on the button's actual screen position."""
 
-        button_center = self._origin_widget.mapToGlobal(
-            self._origin_widget.rect().center()
+        button_top_left = self._origin_widget.mapToGlobal(QPoint(0, 0))
+        overlay_top_left = self.mapToGlobal(QPoint(0, 0))
+        self._origin = QPointF(
+            button_top_left.x() - overlay_top_left.x()
+            + (self._origin_widget.width() - 1) / 2.0,
+            button_top_left.y() - overlay_top_left.y()
+            + (self._origin_widget.height() - 1) / 2.0,
         )
-        self._origin = self.mapFromGlobal(button_center)
 
     def paintEvent(self, event) -> None:  # noqa: N802
         if self._snapshot_image.isNull() or self._render_image.isNull():
@@ -775,6 +794,10 @@ class MainWindow(QMainWindow):
         ):
             return
         phase = self._theme_apply_phase
+        overlay = self._theme_reveal_overlay
+        animation_was_running = (
+            overlay.pause_for_theme_refresh() if overlay is not None else False
+        )
         was_enabled = self.updatesEnabled()
         root_was_enabled = self.root.updatesEnabled()
         self.setUpdatesEnabled(False)
@@ -797,6 +820,8 @@ class MainWindow(QMainWindow):
             self.setUpdatesEnabled(was_enabled)
             self.update()
             self.root.update()
+            if overlay is not None:
+                overlay.resume_after_theme_refresh(animation_was_running)
         self._theme_apply_phase += 1
         if self._theme_apply_phase < 6:
             QTimer.singleShot(
@@ -855,10 +880,11 @@ class MainWindow(QMainWindow):
         return True
 
     def _apply_queued_theme_snapshot(self, snapshot: SettingsSnapshot) -> None:
+        overlay = self._theme_reveal_overlay
+        if overlay is None:
+            return
+        animation_was_running = overlay.pause_for_theme_refresh()
         try:
-            overlay = self._theme_reveal_overlay
-            if overlay is None:
-                return
             saved = self.settings_bridge.save_snapshot(snapshot, apply=False)
             self._settings_snapshot = saved
             self._apply_settings_snapshot(
@@ -875,6 +901,8 @@ class MainWindow(QMainWindow):
                 f"主题切换失败：{error}",
                 self.title_bar.theme_button,
             )
+        finally:
+            overlay.resume_after_theme_refresh(animation_was_running)
 
     def _cancel_theme_reveal(self) -> None:
         self._theme_apply_generation += 1
