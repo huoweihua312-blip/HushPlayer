@@ -170,10 +170,7 @@ class ThemeRevealOverlay(QWidget):
             QImage.Format.Format_ARGB32_Premultiplied,
         )
         self._origin_widget = origin_widget
-        self._origin = origin_widget.mapTo(
-            self,
-            origin_widget.rect().center(),
-        )
+        self._update_origin()
         self._radius = 0.0
         self._animation = QVariantAnimation(self)
         self._animation.setStartValue(0.0)
@@ -213,7 +210,16 @@ class ThemeRevealOverlay(QWidget):
             self.size(),
             QImage.Format.Format_ARGB32_Premultiplied,
         )
+        self._update_origin()
         super().resizeEvent(event)
+
+    def _update_origin(self) -> None:
+        """Keep the reveal center on the button's actual screen position."""
+
+        button_center = self._origin_widget.mapToGlobal(
+            self._origin_widget.rect().center()
+        )
+        self._origin = self.mapFromGlobal(button_center)
 
     def paintEvent(self, event) -> None:  # noqa: N802
         if self._snapshot_image.isNull() or self._render_image.isNull():

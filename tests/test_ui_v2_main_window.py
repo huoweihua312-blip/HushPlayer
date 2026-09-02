@@ -315,9 +315,10 @@ class UiV2MainWindowTests(unittest.TestCase):
         self.app.processEvents()
         self.assertIsNotNone(self.window._theme_reveal_overlay)
         overlay = self.window._theme_reveal_overlay
-        expected_origin = self.window.title_bar.theme_button.mapTo(
-            overlay,
-            self.window.title_bar.theme_button.rect().center(),
+        expected_origin = overlay.mapFromGlobal(
+            self.window.title_bar.theme_button.mapToGlobal(
+                self.window.title_bar.theme_button.rect().center()
+            )
         )
         self.assertEqual(overlay._origin, expected_origin)
         QTest.qWait(overlay._DURATION_MS + 80)
