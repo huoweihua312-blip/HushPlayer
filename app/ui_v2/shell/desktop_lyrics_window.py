@@ -96,6 +96,7 @@ class DesktopLyricsWindow(QWidget):
         self._right_button_pressed = False
         self._mouse_grabbed = False
         self._pending_drag_position: QPoint | None = None
+        self._system_drag_active = False
         self._enabled = False
         self._has_renderable_lyric = False
         self._changing_input_mode = False
@@ -565,10 +566,10 @@ class DesktopLyricsWindow(QWidget):
     def _poll_cursor(self) -> None:
         if not self.isVisible():
             return
-        if self._drag_offset is not None and not (
-            QGuiApplication.mouseButtons() & Qt.MouseButton.LeftButton
-        ):
-            self._finish_drag(persist_position=True)
+        if self._drag_offset is not None:
+            if not (QGuiApplication.mouseButtons() & Qt.MouseButton.LeftButton):
+                self._finish_drag(persist_position=True)
+            return
         cursor = QCursor.pos()
         if self._pointer_in_lyrics_or_button(cursor):
             self._interaction_timer.stop()
@@ -622,8 +623,20 @@ class DesktopLyricsWindow(QWidget):
         self._cursor_timer.stop()
         self._interaction_timer.stop()
         self._pending_drag_position = None
-        self._drag_move_timer.start()
         self._drag_offset = event.globalPosition().toPoint() - self.frameGeometry().topLeft()
+        self._system_drag_active = False
+        window_handle = self.windowHandle()
+        start_system_move = getattr(window_handle, "startSystemMove", None)
+        if callable(start_system_move):
+            try:
+                self._system_drag_active = bool(start_system_move())
+            except RuntimeError:
+                self._system_drag_active = False
+        if self._system_drag_active:
+            self._cursor_timer.start()
+            event.accept()
+            return True
+        self._drag_move_timer.start()
         try:
             self.grabMouse()
             self._mouse_grabbed = True
@@ -634,12 +647,14 @@ class DesktopLyricsWindow(QWidget):
 
     def _finish_drag(self, *, persist_position: bool) -> None:
         was_dragging = self._drag_offset is not None
+        system_drag_active = self._system_drag_active
         pending_position = self._pending_drag_position
         self._pending_drag_position = None
         self._drag_move_timer.stop()
-        if was_dragging and pending_position is not None:
+        if was_dragging and not system_drag_active and pending_position is not None:
             self.move(pending_position)
         self._drag_offset = None
+        self._system_drag_active = False
         if self._mouse_grabbed:
             try:
                 self.releaseMouse()
@@ -696,6 +711,9 @@ class DesktopLyricsWindow(QWidget):
 
     def mouseMoveEvent(self, event: QMouseEvent) -> None:  # noqa: N802
         if self._drag_offset is not None and not self._locked:
+            if self._system_drag_active:
+                event.accept()
+                return
             if not (event.buttons() & Qt.MouseButton.LeftButton):
                 self._finish_drag(persist_position=True)
                 event.accept()
@@ -706,7 +724,7 @@ class DesktopLyricsWindow(QWidget):
         super().mouseMoveEvent(event)
 
     def _apply_pending_drag_move(self) -> None:
-        if self._drag_offset is None or self._locked:
+        if self._drag_offset is None or self._locked or self._system_drag_active:
             self._drag_move_timer.stop()
             return
         pending_position = self._pending_drag_position

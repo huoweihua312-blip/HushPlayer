@@ -283,7 +283,9 @@ class DesktopLyricsWindowTests(unittest.TestCase):
 
         self.assertTrue(self.window._begin_drag(event))
         self.assertFalse(self.window._cursor_timer.isActive())
-        self.assertTrue(self.window._drag_move_timer.isActive())
+        self.assertTrue(
+            self.window._system_drag_active or self.window._drag_move_timer.isActive()
+        )
         self.assertFalse(self.window._lock_button.isVisible())
         self.window._finish_drag(persist_position=False)
         self.assertFalse(self.window._drag_move_timer.isActive())
