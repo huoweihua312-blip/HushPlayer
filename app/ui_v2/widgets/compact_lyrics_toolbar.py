@@ -12,7 +12,6 @@ class CompactLyricsToolbar(QWidget):
     """No track identity and no playback controls: PlayerBar owns those."""
 
     translation_requested = Signal()
-    romanization_requested = Signal()
     immersive_requested = Signal()
 
     def __init__(self, theme: Theme, parent: QWidget | None = None) -> None:
@@ -20,7 +19,6 @@ class CompactLyricsToolbar(QWidget):
         self._theme = theme
         self.title_label = QLabel("歌词", self)
         self.translation_button = self._button("翻译", "显示或隐藏翻译", checkable=True)
-        self.romanization_button = self._button("罗马音", "显示或隐藏罗马音", checkable=True)
         self.more_button = self._button("更多", "更多歌词选项")
         self.immersive_button = self._button("沉浸", "进入沉浸歌词")
         layout = QHBoxLayout(self)
@@ -28,10 +26,9 @@ class CompactLyricsToolbar(QWidget):
         layout.setSpacing(4)
         layout.addWidget(self.title_label)
         layout.addStretch(1)
-        for button in (self.translation_button, self.romanization_button, self.more_button, self.immersive_button):
+        for button in (self.translation_button, self.more_button, self.immersive_button):
             layout.addWidget(button)
         self.translation_button.clicked.connect(self.translation_requested)
-        self.romanization_button.clicked.connect(self.romanization_requested)
         self.immersive_button.clicked.connect(self.immersive_requested)
         self.more_menu = QMenu(self)
         self.more_menu.addAction("回到当前歌词")
@@ -61,15 +58,13 @@ class CompactLyricsToolbar(QWidget):
             f"QToolButton:hover {{ background: {theme.colors.hover_background}; color: {theme.colors.primary_text}; }}"
             f"QToolButton:checked {{ color: {theme.colors.accent}; background: transparent; }}"
         )
-        for button in (self.translation_button, self.romanization_button, self.more_button, self.immersive_button):
+        for button in (self.translation_button, self.more_button, self.immersive_button):
             button.setStyleSheet(style)
 
     def set_options(self, options: dict[str, object]) -> None:
         self.translation_button.setChecked(bool(options.get("translation", True)))
-        self.romanization_button.setChecked(bool(options.get("romanization", False)))
 
     def set_compact(self, compact: bool) -> None:
         self.setFixedHeight(52 if compact else 58)
         self.translation_button.setText("译" if compact else "翻译")
-        self.romanization_button.setText("音" if compact else "罗马音")
         self.immersive_button.setText("沉浸" if not compact else "沉浸")

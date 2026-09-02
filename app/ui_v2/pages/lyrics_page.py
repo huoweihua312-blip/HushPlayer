@@ -65,7 +65,6 @@ class LyricsPage(QWidget):
         # Deprecated visual components deliberately are not allocated here: no header,
         # artwork identity, timeline, in-page transport or secondary player column.
         self.toolbar.translation_requested.connect(adapter.toggle_translation)
-        self.toolbar.romanization_requested.connect(adapter.toggle_romanization)
         self.toolbar.immersive_requested.connect(self.immersive_requested)
         self.toolbar.more_menu.actions()[0].triggered.connect(self.lyrics_view.return_to_current)
         self.lyrics_view.seek_requested.connect(adapter.seek_to_line)

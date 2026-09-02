@@ -38,6 +38,26 @@ def clamp_desktop_lyrics_position(position: QPoint, size, available: QRect) -> Q
     )
 
 
+class DesktopLyricsLockButton(QToolButton):
+    """A non-activating top-level control that remains clickable over pass-through lyrics."""
+
+    def __init__(self) -> None:
+        super().__init__(None)
+        self.setObjectName("desktopLyricsLockButton")
+        self.setWindowFlags(
+            Qt.WindowType.Tool
+            | Qt.WindowType.FramelessWindowHint
+            | Qt.WindowType.WindowStaysOnTopHint
+            | Qt.WindowType.WindowDoesNotAcceptFocus
+        )
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
+        self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating, True)
+        self.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonIconOnly)
+        self.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.setFixedSize(32, 32)
+        self.setIconSize(QSize(17, 17))
+
+
 class DesktopLyricsWindow(QWidget):
     """A shared-adapter lyrics overlay with smart input pass-through."""
 
@@ -70,6 +90,9 @@ class DesktopLyricsWindow(QWidget):
         self._locked = True
         self._input_passthrough = True
         self._suppress_unlock_until_exit = False
+        self._settings_popover_visible = False
+        self._right_button_pressed = False
+        self._mouse_grabbed = False
         self._enabled = False
         self._has_renderable_lyric = False
         self._changing_input_mode = False
@@ -147,12 +170,7 @@ class DesktopLyricsWindow(QWidget):
         surface_layout.addLayout(self._secondary_layout)
         surface_layout.addStretch(1)
 
-        self._lock_button = QToolButton(self)
-        self._lock_button.setObjectName("desktopLyricsLockButton")
-        self._lock_button.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonIconOnly)
-        self._lock_button.setFocusPolicy(Qt.FocusPolicy.TabFocus)
-        self._lock_button.setFixedSize(32, 32)
-        self._lock_button.setIconSize(QSize(17, 17))
+        self._lock_button = DesktopLyricsLockButton()
         self._lock_button.clicked.connect(self._request_lock_toggle)
         self._lock_button.hide()
 
@@ -219,7 +237,7 @@ class DesktopLyricsWindow(QWidget):
             "border-radius: 8px; padding: 0; }"
             f"QToolButton#desktopLyricsLockButton:hover {{ background: {colors.hover_background}; }}"
             f"QToolButton#desktopLyricsLockButton:pressed {{ background: {colors.surface_pressed}; }}"
-            f"QToolButton#desktopLyricsLockButton:focus {{ border: 1px solid {colors.focus_ring}; }}"
+            "QToolButton#desktopLyricsLockButton:focus { background: transparent; border: 0; }"
         )
         self._update_lock_button()
         family = normalize_desktop_lyrics_font(self._settings.get("floating_lyrics_font_family"))
@@ -267,8 +285,10 @@ class DesktopLyricsWindow(QWidget):
             options = self._lyrics_adapter.display_options
             if bool(options.get("translation")) and str(line.translation or "").strip():
                 secondary_text = str(line.translation).strip()
-            elif bool(options.get("romanization")) and str(line.romanization or "").strip():
-                secondary_text = str(line.romanization).strip()
+            else:
+                next_line = self._lyrics_adapter.next_line
+                if next_line is not None and str(next_line.text or "").strip():
+                    secondary_text = str(next_line.text).strip()
         if main_text != self._rendered_main:
             self._rendered_main = main_text
             self._main_label.setText(main_text)
@@ -331,25 +351,40 @@ class DesktopLyricsWindow(QWidget):
     def _update_lock_button_geometry(self) -> None:
         if not hasattr(self, "_lock_button"):
             return
-        self._lock_button.move(max(8, (self.width() - self._lock_button.width()) // 2), 6)
-        self._lock_button.raise_()
+        frame = self.frameGeometry()
+        position = QPoint(
+            frame.left() + max(8, (frame.width() - self._lock_button.width()) // 2),
+            frame.top() + 6,
+        )
+        screen = QGuiApplication.screenAt(frame.center()) or QGuiApplication.primaryScreen()
+        if screen is not None:
+            position = clamp_desktop_lyrics_position(
+                position,
+                self._lock_button.size(),
+                screen.availableGeometry(),
+            )
+        self._lock_button.move(position)
+        if self._lock_button.isVisible():
+            self._lock_button.raise_()
 
     def _apply_lock_preference(self, locked: bool) -> None:
         locked = bool(locked)
         changed = locked != self._locked
         self._locked = locked
         if changed and locked:
-            self._suppress_unlock_until_exit = self.frameGeometry().contains(QCursor.pos())
+            self._finish_drag(persist_position=True)
+            self._right_button_pressed = False
+            self._suppress_unlock_until_exit = self._pointer_in_lyrics_or_button(QCursor.pos())
             self._lock_button.hide()
             self._set_input_passthrough(True)
         elif changed:
             self._suppress_unlock_until_exit = False
             self._set_input_passthrough(False)
-            if self.frameGeometry().contains(QCursor.pos()):
+            if self.frameGeometry().contains(QCursor.pos()) and not self._settings_popover_visible:
                 self._show_lock_affordance()
         elif not locked:
             self._set_input_passthrough(False)
-        elif not self._lock_button.isVisible():
+        else:
             self._set_input_passthrough(True)
         self._update_lock_button()
 
@@ -376,11 +411,14 @@ class DesktopLyricsWindow(QWidget):
         self.interaction_mode_changed.emit(not enabled)
 
     def _show_lock_affordance(self) -> None:
-        if self._suppress_unlock_until_exit:
+        if (
+            self._suppress_unlock_until_exit
+            or self._settings_popover_visible
+            or not self.isVisible()
+        ):
             return
         self._interaction_timer.stop()
-        if self._locked:
-            self._set_input_passthrough(False)
+        self._update_lock_button_geometry()
         self._lock_button.show()
         self._lock_button.raise_()
 
@@ -388,10 +426,9 @@ class DesktopLyricsWindow(QWidget):
         if self._drag_offset is not None:
             return
         self._lock_button.hide()
-        if self._locked:
-            self._set_input_passthrough(True)
 
     def _request_lock_toggle(self) -> None:
+        self._finish_drag(persist_position=True)
         self.lock_state_change_requested.emit(not self._locked)
 
     def _update_lock_button(self) -> None:
@@ -405,68 +442,180 @@ class DesktopLyricsWindow(QWidget):
     def _poll_cursor(self) -> None:
         if not self.isVisible():
             return
+        if self._drag_offset is not None and not (
+            QGuiApplication.mouseButtons() & Qt.MouseButton.LeftButton
+        ):
+            self._finish_drag(persist_position=True)
         cursor = QCursor.pos()
-        frame = self.frameGeometry()
-        if frame.contains(cursor):
+        if self._pointer_in_lyrics_or_button(cursor):
             self._interaction_timer.stop()
-            if not self._suppress_unlock_until_exit and not self._lock_button.isVisible():
+            if (
+                not self._suppress_unlock_until_exit
+                and not self._settings_popover_visible
+                and not self._lock_button.isVisible()
+            ):
                 self._show_lock_affordance()
             return
         self._suppress_unlock_until_exit = False
         if self._lock_button.isVisible() and not self._interaction_timer.isActive():
             self._interaction_timer.start()
 
+    def _pointer_in_lyrics_or_button(self, position: QPoint) -> bool:
+        if self.frameGeometry().contains(position):
+            return True
+        return self._lock_button.isVisible() and self._lock_button.frameGeometry().contains(
+            position
+        )
+
+    def set_settings_popover_visible(self, visible: bool) -> None:
+        """Suspend pointer gestures while the quick-settings popup owns interaction."""
+
+        visible = bool(visible)
+        if visible == self._settings_popover_visible:
+            return
+        self._settings_popover_visible = visible
+        self._right_button_pressed = False
+        if visible:
+            self._finish_drag(persist_position=True)
+            self._interaction_timer.stop()
+            self._lock_button.hide()
+        elif self.isVisible():
+            self._poll_cursor()
+
     def _emit_position(self) -> None:
         self._saved_x = int(self.x())
         self._saved_y = int(self.y())
         self.position_changed.emit(self._saved_x, self._saved_y)
 
-    def mousePressEvent(self, event: QMouseEvent) -> None:  # noqa: N802
-        if not self._locked and event.button() == Qt.MouseButton.LeftButton:
-            self._drag_offset = event.globalPosition().toPoint() - self.frameGeometry().topLeft()
+    def _begin_drag(self, event: QMouseEvent) -> bool:
+        if (
+            self._locked
+            or self._settings_popover_visible
+            or event.button() != Qt.MouseButton.LeftButton
+        ):
+            return False
+        self._right_button_pressed = False
+        self._drag_offset = event.globalPosition().toPoint() - self.frameGeometry().topLeft()
+        try:
+            self.grabMouse()
+            self._mouse_grabbed = True
+        except RuntimeError:
+            self._mouse_grabbed = False
+        event.accept()
+        return True
+
+    def _finish_drag(self, *, persist_position: bool) -> None:
+        was_dragging = self._drag_offset is not None
+        self._drag_offset = None
+        if self._mouse_grabbed:
+            try:
+                self.releaseMouse()
+            except RuntimeError:
+                pass
+            self._mouse_grabbed = False
+        if was_dragging and persist_position:
+            self._emit_position()
+
+    def _handle_right_press(self, event: QMouseEvent) -> bool:
+        if (
+            self._locked
+            or self._settings_popover_visible
+            or event.button() != Qt.MouseButton.RightButton
+        ):
+            return False
+        self._finish_drag(persist_position=True)
+        self._right_button_pressed = True
+        event.accept()
+        return True
+
+    def _handle_right_release(self, event: QMouseEvent) -> bool:
+        if event.button() != Qt.MouseButton.RightButton:
+            return False
+        requested = (
+            self._right_button_pressed
+            and not self._locked
+            and not self._settings_popover_visible
+        )
+        self._right_button_pressed = False
+        if requested:
+            position = event.globalPosition().toPoint()
+            self._finish_drag(persist_position=True)
             event.accept()
+            QTimer.singleShot(0, lambda point=QPoint(position): self._emit_settings_request(point))
+            return True
+        return False
+
+    def _emit_settings_request(self, position: QPoint) -> None:
+        if self._locked or self._settings_popover_visible or not self.isVisible():
+            return
+        self._finish_drag(persist_position=True)
+        self._lock_button.hide()
+        self.settings_requested.emit(QPoint(position))
+
+    def mousePressEvent(self, event: QMouseEvent) -> None:  # noqa: N802
+        if self._handle_right_press(event) or self._begin_drag(event):
             return
         super().mousePressEvent(event)
 
     def mouseMoveEvent(self, event: QMouseEvent) -> None:  # noqa: N802
         if self._drag_offset is not None and not self._locked:
+            if not (event.buttons() & Qt.MouseButton.LeftButton):
+                self._finish_drag(persist_position=True)
+                event.accept()
+                return
             self.move(event.globalPosition().toPoint() - self._drag_offset)
             event.accept()
             return
         super().mouseMoveEvent(event)
 
     def mouseReleaseEvent(self, event: QMouseEvent) -> None:  # noqa: N802
-        if self._drag_offset is not None:
-            self._drag_offset = None
-            self._emit_position()
+        if self._handle_right_release(event):
+            return
+        if self._drag_offset is not None and event.button() == Qt.MouseButton.LeftButton:
+            self._finish_drag(persist_position=True)
             event.accept()
             return
         super().mouseReleaseEvent(event)
 
     def eventFilter(self, watched, event) -> bool:  # noqa: N802
         if watched is self._surface and isinstance(event, QContextMenuEvent):
-            if not self._locked:
-                self.settings_requested.emit(event.globalPos())
             event.accept()
             return True
         if watched is self._surface and isinstance(event, QMouseEvent):
-            if (
-                event.type() == QEvent.Type.MouseButtonPress
-                and event.button() == Qt.MouseButton.LeftButton
-            ):
-                self.mousePressEvent(event)
-                return True
+            if event.type() == QEvent.Type.MouseButtonPress:
+                return self._handle_right_press(event) or self._begin_drag(event)
             if event.type() == QEvent.Type.MouseMove and self._drag_offset is not None:
                 self.mouseMoveEvent(event)
-                return True
-            if event.type() == QEvent.Type.MouseButtonRelease and self._drag_offset is not None:
-                self.mouseReleaseEvent(event)
-                return True
+                return event.isAccepted()
+            if event.type() == QEvent.Type.MouseButtonRelease:
+                if self._handle_right_release(event):
+                    return True
+                if self._drag_offset is not None and event.button() == Qt.MouseButton.LeftButton:
+                    self._finish_drag(persist_position=True)
+                    event.accept()
+                    return True
         return super().eventFilter(watched, event)
+
+    def keyPressEvent(self, event) -> None:  # noqa: N802
+        if event.key() == Qt.Key.Key_Escape and self._drag_offset is not None:
+            self._finish_drag(persist_position=True)
+            event.accept()
+            return
+        super().keyPressEvent(event)
+
+    def event(self, event) -> bool:
+        if event.type() == QEvent.Type.WindowDeactivate:
+            self._finish_drag(persist_position=True)
+            self._right_button_pressed = False
+        return super().event(event)
 
     def resizeEvent(self, event) -> None:  # noqa: N802
         super().resizeEvent(event)
         self._surface.setGeometry(self.rect())
+        self._update_lock_button_geometry()
+
+    def moveEvent(self, event) -> None:  # noqa: N802
+        super().moveEvent(event)
         self._update_lock_button_geometry()
 
     def showEvent(self, event) -> None:  # noqa: N802
@@ -486,7 +635,8 @@ class DesktopLyricsWindow(QWidget):
                 self._set_input_passthrough(True)
             self._cursor_timer.stop()
             self._interaction_timer.stop()
-            self._drag_offset = None
+            self._finish_drag(persist_position=False)
+            self._right_button_pressed = False
         super().hideEvent(event)
         if not input_mode_change:
             self.visible_changed.emit(False)
@@ -497,4 +647,9 @@ class DesktopLyricsWindow(QWidget):
             self.enabled_changed.emit(False)
         self._cursor_timer.stop()
         self._interaction_timer.stop()
+        self._finish_drag(persist_position=False)
+        self._right_button_pressed = False
+        self._lock_button.hide()
+        self._lock_button.close()
+        self._lock_button.deleteLater()
         event.accept()

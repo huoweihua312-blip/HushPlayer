@@ -1916,6 +1916,13 @@ class MainWindow(QMainWindow):
         window.lock_state_change_requested.connect(
             self._on_desktop_lyrics_lock_state_requested
         )
+        if self.desktop_lyrics_settings_popover is not None:
+            self.desktop_lyrics_settings_popover.visibility_changed.connect(
+                window.set_settings_popover_visible
+            )
+            window.set_settings_popover_visible(
+                self.desktop_lyrics_settings_popover.isVisible()
+            )
         self.desktop_lyrics_window = window
         window.apply_settings(self._settings_snapshot.to_dict())
         return window
@@ -1931,6 +1938,10 @@ class MainWindow(QMainWindow):
         popover.reset_position_requested.connect(
             self._reset_desktop_lyrics_position_from_quick_settings
         )
+        if self.desktop_lyrics_window is not None:
+            popover.visibility_changed.connect(
+                self.desktop_lyrics_window.set_settings_popover_visible
+            )
         self.desktop_lyrics_settings_popover = popover
         return popover
 

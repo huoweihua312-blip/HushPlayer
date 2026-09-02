@@ -9,8 +9,8 @@ from pathlib import Path
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PySide6.QtCore import QPoint, QRect, QSize, Qt
-from PySide6.QtGui import QContextMenuEvent, QGuiApplication
+from PySide6.QtCore import QEvent, QPoint, QPointF, QRect, QSize, Qt
+from PySide6.QtGui import QGuiApplication, QMouseEvent
 from PySide6.QtWidgets import QApplication
 
 from app.startup_diagnostics import StartupDiagnostics
@@ -127,6 +127,21 @@ class DesktopLyricsWindowTests(unittest.TestCase):
         margins = self.window._secondary_layout.contentsMargins()
         self.assertGreater(margins.left(), margins.right())
 
+    def test_secondary_lyric_uses_next_line_then_current_translation(self) -> None:
+        track = next(track for track in create_mock_tracks(80) if not track.is_missing)
+        self.lyrics.set_track(track)
+        self.window._render()
+        self.assertIsNotNone(self.lyrics.next_line)
+        self.assertEqual(self.window._secondary_label.text(), self.lyrics.next_line.text)
+
+        self.lyrics.load_mock_scenario("translation")
+        self.window._render()
+        self.assertTrue(self.lyrics.active_line.translation)
+        self.assertEqual(
+            self.window._secondary_label.text(),
+            self.lyrics.active_line.translation,
+        )
+
     def test_font_size_uses_pixels_and_only_one_lock_button_is_created(self) -> None:
         self.window.show()
         self.window.apply_settings({"floating_lyrics_font_size": 22})
@@ -144,27 +159,85 @@ class DesktopLyricsWindowTests(unittest.TestCase):
         self.assertEqual(self.window._lock_button.size(), QSize(32, 32))
         self.assertEqual(
             self.window._lock_button.x(),
-            (self.window.width() - self.window._lock_button.width()) // 2,
+            self.window.frameGeometry().left()
+            + (self.window.width() - self.window._lock_button.width()) // 2,
         )
 
-    def test_unlocked_context_click_requests_settings_without_starting_drag(self) -> None:
+    def test_unlocked_right_release_requests_settings_once_without_starting_drag(self) -> None:
         requests: list[QPoint] = []
         self.window.settings_requested.connect(requests.append)
         self.window.apply_settings({"floating_lyrics_passthrough": False})
-        self.window.show()
+        track = next(track for track in create_mock_tracks(80) if not track.is_missing)
+        self.lyrics.set_track(track)
+        self.window.show_for_current_screen()
         self.app.processEvents()
         local_position = QPoint(120, 70)
         global_position = self.window.mapToGlobal(local_position)
-        event = QContextMenuEvent(
-            QContextMenuEvent.Reason.Mouse,
-            local_position,
-            global_position,
+        press = QMouseEvent(
+            QEvent.Type.MouseButtonPress,
+            QPointF(local_position),
+            QPointF(global_position),
+            Qt.MouseButton.RightButton,
+            Qt.MouseButton.RightButton,
+            Qt.KeyboardModifier.NoModifier,
         )
-        QApplication.sendEvent(self.window._surface, event)
+        release = QMouseEvent(
+            QEvent.Type.MouseButtonRelease,
+            QPointF(local_position),
+            QPointF(global_position),
+            Qt.MouseButton.RightButton,
+            Qt.MouseButton.NoButton,
+            Qt.KeyboardModifier.NoModifier,
+        )
+        QApplication.sendEvent(self.window._surface, press)
+        self.assertEqual(requests, [])
+        QApplication.sendEvent(self.window._surface, release)
+        self.app.processEvents()
         self.assertEqual(requests, [global_position])
         self.assertIsNone(self.window._drag_offset)
 
-    def test_locked_hover_temporarily_accepts_input_and_lock_button_requests_change(self) -> None:
+    def test_settings_visibility_cancels_drag_and_blocks_new_pointer_gestures(self) -> None:
+        self.window.apply_settings({"floating_lyrics_passthrough": False})
+        self.window.show()
+        self.app.processEvents()
+        local_position = QPoint(100, 60)
+        global_position = self.window.mapToGlobal(local_position)
+        press = QMouseEvent(
+            QEvent.Type.MouseButtonPress,
+            QPointF(local_position),
+            QPointF(global_position),
+            Qt.MouseButton.LeftButton,
+            Qt.MouseButton.LeftButton,
+            Qt.KeyboardModifier.NoModifier,
+        )
+        self.assertTrue(self.window._begin_drag(press))
+        self.assertIsNotNone(self.window._drag_offset)
+        self.window.set_settings_popover_visible(True)
+        self.assertIsNone(self.window._drag_offset)
+        self.assertFalse(self.window._mouse_grabbed)
+        self.assertFalse(self.window._begin_drag(press))
+
+    def test_cursor_poll_ends_drag_after_left_button_is_lost(self) -> None:
+        self.window.apply_settings({"floating_lyrics_passthrough": False})
+        track = next(track for track in create_mock_tracks(80) if not track.is_missing)
+        self.lyrics.set_track(track)
+        self.window.show_for_current_screen()
+        self.app.processEvents()
+        local_position = QPoint(100, 60)
+        press = QMouseEvent(
+            QEvent.Type.MouseButtonPress,
+            QPointF(local_position),
+            QPointF(self.window.mapToGlobal(local_position)),
+            Qt.MouseButton.LeftButton,
+            Qt.MouseButton.LeftButton,
+            Qt.KeyboardModifier.NoModifier,
+        )
+        self.assertTrue(self.window._begin_drag(press))
+        self.window._poll_cursor()
+        self.assertIsNone(self.window._drag_offset)
+        self.assertFalse(self.window._mouse_grabbed)
+
+    def test_locked_hover_keeps_input_passthrough_and_lock_button_requests_change(self) -> None:
         requested_states: list[bool] = []
         visibility_changes: list[bool] = []
         self.window.lock_state_change_requested.connect(requested_states.append)
@@ -183,8 +256,17 @@ class DesktopLyricsWindowTests(unittest.TestCase):
         self.app.processEvents()
         self.assertTrue(self.window.is_locked)
         self.assertTrue(self.window._lock_button.isVisible())
-        self.assertFalse(
+        self.assertTrue(
             bool(self.window.windowFlags() & Qt.WindowType.WindowTransparentForInput)
+        )
+        self.assertTrue(self.window._lock_button.isWindow())
+        self.assertIsNone(self.window._lock_button.parentWidget())
+        self.assertEqual(self.window._lock_button.focusPolicy(), Qt.FocusPolicy.NoFocus)
+        self.assertFalse(
+            bool(
+                self.window._lock_button.windowFlags()
+                & Qt.WindowType.WindowTransparentForInput
+            )
         )
         self.assertEqual(visibility_changes, [])
         self.window._lock_button.click()

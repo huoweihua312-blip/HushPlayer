@@ -35,14 +35,13 @@ SEARCH_ENTRIES: tuple[SettingsSearchResult, ...] = (
     SettingsSearchResult("playback.replay_gain_mode", "播放", "ReplayGain", "选择音量标准化策略", ("gain",)),
     SettingsSearchResult("playback.output_device_mock", "播放", "输出设备", "选择音频输出设备", ("device", "output")),
     SettingsSearchResult("lyrics.show_translation", "歌词", "显示翻译", "普通歌词与沉浸歌词同步显示翻译", ("translation",)),
-    SettingsSearchResult("lyrics.show_romanization", "歌词", "显示罗马音", "普通歌词与沉浸歌词同步显示罗马音", ("romanization",)),
     SettingsSearchResult("lyrics.lyrics_font_scale", "歌词", "整体歌词大小", "调整普通歌词的文字比例", ("lyrics size", "font")),
     SettingsSearchResult("lyrics.lyrics_alignment", "歌词", "歌词对齐", "设置普通歌词的阅读对齐偏好", ("alignment",)),
     SettingsSearchResult("lyrics.auto_follow", "歌词", "自动跟随", "播放时跟随当前歌词行", ("follow",)),
     SettingsSearchResult("lyrics.manual_browse_timeout", "歌词", "手动浏览超时", "浏览歌词后返回当前行的等待时间", ("browse", "timeout")),
     SettingsSearchResult("lyrics.lyrics_offset_ms", "歌词", "歌词偏移", "提前或延后同步时间", ("offset", "sync")),
     SettingsSearchResult("immersive.background_mode", "沉浸歌词", "背景模式", "封面、渐变、纯色或透明背景", ("background", "transparent", "opacity")),
-    SettingsSearchResult("immersive.global_font_scale", "沉浸歌词", "整体歌词大小", "按比例调整四类沉浸歌词字号", ("lyrics", "font", "scale")),
+    SettingsSearchResult("immersive.global_font_scale", "沉浸歌词", "整体歌词大小", "按比例调整当前、普通和翻译歌词字号", ("lyrics", "font", "scale")),
     SettingsSearchResult("immersive.controls_auto_hide", "沉浸歌词", "控制层自动隐藏", "播放时静止后收起控制层", ("controls", "auto hide")),
     SettingsSearchResult("library.mock_music_folders", "音乐库", "音乐文件夹", "管理需要扫描的音乐位置", ("folder", "path")),
     SettingsSearchResult("library.scan_on_start", "音乐库", "启动扫描", "启动时扫描音乐文件夹", ("scan",)),
@@ -269,7 +268,6 @@ class SettingsAdapter(QObject):
             return
         values = {
             "lyrics.show_translation": bool(options.get("translation")),
-            "lyrics.show_romanization": bool(options.get("romanization")),
             "lyrics.lyrics_font_scale": float(options.get("font_scale", 1.0)),
         }
         self._sync_external_values(values)
@@ -315,8 +313,6 @@ class SettingsAdapter(QObject):
             display = self._lyrics.display_options
             if bool(display["translation"]) != draft.show_translation:
                 self._lyrics.toggle_translation()
-            if bool(display["romanization"]) != draft.show_romanization:
-                self._lyrics.toggle_romanization()
             self._lyrics.set_font_scale(draft.lyrics_font_scale)
             self._lyrics.set_offset(draft.lyrics_offset_ms)
             self.lyrics_preview_changed.emit({

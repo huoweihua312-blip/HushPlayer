@@ -21,7 +21,6 @@ class LyricLineItem(QWidget):
         self._segment_index = -1
         self._segment_progress = 0.0
         self._show_translation = True
-        self._show_romanization = False
         self._font_scale = 1.0
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         self.setSizePolicy(self.sizePolicy().horizontalPolicy(), self.sizePolicy().verticalPolicy())
@@ -32,16 +31,13 @@ class LyricLineItem(QWidget):
 
     def set_display_options(self, options: dict[str, object]) -> None:
         translation = bool(options.get("translation", True))
-        romanization = bool(options.get("romanization", False))
         scale = float(options.get("font_scale", 1.0))
-        if (translation, romanization, scale) == (
+        if (translation, scale) == (
             self._show_translation,
-            self._show_romanization,
             self._font_scale,
         ):
             return
         self._show_translation = translation
-        self._show_romanization = romanization
         self._font_scale = scale
         self.updateGeometry()
         self.update()
@@ -64,8 +60,6 @@ class LyricLineItem(QWidget):
         height = self._text_height(self.line.text, self._main_font(), available)
         if self._show_translation and self.line.translation:
             height += 4 + self._text_height(self.line.translation, self._secondary_font(), available)
-        if self._show_romanization and self.line.romanization:
-            height += 2 + self._text_height(self.line.romanization, self._secondary_font(), available)
         return height + 20
 
     def hasHeightForWidth(self) -> bool:  # noqa: N802
@@ -123,14 +117,6 @@ class LyricLineItem(QWidget):
             translation_color = self._theme.colors.secondary_text if self._active else self._theme.colors.subtle_text
             self._draw_wrapped(painter, sub_rect, self.line.translation, self._secondary_font(), QColor(translation_color))
             y += height
-        if self._show_romanization and self.line.romanization:
-            y += 2
-            height = self._text_height(self.line.romanization, self._secondary_font(), rect.width())
-            sub_rect = rect
-            sub_rect.setTop(y)
-            sub_rect.setHeight(height)
-            romanization_color = self._theme.colors.secondary_text if self._active else self._theme.colors.subtle_text
-            self._draw_wrapped(painter, sub_rect, self.line.romanization, self._secondary_font(), QColor(romanization_color))
 
     def _highlight_prefix(self) -> str:
         if self._segment_index < 0:

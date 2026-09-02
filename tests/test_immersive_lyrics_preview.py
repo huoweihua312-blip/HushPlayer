@@ -153,7 +153,8 @@ class ImmersiveLyricsPreviewTests(unittest.TestCase):
         self.assertEqual((panel.active_font_slider.minimum(), panel.active_font_slider.maximum()), (32, 72))
         self.assertEqual((panel.inactive_font_slider.minimum(), panel.inactive_font_slider.maximum()), (22, 48))
         self.assertEqual((panel.translation_font_slider.minimum(), panel.translation_font_slider.maximum()), (14, 32))
-        self.assertEqual((panel.romanization_font_slider.minimum(), panel.romanization_font_slider.maximum()), (12, 26))
+        self.assertFalse(hasattr(panel, "romanization_font_slider"))
+        self.assertFalse(hasattr(panel, "romanization_check"))
 
     def test_global_lyric_scale_preserves_role_proportions_and_canvas_instance(self) -> None:
         canvas = self.window.lyrics_view.canvas

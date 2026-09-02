@@ -45,6 +45,7 @@ class DesktopLyricsQuickSettingsPopover(QFrame):
 
     value_changed = Signal(str, object)
     reset_position_requested = Signal()
+    visibility_changed = Signal(bool)
 
     def __init__(self, theme: Theme, parent: QWidget | None = None) -> None:
         super().__init__(parent, Qt.WindowType.Popup | Qt.WindowType.FramelessWindowHint)
@@ -331,3 +332,11 @@ class DesktopLyricsQuickSettingsPopover(QFrame):
             event.accept()
             return
         super().keyPressEvent(event)
+
+    def showEvent(self, event) -> None:  # noqa: N802
+        super().showEvent(event)
+        self.visibility_changed.emit(True)
+
+    def hideEvent(self, event) -> None:  # noqa: N802
+        super().hideEvent(event)
+        self.visibility_changed.emit(False)

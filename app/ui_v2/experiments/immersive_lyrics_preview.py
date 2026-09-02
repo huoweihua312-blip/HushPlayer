@@ -479,7 +479,7 @@ class PreviewLyricsCanvas(QWidget):
         self._artwork = MOCK_ARTWORKS[0]
         self._language = "中文"
         self._show_translation = True
-        self._show_romanization = True
+        self._show_romanization = False
         self._document: LyricsDocument | None = None
         self._current_index = 3
         self._active_segment_index = 1
@@ -631,8 +631,8 @@ class PreviewLyricsCanvas(QWidget):
         self._show_translation = bool(visible)
         self.update()
 
-    def set_romanization_visible(self, visible: bool) -> None:
-        self._show_romanization = bool(visible)
+    def set_romanization_visible(self, _visible: bool) -> None:
+        self._show_romanization = False
         self.update()
 
     def sizeHint(self) -> QSize:  # noqa: N802
@@ -646,7 +646,7 @@ class PreviewLyricsCanvas(QWidget):
         max_width = min(self._max_line_width, max(260, self.width() - 40))
         x = max(20, (self.width() - max_width) // 2)
         y = max(30, round(38 * self._responsive_scale))
-        active_size, inactive_size, translation_size, romanization_size = self.effective_font_sizes
+        active_size, inactive_size, translation_size, _romanization_size = self.effective_font_sizes
         spacing_scale = self._responsive_scale * self._global_scale / 100
         for index, line in indexed_lines:
             distance = index - self._current_index
@@ -673,13 +673,6 @@ class PreviewLyricsCanvas(QWidget):
                 sub_font.setWeight(QFont.Weight.Medium)
                 sub_metrics = QFontMetrics(sub_font)
                 self._draw_text(painter, QRect(x, y, max_width, sub_metrics.height() + 6), line.translation, sub_font, _color(self._theme.colors.secondary_text, 255))
-                y += sub_metrics.height() + max(3, round(4 * spacing_scale))
-            if active and self._show_romanization:
-                sub_font = QFont(self.font())
-                sub_font.setPointSize(max(10, min(42, round(romanization_size * self._responsive_scale))))
-                sub_font.setWeight(QFont.Weight.Normal)
-                sub_metrics = QFontMetrics(sub_font)
-                self._draw_text(painter, QRect(x, y, max_width, sub_metrics.height() + 6), line.romanization, sub_font, _color(self._theme.colors.subtle_text, 255))
                 y += sub_metrics.height() + max(3, round(4 * spacing_scale))
             y += max(8, round(14 * spacing_scale))
 
@@ -785,8 +778,8 @@ class PreviewLyricsView(QScrollArea):
     def set_translation_visible(self, visible: bool) -> None:
         self.canvas.set_translation_visible(visible)
 
-    def set_romanization_visible(self, visible: bool) -> None:
-        self.canvas.set_romanization_visible(visible)
+    def set_romanization_visible(self, _visible: bool) -> None:
+        self.canvas.set_romanization_visible(False)
 
 
 class PreviewControls(QFrame):
@@ -993,7 +986,6 @@ class SettingsPanel(QFrame):
     inactive_opacity_changed = Signal(int)
     text_protection_changed = Signal(str)
     translation_changed = Signal(bool)
-    romanization_changed = Signal(bool)
     cover_scale_changed = Signal(int)
     lyrics_width_changed = Signal(int)
     auto_hide_changed = Signal(bool)
@@ -1041,7 +1033,6 @@ class SettingsPanel(QFrame):
         self.weight_combo = self._add_combo("字重", tuple((value, value) for value in ("Normal", "Medium", "Semibold", "Bold")))
         self.text_protection_combo = self._add_combo("文字保护", tuple((value, value) for value in PreviewLyricsCanvas.PROTECTION_MODES))
         self.translation_check = self._add_check("显示翻译", True)
-        self.romanization_check = self._add_check("显示罗马音", True)
         self.advanced_sizes_toggle = QToolButton(self)
         self.advanced_sizes_toggle.setText("高级字号设置")
         self.advanced_sizes_toggle.setCheckable(True)
@@ -1055,7 +1046,6 @@ class SettingsPanel(QFrame):
         self.active_font_slider = self._add_slider("当前歌词字号", 32, 72, 46, "px", self._advanced_sizes_layout)
         self.inactive_font_slider = self._add_slider("普通歌词字号", 22, 48, 30, "px", self._advanced_sizes_layout)
         self.translation_font_slider = self._add_slider("翻译字号", 14, 32, 14, "px", self._advanced_sizes_layout)
-        self.romanization_font_slider = self._add_slider("罗马音字号", 12, 26, 15, "px", self._advanced_sizes_layout)
         self._body_layout.addWidget(self.advanced_sizes_container)
         self.advanced_sizes_container.hide()
         reset_row = QHBoxLayout()
@@ -1093,13 +1083,12 @@ class SettingsPanel(QFrame):
         self.lyric_protection_check.toggled.connect(self.lyric_protection_changed)
         self.lyric_protection_strength_slider.valueChanged.connect(self.lyric_protection_strength_changed)
         self.global_lyric_scale_slider.valueChanged.connect(self.global_lyric_scale_changed)
-        for slider in (self.active_font_slider, self.inactive_font_slider, self.translation_font_slider, self.romanization_font_slider):
+        for slider in (self.active_font_slider, self.inactive_font_slider, self.translation_font_slider):
             slider.valueChanged.connect(self._emit_font_sizes)
         self.weight_combo.currentIndexChanged.connect(lambda _: self.weight_changed.emit(str(self.weight_combo.currentData())))
         self.inactive_opacity_slider.valueChanged.connect(self.inactive_opacity_changed)
         self.text_protection_combo.currentIndexChanged.connect(lambda _: self.text_protection_changed.emit(str(self.text_protection_combo.currentData())))
         self.translation_check.toggled.connect(self.translation_changed)
-        self.romanization_check.toggled.connect(self.romanization_changed)
         self.cover_scale_slider.valueChanged.connect(self.cover_scale_changed)
         self.lyrics_width_slider.valueChanged.connect(self.lyrics_width_changed)
         self.auto_hide_check.toggled.connect(self.auto_hide_changed)
@@ -1144,12 +1133,10 @@ class SettingsPanel(QFrame):
         self._set_slider(self.active_font_slider, canvas.active_font_size)
         self._set_slider(self.inactive_font_slider, canvas.inactive_font_size)
         self._set_slider(self.translation_font_slider, canvas.translation_font_size)
-        self._set_slider(self.romanization_font_slider, canvas.romanization_font_size)
         self._set_combo_data(self.weight_combo, canvas._weight_name)
         self._set_slider(self.inactive_opacity_slider, canvas.inactive_opacity)
         self._set_combo_data(self.text_protection_combo, canvas.text_protection)
         self._set_check(self.translation_check, preview._translation_visible)
-        self._set_check(self.romanization_check, preview._romanization_visible)
         self._set_slider(self.cover_scale_slider, preview._cover_scale)
         self._set_slider(self.lyrics_width_slider, preview._lyrics_max_width)
         self._set_check(self.auto_hide_check, preview.auto_hide_controls)
@@ -1214,7 +1201,12 @@ class SettingsPanel(QFrame):
         return check
 
     def _emit_font_sizes(self, value: int) -> None:
-        self.font_sizes_changed.emit(self.active_font_slider.value(), self.inactive_font_slider.value(), self.translation_font_slider.value(), self.romanization_font_slider.value())
+        self.font_sizes_changed.emit(
+            self.active_font_slider.value(),
+            self.inactive_font_slider.value(),
+            self.translation_font_slider.value(),
+            15,
+        )
 
     def _set_advanced_sizes_visible(self, visible: bool) -> None:
         self.advanced_sizes_container.setVisible(visible)
@@ -1320,7 +1312,7 @@ class ImmersiveLyricsPreview(QWidget):
         self._artwork = MOCK_ARTWORKS[0]
         self._language = "中文"
         self._translation_visible = True
-        self._romanization_visible = True
+        self._romanization_visible = False
         self._background_mode = "artwork"
         self._background_opacity = 55
         self._overlay_strength = 45
@@ -1555,7 +1547,7 @@ class ImmersiveLyricsPreview(QWidget):
         self.set_inactive_lyric_opacity(68)
         self.set_text_protection("轻微阴影")
         self.set_translation_visible(True)
-        self.set_romanization_visible(True)
+        self.set_romanization_visible(False)
         self.set_cover_scale(100)
         self.set_lyrics_max_width(780)
         self.set_auto_hide_controls(True)
@@ -1629,9 +1621,9 @@ class ImmersiveLyricsPreview(QWidget):
         self.lyrics_view.set_translation_visible(self._translation_visible)
         self._refresh_settings_panel()
 
-    def set_romanization_visible(self, visible: bool) -> None:
-        self._romanization_visible = bool(visible)
-        self.lyrics_view.set_romanization_visible(self._romanization_visible)
+    def set_romanization_visible(self, _visible: bool) -> None:
+        self._romanization_visible = False
+        self.lyrics_view.set_romanization_visible(False)
         self._refresh_settings_panel()
 
     def enter_fullscreen(self) -> None:
@@ -1743,8 +1735,6 @@ class ImmersiveLyricsPreview(QWidget):
             self.set_language("英文")
         elif key == Qt.Key.Key_T:
             self.set_theme_mode("light" if self._theme.mode == "dark" else "dark")
-        elif key == Qt.Key.Key_R:
-            self.set_romanization_visible(not self._romanization_visible)
         else:
             super().keyPressEvent(event)
             return
@@ -1853,7 +1843,6 @@ class ImmersiveLyricsPreview(QWidget):
         panel.inactive_opacity_changed.connect(self.set_inactive_lyric_opacity)
         panel.text_protection_changed.connect(self.set_text_protection)
         panel.translation_changed.connect(self.set_translation_visible)
-        panel.romanization_changed.connect(self.set_romanization_visible)
         panel.cover_scale_changed.connect(self.set_cover_scale)
         panel.lyrics_width_changed.connect(self.set_lyrics_max_width)
         panel.auto_hide_changed.connect(self.set_auto_hide_controls)

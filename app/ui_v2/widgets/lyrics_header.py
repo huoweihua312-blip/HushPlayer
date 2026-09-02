@@ -12,7 +12,6 @@ from app.ui_v2.theme.tokens import Theme
 
 class LyricsHeader(QFrame):
     translation_requested = Signal()
-    romanization_requested = Signal()
     font_scale_requested = Signal(float)
     immersive_requested = Signal()
 
@@ -25,8 +24,6 @@ class LyricsHeader(QFrame):
         self.source_label = QLabel("歌词来源: --", self)
         self.translation_button = QToolButton(self)
         self.translation_button.setText("翻译")
-        self.romanization_button = QToolButton(self)
-        self.romanization_button.setText("罗马音")
         self.smaller_button = QToolButton(self)
         self.smaller_button.setText("A-")
         self.larger_button = QToolButton(self)
@@ -35,7 +32,6 @@ class LyricsHeader(QFrame):
         self.immersive_button.setText("沉浸")
         self.immersive_button.setToolTip("进入沉浸模式")
         self.translation_button.clicked.connect(self.translation_requested)
-        self.romanization_button.clicked.connect(self.romanization_requested)
         self.smaller_button.clicked.connect(lambda: self.font_scale_requested.emit(-0.1))
         self.larger_button.clicked.connect(lambda: self.font_scale_requested.emit(0.1))
         self.immersive_button.clicked.connect(self.immersive_requested)
@@ -48,7 +44,7 @@ class LyricsHeader(QFrame):
         controls = QHBoxLayout()
         controls.setContentsMargins(0, 0, 0, 0)
         controls.setSpacing(4)
-        for button in (self.translation_button, self.romanization_button, self.smaller_button, self.larger_button, self.immersive_button):
+        for button in (self.translation_button, self.smaller_button, self.larger_button, self.immersive_button):
             controls.addWidget(button)
         layout = QVBoxLayout(self)
         layout.setContentsMargins(14, 14, 14, 14)
@@ -66,7 +62,6 @@ class LyricsHeader(QFrame):
 
     def set_options(self, options: dict[str, object]) -> None:
         self.translation_button.setChecked(bool(options.get("translation")))
-        self.romanization_button.setChecked(bool(options.get("romanization")))
 
     def set_theme(self, theme: Theme) -> None:
         self._theme = theme
@@ -81,8 +76,8 @@ class LyricsHeader(QFrame):
         self.title_label.setStyleSheet(f"font-size: {theme.fonts.section_title}px; font-weight: 600; color: {theme.colors.primary_text};")
         self.artist_label.setStyleSheet(f"color: {theme.colors.secondary_text};")
         self.source_label.setStyleSheet(f"font-size: {theme.fonts.caption}px; color: {theme.colors.subtle_text};")
-        for button in (self.translation_button, self.romanization_button, self.smaller_button, self.larger_button, self.immersive_button):
-            button.setCheckable(button in (self.translation_button, self.romanization_button))
+        for button in (self.translation_button, self.smaller_button, self.larger_button, self.immersive_button):
+            button.setCheckable(button is self.translation_button)
             button.setStyleSheet(
                 f"QToolButton {{ min-height: {theme.metrics.control_height}px; padding: 0 {theme.metrics.spacing_sm}px; border: 0; "
                 f"border-radius: {theme.metrics.radius_sm}px; color: {theme.colors.secondary_text}; }}"

@@ -102,10 +102,12 @@ class UiV2ImmersiveLyricsTests(unittest.TestCase):
         self.assertEqual(immersive.canvas.current_index, next(index for index, line in enumerate(document.lines) if line.id == ordinary.adapter.active_line.id))
         self.assertGreaterEqual(immersive.canvas._active_segment_index, 0)
         ordinary.toolbar.translation_button.click()
-        ordinary.toolbar.romanization_button.click()
+        immersive.set_romanization_visible(True)
         self.app.processEvents()
         self.assertFalse(immersive.canvas._translation_visible)
-        self.assertTrue(immersive.canvas._romanization_visible)
+        self.assertFalse(immersive.canvas._romanization_visible)
+        self.assertFalse(hasattr(ordinary.toolbar, "romanization_button"))
+        self.assertFalse(hasattr(immersive, "header_romanization_button"))
         immersive.set_translation_visible(True)
         immersive.set_romanization_visible(False)
         self.app.processEvents()
@@ -635,6 +637,7 @@ class UiV2ImmersiveLyricsTests(unittest.TestCase):
     def test_panel_uses_themed_combo_and_disclosure_controls(self) -> None:
         immersive = self._immersive_page()
         panel = immersive.settings_panel
+        self.assertFalse(hasattr(panel, "romanization_font_slider"))
         panel.show()
         self.app.processEvents()
         for combo in (panel.theme_combo, panel.background_combo, panel.weight_combo, panel.text_protection_combo):

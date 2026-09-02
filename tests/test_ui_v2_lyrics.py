@@ -101,7 +101,7 @@ class LyricsAdapterTests(unittest.TestCase):
         self.adapter.load_mock_scenario("romanization")
         self.assertTrue(self.adapter.document.has_romanization)
         self.adapter.toggle_romanization()
-        self.assertTrue(self.adapter.display_options["romanization"])
+        self.assertFalse(self.adapter.display_options["romanization"])
 
     def test_formal_adapter_loads_actual_local_lrc_instead_of_mock_text(self) -> None:
         with tempfile.TemporaryDirectory(prefix="hushplayer-v2-lyrics-") as root:
@@ -226,9 +226,10 @@ class LyricsPageTests(unittest.TestCase):
         self.assertEqual(len(page.findChildren(QSlider)), 0)
         self.assertTrue(self.window.player_bar.isVisible())
         self.assertEqual(
-            [button.text() for button in (page.toolbar.translation_button, page.toolbar.romanization_button, page.toolbar.more_button, page.toolbar.immersive_button)],
-            ["翻译", "罗马音", "更多", "沉浸"],
+            [button.text() for button in (page.toolbar.translation_button, page.toolbar.more_button, page.toolbar.immersive_button)],
+            ["翻译", "更多", "沉浸"],
         )
+        self.assertFalse(hasattr(page.toolbar, "romanization_button"))
 
     def test_route_reuse_playback_sync_and_canvas_seek(self) -> None:
         page = self._lyrics_page()

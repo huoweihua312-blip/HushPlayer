@@ -263,7 +263,6 @@ class SettingsPage(QWidget):
     def _build_lyrics(self, layout: QVBoxLayout) -> None:
         section = self._section("普通歌词", "立即预览现有 LyricsAdapter 的显示选项，不替换其定位逻辑。")
         section.add_row(self._switch_row("lyrics.show_translation", "显示翻译", "与普通歌词和沉浸歌词同步。"))
-        section.add_row(self._switch_row("lyrics.show_romanization", "显示罗马音", "与普通歌词和沉浸歌词同步。"))
         section.add_row(self._float_slider_row("lyrics.lyrics_font_scale", "整体歌词大小", "普通歌词的基础文字比例。", 80, 145, "%"))
         section.add_row(self._combo_row("lyrics.lyrics_alignment", "歌词对齐", "仅记录普通歌词的阅读偏好。", (("居中", "center"), ("左对齐", "left"))))
         section.add_row(self._switch_row("lyrics.auto_follow", "自动跟随", "记录是否自动回到当前歌词。"))
@@ -289,19 +288,17 @@ class SettingsPage(QWidget):
         layout.addWidget(visual)
 
         lyrics = self._section("歌词", "整体缩放先作用于基础字号，单项字号保持各自比例。")
-        lyrics.add_row(self._slider_row("immersive.global_font_scale", "整体歌词大小", "同时影响当前、普通、翻译和罗马音字号。", 75, 160, "%"))
+        lyrics.add_row(self._slider_row("immersive.global_font_scale", "整体歌词大小", "同时影响当前、普通和翻译字号。", 75, 160, "%"))
         lyrics.add_row(self._combo_row("immersive.font_weight", "字重", "强调当前歌词但保持克制。", (("Regular", "Regular"), ("Medium", "Medium"), ("Semibold", "Semibold"), ("Bold", "Bold"))))
         lyrics.add_row(self._slider_row("immersive.inactive_lyric_opacity", "非当前歌词透明度", "确保前后歌词仍清晰可读。", 40, 92, "%"))
         lyrics.add_row(self._combo_row("immersive.text_protection_mode", "文字保护方式", "选择不影响整体氛围的文字保护。", (("无", "无"), ("轻微阴影", "轻微阴影"), ("柔和描边", "柔和描边"))))
         lyrics.add_row(self._switch_row("lyrics.show_translation", "显示翻译", "沿用普通歌词的共享显示状态。"))
-        lyrics.add_row(self._switch_row("lyrics.show_romanization", "显示罗马音", "沿用普通歌词的共享显示状态。"))
         layout.addWidget(lyrics)
 
         advanced = self._section("高级字号与布局", "高级字号作为整体缩放的基础值，不产生累计误差。")
         advanced.add_row(self._slider_row("immersive.active_font_size", "当前歌词字号", "整体缩放前的基础字号。", 28, 72, " px"))
         advanced.add_row(self._slider_row("immersive.normal_font_size", "普通歌词字号", "整体缩放前的基础字号。", 18, 52, " px"))
         advanced.add_row(self._slider_row("immersive.translation_font_size", "翻译字号", "整体缩放前的基础字号。", 11, 30, " px"))
-        advanced.add_row(self._slider_row("immersive.romanization_font_size", "罗马音字号", "整体缩放前的基础字号。", 11, 30, " px"))
         advanced.add_row(self._slider_row("immersive.artwork_size", "封面大小", "调节沉浸布局中的封面比例。", 70, 130, "%"))
         advanced.add_row(self._slider_row("immersive.lyrics_max_width", "歌词最大宽度", "限制超宽窗口中的单行长度。", 420, 920, " px"))
         advanced.add_row(self._switch_row("immersive.controls_auto_hide", "控制层自动隐藏", "播放中静止后自动收起控制层。"))

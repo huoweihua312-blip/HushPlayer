@@ -71,7 +71,7 @@ class ResponsiveLyricsMetrics:
         romanization = max(12, min(24, round(romanization_base * scale)))
         max_width = max(640, min(980, round(logical_width * 0.78)))
         line_spacing = max(5, round(active * 0.18))
-        section_spacing = max(14, round(active * (0.42 + (0.06 if translation_visible or romanization_visible else 0.0))))
+        section_spacing = max(14, round(active * (0.42 + (0.06 if translation_visible else 0.0))))
         return cls(
             active,
             normal,
@@ -393,7 +393,7 @@ class LyricsCanvasV2(QWidget):
 
     def set_display_options(self, options: dict[str, object], *, update_font_scale: bool = True) -> None:
         self._translation_visible = bool(options.get("translation", True))
-        self._romanization_visible = bool(options.get("romanization", False))
+        self._romanization_visible = False
         if update_font_scale:
             self.set_adapter_font_scale(float(options.get("font_scale", 1.0)))
         else:
@@ -579,10 +579,6 @@ class LyricsCanvasV2(QWidget):
                 sub_rect = self._text_rect(source_rect.x(), y, text_width, sub_font, line.translation, 3)
                 self._draw_text(painter, sub_rect, line.translation, sub_font, _with_alpha(self._theme.colors.secondary_text, 230), shadow=False)
                 y += sub_rect.height() + 2
-            if active and self._romanization_visible and line.romanization:
-                roman_font = self._font(sizes[3], QFont.Weight.Normal)
-                roman_rect = self._text_rect(source_rect.x(), y, text_width, roman_font, line.romanization, 3)
-                self._draw_text(painter, roman_rect, line.romanization, roman_font, _with_alpha(self._theme.colors.subtle_text, 226), shadow=False)
         painter.end()
         self._last_metrics = {
             "active": active_font_size,
@@ -705,11 +701,6 @@ class LyricsCanvasV2(QWidget):
                 sub_rect = self._text_rect(x, y, text_width, sub_font, line.translation, 3)
                 self._draw_text(painter, sub_rect, line.translation, sub_font, _with_alpha(self._theme.colors.secondary_text, 230), shadow=False)
                 y += sub_rect.height() + 2
-            if is_active and self._romanization_visible and line.romanization:
-                roman_font = self._font(sizes[3], QFont.Weight.Normal)
-                roman_rect = self._text_rect(x, y, text_width, roman_font, line.romanization, 3)
-                self._draw_text(painter, roman_rect, line.romanization, roman_font, _with_alpha(self._theme.colors.subtle_text, 226), shadow=False)
-                y += roman_rect.height() + 2
             y += self._section_spacing()
         painter.end()
         self._last_metrics = {
@@ -742,8 +733,6 @@ class LyricsCanvasV2(QWidget):
         result = main_height + self._line_spacing()
         if active and self._translation_visible and line.translation:
             result += self._text_rect(0, 0, width, self._font(sizes[2], QFont.Weight.Medium), line.translation, 3).height() + 2
-        if active and self._romanization_visible and line.romanization:
-            result += self._text_rect(0, 0, width, self._font(sizes[3], QFont.Weight.Normal), line.romanization, 3).height() + 2
         return result + self._section_spacing()
 
     def _line_spacing(self) -> int:

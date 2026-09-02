@@ -180,13 +180,11 @@ class ImmersiveLyricsPage(QWidget):
         self.header_now_playing = self._header_mode_button("正在播放", "正在播放", "now_playing", 112)
         self.header_lyrics = self._header_mode_button("歌词", "歌词", "lyrics", 82)
         self.header_translation_button = self._header_toggle_button("翻译", "显示或隐藏翻译", 64)
-        self.header_romanization_button = self._header_toggle_button("罗马音", "显示或隐藏罗马音", 76)
         self.header_fullscreen_button = self._header_text_button("全屏", "进入全屏（F11）", 60)
         self.header_back_button.clicked.connect(self.immersive_exit_requested)
         self.header_now_playing.clicked.connect(lambda: self.mode_changed.emit("now_playing"))
         self.header_lyrics.clicked.connect(lambda: self.mode_changed.emit("lyrics"))
         self.header_translation_button.toggled.connect(self.set_translation_visible)
-        self.header_romanization_button.toggled.connect(self.set_romanization_visible)
         self.header_fullscreen_button.clicked.connect(self.toggle_fullscreen)
         layout.addWidget(self.header_back_button)
         layout.addStretch(1)
@@ -195,7 +193,6 @@ class ImmersiveLyricsPage(QWidget):
         layout.addWidget(self.header_lyrics)
         layout.addSpacing(8)
         layout.addWidget(self.header_translation_button)
-        layout.addWidget(self.header_romanization_button)
         layout.addSpacing(8)
         layout.addWidget(self.header_fullscreen_button)
         self._window_buttons: list[QToolButton] = []
@@ -316,7 +313,6 @@ class ImmersiveLyricsPage(QWidget):
         options = self.lyrics_adapter.display_options
         for button, value in (
             (self.header_translation_button, options.get("translation", True)),
-            (self.header_romanization_button, options.get("romanization", False)),
         ):
             previous = button.blockSignals(True)
             button.setChecked(bool(value))
@@ -473,9 +469,10 @@ class ImmersiveLyricsPage(QWidget):
             self.lyrics_adapter.toggle_translation()
         self._sync_display_buttons()
 
-    def set_romanization_visible(self, visible: bool) -> None:
-        if bool(self.lyrics_adapter.display_options["romanization"]) != bool(visible):
-            self.lyrics_adapter.toggle_romanization()
+    def set_romanization_visible(self, _visible: bool) -> None:
+        """Compatibility entry point; romanization is permanently hidden."""
+
+        self.lyrics_adapter.toggle_romanization()
         self._sync_display_buttons()
 
     def set_background_mode(self, mode: str) -> None:
@@ -826,7 +823,7 @@ class ImmersiveLyricsPage(QWidget):
 
     def _on_display_options_changed(self, options: dict[str, object]) -> None:
         # Immersive global scale belongs to ImmersiveLyricsOptions.  The shared
-        # adapter only owns translation and romanization visibility here.
+        # The shared adapter only owns translation visibility here.
         self.canvas.set_display_options(options, update_font_scale=False)
         self._sync_display_buttons()
 
@@ -849,7 +846,12 @@ class ImmersiveLyricsPage(QWidget):
         self.set_overlay_strength(panel.overlay_strength_slider.value())
         self.set_control_surface_opacity(panel.control_surface_opacity_slider.value())
         self.set_global_lyric_scale(panel.global_lyric_scale_slider.value())
-        self.set_lyric_font_sizes(panel.active_font_slider.value(), panel.normal_font_slider.value(), panel.translation_font_slider.value(), panel.romanization_font_slider.value())
+        self.set_lyric_font_sizes(
+            panel.active_font_slider.value(),
+            panel.normal_font_slider.value(),
+            panel.translation_font_slider.value(),
+            self.options.romanization_font_size,
+        )
         self.set_inactive_lyric_opacity(panel.inactive_opacity_slider.value())
         self.set_lyric_weight(str(panel.weight_combo.currentData()))
         self.set_text_protection(str(panel.text_protection_combo.currentData()))
@@ -882,7 +884,6 @@ class ImmersiveLyricsPage(QWidget):
             (panel.active_font_slider, self.options.active_font_size),
             (panel.normal_font_slider, self.options.normal_font_size),
             (panel.translation_font_slider, self.options.translation_font_size),
-            (panel.romanization_font_slider, self.options.romanization_font_size),
             (panel.inactive_opacity_slider, self.options.inactive_lyric_opacity),
             (panel.background_blur_slider, self.options.background_blur),
             (panel.background_darkness_slider, self.options.background_darkness),

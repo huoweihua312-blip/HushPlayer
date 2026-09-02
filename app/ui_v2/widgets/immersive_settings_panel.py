@@ -58,7 +58,6 @@ class ImmersiveSettingsPanel(QFrame):
         self.active_font_slider = self._slider(28, 72)
         self.normal_font_slider = self._slider(18, 52)
         self.translation_font_slider = self._slider(11, 30)
-        self.romanization_font_slider = self._slider(11, 30)
         self.inactive_opacity_slider = self._slider(40, 92)
         self.weight_combo = self._combo((("Regular", "Regular"), ("Medium", "Medium"), ("Semibold", "Semibold"), ("Bold", "Bold")))
         self.text_protection_combo = self._combo((("无", "无"), ("轻微阴影", "轻微阴影"), ("柔和描边", "柔和描边")))
@@ -95,7 +94,6 @@ class ImmersiveSettingsPanel(QFrame):
             ("当前歌词", self._slider_row(self.active_font_slider, " px")),
             ("普通歌词", self._slider_row(self.normal_font_slider, " px")),
             ("翻译", self._slider_row(self.translation_font_slider, " px")),
-            ("罗马音", self._slider_row(self.romanization_font_slider, " px")),
         ):
             advanced_form.addRow(label, control)
         form.addRow(self.advanced_disclosure)
@@ -132,7 +130,6 @@ class ImmersiveSettingsPanel(QFrame):
             self.active_font_slider,
             self.normal_font_slider,
             self.translation_font_slider,
-            self.romanization_font_slider,
             self.inactive_opacity_slider,
         ):
             slider.valueChanged.connect(self.changed)

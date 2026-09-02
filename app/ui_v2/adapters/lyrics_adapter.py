@@ -225,10 +225,18 @@ class LyricsAdapter(QObject):
         return self._line_at(self._active_line_index)
 
     @property
+    def next_line(self) -> LyricLine | None:
+        """Return the line after the active line without changing timing state."""
+
+        if self._active_line_index < 0:
+            return None
+        return self._line_at(self._active_line_index + 1)
+
+    @property
     def display_options(self) -> dict[str, object]:
         return {
             "translation": self._show_translation,
-            "romanization": self._show_romanization,
+            "romanization": False,
             "font_scale": self._font_scale,
         }
 
@@ -358,8 +366,11 @@ class LyricsAdapter(QObject):
         self.display_options_changed.emit(self.display_options)
 
     def toggle_romanization(self) -> None:
-        self._show_romanization = not self._show_romanization
-        self.display_options_changed.emit(self.display_options)
+        # Kept as a compatibility slot for older callers. Romanization is no
+        # longer a user-visible display mode.
+        if self._show_romanization:
+            self._show_romanization = False
+            self.display_options_changed.emit(self.display_options)
 
     def set_font_scale(self, value: float) -> None:
         scale = max(0.8, min(1.45, round(float(value), 2)))

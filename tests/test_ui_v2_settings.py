@@ -23,6 +23,7 @@ from app.ui_v2.adapters.legacy_settings_bridge import (
     LegacySettingsBridge,
     SettingsBridgeError,
 )
+from app.ui_v2.adapters.settings_adapter import SEARCH_ENTRIES
 from app.ui_v2.models.settings_category import SETTINGS_CATEGORIES
 from app.ui_v2.models.settings_edit_session import SettingsEditSession
 from app.ui_v2.models.settings_snapshot import SettingsSnapshot
@@ -32,6 +33,14 @@ from app.ui_v2.theme.icons import FLUENT_SETTINGS_ASSETS
 
 
 class SettingsContractTests(unittest.TestCase):
+    def test_search_catalog_has_no_romanization_entry(self) -> None:
+        searchable = "\n".join(
+            f"{entry.path} {entry.title} {entry.description} {' '.join(entry.keywords)}"
+            for entry in SEARCH_ENTRIES
+        )
+        self.assertNotIn("romanization", searchable.casefold())
+        self.assertNotIn("罗马音", searchable)
+
     def test_snapshot_and_edit_session_do_not_write_until_save(self) -> None:
         original = SettingsSnapshot.from_mapping(
             {**DEFAULT_SETTINGS, "unknown_legacy_key": {"keep": True}}
