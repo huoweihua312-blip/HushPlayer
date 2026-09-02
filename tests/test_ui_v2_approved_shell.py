@@ -328,7 +328,8 @@ class ApprovedShellMigrationTests(unittest.TestCase):
             16 <= button.iconSize().width() <= 18
             for button in (
                 bar.favorite_button, bar.shuffle_button, bar.repeat_button,
-                bar.queue_button, bar.lyrics_button, bar.volume_button, bar.more_button,
+                bar.queue_button, bar.lyrics_button, bar.desktop_lyrics_button,
+                bar.volume_button, bar.more_button,
             )
         ))
         self.assertEqual(bar.previous_button.iconSize(), QSize(20, 20))
@@ -393,11 +394,13 @@ class ApprovedShellMigrationTests(unittest.TestCase):
             bar.repeat_button: "arrow_repeat_all_20_regular.svg",
             bar.queue_button: "document_queue_24_regular.svg",
             bar.lyrics_button: "subtitles_20_regular.svg",
+            bar.desktop_lyrics_button: "desktop_lyrics_20_regular.svg",
             bar.volume_button: "speaker_2_20_regular.svg",
             bar.more_button: "more_horizontal_20_regular.svg",
         }
         self.assertTrue(all(button.asset_family == "fluent_player" for button in expected))
         self.assertEqual({button.asset_filename for button in expected}, set(expected.values()))
+        self.assertNotEqual(bar.lyrics_button.asset_filename, bar.desktop_lyrics_button.asset_filename)
         self.assertTrue(all(path.read_text(encoding="utf-8").isascii() for path in manifest_path.parent.glob("*.svg")))
 
     def test_fluent_player_render_cache_includes_file_size_color_dpr_and_play_offset(self) -> None:
@@ -418,6 +421,7 @@ class ApprovedShellMigrationTests(unittest.TestCase):
             bar.repeat_button,
             bar.queue_button,
             bar.lyrics_button,
+            bar.desktop_lyrics_button,
             bar.volume_button,
             bar.more_button,
         )

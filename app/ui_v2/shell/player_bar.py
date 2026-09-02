@@ -373,7 +373,7 @@ class PlayerBar(QFrame):
             asset_family="fluent_player",
         )
         self.desktop_lyrics_button = PlayerIconButton(
-            "lyrics", "桌面歌词", self._theme, self.utility_inner, size=32, icon_canvas_size=18,
+            "desktop_lyrics", "桌面歌词", self._theme, self.utility_inner, size=32, icon_canvas_size=18,
             asset_family="fluent_player",
         )
         self.volume_button = PlayerIconButton(

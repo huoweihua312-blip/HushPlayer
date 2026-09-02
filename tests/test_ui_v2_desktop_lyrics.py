@@ -142,6 +142,31 @@ class DesktopLyricsWindowTests(unittest.TestCase):
             self.lyrics.active_line.translation,
         )
 
+    def test_long_wrapped_lyric_grows_without_shrinking_for_shorter_text(self) -> None:
+        self.window.show()
+        self.window.apply_settings(
+            {"floating_lyrics_font_size": 84, "floating_lyrics_width": 420}
+        )
+        self.app.processEvents()
+        self.window._main_label.setText("人" * 20)
+        self.window._secondary_label.setText("下一句")
+        self.window._secondary_label.setVisible(True)
+        self.window._apply_content_height_floor()
+        wrapped_height = self.window.height()
+        self.assertGreater(
+            self.window._main_label.fontMetrics().boundingRect(
+                QRect(0, 0, self.window._main_label.width(), 0),
+                Qt.TextFlag.TextWordWrap,
+                self.window._main_label.text(),
+            ).height(),
+            self.window._main_label.fontMetrics().height(),
+        )
+        self.assertGreater(wrapped_height, 200)
+
+        self.window._main_label.setText("短句")
+        self.window._apply_content_height_floor()
+        self.assertEqual(self.window.height(), wrapped_height)
+
     def test_font_size_uses_pixels_and_only_one_lock_button_is_created(self) -> None:
         self.window.show()
         self.window.apply_settings({"floating_lyrics_font_size": 22})
@@ -305,6 +330,7 @@ class DesktopLyricsMainWindowIntegrationTests(unittest.TestCase):
             try:
                 self.assertEqual(window.navigation_adapter.route, "browse")
                 self.assertEqual(window.player_bar.desktop_lyrics_button.toolTip(), "桌面歌词")
+                self.assertEqual(window.player_bar.desktop_lyrics_button.icon_name, "desktop_lyrics")
                 window._on_player_bar_action("desktop_lyrics")
                 self.app.processEvents()
                 self.assertIsNotNone(window.desktop_lyrics_window)

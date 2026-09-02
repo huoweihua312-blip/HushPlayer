@@ -215,7 +215,7 @@ class DesktopLyricsWindow(QWidget):
         self._saved_y = int(self._settings["floating_lyrics_y"])
         # Clear the previous runtime floor before applying a new font size.
         # The persisted height remains the user's baseline; the larger value
-        # is only a runtime safety floor for the current two-line layout.
+        # is only a runtime safety floor for the current lyric layout.
         self.setMinimumHeight(0)
         self.resize(
             int(self._settings["floating_lyrics_width"]),
@@ -268,15 +268,39 @@ class DesktopLyricsWindow(QWidget):
         self._update_lock_button_geometry()
 
     def _apply_content_height_floor(self) -> None:
-        """Reserve stable space for both lyric rows without changing settings."""
+        """Reserve stable lyric space and enough height for wrapped text."""
 
         surface_layout = self._surface.layout()
         margins = surface_layout.contentsMargins()
         # The layout contains a top stretch, main row, secondary row and a
         # bottom stretch, so there are three inter-item spacing slots.
         layout_spacing = max(0, int(surface_layout.spacing())) * 3
-        main_height = QFontMetrics(self._main_label.font()).height()
-        secondary_height = QFontMetrics(self._secondary_label.font()).height()
+        main_metrics = QFontMetrics(self._main_label.font())
+        secondary_metrics = QFontMetrics(self._secondary_label.font())
+        main_single_line_height = main_metrics.height()
+        secondary_single_line_height = secondary_metrics.height()
+        main_width = max(1, self._main_label.width())
+        main_wrapped_height = main_metrics.boundingRect(
+            QRect(0, 0, main_width, 0),
+            Qt.TextFlag.TextWordWrap,
+            self._main_label.text(),
+        ).height()
+        main_height = max(
+            main_single_line_height,
+            main_wrapped_height,
+        )
+        secondary_height = secondary_single_line_height
+        if self._secondary_label.text():
+            secondary_width = max(1, self._secondary_label.width())
+            secondary_wrapped_height = secondary_metrics.boundingRect(
+                QRect(0, 0, secondary_width, 0),
+                Qt.TextFlag.TextWordWrap,
+                self._secondary_label.text(),
+            ).height()
+            secondary_height = max(
+                secondary_single_line_height,
+                secondary_wrapped_height,
+            )
         required = (
             margins.top()
             + margins.bottom()
@@ -325,6 +349,7 @@ class DesktopLyricsWindow(QWidget):
             self._rendered_secondary = secondary_text
             self._secondary_label.setText(secondary_text)
             self._secondary_label.setVisible(bool(secondary_text))
+        self._apply_content_height_floor()
         self._has_renderable_lyric = bool(main_text)
         self._sync_render_visibility()
 

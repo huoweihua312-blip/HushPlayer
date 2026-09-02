@@ -15,6 +15,7 @@
     {"feature": "repeat_one", "filename": "arrow_repeat_1_24_regular.svg", "combination": "C", "style": "Regular", "render_size": 18},
     {"feature": "queue", "filename": "document_queue_24_regular.svg", "combination": "C", "style": "Regular", "render_size": 18},
     {"feature": "lyrics", "filename": "subtitles_20_regular.svg", "combination": "A", "style": "Regular", "render_size": 18},
+    {"feature": "desktop_lyrics", "filename": "desktop_lyrics_20_regular.svg", "combination": "A", "style": "Regular", "render_size": 18},
     {"feature": "volume", "filename": "speaker_2_20_regular.svg", "combination": "A", "style": "Regular", "render_size": 18},
     {"feature": "mute", "filename": "speaker_mute_20_regular.svg", "combination": "A", "style": "Regular", "render_size": 18},
     {"feature": "more", "filename": "more_horizontal_20_regular.svg", "combination": "A", "style": "Regular", "render_size": 18}
