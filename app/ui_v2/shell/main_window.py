@@ -31,6 +31,7 @@ from PySide6.QtGui import (
     QKeySequence,
     QMouseEvent,
     QBrush,
+    QImage,
     QPainter,
     QPainterPath,
     QPalette,
@@ -140,10 +141,10 @@ def _resolve_data_mode(value: str | None) -> str:
 
 
 class ThemeRevealOverlay(QWidget):
-    """Lightweight radial old-theme layer used during the theme transition."""
+    """Radial old-theme layer with a reusable off-screen render buffer."""
 
     finished = Signal()
-    _DURATION_MS = 280
+    _DURATION_MS = 1200
     _FEATHER_PX = 110
 
     def __init__(self, snapshot: QPixmap, origin: QPoint, parent: QWidget) -> None:
@@ -156,6 +157,13 @@ class ThemeRevealOverlay(QWidget):
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
         self.setGeometry(parent.rect())
         self._snapshot = snapshot
+        self._snapshot_image = snapshot.toImage().convertToFormat(
+            QImage.Format.Format_ARGB32_Premultiplied
+        )
+        self._render_image = QImage(
+            self.size(),
+            QImage.Format.Format_ARGB32_Premultiplied,
+        )
         self._origin = QPoint(origin)
         self._radius = 0.0
         self._animation = QVariantAnimation(self)
@@ -191,19 +199,20 @@ class ThemeRevealOverlay(QWidget):
         self.finished.emit()
         self.deleteLater()
 
+    def resizeEvent(self, event) -> None:  # noqa: N802
+        self._render_image = QImage(
+            self.size(),
+            QImage.Format.Format_ARGB32_Premultiplied,
+        )
+        super().resizeEvent(event)
+
     def paintEvent(self, event) -> None:  # noqa: N802
-        if self._snapshot.isNull():
+        if self._snapshot_image.isNull() or self._render_image.isNull():
             return
-        painter = QPainter(self)
-        painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform, True)
-        painter.setCompositionMode(
-            QPainter.CompositionMode.CompositionMode_Source
-        )
-        painter.fillRect(self.rect(), Qt.GlobalColor.transparent)
-        painter.setCompositionMode(
-            QPainter.CompositionMode.CompositionMode_SourceOver
-        )
-        painter.drawPixmap(self.rect(), self._snapshot)
+        self._render_image.fill(Qt.GlobalColor.transparent)
+        image_painter = QPainter(self._render_image)
+        image_painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform, True)
+        image_painter.drawImage(self._render_image.rect(), self._snapshot_image)
         if self._radius > 0.0:
             feather = min(self._FEATHER_PX, max(24.0, self._radius * 0.24))
             inner_ratio = max(0.0, (self._radius - feather) / self._radius)
@@ -214,10 +223,14 @@ class ThemeRevealOverlay(QWidget):
             inverse_gradient.setColorAt(0.0, QColor(0, 0, 0, 0))
             inverse_gradient.setColorAt(inner_ratio, QColor(0, 0, 0, 0))
             inverse_gradient.setColorAt(1.0, QColor(0, 0, 0, 255))
-            painter.setCompositionMode(
+            image_painter.setCompositionMode(
                 QPainter.CompositionMode.CompositionMode_DestinationIn
             )
-            painter.fillRect(self.rect(), QBrush(inverse_gradient))
+            image_painter.fillRect(self._render_image.rect(), QBrush(inverse_gradient))
+        image_painter.end()
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform, True)
+        painter.drawImage(self.rect(), self._render_image)
         painter.end()
 
 
