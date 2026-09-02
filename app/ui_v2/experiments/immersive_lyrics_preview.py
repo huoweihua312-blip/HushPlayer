@@ -853,10 +853,11 @@ class PreviewControls(QFrame):
             f"QFrame#floatingControls {{ background: {_rgba(theme.colors.elevated_background, alpha)}; border: 1px solid {_rgba(theme.colors.border, min(120, alpha + 30))}; border-radius: {theme.metrics.radius_lg}px; }}"
             f"QLabel {{ background: transparent; color: {theme.colors.secondary_text}; font-size: {theme.fonts.caption}px; }}"
             "QSlider { background: transparent; border: 0; padding: 0; }"
-            f"QSlider::groove:horizontal {{ height: 4px; border: 0; border-radius: 2px; background: {_rgba(theme.colors.border_strong, 145)}; }}"
+            "QSlider::groove:horizontal { height: 4px; border: 0; border-radius: 2px; background: transparent; }"
             f"QSlider::sub-page:horizontal {{ border-radius: 2px; background: {theme.colors.accent}; }}"
-            "QSlider::add-page:horizontal { background: transparent; border: 0; }"
+            f"QSlider::add-page:horizontal {{ border-radius: 2px; background: {_rgba(theme.colors.border_strong, 145)}; border: 0; }}"
             f"QSlider::handle:horizontal {{ width: 10px; margin: -3px 0; border-radius: 5px; background: {theme.colors.primary_text}; }}"
+            "QSlider:focus { outline: 0; }"
         )
         for button in (self.previous_button, self.play_button, self.next_button, self.volume_button):
             button.set_theme(theme)
@@ -1114,10 +1115,11 @@ class SettingsPanel(QFrame):
             f"QToolButton {{ border: 0; border-radius: {theme.metrics.radius_sm}px; padding: 4px 8px; color: {theme.colors.secondary_text}; background: transparent; }}"
             f"QToolButton:hover {{ color: {theme.colors.primary_text}; background: {_rgba(theme.colors.hover_background, 150)}; }}"
             "QSlider { background: transparent; border: 0; padding: 0; }"
-            f"QSlider::groove:horizontal {{ height: 4px; border: 0; border-radius: 2px; background: {_rgba(theme.colors.border_strong, 150)}; }}"
+            "QSlider::groove:horizontal { height: 4px; border: 0; border-radius: 2px; background: transparent; }"
             f"QSlider::sub-page:horizontal {{ background: {theme.colors.accent}; border-radius: 2px; }}"
-            "QSlider::add-page:horizontal { background: transparent; border: 0; }"
+            f"QSlider::add-page:horizontal {{ background: {_rgba(theme.colors.border_strong, 150)}; border-radius: 2px; border: 0; }}"
             f"QSlider::handle:horizontal {{ width: 10px; margin: -3px 0; border-radius: 5px; background: {theme.colors.primary_text}; }}"
+            "QSlider:focus { outline: 0; }"
             "QScrollArea, QAbstractScrollArea::viewport, QWidget#settingsBody { background: transparent; border: 0; }"
         )
         self.title_label.setStyleSheet(f"color: {theme.colors.primary_text}; font-size: {theme.fonts.section_title}px; font-weight: 600;")

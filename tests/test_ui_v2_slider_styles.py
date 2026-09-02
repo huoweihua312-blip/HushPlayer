@@ -54,9 +54,13 @@ class SliderSurfaceStyleTests(unittest.TestCase):
                 self.assertIn("QSlider", style)
                 self.assertIn("background: transparent", style)
                 self.assertIn("border: 0", style)
+                self.assertIn("groove:horizontal", style)
+                self.assertIn("background: transparent", style.split("groove:horizontal", 1)[1])
 
             self.assertIn("QSlider", settings_panel.styleSheet())
             self.assertIn("background: transparent", settings_panel.styleSheet())
+            self.assertIn("groove:horizontal", settings_panel.styleSheet())
+            self.assertIn("background: transparent", settings_panel.styleSheet().split("groove:horizontal", 1)[1])
             quick_slider_styles = [
                 control.slider.styleSheet()
                 for control in quick_settings.controls.values()

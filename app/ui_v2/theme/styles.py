@@ -104,9 +104,12 @@ def build_stylesheet(theme: Theme) -> str:
             outline: 1px solid {c.focus_ring};
             outline-offset: 1px;
         }}
-        QComboBox:focus, QSlider:focus, QLineEdit:focus {{
+        QComboBox:focus, QLineEdit:focus {{
             outline: 1px solid {c.focus_ring};
             outline-offset: 1px;
+        }}
+        QSlider:focus {{
+            outline: 0;
         }}
         QSlider {{
             background: transparent;

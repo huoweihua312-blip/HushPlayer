@@ -175,11 +175,11 @@ class ImmersiveControls(QWidget):
         for slider in (self.progress_slider, self.volume_slider):
             slider.setStyleSheet(
                 "QSlider { background: transparent; border: 0; padding: 0; }"
-                "QSlider::groove:horizontal { height: 3px; border: 0; border-radius: 1px; "
-                f"background: {_rgba(colors.primary_text, 112)}; }}"
+                "QSlider::groove:horizontal { height: 3px; border: 0; border-radius: 1px; background: transparent; }"
                 f"QSlider::sub-page:horizontal {{ border-radius: 1px; background: {colors.accent}; }}"
-                "QSlider::add-page:horizontal { background: transparent; border: 0; }"
+                f"QSlider::add-page:horizontal {{ border-radius: 1px; background: {_rgba(colors.primary_text, 112)}; border: 0; }}"
                 f"QSlider::handle:horizontal {{ width: 10px; margin: -4px 0; border: 0; border-radius: 5px; background: {_rgba(colors.primary_text, 238)}; }}"
+                "QSlider:focus { outline: 0; }"
             )
 
     def set_compact(self, compact: bool) -> None:
