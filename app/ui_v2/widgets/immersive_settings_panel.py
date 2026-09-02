@@ -215,7 +215,7 @@ class ImmersiveSettingsPanel(QFrame):
             "QSlider { background: transparent; border: 0; padding: 0; }"
             "QSlider::groove:horizontal { height: 3px; border: 0; border-radius: 1px; background: transparent; }"
             f"QSlider::sub-page:horizontal {{ border-radius: 1px; background: {c.accent}; }}"
-            f"QSlider::add-page:horizontal {{ border-radius: 1px; background: {c.border_strong}; border: 0; }}"
+            "QSlider::add-page:horizontal { background: transparent; border: 0; }"
             f"QSlider::handle:horizontal {{ width: 10px; margin: -4px 0; border: 0; border-radius: 5px; background: {c.primary_text}; }}"
             "QSlider:focus { outline: 0; }"
             "QScrollBar:vertical { width: 8px; border: 0; background: transparent; margin: 4px 2px; }"

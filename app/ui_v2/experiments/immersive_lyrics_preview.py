@@ -855,7 +855,7 @@ class PreviewControls(QFrame):
             "QSlider { background: transparent; border: 0; padding: 0; }"
             "QSlider::groove:horizontal { height: 4px; border: 0; border-radius: 2px; background: transparent; }"
             f"QSlider::sub-page:horizontal {{ border-radius: 2px; background: {theme.colors.accent}; }}"
-            f"QSlider::add-page:horizontal {{ border-radius: 2px; background: {_rgba(theme.colors.border_strong, 145)}; border: 0; }}"
+            "QSlider::add-page:horizontal { background: transparent; border: 0; }"
             f"QSlider::handle:horizontal {{ width: 10px; margin: -3px 0; border-radius: 5px; background: {theme.colors.primary_text}; }}"
             "QSlider:focus { outline: 0; }"
         )
@@ -1117,7 +1117,7 @@ class SettingsPanel(QFrame):
             "QSlider { background: transparent; border: 0; padding: 0; }"
             "QSlider::groove:horizontal { height: 4px; border: 0; border-radius: 2px; background: transparent; }"
             f"QSlider::sub-page:horizontal {{ background: {theme.colors.accent}; border-radius: 2px; }}"
-            f"QSlider::add-page:horizontal {{ background: {_rgba(theme.colors.border_strong, 150)}; border-radius: 2px; border: 0; }}"
+            "QSlider::add-page:horizontal { background: transparent; border: 0; }"
             f"QSlider::handle:horizontal {{ width: 10px; margin: -3px 0; border-radius: 5px; background: {theme.colors.primary_text}; }}"
             "QSlider:focus { outline: 0; }"
             "QScrollArea, QAbstractScrollArea::viewport, QWidget#settingsBody { background: transparent; border: 0; }"

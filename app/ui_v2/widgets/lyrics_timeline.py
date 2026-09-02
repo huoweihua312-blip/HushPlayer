@@ -45,6 +45,6 @@ class LyricsTimeline(QWidget):
             "QSlider { background: transparent; border: 0; padding: 0; }"
             "QSlider::groove:horizontal { height: 4px; border: 0; border-radius: 2px; background: transparent; }"
             f"QSlider::sub-page:horizontal {{ background: {theme.colors.accent}; border-radius: 2px; }}"
-            f"QSlider::add-page:horizontal {{ background: {theme.colors.border_strong}; border: 0; border-radius: 2px; }}"
+            "QSlider::add-page:horizontal { background: transparent; border: 0; }"
             f"QSlider::handle:horizontal {{ width: 10px; margin: -3px 0; border-radius: 5px; background: {theme.colors.primary_text}; }}"
         )
