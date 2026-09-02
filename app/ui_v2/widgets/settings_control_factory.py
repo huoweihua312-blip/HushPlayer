@@ -24,6 +24,123 @@ from app.ui_v2.theme.icons import icon
 from app.ui_v2.theme.tokens import Theme
 
 
+class FlatSlider(QSlider):
+    """A native-interactive slider with a fully controlled, frameless surface."""
+
+    def __init__(self, orientation: Qt.Orientation, parent: QWidget | None = None) -> None:
+        super().__init__(orientation, parent)
+        self._track_color = QColor("#505050")
+        self._fill_color = QColor("#c9a86a")
+        self._handle_color = QColor("#c9a86a")
+        self._handle_hover_color = QColor("#dab97b")
+        self._disabled_color = QColor("#6b6b6b")
+        self._focus_color = QColor("#c9a86a")
+        self._handle_radius = 6.0
+        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, False)
+        self.setAutoFillBackground(False)
+        self.setMouseTracking(True)
+
+    def set_visual_colors(
+        self,
+        track_color: str | QColor,
+        fill_color: str | QColor,
+        handle_color: str | QColor,
+        *,
+        handle_hover_color: str | QColor | None = None,
+        disabled_color: str | QColor | None = None,
+        focus_color: str | QColor | None = None,
+    ) -> None:
+        self._track_color = QColor(track_color)
+        self._fill_color = QColor(fill_color)
+        self._handle_color = QColor(handle_color)
+        self._handle_hover_color = QColor(handle_hover_color or handle_color)
+        self._disabled_color = QColor(disabled_color or track_color)
+        self._focus_color = QColor(focus_color or handle_color)
+        self.update()
+
+    def set_handle_radius(self, radius: float) -> None:
+        self._handle_radius = max(3.0, float(radius))
+        self.update()
+
+    def paintEvent(self, event) -> None:  # noqa: N802
+        if self.orientation() != Qt.Orientation.Horizontal:
+            return super().paintEvent(event)
+        del event
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        margin = max(self._handle_radius + 1.0, 6.0)
+        left = float(self.rect().left()) + margin
+        right = float(self.rect().right()) - margin
+        width = max(0.0, right - left)
+        if width <= 0.0:
+            painter.end()
+            return
+        center_y = float(self.rect().center().y())
+        track_height = min(4.0, max(2.0, float(self.height()) / 4.0))
+        track = QRectF(left, center_y - track_height / 2.0, width, track_height)
+        enabled = self.isEnabled()
+        track_color = self._track_color if enabled else self._disabled_color
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(track_color)
+        painter.drawRoundedRect(track, track_height / 2.0, track_height / 2.0)
+
+        minimum = self.minimum()
+        maximum = self.maximum()
+        ratio = 0.0 if maximum <= minimum else (self.value() - minimum) / (maximum - minimum)
+        ratio = max(0.0, min(1.0, ratio))
+        handle_x = left + width * ratio
+        if ratio > 0.0:
+            fill = QRectF(left, track.top(), max(0.0, handle_x - left), track.height())
+            painter.setBrush(self._fill_color if enabled else self._disabled_color)
+            painter.drawRoundedRect(fill, track_height / 2.0, track_height / 2.0)
+
+        handle_radius = self._handle_radius if enabled else max(4.0, self._handle_radius - 1.0)
+        painter.setBrush(
+            self._handle_hover_color
+            if enabled and self.underMouse()
+            else self._handle_color
+            if enabled
+            else self._disabled_color
+        )
+        painter.drawEllipse(
+            QRectF(
+                handle_x - handle_radius,
+                center_y - handle_radius,
+                handle_radius * 2.0,
+                handle_radius * 2.0,
+            )
+        )
+        if enabled and self.hasFocus():
+            painter.setBrush(Qt.BrushStyle.NoBrush)
+            painter.setPen(QPen(self._focus_color, 1.0))
+            focus_radius = handle_radius + 2.0
+            painter.drawEllipse(
+                QRectF(
+                    handle_x - focus_radius,
+                    center_y - focus_radius,
+                    focus_radius * 2.0,
+                    focus_radius * 2.0,
+                )
+            )
+        painter.end()
+
+    def enterEvent(self, event) -> None:  # noqa: N802
+        super().enterEvent(event)
+        self.update()
+
+    def leaveEvent(self, event) -> None:  # noqa: N802
+        super().leaveEvent(event)
+        self.update()
+
+    def focusInEvent(self, event) -> None:  # noqa: N802
+        super().focusInEvent(event)
+        self.update()
+
+    def focusOutEvent(self, event) -> None:  # noqa: N802
+        super().focusOutEvent(event)
+        self.update()
+
+
 class ThemedComboBox(QComboBox):
     """A V2 ComboBox that paints a shared chevron instead of the native arrow."""
 
@@ -293,7 +410,7 @@ class SliderSpinControl(QWidget):
         super().__init__(parent)
         self._theme = theme
         self.setObjectName("settingsSliderControl")
-        self.slider = QSlider(Qt.Orientation.Horizontal, self)
+        self.slider = FlatSlider(Qt.Orientation.Horizontal, self)
         self.slider.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, False)
         self.slider.setRange(minimum, maximum)
         self.value_label = QLabel(self)
@@ -328,6 +445,15 @@ class SliderSpinControl(QWidget):
     def set_theme(self, theme: Theme) -> None:
         self._theme = theme
         self.slider.setFixedHeight(18)
+        self.slider.set_handle_radius(7.0)
+        self.slider.set_visual_colors(
+            theme.colors.border,
+            theme.colors.accent,
+            theme.colors.accent,
+            handle_hover_color=theme.colors.accent_hover,
+            disabled_color=theme.colors.disabled_text,
+            focus_color=theme.colors.focus_ring,
+        )
         self.slider.setStyleSheet(
             f"QSlider {{ background: transparent; border: 0; padding: 0; }} "
             "QSlider::groove:horizontal { height: 4px; border: 0; border-radius: 2px; background: transparent; } "

@@ -46,7 +46,6 @@ from PySide6.QtWidgets import (
     QLabel,
     QScrollArea,
     QSizePolicy,
-    QSlider,
     QToolButton,
     QVBoxLayout,
     QWidget,
@@ -59,6 +58,7 @@ from app.ui_v2.models.lyrics_document import LyricsDocument
 from app.ui_v2.models.track import Track, format_duration
 from app.ui_v2.widgets.elided_label import ElidedLabel
 from app.ui_v2.widgets.playback_button import PlaybackButton
+from app.ui_v2.widgets.settings_control_factory import FlatSlider
 
 if TYPE_CHECKING:
     from app.ui_v2.adapters.playback_adapter import PlaybackAdapter
@@ -803,11 +803,11 @@ class PreviewControls(QFrame):
         self.next_button = PlaybackButton("next", "下一首", theme, self)
         self.current_label = QLabel("2:18", self)
         self.total_label = QLabel("4:02", self)
-        self.progress_slider = QSlider(Qt.Orientation.Horizontal, self)
+        self.progress_slider = FlatSlider(Qt.Orientation.Horizontal, self)
         self.progress_slider.setRange(0, 100)
         self.progress_slider.setValue(57)
         self.volume_button = PlaybackButton("volume", "音量", theme, self)
-        self.volume_slider = QSlider(Qt.Orientation.Horizontal, self)
+        self.volume_slider = FlatSlider(Qt.Orientation.Horizontal, self)
         self.volume_slider.setRange(0, 100)
         self.volume_slider.setValue(72)
         self.more_button = QToolButton(self)
@@ -872,6 +872,16 @@ class PreviewControls(QFrame):
         self.more_button.setIcon(icon("settings", theme))
         self.back_button.setIconSize(QSize(17, 17))
         self.more_button.setIconSize(QSize(18, 18))
+        for slider in (self.progress_slider, self.volume_slider):
+            slider.setFixedHeight(18)
+            slider.set_handle_radius(5.0)
+            slider.set_visual_colors(
+                _rgba(theme.colors.primary_text, 112),
+                theme.colors.accent,
+                _rgba(theme.colors.primary_text, 238),
+                disabled_color=theme.colors.disabled_text,
+                focus_color=theme.colors.focus_ring,
+            )
 
     def set_surface_opacity(self, value: int) -> None:
         self._surface_opacity = max(0, min(100, int(value)))
@@ -1123,6 +1133,16 @@ class SettingsPanel(QFrame):
             "QScrollArea, QAbstractScrollArea::viewport, QWidget#settingsBody { background: transparent; border: 0; }"
         )
         self.title_label.setStyleSheet(f"color: {theme.colors.primary_text}; font-size: {theme.fonts.section_title}px; font-weight: 600;")
+        for slider in self.findChildren(FlatSlider):
+            slider.setFixedHeight(18)
+            slider.set_handle_radius(5.0)
+            slider.set_visual_colors(
+                _rgba(theme.colors.primary_text, 112),
+                theme.colors.accent,
+                _rgba(theme.colors.primary_text, 238),
+                disabled_color=theme.colors.disabled_text,
+                focus_color=theme.colors.focus_ring,
+            )
         for combo in self._combos:
             self._configure_combo_popup(combo)
 
@@ -1176,7 +1196,7 @@ class SettingsPanel(QFrame):
         value: int,
         suffix: str,
         target_layout: QVBoxLayout | None = None,
-    ) -> QSlider:
+    ) -> FlatSlider:
         row = QWidget(self)
         layout = QVBoxLayout(row)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -1189,7 +1209,7 @@ class SettingsPanel(QFrame):
         title_row.addStretch(1)
         title_row.addWidget(value_label)
         layout.addLayout(title_row)
-        slider = QSlider(Qt.Orientation.Horizontal, row)
+        slider = FlatSlider(Qt.Orientation.Horizontal, row)
         slider.setRange(minimum, maximum)
         slider.setValue(value)
         slider.setProperty("value_label", value_label)
@@ -1281,7 +1301,7 @@ class SettingsPanel(QFrame):
         )
 
     @staticmethod
-    def _set_slider(slider: QSlider, value: int) -> None:
+    def _set_slider(slider: FlatSlider, value: int) -> None:
         slider.blockSignals(True)
         slider.setValue(value)
         slider.blockSignals(False)

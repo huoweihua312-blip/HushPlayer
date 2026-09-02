@@ -143,7 +143,7 @@ class DesktopLyricsWindowTests(unittest.TestCase):
             self.lyrics.active_line.translation,
         )
 
-    def test_long_wrapped_lyric_grows_without_shrinking_for_shorter_text(self) -> None:
+    def test_long_lyric_expands_width_and_stays_at_two_rows(self) -> None:
         self.window.show()
         self.window.apply_settings(
             {"floating_lyrics_font_size": 84, "floating_lyrics_width": 420}
@@ -153,20 +153,21 @@ class DesktopLyricsWindowTests(unittest.TestCase):
         self.window._secondary_label.setText("下一句")
         self.window._secondary_label.setVisible(True)
         self.window._apply_content_height_floor()
-        wrapped_height = self.window.height()
-        self.assertGreater(
-            self.window._main_label.fontMetrics().boundingRect(
-                QRect(0, 0, self.window._main_label.width(), 0),
-                Qt.TextFlag.TextWordWrap,
-                self.window._main_label.text(),
-            ).height(),
+        expanded_width = self.window.width()
+        expanded_height = self.window.height()
+        self.assertFalse(self.window._main_label.wordWrap())
+        self.assertFalse(self.window._secondary_label.wordWrap())
+        self.assertGreater(expanded_width, 420)
+        self.assertLessEqual(expanded_height, 220)
+        self.assertEqual(
+            self.window._main_label.height(),
             self.window._main_label.fontMetrics().height(),
         )
-        self.assertGreater(wrapped_height, 200)
 
         self.window._main_label.setText("短句")
         self.window._apply_content_height_floor()
-        self.assertEqual(self.window.height(), wrapped_height)
+        self.assertEqual(self.window.width(), expanded_width)
+        self.assertEqual(self.window.height(), expanded_height)
 
     def test_font_size_uses_pixels_and_only_one_lock_button_is_created(self) -> None:
         self.window.show()
@@ -197,7 +198,7 @@ class DesktopLyricsWindowTests(unittest.TestCase):
             + (self.window.width() - self.window._lock_button.width()) // 2,
         )
 
-    def test_live_preview_updates_font_and_keeps_wrapped_surface_in_sync(self) -> None:
+    def test_live_preview_updates_font_and_expands_two_row_surface(self) -> None:
         self.window.show()
         self.window.apply_settings(
             {
@@ -219,16 +220,17 @@ class DesktopLyricsWindowTests(unittest.TestCase):
         )
         self.app.processEvents()
 
-        wrapped_height = self.window._main_label.fontMetrics().boundingRect(
-            QRect(0, 0, self.window._main_label.width(), 0),
-            Qt.TextFlag.TextWordWrap,
-            self.window._main_label.text(),
-        ).height()
         self.assertEqual(self.window._main_label.font().pixelSize(), 84)
-        self.assertEqual(self.window.width(), 420)
+        self.assertGreater(self.window.width(), 420)
+        self.assertLessEqual(self.window.height(), 220)
         self.assertEqual(self.window._surface.size(), self.window.size())
         self.assertEqual(self.window._surface.layout().geometry(), self.window._surface.rect())
-        self.assertEqual(self.window._main_label.height(), wrapped_height)
+        self.assertFalse(self.window._main_label.wordWrap())
+        self.assertFalse(self.window._secondary_label.wordWrap())
+        self.assertEqual(
+            self.window._main_label.height(),
+            self.window._main_label.fontMetrics().height(),
+        )
         self.assertFalse(self.window._render_timer.isActive())
 
     def test_unlocked_right_release_requests_settings_once_without_starting_drag(self) -> None:

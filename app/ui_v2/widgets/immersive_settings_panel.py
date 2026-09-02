@@ -4,10 +4,10 @@ from __future__ import annotations
 
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QColor, QPalette
-from PySide6.QtWidgets import QComboBox, QFormLayout, QFrame, QHBoxLayout, QLabel, QScrollArea, QSlider, QToolButton, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QComboBox, QFormLayout, QFrame, QHBoxLayout, QLabel, QScrollArea, QToolButton, QVBoxLayout, QWidget
 
 from app.ui_v2.theme.tokens import Theme
-from app.ui_v2.widgets.settings_control_factory import SettingsControlFactory, ThemedComboBox, ThemedDisclosureButton
+from app.ui_v2.widgets.settings_control_factory import FlatSlider, SettingsControlFactory, ThemedComboBox, ThemedDisclosureButton
 
 
 class ImmersiveSettingsPanel(QFrame):
@@ -21,7 +21,7 @@ class ImmersiveSettingsPanel(QFrame):
     def __init__(self, theme: Theme, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self._theme = theme
-        self._value_labels: dict[QSlider, QLabel] = {}
+        self._value_labels: dict[FlatSlider, QLabel] = {}
         self.setObjectName("immersiveSettingsPanel")
         self.setFrameShape(QFrame.Shape.NoFrame)
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground)
@@ -154,12 +154,12 @@ class ImmersiveSettingsPanel(QFrame):
         view.viewport().setAttribute(Qt.WidgetAttribute.WA_StyledBackground)
         return combo
 
-    def _slider(self, low: int, high: int) -> QSlider:
-        slider = QSlider(Qt.Orientation.Horizontal, self)
+    def _slider(self, low: int, high: int) -> FlatSlider:
+        slider = FlatSlider(Qt.Orientation.Horizontal, self)
         slider.setRange(low, high)
         return slider
 
-    def _slider_row(self, slider: QSlider, suffix: str) -> QWidget:
+    def _slider_row(self, slider: FlatSlider, suffix: str) -> QWidget:
         host = QWidget(self.content_widget)
         layout = QHBoxLayout(host)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -225,6 +225,17 @@ class ImmersiveSettingsPanel(QFrame):
         )
         self.title_label.setStyleSheet(f"font-size: {theme.fonts.section_title}px; font-weight: 600; color: {c.primary_text};")
         self.advanced_disclosure.set_theme(theme)
+        for slider in self.findChildren(FlatSlider):
+            slider.setFixedHeight(18)
+            slider.set_handle_radius(5.0)
+            slider.set_visual_colors(
+                c.border,
+                c.accent,
+                c.primary_text,
+                handle_hover_color=c.accent_hover,
+                disabled_color=c.disabled_text,
+                focus_color=c.focus_ring,
+            )
         for combo in (self.theme_combo, self.background_combo, self.weight_combo, self.text_protection_combo):
             SettingsControlFactory.style_combo(combo, theme)
             view = combo.view()

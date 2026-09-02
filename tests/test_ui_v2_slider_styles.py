@@ -22,7 +22,7 @@ from app.ui_v2.widgets.immersive_controls import ImmersiveControls
 from app.ui_v2.widgets.immersive_settings_panel import ImmersiveSettingsPanel
 from app.ui_v2.widgets.lyrics_quick_settings_drawer import LyricsQuickSettingsContent
 from app.ui_v2.widgets.lyrics_timeline import LyricsTimeline
-from app.ui_v2.widgets.settings_control_factory import SettingsControlFactory
+from app.ui_v2.widgets.settings_control_factory import FlatSlider, SettingsControlFactory
 
 
 class SliderSurfaceStyleTests(unittest.TestCase):
@@ -50,6 +50,14 @@ class SliderSurfaceStyleTests(unittest.TestCase):
                 timeline.styleSheet(),
                 slider_control.slider.styleSheet(),
             )
+            self.assertIsInstance(controls.progress_slider, FlatSlider)
+            self.assertIsInstance(controls.volume_slider, FlatSlider)
+            self.assertIsInstance(timeline.slider, FlatSlider)
+            self.assertIsInstance(slider_control.slider, FlatSlider)
+            self.assertTrue(all(isinstance(slider, FlatSlider) for slider in settings_panel.findChildren(FlatSlider)))
+            self.assertIsInstance(preview.controls.progress_slider, FlatSlider)
+            self.assertIsInstance(preview.controls.volume_slider, FlatSlider)
+            self.assertTrue(all(isinstance(slider, FlatSlider) for slider in preview.settings_panel.findChildren(FlatSlider)))
             for style in direct_styles:
                 self.assertIn("QSlider", style)
                 self.assertIn("background: transparent", style)

@@ -4,13 +4,14 @@ from __future__ import annotations
 
 from PySide6.QtCore import QEvent, QSize, Qt, Signal
 from PySide6.QtGui import QColor
-from PySide6.QtWidgets import QHBoxLayout, QLabel, QSlider, QToolButton, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QHBoxLayout, QLabel, QToolButton, QVBoxLayout, QWidget
 
 from app.ui_v2.adapters.playback_adapter import PlaybackAdapter
 from app.ui_v2.models.playback_state import RepeatMode
 from app.ui_v2.models.track import format_duration
 from app.ui_v2.theme.icons import fluent_icon, icon
 from app.ui_v2.theme.tokens import Theme
+from app.ui_v2.widgets.settings_control_factory import FlatSlider
 
 
 def _rgba(value: str, alpha: int) -> str:
@@ -40,14 +41,14 @@ class ImmersiveControls(QWidget):
         self.next_button = self._button("next", "下一首")
         self.repeat_button = self._button("repeat", "循环模式")
         self.elapsed_label = QLabel("0:00", self)
-        self.progress_slider = QSlider(Qt.Orientation.Horizontal, self)
+        self.progress_slider = FlatSlider(Qt.Orientation.Horizontal, self)
         self.progress_slider.setObjectName("immersiveProgressSlider")
         self.progress_slider.setRange(0, 0)
         self.duration_label = QLabel("--:--", self)
         self.volume_button = self._button("volume", "音量")
         self.queue_button = self._button("queue", "播放队列")
         self.lyrics_button = self._button("lyrics", "歌词")
-        self.volume_slider = QSlider(Qt.Orientation.Horizontal, self)
+        self.volume_slider = FlatSlider(Qt.Orientation.Horizontal, self)
         self.volume_slider.setObjectName("immersiveVolumeSlider")
         self.volume_slider.setRange(0, 100)
         self.more_button = self._button("more", "更多设置")
@@ -173,6 +174,14 @@ class ImmersiveControls(QWidget):
         for label in (self.elapsed_label, self.duration_label):
             label.setStyleSheet(f"background: transparent; color: {_rgba(colors.primary_text, 224)}; font-size: {theme.fonts.caption}px;")
         for slider in (self.progress_slider, self.volume_slider):
+            slider.set_handle_radius(5.0)
+            slider.set_visual_colors(
+                _rgba(colors.primary_text, 112),
+                colors.accent,
+                _rgba(colors.primary_text, 238),
+                disabled_color=colors.disabled_text,
+                focus_color=colors.focus_ring,
+            )
             slider.setStyleSheet(
                 "QSlider { background: transparent; border: 0; padding: 0; }"
                 "QSlider::groove:horizontal { height: 3px; border: 0; border-radius: 1px; background: transparent; }"

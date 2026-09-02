@@ -14,7 +14,7 @@ from PySide6.QtGui import (
     QGuiApplication,
     QMouseEvent,
 )
-from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QToolButton, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QSizePolicy, QToolButton, QVBoxLayout, QWidget
 
 from app.ui_v2.adapters.lyrics_adapter import LyricsAdapter
 from app.ui_v2.adapters.playback_adapter import PlaybackAdapter
@@ -153,12 +153,16 @@ class DesktopLyricsWindow(QWidget):
         self._main_label = QLabel(self._surface)
         self._main_label.setObjectName("desktopLyricsMain")
         self._main_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self._main_label.setWordWrap(True)
+        self._main_label.setWordWrap(False)
+        self._main_label.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        self._main_label.setMinimumWidth(0)
         self._main_label.setTextInteractionFlags(Qt.TextInteractionFlag.NoTextInteraction)
         self._secondary_label = QLabel(self._surface)
         self._secondary_label.setObjectName("desktopLyricsSecondary")
         self._secondary_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self._secondary_label.setWordWrap(True)
+        self._secondary_label.setWordWrap(False)
+        self._secondary_label.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        self._secondary_label.setMinimumWidth(0)
         self._secondary_label.setTextInteractionFlags(Qt.TextInteractionFlag.NoTextInteraction)
         for label in (self._main_label, self._secondary_label):
             label.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
@@ -310,40 +314,33 @@ class DesktopLyricsWindow(QWidget):
         self._secondary_label.setFont(secondary_font)
 
     def _apply_content_height_floor(self) -> None:
-        """Reserve stable lyric space and enough height for wrapped text."""
+        """Keep two fixed lyric rows and widen the overlay for long text."""
 
         self._sync_surface_geometry()
         surface_layout = self._surface.layout()
         margins = surface_layout.contentsMargins()
+        secondary_margins = self._secondary_layout.contentsMargins()
         # The layout contains a top stretch, main row, secondary row and a
         # bottom stretch, so there are three inter-item spacing slots.
         layout_spacing = max(0, int(surface_layout.spacing())) * 3
         main_metrics = QFontMetrics(self._main_label.font())
         secondary_metrics = QFontMetrics(self._secondary_label.font())
-        main_single_line_height = main_metrics.height()
-        secondary_single_line_height = secondary_metrics.height()
-        main_width = max(1, self._main_label.width())
-        main_wrapped_height = main_metrics.boundingRect(
-            QRect(0, 0, main_width, 0),
-            Qt.TextFlag.TextWordWrap,
-            self._main_label.text(),
-        ).height()
-        main_height = max(
-            main_single_line_height,
-            main_wrapped_height,
+        main_height = main_metrics.height()
+        secondary_height = secondary_metrics.height()
+        width_safety = max(16, self._GLYPH_SAFETY_PADDING * 2)
+        main_text_width = main_metrics.horizontalAdvance(self._main_label.text())
+        secondary_text_width = secondary_metrics.horizontalAdvance(self._secondary_label.text())
+        content_width = max(
+            main_text_width + margins.left() + margins.right() + width_safety,
+            secondary_text_width
+            + margins.left()
+            + margins.right()
+            + secondary_margins.left()
+            + width_safety,
+            1,
         )
-        secondary_height = secondary_single_line_height
-        if self._secondary_label.text():
-            secondary_width = max(1, self._secondary_label.width())
-            secondary_wrapped_height = secondary_metrics.boundingRect(
-                QRect(0, 0, secondary_width, 0),
-                Qt.TextFlag.TextWordWrap,
-                self._secondary_label.text(),
-            ).height()
-            secondary_height = max(
-                secondary_single_line_height,
-                secondary_wrapped_height,
-            )
+        baseline_width = int(self._settings.get("floating_lyrics_width", 980))
+        required_width = max(baseline_width, int(content_width))
         required = (
             margins.top()
             + margins.bottom()
@@ -353,11 +350,15 @@ class DesktopLyricsWindow(QWidget):
             + self._GLYPH_SAFETY_PADDING
         )
         self.setMinimumHeight(max(0, int(required)))
-        # Raising the minimum can resize the top-level window immediately;
-        # keep the transparent child surface in lockstep with that resize.
+        # Do not shrink during lyric updates. An explicit settings change can
+        # still shrink the window first, after which this floor grows it again
+        # only when the current two rows need more room.
         self._sync_surface_geometry()
         if self.height() < required:
             self.resize(self.width(), int(required))
+            self._sync_surface_geometry()
+        if self.width() < required_width:
+            self.resize(int(required_width), self.height())
             self._sync_surface_geometry()
 
     @property

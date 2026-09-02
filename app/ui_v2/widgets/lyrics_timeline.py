@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 from PySide6.QtCore import QSignalBlocker, Qt, Signal
-from PySide6.QtWidgets import QHBoxLayout, QLabel, QSlider, QWidget
+from PySide6.QtWidgets import QHBoxLayout, QLabel, QWidget
 
 from app.ui_v2.models.track import format_duration
 from app.ui_v2.theme.tokens import Theme
+from app.ui_v2.widgets.settings_control_factory import FlatSlider
 
 
 class LyricsTimeline(QWidget):
@@ -17,7 +18,7 @@ class LyricsTimeline(QWidget):
         self._theme = theme
         self.current_label = QLabel("0:00", self)
         self.total_label = QLabel("--:--", self)
-        self.slider = QSlider(Qt.Orientation.Horizontal, self)
+        self.slider = FlatSlider(Qt.Orientation.Horizontal, self)
         self.slider.sliderReleased.connect(lambda: self.seek_requested.emit(self.slider.value()))
         layout = QHBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -40,6 +41,14 @@ class LyricsTimeline(QWidget):
 
     def set_theme(self, theme: Theme) -> None:
         self._theme = theme
+        self.slider.set_handle_radius(5.0)
+        self.slider.set_visual_colors(
+            theme.colors.border_strong,
+            theme.colors.accent,
+            theme.colors.primary_text,
+            disabled_color=theme.colors.disabled_text,
+            focus_color=theme.colors.focus_ring,
+        )
         self.setStyleSheet(
             f"QLabel {{ color: {theme.colors.secondary_text}; font-size: {theme.fonts.caption}px; }}"
             "QSlider { background: transparent; border: 0; padding: 0; }"
