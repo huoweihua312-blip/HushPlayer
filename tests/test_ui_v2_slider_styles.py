@@ -53,6 +53,7 @@ class SliderSurfaceStyleTests(unittest.TestCase):
             for style in direct_styles:
                 self.assertIn("QSlider", style)
                 self.assertIn("background: transparent", style)
+                self.assertIn("border: 0", style)
 
             self.assertIn("QSlider", settings_panel.styleSheet())
             self.assertIn("background: transparent", settings_panel.styleSheet())
@@ -67,10 +68,14 @@ class SliderSurfaceStyleTests(unittest.TestCase):
                 self.assertIn("background: transparent", style)
             self.assertIn("QSlider#playerProgress", player_bar.styleSheet())
             self.assertIn("background: transparent", player_bar.styleSheet())
+            self.assertIn("groove:horizontal", player_bar.styleSheet())
+            self.assertIn("border: 0", player_bar.styleSheet())
             self.assertIn("QSlider", preview.controls.styleSheet())
             self.assertIn("background: transparent", preview.controls.styleSheet())
+            self.assertIn("border: 0", preview.controls.styleSheet())
             self.assertIn("QSlider", preview.settings_panel.styleSheet())
             self.assertIn("background: transparent", preview.settings_panel.styleSheet())
+            self.assertIn("border: 0", preview.settings_panel.styleSheet())
         finally:
             preview.close()
             preview.deleteLater()

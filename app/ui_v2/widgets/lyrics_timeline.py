@@ -43,7 +43,8 @@ class LyricsTimeline(QWidget):
         self.setStyleSheet(
             f"QLabel {{ color: {theme.colors.secondary_text}; font-size: {theme.fonts.caption}px; }}"
             "QSlider { background: transparent; border: 0; padding: 0; }"
-            f"QSlider::groove:horizontal {{ height: 4px; border-radius: 2px; background: {theme.colors.border_strong}; }}"
+            f"QSlider::groove:horizontal {{ height: 4px; border: 0; border-radius: 2px; background: {theme.colors.border_strong}; }}"
             f"QSlider::sub-page:horizontal {{ background: {theme.colors.accent}; border-radius: 2px; }}"
+            "QSlider::add-page:horizontal { background: transparent; border: 0; }"
             f"QSlider::handle:horizontal {{ width: 10px; margin: -3px 0; border-radius: 5px; background: {theme.colors.primary_text}; }}"
         )

@@ -330,7 +330,7 @@ class SliderSpinControl(QWidget):
         self.slider.setFixedHeight(18)
         self.slider.setStyleSheet(
             f"QSlider {{ background: transparent; border: 0; padding: 0; }} "
-            f"QSlider::groove:horizontal {{ height: 4px; border-radius: 2px; background: {theme.colors.border}; }} "
+            f"QSlider::groove:horizontal {{ height: 4px; border: 0; border-radius: 2px; background: {theme.colors.border}; }} "
             f"QSlider::sub-page:horizontal {{ background: {theme.colors.accent}; border-radius: 2px; }} "
             f"QSlider::add-page:horizontal {{ background: transparent; border: 0; }} "
             f"QSlider::handle:horizontal {{ width: 14px; margin: -5px 0; border: 1px solid transparent; border-radius: 7px; background: {theme.colors.accent}; }} "
