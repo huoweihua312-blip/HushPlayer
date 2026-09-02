@@ -5,9 +5,9 @@
     "numeric_version": "0.6.0.11",
     "architecture": "win-x64",
     "mandatory": false,
-    "setup_url": "https://api.gitcode.com/api/v5/repos/gcw_iPVB8B5g/HushPlayer-updates/releases/v0.6.0-beta.11/attach_files/HushPlayer-0.6.0-beta.11-win-x64-setup.exe/download",
-    "setup_size": 124572189,
-    "sha256": "dd3549a2f929503f396b98e290baef67a4e22c49abbfa0d420dfcde50cfbbbed",
+    "setup_url": "https://api.gitcode.com/api/v5/repos/gcw_iPVB8B5g/HushPlayer-updates/raw/installers/HushPlayer-0.6.0-beta.11-win-x64-setup.exe?ref=main",
+    "setup_size": 116075125,
+    "sha256": "2228d018ca3a0bde8fb9be2da33fc22091ac31320d5bb872e8279883cbf8d19a",
     "release_notes": [
         "优化启动后的音乐库 UI 投影，将队列、卡片刷新和封面请求分开调度，减少首屏后的集中卡顿。",
         "优化深浅色切换反馈，先显示主题揭示动画并分批应用界面样式，减少点击后的等待。",
@@ -247,8 +247,8 @@
             ]
         }
     ],
-    "package_url": "https://api.gitcode.com/api/v5/repos/gcw_iPVB8B5g/HushPlayer-updates/releases/v0.6.0-beta.11/attach_files/HushPlayer-0.6.0-beta.11-win-x64-update.zip/download",
-    "package_size": 172324720,
-    "package_sha256": "3a392b39b5cce6ca2e601e893f668f5f0616ef8f8ea9f6244bc5d40ce3f80346",
+    "package_url": "https://api.gitcode.com/api/v5/repos/gcw_iPVB8B5g/HushPlayer-updates/raw/packages/HushPlayer-0.6.0-beta.11-win-x64-update.zip?ref=main",
+    "package_size": 158648812,
+    "package_sha256": "4c7b1d925fd8813b02ada05b5f2b8d4605fa2829fabbd525d4da67df9530aa29",
     "package_filename": "HushPlayer-0.6.0-beta.11-win-x64-update.zip"
 }
