@@ -314,12 +314,13 @@ class UiV2MainWindowTests(unittest.TestCase):
         self.window.set_theme(target)
         self.app.processEvents()
         self.assertIsNotNone(self.window._theme_reveal_overlay)
+        overlay = self.window._theme_reveal_overlay
         expected_origin = self.window.title_bar.theme_button.mapTo(
             self.window,
             self.window.title_bar.theme_button.rect().center(),
         )
-        self.assertEqual(self.window._theme_reveal_overlay._origin, expected_origin)
-        QTest.qWait(1260)
+        self.assertEqual(overlay._origin, expected_origin)
+        QTest.qWait(overlay._DURATION_MS + 80)
         self.app.processEvents()
         self.assertIsNone(self.window._theme_reveal_overlay)
 
@@ -330,7 +331,7 @@ class UiV2MainWindowTests(unittest.TestCase):
         overlay = self.window._theme_reveal_overlay
         self.assertIsNotNone(overlay)
         self.assertEqual(self.window.theme.mode, original_mode)
-        self.assertEqual(overlay._radius, 0.0)
+        self.assertEqual(overlay._opacity, 1.0)
         self.assertEqual(overlay._animation.state(), QAbstractAnimation.State.Running)
 
         QTest.qWait(self.window._THEME_REVEAL_APPLY_DELAY_MS + 20)
@@ -338,9 +339,9 @@ class UiV2MainWindowTests(unittest.TestCase):
         self.assertNotEqual(self.window.theme.mode, original_mode)
         QTest.qWait(40)
         self.app.processEvents()
-        self.assertGreater(overlay._radius, 0.0)
+        self.assertLess(overlay._opacity, 1.0)
 
-        QTest.qWait(1260)
+        QTest.qWait(overlay._DURATION_MS + 80)
         self.app.processEvents()
         self.assertIsNone(self.window._theme_reveal_overlay)
 

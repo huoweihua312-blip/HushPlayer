@@ -5,7 +5,6 @@ from __future__ import annotations
 import ctypes
 from dataclasses import replace
 from enum import Enum
-import math
 import os
 from pathlib import Path
 import tempfile
@@ -15,7 +14,6 @@ from PySide6.QtCore import (
     QEasingCurve,
     QEvent,
     QPoint,
-    QPointF,
     QRect,
     QRectF,
     QUrl,
@@ -30,13 +28,10 @@ from PySide6.QtGui import (
     QGuiApplication,
     QKeySequence,
     QMouseEvent,
-    QImage,
-    QBrush,
     QPainter,
     QPainterPath,
     QPalette,
     QPixmap,
-    QRadialGradient,
     QRegion,
     QShortcut,
 )
@@ -141,11 +136,10 @@ def _resolve_data_mode(value: str | None) -> str:
 
 
 class ThemeRevealOverlay(QWidget):
-    """Temporary old-theme layer used by the opt-in transition demo."""
+    """Lightweight old-theme layer used during the theme transition."""
 
     finished = Signal()
-    _DURATION_MS = 1200
-    _FEATHER_PX = 110
+    _DURATION_MS = 220
 
     def __init__(self, snapshot: QPixmap, origin: QPoint, parent: QWidget) -> None:
         super().__init__(parent)
@@ -158,15 +152,13 @@ class ThemeRevealOverlay(QWidget):
         self.setGeometry(parent.rect())
         self._snapshot = snapshot
         self._origin = QPoint(origin)
-        self._radius = 0.0
+        self._opacity = 1.0
         self._animation = QVariantAnimation(self)
-        self._animation.setStartValue(0.0)
-        self._animation.setEndValue(
-            math.hypot(float(self.width()), float(self.height())) + self._FEATHER_PX
-        )
+        self._animation.setStartValue(1.0)
+        self._animation.setEndValue(0.0)
         self._animation.setDuration(self._DURATION_MS)
-        self._animation.setEasingCurve(QEasingCurve.Type.OutCubic)
-        self._animation.valueChanged.connect(self._set_radius)
+        self._animation.setEasingCurve(QEasingCurve.Type.InOutCubic)
+        self._animation.valueChanged.connect(self._set_opacity)
         self._animation.finished.connect(self._finish)
 
     def start(self) -> None:
@@ -176,15 +168,15 @@ class ThemeRevealOverlay(QWidget):
     def show_ready(self) -> None:
         self.raise_()
         self.show()
-        self.repaint()
+        self.update()
 
     def start_animation(self) -> None:
         if self._animation.state() == QAbstractAnimation.State.Running:
             return
         self._animation.start()
 
-    def _set_radius(self, value) -> None:
-        self._radius = float(value or 0.0)
+    def _set_opacity(self, value) -> None:
+        self._opacity = max(0.0, min(1.0, float(value or 0.0)))
         self.update()
 
     def _finish(self) -> None:
@@ -193,38 +185,12 @@ class ThemeRevealOverlay(QWidget):
         self.deleteLater()
 
     def paintEvent(self, event) -> None:  # noqa: N802
-        if self._snapshot.isNull():
+        if self._snapshot.isNull() or self._opacity <= 0.0:
             return
-        if self._radius <= 0:
-            painter = QPainter(self)
-            painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform, True)
-            painter.drawPixmap(self.rect(), self._snapshot)
-            return
-        feather = min(self._FEATHER_PX, max(24.0, self._radius * 0.24))
-        inner_ratio = max(0.0, (self._radius - feather) / self._radius)
-        image = QImage(
-            self.size(),
-            QImage.Format.Format_ARGB32_Premultiplied,
-        )
-        image.fill(Qt.GlobalColor.transparent)
-        image_painter = QPainter(image)
-        image_painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform, True)
-        image_painter.drawPixmap(image.rect(), self._snapshot)
-        image_painter.setCompositionMode(
-            QPainter.CompositionMode.CompositionMode_DestinationIn
-        )
-        inverse_gradient = QRadialGradient(
-            QPointF(float(self._origin.x()), float(self._origin.y())),
-            self._radius,
-        )
-        inverse_gradient.setColorAt(0.0, QColor(0, 0, 0, 0))
-        inverse_gradient.setColorAt(inner_ratio, QColor(0, 0, 0, 0))
-        inverse_gradient.setColorAt(1.0, QColor(0, 0, 0, 255))
-        image_painter.fillRect(image.rect(), QBrush(inverse_gradient))
-        image_painter.end()
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform, True)
-        painter.drawImage(self.rect(), image)
+        painter.setOpacity(self._opacity)
+        painter.drawPixmap(self.rect(), self._snapshot)
 
 
 class MainWindow(QMainWindow):
