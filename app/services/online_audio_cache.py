@@ -91,6 +91,7 @@ class OnlineAudioCacheService(QObject):
         "opus": ".opus",
         "aac": ".aac",
     }
+    _STARTUP_CLEANUP_DELAY_MS = 10_000
 
     def __init__(self, cache_root: Path, parent: QObject | None = None) -> None:
         super().__init__(parent)
@@ -103,11 +104,14 @@ class OnlineAudioCacheService(QObject):
         self.network = QNetworkAccessManager(self)
         self._jobs: dict[str, _CacheJob] = {}
         self._closed = False
-        self._initialize_database()
-        # Startup cleanup can scan the cache directory and touch several
-        # SQLite rows. Let the first window paint before doing that work; all
-        # public database methods still remain synchronous and safe.
-        QTimer.singleShot(0, self._cleanup_startup_artifacts)
+        # Creating the SQLite schema can be surprisingly expensive on some
+        # Windows disks. Database methods initialize it lazily, while stale
+        # startup cleanup waits until the first interaction burst has settled.
+        self._startup_cleanup_timer = QTimer(self)
+        self._startup_cleanup_timer.setSingleShot(True)
+        self._startup_cleanup_timer.setInterval(self._STARTUP_CLEANUP_DELAY_MS)
+        self._startup_cleanup_timer.timeout.connect(self._cleanup_startup_artifacts)
+        self._startup_cleanup_timer.start()
 
     @contextmanager
     def _database_connection(self):
@@ -120,6 +124,7 @@ class OnlineAudioCacheService(QObject):
         database.execute("PRAGMA synchronous=NORMAL")
         try:
             if initialize_schema:
+                database.execute("PRAGMA journal_mode=WAL")
                 self._create_schema(database)
             yield database
             database.commit()
@@ -423,13 +428,9 @@ class OnlineAudioCacheService(QObject):
         if self._closed:
             return
         self._closed = True
+        self._startup_cleanup_timer.stop()
         for cache_key in list(self._jobs):
             self._cancel_job(cache_key, remove_record=False, failure="应用退出，缓存任务已取消。")
-
-    def _initialize_database(self) -> None:
-        with self._database_connection() as database:
-            database.execute("PRAGMA journal_mode=WAL")
-            self._create_schema(database)
 
     @staticmethod
     def _create_schema(database: sqlite3.Connection) -> None:
@@ -465,28 +466,35 @@ class OnlineAudioCacheService(QObject):
         )
 
     def _cleanup_startup_artifacts(self) -> None:
-        for path in self.temp_dir.glob("*.part"):
-            self._unlink_if_safe(path, self.temp_dir)
-        with self._database_connection() as database:
-            database.execute(
-                "UPDATE cache_entries SET status = 'failed', temporary_path = '', "
-                "file_size = 0, last_error = ? WHERE status = 'downloading'",
-                ("上次运行结束前缓存未完成。",),
-            )
-            referenced = {
-                Path(str(row[0])).name
-                for row in database.execute(
-                    "SELECT local_path FROM cache_entries WHERE status = 'complete'"
-                ).fetchall()
-                if str(row[0] or "")
-            }
-        for path in self.files_dir.iterdir():
-            if (
-                path.is_file()
-                and self._CACHE_FILE_PATTERN.fullmatch(path.name)
-                and path.name not in referenced
-            ):
-                self._unlink_if_safe(path, self.files_dir)
+        if self._closed:
+            return
+        try:
+            for path in self.temp_dir.glob("*.part"):
+                self._unlink_if_safe(path, self.temp_dir)
+            with self._database_connection() as database:
+                database.execute(
+                    "UPDATE cache_entries SET status = 'failed', temporary_path = '', "
+                    "file_size = 0, last_error = ? WHERE status = 'downloading'",
+                    ("上次运行结束前缓存未完成。",),
+                )
+                referenced = {
+                    Path(str(row[0])).name
+                    for row in database.execute(
+                        "SELECT local_path FROM cache_entries WHERE status = 'complete'"
+                    ).fetchall()
+                    if str(row[0] or "")
+                }
+            for path in self.files_dir.iterdir():
+                if (
+                    path.is_file()
+                    and self._CACHE_FILE_PATTERN.fullmatch(path.name)
+                    and path.name not in referenced
+                ):
+                    self._unlink_if_safe(path, self.files_dir)
+        except (OSError, sqlite3.Error):
+            # The cache directory may be temporary in tests or removed by a
+            # user while the delayed maintenance task is waiting.
+            return
 
     def _record_downloading(self, job: _CacheJob) -> None:
         with self._database_connection() as database:

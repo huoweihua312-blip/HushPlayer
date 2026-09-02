@@ -99,7 +99,11 @@ from app.ui_v2.widgets.track_action_dialogs import (
     PlaylistSelectionDialog,
     TrackInfoDialog,
 )
-from app.ui_v2.theme.styles import build_application_palette, build_stylesheet
+from app.ui_v2.theme.styles import (
+    build_application_palette,
+    build_dialog_stylesheet,
+    build_stylesheet,
+)
 from app.ui_v2.theme.tokens import Theme, get_theme
 
 
@@ -117,6 +121,7 @@ _AUTO_RECOVERY_FAILURE_STATES = frozenset(
 _DESKTOP_LYRICS_CONTINUOUS_PREVIEW_KEYS = frozenset(
     {"floating_lyrics_font_size", "floating_lyrics_width"}
 )
+_REAL_LIBRARY_IMMEDIATE_PROJECTION_LIMIT = 12
 
 
 class ShellPresentationMode(str, Enum):
@@ -307,6 +312,7 @@ class MainWindow(QMainWindow):
         self._user_close_requested = False
         self._close_finalized = False
         self._startup_scan_timer: QTimer | None = None
+        self._real_library_projection_generation = 0
         self.desktop_lyrics_window: DesktopLyricsWindow | None = None
         self.desktop_lyrics_settings_popover: DesktopLyricsQuickSettingsPopover | None = None
         self._desktop_lyrics_settings_pending_snapshot: SettingsSnapshot | None = None
@@ -336,6 +342,9 @@ class MainWindow(QMainWindow):
         self._theme_reveal_enabled = True
         self._animate_next_theme_change = False
         self._theme_reveal_overlay: ThemeRevealOverlay | None = None
+        self._theme_apply_generation = 0
+        self._theme_apply_phase = 0
+        self._theme_apply_in_progress = False
         self._immersive_shell_active = False
         self._immersive_normal_geometry: QRect | None = None
         self._immersive_transparency_enabled = False
@@ -576,58 +585,200 @@ class MainWindow(QMainWindow):
             "window_flags": int(self.windowFlags()),
         }
 
-    def set_theme(self, mode: str) -> None:
+    def set_theme(
+        self,
+        mode: str,
+        *,
+        reveal_overlay: ThemeRevealOverlay | None = None,
+    ) -> None:
         target_theme = get_theme("light" if mode == "light" else "dark")
-        animate = (
-            self._animate_next_theme_change
-            and self._theme_reveal_enabled
-            and self.isVisible()
-            and target_theme.mode != self._theme.mode
+        animate = bool(
+            reveal_overlay is not None
+            or (
+                self._animate_next_theme_change
+                and self._theme_reveal_enabled
+                and self.isVisible()
+                and target_theme.mode != self._theme.mode
+            )
         )
-        reveal_overlay = self._prepare_theme_reveal() if animate else None
-        if reveal_overlay is not None:
-            self._show_theme_reveal(reveal_overlay)
+        if animate and reveal_overlay is None:
+            reveal_overlay = self._prepare_theme_reveal()
         self._animate_next_theme_change = False
+        self._theme_apply_generation += 1
+        generation = self._theme_apply_generation
+        self._theme_apply_in_progress = False
+        if reveal_overlay is None and self._theme_reveal_overlay is not None:
+            self._cancel_theme_reveal()
+
         self._theme = target_theme
-        app = QApplication.instance()
         stylesheet = build_stylesheet(self._theme)
+        if reveal_overlay is not None:
+            try:
+                self._apply_theme_global_styles_synchronously(
+                    stylesheet,
+                    application_scope=False,
+                )
+            except Exception:
+                self._cancel_theme_reveal()
+                raise
+            if self._theme_reveal_overlay is not reveal_overlay:
+                self._show_theme_reveal(reveal_overlay)
+            self._theme_apply_in_progress = True
+            self._theme_apply_phase = 0
+            reveal_overlay.start_animation()
+            QTimer.singleShot(
+                0,
+                lambda generation=generation, theme=self._theme: self._run_theme_apply_phase(
+                    generation, theme
+                ),
+            )
+            return
+        self._apply_theme_synchronously(
+            stylesheet,
+            application_scope=not self.isVisible(),
+        )
+
+    def _apply_theme_global_styles(
+        self,
+        stylesheet: str,
+        *,
+        application_scope: bool,
+    ) -> None:
+        """Apply shared rules to the app at startup or to this shell at runtime."""
+
+        app = QApplication.instance()
+        if app is None:
+            return
+        app.setPalette(build_application_palette(self._theme))
+        if application_scope:
+            app.setStyleSheet(stylesheet)
+        else:
+            self.setStyleSheet(stylesheet)
+        app.setProperty("hushUiFlavor", "ui-v2")
+        app.setProperty("hushUiV2ThemeMode", self._theme.mode)
+        self._apply_root_stylesheet()
+
+    def _apply_theme_global_styles_synchronously(
+        self,
+        stylesheet: str,
+        *,
+        application_scope: bool,
+    ) -> None:
+        """Apply global rules while suppressing the intermediate repaint."""
+
         was_enabled = self.updatesEnabled()
         root_was_enabled = self.root.updatesEnabled()
         self.setUpdatesEnabled(False)
         self.root.setUpdatesEnabled(False)
         try:
-            if app is not None:
-                app.setPalette(build_application_palette(self._theme))
-                app.setStyleSheet(stylesheet)
-                app.setProperty("hushUiFlavor", "ui-v2")
-                app.setProperty("hushUiV2ThemeMode", self._theme.mode)
-            self._apply_root_stylesheet(stylesheet)
-            self.title_bar.set_theme(self._theme)
-            self.library_page.set_theme(self._theme)
-            self.sidebar.set_theme(self._theme)
-            self.router.set_theme(self._theme)
-            self.player_bar.set_theme(self._theme)
+            self._apply_theme_global_styles(
+                stylesheet,
+                application_scope=application_scope,
+            )
+        finally:
+            self.root.setUpdatesEnabled(root_was_enabled)
+            self.setUpdatesEnabled(was_enabled)
+            self.update()
+            self.root.update()
+
+    def _apply_theme_component_phase(self, phase: int, theme: Theme) -> None:
+        """Apply one small UI group so animation frames can be processed between groups."""
+
+        if phase == 0:
+            self.title_bar.set_theme(theme)
+        elif phase == 1:
+            self.library_page.set_theme(theme)
+        elif phase == 2:
+            self.sidebar.set_theme(theme)
+        elif phase == 3:
+            self.router.set_theme(theme)
+        elif phase == 4:
+            self.player_bar.set_theme(theme)
+        elif phase == 5:
             if self.desktop_lyrics_window is not None:
-                self.desktop_lyrics_window.set_theme(self._theme)
+                self.desktop_lyrics_window.set_theme(theme)
             if self.desktop_lyrics_settings_popover is not None:
-                self.desktop_lyrics_settings_popover.set_theme(self._theme)
+                self.desktop_lyrics_settings_popover.set_theme(theme)
             if self.settings_overlay is not None:
-                self.settings_overlay.set_theme(self._theme)
+                self.settings_overlay.set_theme(theme)
+            if self._track_info_dialog is not None:
+                self._track_info_dialog.set_theme(theme)
+            if self._update_dialog is not None:
+                self._update_dialog.setStyleSheet(build_dialog_stylesheet(theme))
             self.router.set_content_safe_bottom(
-                self._theme.metrics.player_bar_height + self._theme.metrics.content_safe_bottom
+                theme.metrics.player_bar_height + theme.metrics.content_safe_bottom
             )
             if not self._immersive_transparency_enabled:
                 self._shell_surface_states = tuple(
                     (widget, QPalette(widget.palette()), widget.autoFillBackground())
                     for widget in (self.root, self.body, self.content_container, self.router)
                 )
+
+    def _apply_theme_synchronously(
+        self,
+        stylesheet: str,
+        *,
+        application_scope: bool,
+    ) -> None:
+        """Apply all theme layers in one pass for startup and non-animated changes."""
+
+        was_enabled = self.updatesEnabled()
+        root_was_enabled = self.root.updatesEnabled()
+        self.setUpdatesEnabled(False)
+        self.root.setUpdatesEnabled(False)
+        try:
+            self._apply_theme_global_styles(
+                stylesheet,
+                application_scope=application_scope,
+            )
+            for phase in range(6):
+                self._apply_theme_component_phase(phase, self._theme)
         finally:
             self.root.setUpdatesEnabled(root_was_enabled)
             self.setUpdatesEnabled(was_enabled)
             self.update()
             self.root.update()
-        if reveal_overlay is not None:
-            reveal_overlay.start_animation()
+
+    def _run_theme_apply_phase(self, generation: int, theme: Theme) -> None:
+        if (
+            generation != self._theme_apply_generation
+            or not self._theme_apply_in_progress
+            or self._close_finalized
+        ):
+            return
+        phase = self._theme_apply_phase
+        was_enabled = self.updatesEnabled()
+        root_was_enabled = self.root.updatesEnabled()
+        self.setUpdatesEnabled(False)
+        self.root.setUpdatesEnabled(False)
+        try:
+            self._apply_theme_component_phase(phase, theme)
+        except Exception as error:
+            self._theme_apply_in_progress = False
+            self._cancel_theme_reveal()
+            QToolTip.showText(
+                self.title_bar.theme_button.mapToGlobal(
+                    self.title_bar.theme_button.rect().bottomLeft()
+                ),
+                f"主题切换失败：{error}",
+                self.title_bar.theme_button,
+            )
+            return
+        finally:
+            self.root.setUpdatesEnabled(root_was_enabled)
+            self.setUpdatesEnabled(was_enabled)
+            self.update()
+            self.root.update()
+        self._theme_apply_phase += 1
+        if self._theme_apply_phase < 6:
+            QTimer.singleShot(
+                0,
+                lambda generation=generation, theme=theme: self._run_theme_apply_phase(
+                    generation, theme
+                ),
+            )
+        else:
+            self._theme_apply_in_progress = False
 
     def toggle_theme(self) -> None:
         """Persist an explicit Light/Dark choice through the existing bridge."""
@@ -673,10 +824,17 @@ class MainWindow(QMainWindow):
 
     def _apply_queued_theme_snapshot(self, snapshot: SettingsSnapshot) -> None:
         try:
-            self._settings_snapshot = self.settings_bridge.save_snapshot(snapshot)
-            if self._theme_reveal_overlay is not None:
-                self._theme_reveal_overlay.start_animation()
+            overlay = self._theme_reveal_overlay
+            if overlay is None:
+                return
+            saved = self.settings_bridge.save_snapshot(snapshot, apply=False)
+            self._settings_snapshot = saved
+            self._apply_settings_snapshot(
+                saved.to_dict(),
+                theme_reveal_overlay=overlay,
+            )
         except Exception as error:
+            self._animate_next_theme_change = False
             self._cancel_theme_reveal()
             QToolTip.showText(
                 self.title_bar.theme_button.mapToGlobal(
@@ -687,6 +845,8 @@ class MainWindow(QMainWindow):
             )
 
     def _cancel_theme_reveal(self) -> None:
+        self._theme_apply_generation += 1
+        self._theme_apply_in_progress = False
         overlay = self._theme_reveal_overlay
         self._theme_reveal_overlay = None
         if overlay is not None:
@@ -1412,7 +1572,12 @@ class MainWindow(QMainWindow):
         if self.desktop_lyrics_window is not None:
             self.desktop_lyrics_window.apply_settings(values)
 
-    def _apply_settings_snapshot(self, values: dict[str, object]) -> None:
+    def _apply_settings_snapshot(
+        self,
+        values: dict[str, object],
+        *,
+        theme_reveal_overlay: ThemeRevealOverlay | None = None,
+    ) -> None:
         """Preview or apply a Settings snapshot without creating another shell."""
 
         self._apply_settings_values(values)
@@ -1422,7 +1587,8 @@ class MainWindow(QMainWindow):
             self.playback_adapter.set_volume(65)
         mode = str(values.get("appearance_mode", "dark"))
         self.set_theme(
-            "dark" if self._force_dark_theme or mode != "light" else "light"
+            "dark" if self._force_dark_theme or mode != "light" else "light",
+            reveal_overlay=theme_reveal_overlay,
         )
         page = self.router._pages.get("immersive_lyrics")
         if page is not None and hasattr(page, "apply_options"):
@@ -1552,11 +1718,14 @@ class MainWindow(QMainWindow):
             self.activateWindow()
         self._update_window_shape()
 
-    def _apply_root_stylesheet(self, stylesheet: str | None = None) -> None:
-        stylesheet = stylesheet or build_stylesheet(self._theme)
-        stylesheet += (
-            f"\nQWidget#uiV2Root {{ border: 1px solid {self._theme.colors.divider}; "
-            f"border-radius: {self._WINDOW_CORNER_RADIUS}px; }}\n"
+    def _apply_root_stylesheet(self) -> None:
+        """Apply only root-specific rules; shared rules already live on QApplication."""
+
+        stylesheet = (
+            f"QWidget#uiV2Root {{ background: {self._theme.colors.app_background}; "
+            f"color: {self._theme.colors.text_primary}; "
+            f"border: 1px solid {self._theme.colors.divider}; "
+            f"border-radius: {self._WINDOW_CORNER_RADIUS}px; }}"
         )
         if self._immersive_transparency_enabled and self._immersive_transparency_supported:
             stylesheet += (
@@ -1855,15 +2024,56 @@ class MainWindow(QMainWindow):
     def _on_real_library_loaded(self) -> None:
         """Refresh the local playback projection after the read-only snapshot arrives."""
 
+        if self._close_finalized or self.real_library_adapter is None:
+            return
+        self._real_library_projection_generation += 1
+        generation = self._real_library_projection_generation
         self.playback_adapter.set_queue(self.library_collection.tracks())
-        # The shared collection coalesces updates through a short timer.  The
-        # landing page should not make the user wait for that timer after a
-        # successful startup load, so render the Browse snapshot immediately.
-        self.router.browse_page.refresh_cards()
-        self._request_loaded_remote_artwork()
         self.library_page.set_playback_enabled(
             self.playback_adapter.has_real_backend
         )
+        if self._startup_diagnostics is not None:
+            self._startup_diagnostics.mark("real_library.ui_state")
+        # Let the shell paint the loaded state before building or replacing
+        # Browse cards.  The following turns keep card work and artwork
+        # requests separate so a loaded snapshot cannot monopolize the UI.
+        if len(self.library_collection.tracks()) <= _REAL_LIBRARY_IMMEDIATE_PROJECTION_LIMIT:
+            self.router.browse_page.refresh_cards()
+            if self._startup_diagnostics is not None:
+                self._startup_diagnostics.mark("real_library.browse_projection")
+            next_phase = 1
+        else:
+            next_phase = 0
+        QTimer.singleShot(
+            0,
+            lambda generation=generation, next_phase=next_phase: self._continue_real_library_projection(
+                generation, next_phase
+            ),
+        )
+
+    def _continue_real_library_projection(self, generation: int, phase: int) -> None:
+        """Run post-load UI projection in small event-loop batches."""
+
+        if (
+            generation != self._real_library_projection_generation
+            or self._close_finalized
+            or self.real_library_adapter is None
+        ):
+            return
+        if phase == 0:
+            self.router.browse_page.refresh_cards()
+            if self._startup_diagnostics is not None:
+                self._startup_diagnostics.mark("real_library.browse_projection")
+            QTimer.singleShot(
+                0,
+                lambda generation=generation: self._continue_real_library_projection(
+                    generation, 1
+                ),
+            )
+            return
+        self._request_loaded_remote_artwork()
+        if self._startup_diagnostics is not None:
+            self._startup_diagnostics.mark("real_library.artwork_requests")
 
     def _request_loaded_remote_artwork(self) -> None:
         """Warm artwork for persisted remote tracks before they reach player surfaces."""

@@ -308,7 +308,14 @@ class LegacySettingsBridge(QObject):
                 errors["cache_directory"] = "缓存目录不可写，请选择其他文件夹。"
         return errors
 
-    def save_snapshot(self, snapshot: SettingsSnapshot) -> SettingsSnapshot:
+    def save_snapshot(
+        self,
+        snapshot: SettingsSnapshot,
+        *,
+        apply: bool = True,
+    ) -> SettingsSnapshot:
+        """Validate and persist a snapshot, optionally deferring runtime apply."""
+
         document = snapshot.to_dict()
         document["remember_close_choice"] = bool(
             document.get("remember_close_choice", False)
@@ -322,7 +329,7 @@ class LegacySettingsBridge(QObject):
             raise SettingsBridgeError(message)
         try:
             write_settings_document(self.settings_path, document)
-            if self._apply_callback is not None:
+            if apply and self._apply_callback is not None:
                 self._apply_callback(deepcopy(document))
         except Exception as error:
             message = f"保存设置失败：{error}"
