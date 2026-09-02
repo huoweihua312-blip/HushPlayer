@@ -298,6 +298,9 @@ class MainWindow(QMainWindow):
             parent=application,
         )
         self.close_behavior_controller.register_window(self)
+        self.close_behavior_controller.desktop_lyrics_unlock_requested.connect(
+            self._unlock_desktop_lyrics_from_tray
+        )
         self._user_close_requested = False
         self._close_finalized = False
         self._startup_scan_timer: QTimer | None = None
@@ -1925,6 +1928,7 @@ class MainWindow(QMainWindow):
             )
         self.desktop_lyrics_window = window
         window.apply_settings(self._settings_snapshot.to_dict())
+        self._sync_desktop_lyrics_tray_state()
         return window
 
     def _ensure_desktop_lyrics_settings_popover(
@@ -1982,6 +1986,23 @@ class MainWindow(QMainWindow):
             bool(locked),
         )
 
+    def _sync_desktop_lyrics_tray_state(self) -> None:
+        window = self.desktop_lyrics_window
+        self.close_behavior_controller.set_desktop_lyrics_locked(
+            bool(window is not None and window.is_enabled and window.is_locked)
+        )
+
+    def _unlock_desktop_lyrics_from_tray(self) -> None:
+        if self._close_finalized:
+            return
+        window = self.desktop_lyrics_window
+        if window is None or not window.is_enabled or not window.is_locked:
+            return
+        self._on_desktop_lyrics_setting_changed(
+            "floating_lyrics_passthrough",
+            False,
+        )
+
     def _on_desktop_lyrics_setting_changed(self, key: str, value: object) -> None:
         if self._close_finalized or key not in DESKTOP_LYRICS_QUICK_SETTING_KEYS:
             return
@@ -2000,6 +2021,7 @@ class MainWindow(QMainWindow):
             self.desktop_lyrics_settings_popover.show_error("")
         if self.desktop_lyrics_window is not None:
             self.desktop_lyrics_window.apply_settings(candidate.to_dict())
+        self._sync_desktop_lyrics_tray_state()
         self._desktop_lyrics_settings_save_timer.start()
 
     def _save_pending_desktop_lyrics_settings(self) -> bool:
@@ -2050,6 +2072,7 @@ class MainWindow(QMainWindow):
     def _on_desktop_lyrics_enabled_changed(self, enabled: bool) -> None:
         if hasattr(self, "player_bar"):
             self.player_bar.desktop_lyrics_button.set_active(bool(enabled))
+        self._sync_desktop_lyrics_tray_state()
 
     def _persist_desktop_lyrics_position(self, x: int, y: int) -> None:
         if self._close_finalized:

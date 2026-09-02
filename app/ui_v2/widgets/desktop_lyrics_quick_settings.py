@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 
 from PySide6.QtCore import QPoint, QSignalBlocker, Qt, Signal
-from PySide6.QtGui import QColor, QGuiApplication, QKeyEvent
+from PySide6.QtGui import QColor, QGuiApplication, QKeyEvent, QPainter, QPen
 from PySide6.QtWidgets import (
     QFrame,
     QGridLayout,
@@ -254,8 +254,8 @@ class DesktopLyricsQuickSettingsPopover(QFrame):
         self._theme = theme
         colors = theme.colors
         self.setStyleSheet(
-            f"QFrame#desktopLyricsQuickSettings {{ background: {colors.surface_elevated}; "
-            f"border: 1px solid {colors.border}; border-radius: {theme.metrics.radius_lg}px; }}"
+            f"QFrame#desktopLyricsQuickSettings {{ background: transparent; border: 0; "
+            f"border-radius: {theme.metrics.radius_lg}px; }}"
             f"QLabel#desktopLyricsQuickSettingsTitle {{ color: {colors.primary_text}; "
             f"font-size: {theme.fonts.section_title}px; font-weight: 650; }}"
             f"QLabel#desktopLyricsQuickSettingsLabel {{ color: {colors.secondary_text}; "
@@ -275,6 +275,26 @@ class DesktopLyricsQuickSettingsPopover(QFrame):
         self.passthrough_toggle.set_theme(theme)
         self.reset_button.set_theme(theme)
         self._refresh_color_buttons()
+        self.update()
+
+    def paintEvent(self, event) -> None:  # noqa: N802
+        """Paint an opaque rounded surface over the translucent popup window."""
+
+        del event
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        rect = self.rect().adjusted(0, 0, -1, -1)
+        surface = QColor(self._theme.colors.surface_elevated)
+        surface.setAlpha(255)
+        painter.setBrush(surface)
+        border = QPen(QColor(self._theme.colors.border))
+        border.setWidth(1)
+        painter.setPen(border)
+        painter.drawRoundedRect(
+            rect,
+            self._theme.metrics.radius_lg,
+            self._theme.metrics.radius_lg,
+        )
 
     def show_error(self, message: str) -> None:
         text = str(message or "").strip()

@@ -401,10 +401,7 @@ class PlayerBar(QFrame):
             lambda: self.mock_action_requested.emit("desktop_lyrics")
         )
         self.desktop_lyrics_button.setContextMenuPolicy(
-            Qt.ContextMenuPolicy.CustomContextMenu
-        )
-        self.desktop_lyrics_button.customContextMenuRequested.connect(
-            lambda _position: self.desktop_lyrics_settings_requested.emit()
+            Qt.ContextMenuPolicy.NoContextMenu
         )
         self.queue_button.clicked.connect(lambda: self.mock_action_requested.emit("queue"))
         self.volume_button.clicked.connect(self._toggle_mute)

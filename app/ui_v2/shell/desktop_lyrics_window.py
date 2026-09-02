@@ -10,6 +10,7 @@ from PySide6.QtGui import (
     QContextMenuEvent,
     QCursor,
     QFont,
+    QFontMetrics,
     QGuiApplication,
     QMouseEvent,
 )
@@ -70,6 +71,7 @@ class DesktopLyricsWindow(QWidget):
 
     _CURSOR_POLL_MS = 160
     _INTERACTION_IDLE_MS = 1_500
+    _GLYPH_SAFETY_PADDING = 4
 
     def __init__(
         self,
@@ -211,6 +213,10 @@ class DesktopLyricsWindow(QWidget):
         )
         self._saved_x = int(self._settings["floating_lyrics_x"])
         self._saved_y = int(self._settings["floating_lyrics_y"])
+        # Clear the previous runtime floor before applying a new font size.
+        # The persisted height remains the user's baseline; the larger value
+        # is only a runtime safety floor for the current two-line layout.
+        self.setMinimumHeight(0)
         self.resize(
             int(self._settings["floating_lyrics_width"]),
             int(self._settings["floating_lyrics_height"]),
@@ -258,7 +264,30 @@ class DesktopLyricsWindow(QWidget):
         secondary_font.setWeight(QFont.Weight.Normal)
         self._main_label.setFont(main_font)
         self._secondary_label.setFont(secondary_font)
+        self._apply_content_height_floor()
         self._update_lock_button_geometry()
+
+    def _apply_content_height_floor(self) -> None:
+        """Reserve stable space for both lyric rows without changing settings."""
+
+        surface_layout = self._surface.layout()
+        margins = surface_layout.contentsMargins()
+        # The layout contains a top stretch, main row, secondary row and a
+        # bottom stretch, so there are three inter-item spacing slots.
+        layout_spacing = max(0, int(surface_layout.spacing())) * 3
+        main_height = QFontMetrics(self._main_label.font()).height()
+        secondary_height = QFontMetrics(self._secondary_label.font()).height()
+        required = (
+            margins.top()
+            + margins.bottom()
+            + layout_spacing
+            + main_height
+            + secondary_height
+            + self._GLYPH_SAFETY_PADDING
+        )
+        self.setMinimumHeight(max(0, int(required)))
+        if self.height() < required:
+            self.resize(self.width(), int(required))
 
     @property
     def is_enabled(self) -> bool:

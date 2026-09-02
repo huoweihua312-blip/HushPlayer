@@ -116,6 +116,18 @@ class CloseBehaviorControllerTests(unittest.TestCase):
             self.app.processEvents()
             quit_app.assert_called()
 
+    def test_locked_desktop_lyrics_exposes_tray_unlock_action(self) -> None:
+        requests: list[bool] = []
+        self.controller.desktop_lyrics_unlock_requested.connect(
+            lambda: requests.append(True)
+        )
+        self.controller.set_desktop_lyrics_locked(True)
+        self.assertTrue(self.controller.desktop_lyrics_unlock_action.isVisible())
+        self.controller.desktop_lyrics_unlock_action.trigger()
+        self.assertEqual(requests, [True])
+        self.controller.set_desktop_lyrics_locked(False)
+        self.assertFalse(self.controller.desktop_lyrics_unlock_action.isVisible())
+
     def test_settings_bridge_persists_and_clears_close_memory(self) -> None:
         bridge = LegacySettingsBridge(self.settings_path)
         saved = bridge.save_snapshot(

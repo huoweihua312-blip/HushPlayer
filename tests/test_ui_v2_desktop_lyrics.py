@@ -148,10 +148,18 @@ class DesktopLyricsWindowTests(unittest.TestCase):
         self.app.processEvents()
         self.assertEqual(self.window._main_label.font().pixelSize(), 22)
         self.assertEqual(self.window._secondary_label.font().pixelSize(), 14)
+        compact_height = self.window.height()
         self.window.apply_settings({"floating_lyrics_font_size": 84})
         self.app.processEvents()
         self.assertEqual(self.window._main_label.font().pixelSize(), 84)
         self.assertEqual(self.window._secondary_label.font().pixelSize(), 42)
+        self.assertGreater(self.window.height(), compact_height)
+        self.assertGreaterEqual(
+            self.window.height(),
+            self.window._main_label.fontMetrics().height()
+            + self.window._secondary_label.fontMetrics().height()
+            + 28,
+        )
         self.assertFalse(hasattr(self.window, "_toolbar"))
         self.assertFalse(hasattr(self.window, "_reset_button"))
         self.assertFalse(hasattr(self.window, "_close_button"))
@@ -311,7 +319,7 @@ class DesktopLyricsMainWindowIntegrationTests(unittest.TestCase):
                 window.close()
                 self.app.processEvents()
 
-    def test_right_click_opens_quick_settings_without_toggling_lyrics(self) -> None:
+    def test_player_bar_button_only_toggles_lyrics_without_context_settings(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             settings_path = Path(directory) / "settings.json"
             window = MainWindow(settings_path=settings_path)
@@ -320,20 +328,17 @@ class DesktopLyricsMainWindowIntegrationTests(unittest.TestCase):
                 window.show()
                 self.app.processEvents()
                 self.assertIsNone(window.desktop_lyrics_window)
-                window.player_bar.desktop_lyrics_button.customContextMenuRequested.emit(
-                    QPoint(4, 4)
+                self.assertEqual(
+                    window.player_bar.desktop_lyrics_button.contextMenuPolicy(),
+                    Qt.ContextMenuPolicy.NoContextMenu,
                 )
-                self.app.processEvents()
-                popover = window.desktop_lyrics_settings_popover
-                self.assertIsNotNone(popover)
-                self.assertTrue(popover.isVisible())
                 self.assertIsNone(window.desktop_lyrics_window)
                 self.assertEqual(window.navigation_adapter.route, "browse")
-                window.player_bar.desktop_lyrics_button.customContextMenuRequested.emit(
-                    QPoint(4, 4)
-                )
+                window._on_player_bar_action("desktop_lyrics")
                 self.app.processEvents()
-                self.assertFalse(popover.isVisible())
+                self.assertIsNotNone(window.desktop_lyrics_window)
+                self.assertTrue(window.desktop_lyrics_window.is_enabled)
+                self.assertIsNone(window.desktop_lyrics_settings_popover)
             finally:
                 window.close()
                 self.app.processEvents()
@@ -373,6 +378,30 @@ class DesktopLyricsMainWindowIntegrationTests(unittest.TestCase):
                 self.app.processEvents()
                 self.assertFalse(desktop.is_locked)
                 self.assertTrue(window._desktop_lyrics_settings_save_timer.isActive())
+                window._desktop_lyrics_settings_save_timer.stop()
+                self.assertTrue(window._save_pending_desktop_lyrics_settings())
+                document = json.loads(settings_path.read_text(encoding="utf-8"))
+                self.assertFalse(document["floating_lyrics_passthrough"])
+            finally:
+                window.close()
+                self.app.processEvents()
+
+    def test_tray_unlock_uses_existing_settings_path(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            settings_path = Path(directory) / "settings.json"
+            window = MainWindow(settings_path=settings_path)
+            try:
+                desktop = window._ensure_desktop_lyrics_window()
+                window._on_player_bar_action("desktop_lyrics")
+                self.app.processEvents()
+                self.assertTrue(desktop.is_enabled)
+                self.assertTrue(desktop.is_locked)
+                action = window.close_behavior_controller.desktop_lyrics_unlock_action
+                self.assertTrue(action.isVisible())
+                action.trigger()
+                self.app.processEvents()
+                self.assertFalse(desktop.is_locked)
+                self.assertFalse(action.isVisible())
                 window._desktop_lyrics_settings_save_timer.stop()
                 self.assertTrue(window._save_pending_desktop_lyrics_settings())
                 document = json.loads(settings_path.read_text(encoding="utf-8"))

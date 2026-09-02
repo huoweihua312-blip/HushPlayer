@@ -39,6 +39,7 @@ class CloseBehaviorController(QObject):
 
     hidden_to_tray = Signal()
     restored_from_tray = Signal()
+    desktop_lyrics_unlock_requested = Signal()
     exiting = Signal()
     preference_save_failed = Signal(str)
 
@@ -59,17 +60,26 @@ class CloseBehaviorController(QObject):
         self._tray_available_override = tray_available
         self._decision_provider = decision_provider
         self._allow_next_close = False
+        self._window_hidden_to_tray = False
+        self._desktop_lyrics_locked = False
 
         tray_icon = icon or app.windowIcon()
         self.tray_icon = QSystemTrayIcon(tray_icon, self)
         self.tray_icon.setToolTip("HushPlayer")
         self.tray_menu = QMenu()
+        self.desktop_lyrics_unlock_action = QAction("解锁桌面歌词", self.tray_menu)
+        self.desktop_lyrics_unlock_action.setVisible(False)
         self.open_action = QAction("打开 HushPlayer", self.tray_menu)
         self.exit_action = QAction("退出 HushPlayer", self.tray_menu)
+        self.tray_menu.addAction(self.desktop_lyrics_unlock_action)
+        self.tray_menu.addSeparator()
         self.tray_menu.addAction(self.open_action)
         self.tray_menu.addSeparator()
         self.tray_menu.addAction(self.exit_action)
         self.tray_icon.setContextMenu(self.tray_menu)
+        self.desktop_lyrics_unlock_action.triggered.connect(
+            lambda _checked=False: self.desktop_lyrics_unlock_requested.emit()
+        )
         self.open_action.triggered.connect(self.restore_window)
         self.exit_action.triggered.connect(self.request_exit)
         self.tray_icon.activated.connect(self._on_tray_activated)
@@ -82,6 +92,20 @@ class CloseBehaviorController(QObject):
 
     def register_window(self, window: QWidget) -> None:
         self._window_ref = weakref.ref(window)
+
+    def set_desktop_lyrics_locked(self, locked: bool) -> None:
+        """Expose a tray unlock action while enabled lyrics remain pass-through."""
+
+        self._desktop_lyrics_locked = bool(locked)
+        self.desktop_lyrics_unlock_action.setVisible(self._desktop_lyrics_locked)
+        self._sync_tray_visibility()
+
+    def _sync_tray_visibility(self) -> None:
+        should_show = self._window_hidden_to_tray or self._desktop_lyrics_locked
+        if should_show:
+            self.tray_icon.show()
+        else:
+            self.tray_icon.hide()
 
     def allow_next_close(self) -> None:
         """Bypass the user prompt for an intentional internal shutdown."""
@@ -143,11 +167,12 @@ class CloseBehaviorController(QObject):
         window = self._window()
         if window is None:
             return
-        self.tray_icon.hide()
+        self._window_hidden_to_tray = False
         window.showNormal()
         window.show()
         window.raise_()
         window.activateWindow()
+        self._sync_tray_visibility()
         self.restored_from_tray.emit()
 
     def _window(self) -> QWidget | None:
@@ -197,12 +222,16 @@ class CloseBehaviorController(QObject):
     def _minimize_to_tray(self, window: QWidget, event: QCloseEvent) -> None:
         event.ignore()
         self._app.setQuitOnLastWindowClosed(False)
-        self.tray_icon.show()
+        self._window_hidden_to_tray = True
+        self._sync_tray_visibility()
         window.hide()
         self.hidden_to_tray.emit()
 
     def _finish_exit(self, event: QCloseEvent) -> None:
         event.accept()
+        self._window_hidden_to_tray = False
+        self._desktop_lyrics_locked = False
+        self.desktop_lyrics_unlock_action.setVisible(False)
         self.tray_icon.hide()
         self.exiting.emit()
         QTimer.singleShot(0, self._app.quit)
