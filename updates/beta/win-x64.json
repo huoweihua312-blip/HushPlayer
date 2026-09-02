@@ -5,7 +5,7 @@
     "numeric_version": "0.6.0.11",
     "architecture": "win-x64",
     "mandatory": false,
-    "setup_url": "https://github.com/huoweihua312-blip/HushPlayer/releases/download/v0.6.0-beta.11/HushPlayer-0.6.0-beta.11-win-x64-setup.exe",
+    "setup_url": "https://api.gitcode.com/api/v5/repos/gcw_iPVB8B5g/HushPlayer-updates/raw/installers/HushPlayer-0.6.0-beta.11-win-x64-setup.exe?ref=main",
     "setup_size": 124572189,
     "sha256": "dd3549a2f929503f396b98e290baef67a4e22c49abbfa0d420dfcde50cfbbbed",
     "release_notes": [
@@ -246,9 +246,5 @@
                 "增强歌曲右键操作，支持查看歌曲信息和添加到自定义歌单，并保留当前播放状态。"
             ]
         }
-    ],
-    "package_url": "https://github.com/huoweihua312-blip/HushPlayer/releases/download/v0.6.0-beta.11/HushPlayer-0.6.0-beta.11-win-x64-update.zip",
-    "package_size": 172324720,
-    "package_sha256": "3a392b39b5cce6ca2e601e893f668f5f0616ef8f8ea9f6244bc5d40ce3f80346",
-    "package_filename": "HushPlayer-0.6.0-beta.11-win-x64-update.zip"
+    ]
 }
