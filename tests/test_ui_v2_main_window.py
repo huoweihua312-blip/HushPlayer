@@ -316,7 +316,7 @@ class UiV2MainWindowTests(unittest.TestCase):
         self.assertIsNotNone(self.window._theme_reveal_overlay)
         overlay = self.window._theme_reveal_overlay
         expected_origin = self.window.title_bar.theme_button.mapTo(
-            self.window,
+            overlay,
             self.window.title_bar.theme_button.rect().center(),
         )
         self.assertEqual(overlay._origin, expected_origin)

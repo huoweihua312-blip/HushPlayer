@@ -147,7 +147,12 @@ class ThemeRevealOverlay(QWidget):
     _DURATION_MS = 1200
     _FEATHER_PX = 110
 
-    def __init__(self, snapshot: QPixmap, origin: QPoint, parent: QWidget) -> None:
+    def __init__(
+        self,
+        snapshot: QPixmap,
+        origin_widget: QWidget,
+        parent: QWidget,
+    ) -> None:
         super().__init__(parent)
         self.setObjectName("themeRevealOverlay")
         self.setStyleSheet(
@@ -164,7 +169,11 @@ class ThemeRevealOverlay(QWidget):
             self.size(),
             QImage.Format.Format_ARGB32_Premultiplied,
         )
-        self._origin = QPoint(origin)
+        self._origin_widget = origin_widget
+        self._origin = origin_widget.mapTo(
+            self,
+            origin_widget.rect().center(),
+        )
         self._radius = 0.0
         self._animation = QVariantAnimation(self)
         self._animation.setStartValue(0.0)
@@ -876,9 +885,7 @@ class MainWindow(QMainWindow):
         snapshot = self.grab()
         if snapshot.isNull():
             return None
-        theme_button = self.title_bar.theme_button
-        origin = theme_button.mapTo(self, theme_button.rect().center())
-        return ThemeRevealOverlay(snapshot, origin, self)
+        return ThemeRevealOverlay(snapshot, self.title_bar.theme_button, self)
 
     def _show_theme_reveal(self, overlay: ThemeRevealOverlay) -> None:
         self._attach_theme_reveal(overlay)
