@@ -15,6 +15,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
+from PySide6.QtCore import QAbstractAnimation
 from PySide6.QtGui import QColor, QPalette
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication
@@ -330,6 +331,7 @@ class UiV2MainWindowTests(unittest.TestCase):
         self.assertIsNotNone(overlay)
         self.assertEqual(self.window.theme.mode, original_mode)
         self.assertEqual(overlay._radius, 0.0)
+        self.assertEqual(overlay._animation.state(), QAbstractAnimation.State.Running)
 
         QTest.qWait(self.window._THEME_REVEAL_APPLY_DELAY_MS + 20)
         self.app.processEvents()

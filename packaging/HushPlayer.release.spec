@@ -100,6 +100,31 @@ for relative_path, metadata in sorted(package_entries.items()):
 
 hiddenimports = collect_submodules("mutagen")
 
+
+def without_conflicting_system_dlls(entries):
+    """Keep bundled runtimes from shadowing Windows and Qt dependencies."""
+
+    filtered = []
+    removed = []
+    for entry in entries:
+        destination = Path(str(entry[0])).name.casefold()
+        source = Path(str(entry[1])).name.casefold()
+        if (
+            destination.startswith("api-ms-win-")
+            or source.startswith("api-ms-win-")
+            or destination.startswith("icu")
+            or source.startswith("icu")
+        ):
+            removed.append(str(entry[0]))
+            continue
+        filtered.append(entry)
+    if removed:
+        print(
+            "Excluded conflicting system DLLs: "
+            + ", ".join(sorted(removed))
+        )
+    return filtered
+
 a = Analysis(
     [str(PROJECT_ROOT / "main.py")],
     pathex=[str(PROJECT_ROOT)],
@@ -137,7 +162,7 @@ exe = EXE(
 
 coll = COLLECT(
     exe,
-    a.binaries,
+    without_conflicting_system_dlls(a.binaries),
     a.datas,
     strip=False,
     upx=False,

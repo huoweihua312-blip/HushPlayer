@@ -11,6 +11,7 @@ from pathlib import Path
 import tempfile
 
 from PySide6.QtCore import (
+    QAbstractAnimation,
     QEasingCurve,
     QEvent,
     QPoint,
@@ -178,6 +179,8 @@ class ThemeRevealOverlay(QWidget):
         self.repaint()
 
     def start_animation(self) -> None:
+        if self._animation.state() == QAbstractAnimation.State.Running:
+            return
         self._animation.start()
 
     def _set_radius(self, value) -> None:
@@ -816,6 +819,10 @@ class MainWindow(QMainWindow):
             return False
         self._animate_next_theme_change = False
         self._show_theme_reveal(overlay)
+        # Start the animation before the queued settings write and theme
+        # polish. The first event-loop turn can now observe a running
+        # transition instead of waiting for the synchronous style refresh.
+        overlay.start_animation()
         QTimer.singleShot(
             self._THEME_REVEAL_APPLY_DELAY_MS,
             lambda snapshot=snapshot: self._apply_queued_theme_snapshot(snapshot),
