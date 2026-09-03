@@ -1,19 +1,15 @@
 {
     "schema_version": 1,
     "channel": "beta",
-    "version": "0.6.0-beta.12",
-    "numeric_version": "0.6.0.12",
+    "version": "0.6.0-beta.13",
+    "numeric_version": "0.6.0.13",
     "architecture": "win-x64",
     "mandatory": false,
-    "setup_url": "https://api.gitcode.com/api/v5/repos/gcw_iPVB8B5g/HushPlayer-updates/releases/v0.6.0-beta.12/attach_files/HushPlayer-0.6.0-beta.12-win-x64-setup.exe/download",
-    "setup_size": 116082474,
-    "sha256": "8e1caa1e814ff151c9aa4b112f798debeadac8f93d9c5e30bb6bdfad351bad28",
+    "setup_url": "https://api.gitcode.com/api/v5/repos/gcw_iPVB8B5g/HushPlayer-updates/releases/v0.6.0-beta.13/attach_files/HushPlayer-0.6.0-beta.13-win-x64-setup.exe/download",
+    "setup_size": 116078295,
+    "sha256": "f2643897c97f9b1f03e21c76d1a68d5af81b388904cdab43ad28a74c57b64f69",
     "release_notes": [
-        "修复 Windows 安装包携带冲突的系统 API 与 ICU DLL，导致程序启动时 QtCore 加载失败的问题。",
-        "修复深浅色主题切换点击后动画启动延迟的问题，动画会先给出即时反馈，再完成主题样式刷新。",
-        "优化深浅色主题切换动画，保留原有从主题按钮向外扩散的放射效果，复用离屏缓冲区减少正式版真实曲库下的 UI 卡顿。",
-        "修复无边框窗口和系统缩放下的扩散起点偏移，固定从主题按钮实际中心开始放射。",
-        "修复主题样式刷新期间放射半径跳跃造成的短暂停顿，刷新时保持当前半径，完成后继续动画。"
+        "增加单实例启动保护：重复启动时复用已运行的 HushPlayer 窗口，不再创建多个播放进程。"
     ],
     "release_history": [
         {
@@ -242,10 +238,18 @@
                 "修复无边框窗口和系统缩放下的扩散起点偏移，固定从主题按钮实际中心开始放射。",
                 "修复主题样式刷新期间放射半径跳跃造成的短暂停顿，刷新时保持当前半径，完成后继续动画。"
             ]
+        },
+        {
+            "version": "0.6.0-beta.13",
+            "numeric_version": "0.6.0.13",
+            "release_date": "2026-09-03",
+            "notes": [
+                "增加单实例启动保护：重复启动时复用已运行的 HushPlayer 窗口，不再创建多个播放进程。"
+            ]
         }
     ],
-    "package_url": "https://api.gitcode.com/api/v5/repos/gcw_iPVB8B5g/HushPlayer-updates/releases/v0.6.0-beta.12/attach_files/HushPlayer-0.6.0-beta.12-win-x64-update.zip/download",
-    "package_size": 158652370,
-    "package_sha256": "2b5d191360ffc864c4e052db52b191207be03f231777d740873df9e01e6b6696",
-    "package_filename": "HushPlayer-0.6.0-beta.12-win-x64-update.zip"
+    "package_url": "https://api.gitcode.com/api/v5/repos/gcw_iPVB8B5g/HushPlayer-updates/releases/v0.6.0-beta.13/attach_files/HushPlayer-0.6.0-beta.13-win-x64-update.zip/download",
+    "package_size": 158654436,
+    "package_sha256": "745aab1e49df0357671f3a1c627cc78043131f692babde660fc2dc425fc0e053",
+    "package_filename": "HushPlayer-0.6.0-beta.13-win-x64-update.zip"
 }
