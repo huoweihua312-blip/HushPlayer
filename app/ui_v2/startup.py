@@ -14,6 +14,7 @@ from PySide6.QtCore import QTimer
 from PySide6.QtWidgets import QApplication
 
 from app.core.app_paths import AppPaths
+from app.core.single_instance import SingleInstanceCoordinator
 from app.services.library_repository import LibraryRepository
 from app.services.production_playback_controller import ProductionPlaybackController
 from app.services.remote_track_store import RemoteTrackStore
@@ -243,27 +244,46 @@ def run_ui_v2_application(
         startup_started_at=startup_diagnostics.started_at,
         startup_diagnostics=startup_diagnostics,
     )
+    single_instance = SingleInstanceCoordinator(parent=context.app)
+    if not single_instance.is_primary:
+        startup_diagnostics.mark("single_instance.secondary")
+        single_instance.close()
+        return 0
+    startup_diagnostics.mark("single_instance.primary")
     try:
-        window = create_ui_v2_main_window(
-            data_mode=data_mode,
-            initialize_storage=initialize_storage,
-            startup_diagnostics=startup_diagnostics,
-        )
-    except Exception:
-        startup_diagnostics.mark("main_window.construct_failed")
-        startup_diagnostics.write(context.paths.log_dir)
-        raise
-    window.setWindowIcon(context.icon)
-    window.show()
-    startup_diagnostics.mark("main_window.show")
-    install_ui_v2_smoke_exit(context.app, window)
+        try:
+            window = create_ui_v2_main_window(
+                data_mode=data_mode,
+                initialize_storage=initialize_storage,
+                startup_diagnostics=startup_diagnostics,
+            )
+        except Exception:
+            startup_diagnostics.mark("main_window.construct_failed")
+            startup_diagnostics.write(context.paths.log_dir)
+            raise
 
-    def record_first_paint() -> None:
-        startup_diagnostics.mark("event_loop.first_paint")
-        startup_diagnostics.write(context.paths.log_dir)
+        def activate_main_window() -> None:
+            window.showNormal()
+            window.raise_()
+            window.activateWindow()
 
-    QTimer.singleShot(0, record_first_paint)
-    exit_code = context.app.exec()
-    startup_diagnostics.mark("event_loop.exit")
-    startup_diagnostics.write(context.paths.log_dir)
-    return exit_code
+        single_instance.activation_requested.connect(activate_main_window)
+        if single_instance.has_pending_activation:
+            QTimer.singleShot(0, activate_main_window)
+
+        window.setWindowIcon(context.icon)
+        window.show()
+        startup_diagnostics.mark("main_window.show")
+        install_ui_v2_smoke_exit(context.app, window)
+
+        def record_first_paint() -> None:
+            startup_diagnostics.mark("event_loop.first_paint")
+            startup_diagnostics.write(context.paths.log_dir)
+
+        QTimer.singleShot(0, record_first_paint)
+        exit_code = context.app.exec()
+        startup_diagnostics.mark("event_loop.exit")
+        startup_diagnostics.write(context.paths.log_dir)
+        return exit_code
+    finally:
+        single_instance.close()
