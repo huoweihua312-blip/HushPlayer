@@ -6,7 +6,19 @@ from bisect import bisect_right
 from dataclasses import dataclass
 from math import ceil
 
-from PySide6.QtCore import QElapsedTimer, QPoint, QRect, QRectF, QSize, QTimer, Qt, Signal
+from PySide6.QtCore import (
+    QAbstractAnimation,
+    QEasingCurve,
+    QElapsedTimer,
+    QPoint,
+    QRect,
+    QRectF,
+    QSize,
+    QTimer,
+    Qt,
+    QVariantAnimation,
+    Signal,
+)
 from PySide6.QtGui import QColor, QFont, QFontMetrics, QPainter, QPen
 from PySide6.QtWidgets import QSizePolicy, QToolButton, QWidget
 
@@ -97,6 +109,7 @@ class LyricsCanvasV2(QWidget):
     browsing_changed = Signal(bool)
     _POSITION_REANCHOR_TOLERANCE_MS = 750
     _POSITION_BACKWARD_REANCHOR_MS = 300
+    _LINE_TRANSITION_DURATION_MS = 220
 
     def __init__(self, theme: Theme, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -109,6 +122,14 @@ class LyricsCanvasV2(QWidget):
         self._playback_clock = QElapsedTimer()
         self._playback_clock.start()
         self._playback_active = False
+        self._reduce_motion = False
+        self._suppress_line_transition_once = True
+        self._line_transition_offset = 0.0
+        self._line_transition = QVariantAnimation(self)
+        self._line_transition.setDuration(self._LINE_TRANSITION_DURATION_MS)
+        self._line_transition.setEasingCurve(QEasingCurve.Type.OutCubic)
+        self._line_transition.valueChanged.connect(self._set_line_transition_offset)
+        self._line_transition.finished.connect(self._finish_line_transition)
         self._highlight_timer = QTimer(self)
         self._highlight_timer.setInterval(16)
         self._highlight_timer.timeout.connect(self._on_highlight_tick)
@@ -172,6 +193,10 @@ class LyricsCanvasV2(QWidget):
     @property
     def paints_row_background(self) -> bool:
         return False
+
+    @property
+    def line_transition_offset(self) -> float:
+        return self._line_transition_offset
 
     @property
     def effective_font_sizes(self) -> tuple[int, int, int, int]:
@@ -261,6 +286,7 @@ class LyricsCanvasV2(QWidget):
         self._mode = "immersive" if mode == "immersive" else "ordinary"
         if self._mode != "immersive":
             self._highlight_timer.stop()
+            self._stop_line_transition()
         self._refresh_ordinary_metrics()
         self.update()
 
@@ -269,13 +295,14 @@ class LyricsCanvasV2(QWidget):
         self._browse_anchor = -1
         self._browse_offset = 0.0
         self._browse_content_height = 0
+        self._suppress_line_transition_once = True
+        self._stop_line_transition()
         self.return_button.setVisible(False)
         self.update()
 
     def set_active_line(self, line: LyricLine | None) -> None:
-        previous_id = self._active_line.id if self._active_line is not None else ""
-        self._active_line = line
-        if line is None or line.id != previous_id:
+        line_changed = self._replace_active_line(line)
+        if line_changed:
             self._active_segment_index = -1
             self._active_segment_progress = 0.0
         if self._playback_active and line is not None and line.segments and self._mode == "immersive":
@@ -283,8 +310,7 @@ class LyricsCanvasV2(QWidget):
         self.update()
 
     def set_active_segment(self, line: LyricLine, index: int, progress: float) -> None:
-        line_changed = self._active_line is None or line.id != self._active_line.id
-        self._active_line = line
+        line_changed = self._replace_active_line(line)
         incoming_index = int(index)
         incoming_progress = max(0.0, min(1.0, float(progress)))
         incoming_position = None
@@ -323,13 +349,108 @@ class LyricsCanvasV2(QWidget):
 
         position = max(0, int(position_ms))
         predicted = self._interpolated_position_ms()
-        if (
+        discontinuous = (
             force
             or not self._playback_active
             or position < predicted - self._POSITION_BACKWARD_REANCHOR_MS
             or abs(position - predicted) > self._POSITION_REANCHOR_TOLERANCE_MS
-        ):
+        )
+        if discontinuous:
+            self._suppress_line_transition_once = True
+            self._stop_line_transition()
             self._set_playback_anchor(position)
+            QTimer.singleShot(0, self._clear_line_transition_suppression)
+
+    def set_reduce_motion(self, enabled: bool) -> None:
+        self._reduce_motion = bool(enabled)
+        if self._reduce_motion:
+            self._stop_line_transition()
+
+    def _replace_active_line(self, line: LyricLine | None) -> bool:
+        previous = self._active_line
+        previous_id = previous.id if previous is not None else ""
+        next_id = line.id if line is not None else ""
+        if next_id == previous_id:
+            self._active_line = line
+            return False
+        previous_index = self._index_for_line(previous)
+        next_index = self._index_for_line(line)
+        self._active_line = line
+        self._start_line_transition(previous_index, next_index)
+        return True
+
+    def _index_for_line(self, line: LyricLine | None) -> int:
+        if line is None or self._document is None:
+            return -1
+        return next(
+            (
+                index
+                for index, candidate in enumerate(self._document.lines)
+                if candidate.id == line.id
+            ),
+            -1,
+        )
+
+    def _start_line_transition(self, previous_index: int, next_index: int) -> None:
+        suppressed = self._suppress_line_transition_once
+        self._suppress_line_transition_once = False
+        if (
+            suppressed
+            or self._reduce_motion
+            or self._mode != "immersive"
+            or self.browsing
+            or previous_index < 0
+            or next_index < 0
+            or abs(next_index - previous_index) != 1
+            or self._document is None
+        ):
+            self._stop_line_transition()
+            return
+        sizes = self.effective_font_sizes
+        previous_line = self._document.lines[previous_index]
+        next_line = self._document.lines[next_index]
+        previous_height = self._line_height(
+            previous_line,
+            False,
+            1,
+            sizes,
+        )
+        next_height = self._line_height(
+            next_line,
+            True,
+            0,
+            sizes,
+        )
+        distance = max(
+            28.0,
+            min(float(self.height()) * 0.45, (previous_height + next_height) / 2.0),
+        )
+        direction = 1.0 if next_index > previous_index else -1.0
+        carried_offset = (
+            self._line_transition_offset
+            if self._line_transition.state() == QAbstractAnimation.State.Running
+            else 0.0
+        )
+        self._line_transition.stop()
+        self._line_transition.setStartValue(carried_offset + direction * distance)
+        self._line_transition.setEndValue(0.0)
+        self._line_transition.start()
+
+    def _set_line_transition_offset(self, value) -> None:
+        self._line_transition_offset = float(value or 0.0)
+        self.update()
+
+    def _finish_line_transition(self) -> None:
+        self._line_transition_offset = 0.0
+        self.update()
+
+    def _stop_line_transition(self) -> None:
+        if self._line_transition.state() != QAbstractAnimation.State.Stopped:
+            self._line_transition.stop()
+        self._line_transition_offset = 0.0
+
+    def _clear_line_transition_suppression(self) -> None:
+        self._suppress_line_transition_once = False
 
     def set_playback_active(self, active: bool) -> None:
         """Refresh the visual highlight only while the shared player is running."""
@@ -461,6 +582,8 @@ class LyricsCanvasV2(QWidget):
             return
         self._browse_anchor = -1
         self._browse_offset = 0.0
+        self._suppress_line_transition_once = True
+        self._stop_line_transition()
         self.return_button.setVisible(False)
         self.browsing_changed.emit(False)
         self.update()
@@ -486,6 +609,7 @@ class LyricsCanvasV2(QWidget):
         event.accept()
 
     def _begin_browse(self) -> None:
+        self._stop_line_transition()
         self._browse_anchor = self._active_index()
         self._browse_offset = self._offset_for_current_line()
         self.return_button.setVisible(True)
@@ -605,6 +729,7 @@ class LyricsCanvasV2(QWidget):
         super().mouseReleaseEvent(event)
 
     def resizeEvent(self, event) -> None:  # noqa: N802
+        self._stop_line_transition()
         super().resizeEvent(event)
         self.return_button.adjustSize()
         self.return_button.move(
@@ -669,6 +794,7 @@ class LyricsCanvasV2(QWidget):
             # of pinning the whole group to the top and making the current
             # line appear too low.
             y = target_y
+        y += round(self._line_transition_offset)
         x = max(20, (self.width() - text_width) // 2)
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.TextAntialiasing)

@@ -156,6 +156,7 @@ def main() -> int:
             assert json.loads(paths.metadata_cache_file.read_text(encoding="utf-8"))["fixture"] is True
             assert json.loads(paths.source_registry_file.read_text(encoding="utf-8"))["sources"][0]["id"] == "fixture_source"
             assert json.loads(paths.play_queue_file.read_text(encoding="utf-8")) == []
+            assert json.loads(paths.playback_session_file.read_text(encoding="utf-8")) == {}
             assert (paths.source_runtime_data_dir / "sources" / "active" / "fixture.js").is_file()
             assert (paths.user_sources_dir / "user.js").is_file()
             (paths.data_dir / "library.json").write_text("[]", encoding="utf-8")
@@ -164,6 +165,9 @@ def main() -> int:
             )
             paths.play_queue_file.write_text(
                 '[{"kind": "remote"}]', encoding="utf-8"
+            )
+            paths.playback_session_file.write_text(
+                '{"version": 1, "position_ms": 42}', encoding="utf-8"
             )
             paths.source_registry_file.write_text(
                 '{"version": 1, "sources": [{"id": "preserved"}]}',
@@ -177,6 +181,9 @@ def main() -> int:
             assert json.loads(paths.play_queue_file.read_text(encoding="utf-8")) == [
                 {"kind": "remote"}
             ]
+            assert json.loads(
+                paths.playback_session_file.read_text(encoding="utf-8")
+            )["position_ms"] == 42
             assert json.loads(paths.source_registry_file.read_text(encoding="utf-8"))["sources"][0]["id"] == "preserved"
             assert paths.data_dir.is_dir()
             assert (paths.cache_dir / "covers").is_dir()
@@ -207,6 +214,9 @@ def main() -> int:
                 clean_paths.metadata_cache_file.read_text(encoding="utf-8")
             ) == {}
             assert json.loads(clean_paths.play_queue_file.read_text(encoding="utf-8")) == []
+            assert json.loads(
+                clean_paths.playback_session_file.read_text(encoding="utf-8")
+            ) == {}
 
             frozen_bundle = root / "portable 中文" / "HushPlayer" / "_internal"
             frozen_bundle.mkdir(parents=True)

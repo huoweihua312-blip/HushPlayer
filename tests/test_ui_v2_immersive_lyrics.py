@@ -12,7 +12,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from PySide6.QtCore import QPoint, QRect, QSize, Qt
+from PySide6.QtCore import QAbstractAnimation, QPoint, QRect, QSize, Qt
 from PySide6.QtGui import QColor, QPalette
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication, QLabel, QSlider
@@ -407,6 +407,49 @@ class UiV2ImmersiveLyricsTests(unittest.TestCase):
         self.assertGreater(canvas._highlight_character_progress(line), 1.0)
         canvas.set_playback_active(False)
         self.assertFalse(canvas._highlight_timer.isActive())
+
+    def test_adjacent_lines_slide_but_seeks_and_reduced_motion_snap(self) -> None:
+        canvas = LyricsCanvasV2(self.window.theme)
+        lines = (
+            LyricLine("motion-1", 0, 1_000, "第一句"),
+            LyricLine("motion-2", 1_000, 2_000, "第二句"),
+            LyricLine("motion-3", 2_000, 3_000, "第三句"),
+        )
+        canvas.set_mode("immersive")
+        canvas.resize(720, 520)
+        canvas.set_document(
+            LyricsDocument("motion", "Motion", "Artist", "mock", lines)
+        )
+        canvas.show()
+        canvas.set_active_line(lines[0])
+
+        canvas.set_active_line(lines[1])
+        QTest.qWait(20)
+        self.assertEqual(
+            canvas._line_transition.state(),
+            QAbstractAnimation.State.Running,
+        )
+        self.assertGreater(canvas.line_transition_offset, 0.0)
+        QTest.qWait(canvas._LINE_TRANSITION_DURATION_MS + 40)
+        self.assertEqual(canvas.line_transition_offset, 0.0)
+
+        canvas.set_playback_position(2_000, force=True)
+        canvas.set_active_line(lines[2])
+        self.assertEqual(
+            canvas._line_transition.state(),
+            QAbstractAnimation.State.Stopped,
+        )
+        self.assertEqual(canvas.line_transition_offset, 0.0)
+
+        canvas.set_reduce_motion(True)
+        canvas.set_active_line(lines[1])
+        self.assertEqual(
+            canvas._line_transition.state(),
+            QAbstractAnimation.State.Stopped,
+        )
+        self.assertEqual(canvas.line_transition_offset, 0.0)
+        canvas.close()
+        canvas.deleteLater()
 
     def test_external_position_updates_do_not_reset_smooth_highlight_clock(self) -> None:
         immersive = self._immersive_page()

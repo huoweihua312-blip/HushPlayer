@@ -209,6 +209,49 @@ class PlaybackAdapter(QObject):
             return
         self._controller.play_item(track.stable_identity)
 
+    def prepare_track(self, track_id: str, *, position_ms: int = 0) -> bool:
+        """Restore one selected track and position without starting playback."""
+
+        track = next(
+            (candidate for candidate in self.queue_tracks if candidate.id == track_id),
+            None,
+        )
+        if track is None:
+            return False
+        if self._controller is not None:
+            return self._controller.prepare_item(
+                track.stable_identity,
+                position_ms=max(0, int(position_ms)),
+            )
+        duration = track.duration_ms
+        position = max(0, int(position_ms))
+        if duration is not None:
+            position = min(position, duration)
+        self._timer.stop()
+        self._state = replace(
+            self._state,
+            current_track=track,
+            current_index=next(
+                index for index, candidate in enumerate(self._queue) if candidate.id == track.id
+            ),
+            is_playing=False,
+            position_ms=position,
+            duration_ms=duration,
+            is_favorite=track.is_favorite,
+            status="paused",
+            status_detail="已恢复上次播放位置",
+        )
+        self.track_changed.emit(track)
+        self.duration_changed.emit(duration)
+        self.position_changed.emit(position)
+        self.favorite_changed.emit(track.is_favorite)
+        self.playing_changed.emit(False)
+        self.playback_status_changed.emit(
+            self._state.status,
+            self._state.status_detail,
+        )
+        return True
+
     def play(self) -> None:
         if self._controller is not None:
             self._controller.play()

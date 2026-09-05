@@ -158,6 +158,10 @@ class AppPaths:
         return self.data_dir / "play_queue.json"
 
     @property
+    def playback_session_file(self) -> Path:
+        return self.data_dir / "playback_session.json"
+
+    @property
     def bundled_source_runtime_dir(self) -> Path:
         return self.resource_path("source_runtime")
 
@@ -286,6 +290,7 @@ class AppPaths:
         self._initialize_source_registry()
         self._initialize_json_file(self.metadata_cache_file, {})
         self._initialize_json_file(self.play_queue_file, [])
+        self._initialize_json_file(self.playback_session_file, {})
 
     def _migrate_legacy_data_files(self) -> None:
         if self.frozen:

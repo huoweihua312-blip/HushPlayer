@@ -19,6 +19,8 @@ from app.ui_v2.adapters.legacy_settings_bridge import SettingsBridgeError
 from app.ui_v2.adapters.lyrics_adapter import LyricsAdapter
 from app.ui_v2.adapters.playback_adapter import PlaybackAdapter
 from app.ui_v2.mock.track_factory import create_mock_tracks
+from app.ui_v2.models.lyric_line import LyricLine
+from app.ui_v2.models.lyrics_document import LyricsDocument
 from app.ui_v2.shell.desktop_lyrics_window import (
     DesktopLyricsWindow,
     clamp_desktop_lyrics_position,
@@ -142,6 +144,28 @@ class DesktopLyricsWindowTests(unittest.TestCase):
             self.window._secondary_label.text(),
             self.lyrics.active_line.translation,
         )
+
+    def test_document_width_stays_stable_across_ordinary_line_changes(self) -> None:
+        lines = (
+            LyricLine("line-1", 0, 1_000, "短句"),
+            LyricLine("line-2", 1_000, 2_000, "这一句明显更长但不会在切句时再改窗口"),
+            LyricLine("line-3", 2_000, 3_000, "收尾"),
+        )
+        self.lyrics._set_document(
+            LyricsDocument("stable", "Stable", "Artist", "mock", lines)
+        )
+        self.window.show_for_current_screen()
+        self.app.processEvents()
+        self.window._render()
+        self.app.processEvents()
+        stable_size = QSize(self.window.size())
+        stable_position = QPoint(self.window.pos())
+
+        for line in lines[1:]:
+            self.lyrics.set_position(line.start_ms, force=True)
+            self.app.processEvents()
+            self.assertEqual(self.window.size(), stable_size)
+            self.assertEqual(self.window.pos(), stable_position)
 
     def test_long_lyric_expands_width_and_stays_at_two_rows(self) -> None:
         self.window.show()

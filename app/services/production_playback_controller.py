@@ -77,6 +77,8 @@ class ProductionPlaybackController(QObject):
         self._online_recovery_attempted = False
         self._online_cache_key = ""
         self._switching_item = False
+        self._pending_prepared_position_ms: int | None = None
+        self._prepared_without_playback = False
         self._deferred_online_cache: tuple[int, str, MediaItem, dict] | None = None
         self._online_cache_timer = QTimer(self)
         self._online_cache_timer.setSingleShot(True)
@@ -235,7 +237,12 @@ class ProductionPlaybackController(QObject):
             self._cancel_online_resolution()
         self.queue_changed.emit(tuple(self.queue.items))
 
-    def play_item(self, value: PlaybackQueueItem | str) -> bool:
+    def play_item(
+        self,
+        value: PlaybackQueueItem | str,
+        *,
+        start_position_ms: int = 0,
+    ) -> bool:
         identity = value.stable_identity if isinstance(value, PlaybackQueueItem) else str(value or "")
         index = self.queue.index_for_identity(identity)
         if index < 0:
@@ -263,15 +270,18 @@ class ProductionPlaybackController(QObject):
         self._online_recovery_generation = self._generation
         self._online_recovery_attempted = False
         self._online_cache_key = ""
+        target_position = self._bounded_position(start_position_ms)
+        self._pending_prepared_position_ms = target_position if target_position > 0 else None
+        self._prepared_without_playback = False
         try:
             self.media_player.stop()
             if item.kind == "local":
                 self.media_player.setSource(QUrl.fromLocalFile(str(path)))
-                self.media_player.setPosition(0)
+                self.media_player.setPosition(target_position)
                 self._set_status("loading", "正在加载本地歌曲…")
                 self.media_player.play()
                 self._switching_item = False
-                self._emit_track_context(item)
+                self._emit_track_context(item, position_ms=target_position)
                 self._set_playing(True)
                 return True
             else:
@@ -291,16 +301,23 @@ class ProductionPlaybackController(QObject):
                         cache_key=str(cache_record.get("cache_key") or ""),
                     ):
                         self._switching_item = False
-                        self._emit_track_context(item)
+                        self._emit_track_context(
+                            item,
+                            position_ms=target_position,
+                        )
                         return True
         except (RuntimeError, OSError) as error:
             self._switching_item = False
+            self._pending_prepared_position_ms = None
+            self._prepared_without_playback = False
+            # The requested resume point was never applied, so do not expose
+            # it as the player's actual position after a load failure.
             self._emit_track_context(item)
             self._set_playing(False)
             self._emit_error(str(error) or "The local audio file could not be played.")
             return False
 
-        self._emit_track_context(item)
+        self._emit_track_context(item, position_ms=target_position)
         self._set_status("resolving", "正在解析在线播放地址…")
         resolver = self._online_resolver
         if resolver is None:
@@ -333,12 +350,76 @@ class ProductionPlaybackController(QObject):
         self._set_playing(False)
         return True
 
-    def _emit_track_context(self, item: PlaybackQueueItem) -> None:
+    def prepare_item(
+        self,
+        value: PlaybackQueueItem | str,
+        *,
+        position_ms: int = 0,
+    ) -> bool:
+        """Select and load one queue item without starting audio playback."""
+
+        identity = value.stable_identity if isinstance(value, PlaybackQueueItem) else str(value or "")
+        index = self.queue.index_for_identity(identity)
+        if index < 0:
+            return False
+        item = self.queue.items[index]
+        if item.kind == "local":
+            path = Path(item.local_path)
+            if not path.is_file():
+                return False
+
+        self._cancel_online_resolution()
+        self._switching_item = True
+        self.queue.set_current_identity(item.stable_identity)
+        self._current_item = item
+        self._duration_ms = (
+            max(0, int(item.media_item.duration * 1000))
+            if item.media_item.duration > 0
+            else None
+        )
+        self._generation += 1
+        self._handled_end_generation = -1
+        self._resolved_online_identity = ""
+        self._online_recovery_generation = self._generation
+        self._online_recovery_attempted = False
+        self._online_cache_key = ""
+        target_position = self._bounded_position(position_ms)
+        self._pending_prepared_position_ms = target_position if target_position > 0 else None
+        self._prepared_without_playback = True
+        try:
+            self.media_player.stop()
+            if item.kind == "local":
+                self.media_player.setSource(QUrl.fromLocalFile(str(path)))
+                self.media_player.setPosition(target_position)
+            else:
+                # Online addresses may expire between runs. Keep only the
+                # selected context and resolve a fresh address after Play.
+                self.media_player.setSource(QUrl())
+        except (RuntimeError, OSError):
+            self._switching_item = False
+            self._pending_prepared_position_ms = None
+            self._prepared_without_playback = False
+            self._current_item = None
+            self._duration_ms = None
+            self._set_status("idle", "")
+            return False
+        self._switching_item = False
+        self._emit_track_context(item, position_ms=target_position)
+        self._set_playing(False)
+        self._set_status("paused", "已恢复上次播放位置")
+        return True
+
+    def _emit_track_context(
+        self,
+        item: PlaybackQueueItem,
+        *,
+        position_ms: int = 0,
+    ) -> None:
         """Publish the new track after the media transition has been started."""
 
         self.track_changed.emit(item)
         self.duration_changed.emit(self._duration_ms)
-        self.position_changed.emit(0)
+        self.position_changed.emit(max(0, int(position_ms)))
         self.queue_changed.emit(tuple(self.queue.items))
 
     def play(self) -> bool:
@@ -354,10 +435,16 @@ class ProductionPlaybackController(QObject):
                 self._set_status("playing", "正在播放")
                 self._set_playing(True)
                 return True
-            return self.play_item(self._current_item)
+            self._prepared_without_playback = False
+            return self.play_item(
+                self._current_item,
+                start_position_ms=self._pending_prepared_position_ms or 0,
+            )
         if not Path(self._current_item.local_path).is_file():
             self._emit_error("The local audio file is unavailable.")
             return False
+        self._apply_pending_prepared_position()
+        self._prepared_without_playback = False
         self.media_player.play()
         self._set_status("playing", "正在播放")
         self._set_playing(True)
@@ -392,6 +479,8 @@ class ProductionPlaybackController(QObject):
         if self._playback_status == "resolving":
             return False
         target = max(0, min(int(position_ms), self._duration_ms))
+        if self._pending_prepared_position_ms is not None:
+            self._pending_prepared_position_ms = target if target > 0 else None
         self.media_player.setPosition(target)
         self.position_changed.emit(target)
         return True
@@ -442,6 +531,8 @@ class ProductionPlaybackController(QObject):
         self._online_recovery_generation = self._generation
         self._online_recovery_attempted = False
         self._online_cache_key = ""
+        self._pending_prepared_position_ms = None
+        self._prepared_without_playback = False
         self.track_changed.emit(None)
         self.duration_changed.emit(None)
         self.position_changed.emit(0)
@@ -456,6 +547,8 @@ class ProductionPlaybackController(QObject):
         self._cancel_online_resolution()
         self._online_cache_timer.stop()
         self._deferred_online_cache = None
+        self._pending_prepared_position_ms = None
+        self._prepared_without_playback = False
         self.default_audio_output_sync_timer.stop()
         self.media_player.stop()
         self.media_player.setSource(QUrl())
@@ -537,7 +630,7 @@ class ProductionPlaybackController(QObject):
         try:
             self.media_player.stop()
             self.media_player.setSource(source)
-            self.media_player.setPosition(0)
+            self.media_player.setPosition(self._pending_prepared_position_ms or 0)
             self._resolved_online_identity = item.stable_identity
             self._online_cache_key = str(cache_key or "")
             self._set_status("buffering", detail)
@@ -781,12 +874,23 @@ class ProductionPlaybackController(QObject):
 
     @Slot(int)
     def _on_position_changed(self, position: int) -> None:
-        self.position_changed.emit(max(0, int(position)))
+        normalized = max(0, int(position))
+        pending = self._pending_prepared_position_ms
+        if pending is not None:
+            if normalized == 0 and pending > 0:
+                return
+            if (
+                not self._prepared_without_playback
+                and (abs(normalized - pending) <= 250 or normalized >= pending)
+            ):
+                self._pending_prepared_position_ms = None
+        self.position_changed.emit(normalized)
 
     @Slot(int)
     def _on_duration_changed(self, duration: int) -> None:
         self._duration_ms = int(duration) if duration > 0 else None
         self.duration_changed.emit(self._duration_ms)
+        self._apply_pending_prepared_position()
 
     @Slot(object)
     def _on_playback_state_changed(self, state) -> None:
@@ -799,6 +903,11 @@ class ProductionPlaybackController(QObject):
     @Slot(object)
     def _on_media_status_changed(self, status) -> None:
         self.media_status_changed.emit(status)
+        if status in {
+            QMediaPlayer.MediaStatus.LoadedMedia,
+            QMediaPlayer.MediaStatus.BufferedMedia,
+        }:
+            self._apply_pending_prepared_position()
         if (
             self._switching_item
             and self._current_item is not None
@@ -835,6 +944,26 @@ class ProductionPlaybackController(QObject):
             and self._current_item is not None
         ):
             self._handle_end_of_media()
+
+    def _bounded_position(self, value: int) -> int:
+        try:
+            position = max(0, int(value))
+        except (TypeError, ValueError):
+            return 0
+        if self._duration_ms is not None:
+            return min(position, self._duration_ms)
+        return position
+
+    def _apply_pending_prepared_position(self) -> None:
+        pending = self._pending_prepared_position_ms
+        if pending is None or self._current_item is None:
+            return
+        target = self._bounded_position(pending)
+        self._pending_prepared_position_ms = target if target > 0 else None
+        try:
+            self.media_player.setPosition(target)
+        except RuntimeError:
+            return
 
     @Slot(object, str)
     def _on_player_error(self, _error, message: str) -> None:

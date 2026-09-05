@@ -60,6 +60,7 @@ from app.services.cache_maintenance import clear_missing_cache_files
 from app.services.library_repository import LibraryRepository
 from app.services.music_folder_scan import MusicFolderImportService
 from app.services.online_discovery_runtime import OnlineDiscoveryRuntime
+from app.services.playback_session_store import PlaybackSession, PlaybackSessionStore
 from app.services.remote_track_store import RemoteTrackStore
 from app.startup_diagnostics import StartupDiagnostics
 from app.ui_v2.adapters.library_adapter import LibraryAdapter
@@ -123,6 +124,20 @@ _DESKTOP_LYRICS_CONTINUOUS_PREVIEW_KEYS = frozenset(
     {"floating_lyrics_font_size", "floating_lyrics_width"}
 )
 _REAL_LIBRARY_IMMEDIATE_PROJECTION_LIMIT = 12
+_PLAYBACK_SESSION_SAVE_INTERVAL_MS = 5_000
+_RESTORABLE_SESSION_ROUTES = frozenset(
+    {
+        "library",
+        "browse",
+        "liked",
+        "recent",
+        "artists",
+        "albums",
+        "online_search",
+        "online_sources",
+        "lyrics",
+    }
+)
 
 
 class ShellPresentationMode(str, Enum):
@@ -341,6 +356,33 @@ class MainWindow(QMainWindow):
             parent=self,
         )
         self._settings_snapshot = self.settings_bridge.read_snapshot()
+        self._playback_session_store = (
+            PlaybackSessionStore(resolved_settings_path.parent / "playback_session.json")
+            if self.data_mode == "real"
+            else None
+        )
+        restore_last_playback = bool(
+            self.settings_bridge.value(
+                self._settings_snapshot,
+                "restore_last_playback",
+            )
+        )
+        self._pending_playback_session = (
+            self._playback_session_store.load()
+            if restore_last_playback and self._playback_session_store is not None
+            else None
+        )
+        self._playback_session_restore_attempted = False
+        self._playback_session_ready = False
+        self._restoring_playback_session = False
+        self._playback_session_save_timer = QTimer(self)
+        self._playback_session_save_timer.setSingleShot(True)
+        self._playback_session_save_timer.setInterval(
+            _PLAYBACK_SESSION_SAVE_INTERVAL_MS
+        )
+        self._playback_session_save_timer.timeout.connect(
+            self._save_playback_session
+        )
         if self._startup_diagnostics is not None:
             self._startup_diagnostics.mark("main_window.settings_snapshot")
         application = QApplication.instance()
@@ -526,6 +568,9 @@ class MainWindow(QMainWindow):
             settings_bridge=self.settings_bridge,
             settings_apply_callback=self._apply_settings_snapshot,
             pending_import_service=self.music_import_service,
+        )
+        self.router.set_reduce_motion_preview(
+            bool(self._settings_snapshot.get("reduce_motion", False))
         )
         self.player_bar = PlayerBar(self.playback_adapter, self._theme, self)
         self.player_bar.set_read_only(
@@ -1033,6 +1078,8 @@ class MainWindow(QMainWindow):
             self._desktop_lyrics_settings_preview_timer.stop()
             self._desktop_lyrics_settings_save_timer.stop()
             self._save_pending_desktop_lyrics_settings()
+        self._playback_session_save_timer.stop()
+        self._save_playback_session(force=True)
         self._close_finalized = True
         QApplication.instance().removeEventFilter(self)
         if self.desktop_lyrics_settings_popover is not None:
@@ -1293,7 +1340,19 @@ class MainWindow(QMainWindow):
         )
         self.navigation_adapter.route_changed.connect(self._sync_immersive_shell)
         self.navigation_adapter.route_changed.connect(self._sync_search_context)
+        self.navigation_adapter.route_changed.connect(
+            self._schedule_playback_session_save
+        )
         self.playback_adapter.track_changed.connect(self._on_playback_track_changed)
+        self.playback_adapter.track_changed.connect(
+            self._schedule_playback_session_save
+        )
+        self.playback_adapter.position_changed.connect(
+            self._schedule_playback_session_save
+        )
+        self.playback_adapter.queue_changed.connect(
+            self._schedule_playback_session_save
+        )
         self.playback_adapter.playing_changed.connect(self.router.set_playback_state)
         self.playback_adapter.playback_status_changed.connect(
             self.lyrics_adapter.set_playback_status
@@ -1651,6 +1710,9 @@ class MainWindow(QMainWindow):
         page = self.router._pages.get("immersive_lyrics")
         if page is not None and hasattr(page, "apply_options"):
             page.apply_options(self.immersive_lyrics_options)
+        self.router.set_reduce_motion_preview(
+            bool(values.get("reduce_motion", False))
+        )
 
     def set_immersive_fullscreen(self, enabled: bool) -> None:
         enabled = bool(enabled)
@@ -2086,7 +2148,19 @@ class MainWindow(QMainWindow):
             return
         self._real_library_projection_generation += 1
         generation = self._real_library_projection_generation
-        self.playback_adapter.set_queue(self.library_collection.tracks())
+        if not self._playback_session_restore_attempted:
+            self._playback_session_restore_attempted = True
+            self._restoring_playback_session = True
+            try:
+                restored = self._restore_playback_session()
+            finally:
+                self._restoring_playback_session = False
+            if not restored:
+                self.playback_adapter.set_queue(self.library_collection.tracks())
+            self._pending_playback_session = None
+            self._playback_session_ready = True
+        else:
+            self.playback_adapter.set_queue(self.library_collection.tracks())
         self.library_page.set_playback_enabled(
             self.playback_adapter.has_real_backend
         )
@@ -2108,6 +2182,90 @@ class MainWindow(QMainWindow):
                 generation, next_phase
             ),
         )
+
+    def _restore_playback_session(self) -> bool:
+        session = self._pending_playback_session
+        if session is None or not session.current_identity:
+            return False
+        all_tracks = self.library_collection.tracks()
+        by_identity = {
+            track.stable_identity: track
+            for track in all_tracks
+            if track.stable_identity
+        }
+        current = by_identity.get(session.current_identity)
+        if current is None:
+            return False
+        restored_queue = tuple(
+            by_identity[identity]
+            for identity in session.queue_identities
+            if identity in by_identity
+        )
+        if not restored_queue:
+            restored_queue = all_tracks
+        if not any(track.stable_identity == current.stable_identity for track in restored_queue):
+            restored_queue = (current, *restored_queue)
+        self.playback_adapter.set_queue(restored_queue)
+        if not self.playback_adapter.prepare_track(
+            current.id,
+            position_ms=session.position_ms,
+        ):
+            return False
+        route = self._restorable_session_route(session.route)
+        self.navigation_adapter.set_route(route, record_history=False)
+        return True
+
+    def _restorable_session_route(self, route: str) -> str:
+        normalized = str(route or "browse")
+        if normalized.startswith("immersive"):
+            return "lyrics"
+        if normalized.startswith("playlist:"):
+            playlist_id = normalized.removeprefix("playlist:")
+            return (
+                normalized
+                if playlist_id and self.playlist_adapter.playlist_for_id(playlist_id) is not None
+                else "library"
+            )
+        if normalized.startswith("artist_detail:"):
+            return "artists"
+        if normalized.startswith("album_detail:"):
+            return "albums"
+        return normalized if normalized in _RESTORABLE_SESSION_ROUTES else "browse"
+
+    def _schedule_playback_session_save(self, *_args) -> None:
+        if (
+            self._playback_session_store is None
+            or not self._playback_session_ready
+            or self._restoring_playback_session
+            or self._close_finalized
+            or self.playback_adapter.state.current_track is None
+        ):
+            return
+        if not self._playback_session_save_timer.isActive():
+            self._playback_session_save_timer.start()
+
+    def _save_playback_session(self, *, force: bool = False) -> None:
+        if (
+            self._playback_session_store is None
+            or not self._playback_session_ready
+            or self._restoring_playback_session
+        ):
+            return
+        current = self.playback_adapter.state.current_track
+        if current is None:
+            return
+        if force:
+            self._playback_session_save_timer.stop()
+        session = PlaybackSession.create(
+            current_identity=current.stable_identity,
+            queue_identities=(
+                track.stable_identity
+                for track in self.playback_adapter.queue_tracks
+            ),
+            position_ms=self.playback_adapter.state.position_ms,
+            route=self.navigation_adapter.route,
+        )
+        self._playback_session_store.save(session)
 
     def _continue_real_library_projection(self, generation: int, phase: int) -> None:
         """Run post-load UI projection in small event-loop batches."""

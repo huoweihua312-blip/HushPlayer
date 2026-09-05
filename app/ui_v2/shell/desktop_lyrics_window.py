@@ -105,6 +105,8 @@ class DesktopLyricsWindow(QWidget):
         self._lock_button_closing = False
         self._rendered_main: str | None = None
         self._rendered_secondary: str | None = None
+        self._stable_document_text_width: int | None = None
+        self._stable_geometry_reset_pending = True
         self._settings = {
             "floating_lyrics_color": "white",
             "floating_lyrics_opacity": 100,
@@ -148,10 +150,10 @@ class DesktopLyricsWindow(QWidget):
         self._geometry_flush_timer.timeout.connect(self._flush_deferred_geometry)
 
         playback_adapter.track_changed.connect(self._schedule_render)
-        lyrics_adapter.document_changed.connect(self._schedule_render)
+        lyrics_adapter.document_changed.connect(self._invalidate_stable_geometry)
         lyrics_adapter.state_changed.connect(self._schedule_render)
         lyrics_adapter.active_line_changed.connect(self._schedule_render)
-        lyrics_adapter.display_options_changed.connect(self._schedule_render)
+        lyrics_adapter.display_options_changed.connect(self._invalidate_stable_geometry)
         self.apply_settings(self._settings)
 
     def _build_ui(self) -> None:
@@ -210,6 +212,11 @@ class DesktopLyricsWindow(QWidget):
             self._settings.get("floating_lyrics_font_family"),
             self._settings.get("floating_lyrics_font_size"),
         )
+        previous_measurement = (
+            self._settings.get("floating_lyrics_font_family"),
+            self._settings.get("floating_lyrics_font_size"),
+            self._settings.get("floating_lyrics_width"),
+        )
         previous_saved_position = (self._saved_x, self._saved_y)
         visible_center = QPoint(self.frameGeometry().center()) if self.isVisible() else None
         self._settings.update(dict(values or {}))
@@ -240,6 +247,14 @@ class DesktopLyricsWindow(QWidget):
         self._settings["floating_lyrics_passthrough"] = bool(
             self._settings.get("floating_lyrics_passthrough", True)
         )
+        measurement_changed = previous_measurement != (
+            self._settings["floating_lyrics_font_family"],
+            self._settings["floating_lyrics_font_size"],
+            self._settings["floating_lyrics_width"],
+        )
+        if measurement_changed:
+            self._stable_document_text_width = None
+            self._stable_geometry_reset_pending = True
         self._saved_x = int(self._settings["floating_lyrics_x"])
         self._saved_y = int(self._settings["floating_lyrics_y"])
         # The persisted height remains the user's baseline; the larger value
@@ -371,6 +386,7 @@ class DesktopLyricsWindow(QWidget):
         width_safety = max(16, self._GLYPH_SAFETY_PADDING * 2)
         main_text_width = main_metrics.horizontalAdvance(self._main_label.text())
         secondary_text_width = secondary_metrics.horizontalAdvance(self._secondary_label.text())
+        stable_text_width = self._stable_text_width(main_metrics, secondary_metrics)
         content_width = max(
             main_text_width + margins.left() + margins.right() + width_safety,
             secondary_text_width
@@ -378,6 +394,7 @@ class DesktopLyricsWindow(QWidget):
             + margins.right()
             + secondary_margins.left()
             + width_safety,
+            stable_text_width + margins.left() + margins.right() + width_safety,
             1,
         )
         baseline_width = int(self._settings.get("floating_lyrics_width", 980))
@@ -394,6 +411,9 @@ class DesktopLyricsWindow(QWidget):
         if dragging:
             if self.width() < required_width or self.height() < required:
                 self._geometry_update_pending = True
+            if reset_to_settings_size:
+                self._deferred_settings_resize = True
+                self._geometry_update_pending = True
             return
 
         self.setMinimumHeight(max(0, int(required)))
@@ -409,11 +429,46 @@ class DesktopLyricsWindow(QWidget):
             # use reset_to_settings_size=True after their preview is released.
             desired_width = max(self.width(), required_width)
             desired_height = max(self.height(), int(required))
-        if self.size() != QSize(int(desired_width), int(desired_height)):
+        resized = self.size() != QSize(int(desired_width), int(desired_height))
+        if resized:
             self.resize(int(desired_width), int(desired_height))
             self._sync_surface_geometry()
-        if visible_center is not None:
+        if resized and visible_center is not None:
             self._restore_window_center(visible_center)
+
+    def _stable_text_width(
+        self,
+        main_metrics: QFontMetrics,
+        secondary_metrics: QFontMetrics,
+    ) -> int:
+        """Measure a lyric document once so ordinary line changes never resize."""
+
+        if self._stable_document_text_width is not None:
+            return self._stable_document_text_width
+        document = self._lyrics_adapter.document
+        lines = tuple(document.lines) if document is not None else ()
+        options = self._lyrics_adapter.display_options
+        translation_visible = bool(options.get("translation"))
+        secondary_indent = self._secondary_layout.contentsMargins().left()
+        widest = 0
+        for index, line in enumerate(lines):
+            widest = max(
+                widest,
+                main_metrics.horizontalAdvance(str(line.text or "").strip()),
+            )
+            secondary_text = ""
+            if translation_visible and str(line.translation or "").strip():
+                secondary_text = str(line.translation).strip()
+            elif index + 1 < len(lines):
+                secondary_text = str(lines[index + 1].text or "").strip()
+            if secondary_text:
+                widest = max(
+                    widest,
+                    secondary_metrics.horizontalAdvance(secondary_text)
+                    + secondary_indent,
+                )
+        self._stable_document_text_width = max(0, int(widest))
+        return self._stable_document_text_width
 
     @property
     def is_enabled(self) -> bool:
@@ -453,6 +508,11 @@ class DesktopLyricsWindow(QWidget):
         if not self._render_timer.isActive():
             self._render_timer.start()
 
+    def _invalidate_stable_geometry(self, *_args) -> None:
+        self._stable_document_text_width = None
+        self._stable_geometry_reset_pending = True
+        self._schedule_render()
+
     def _render(self, *_args) -> None:
         line = self._lyrics_adapter.active_line
         main_text = ""
@@ -473,7 +533,11 @@ class DesktopLyricsWindow(QWidget):
             self._rendered_secondary = secondary_text
             self._secondary_label.setText(secondary_text)
             self._secondary_label.setVisible(bool(secondary_text))
-        self._apply_content_height_floor()
+        reset_geometry = self._stable_geometry_reset_pending
+        self._stable_geometry_reset_pending = False
+        self._apply_content_height_floor(
+            reset_to_settings_size=reset_geometry
+        )
         self._has_renderable_lyric = bool(main_text)
         self._sync_render_visibility()
 

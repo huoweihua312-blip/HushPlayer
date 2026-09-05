@@ -612,6 +612,7 @@ class ImmersiveLyricsPage(QWidget):
 
     def set_reduce_motion(self, enabled: bool) -> None:
         self._reduce_motion = bool(enabled)
+        self.canvas.set_reduce_motion(self._reduce_motion)
         self.settings_panel.set_reduce_motion(self._reduce_motion)
 
     def enter_fullscreen(self) -> None:

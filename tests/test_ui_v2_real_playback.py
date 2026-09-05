@@ -23,6 +23,7 @@ from PySide6.QtWidgets import QApplication
 from app.core.app_paths import AppPaths
 from app.services.library_repository import LibraryRepository
 from app.services.production_playback_controller import ProductionPlaybackController
+from app.services.playback_session_store import PlaybackSession, PlaybackSessionStore
 from app.services.remote_track_store import RemoteTrackStore
 from app.ui_v2.adapters.playback_adapter import PlaybackAdapter
 from app.ui_v2.adapters.lyrics_adapter import LyricsAdapter
@@ -211,6 +212,25 @@ class UiV2RealPlaybackTests(unittest.TestCase):
         self.assertEqual(self.adapter.state.current_track, self.second)
         self.assertEqual(Path(self.player.source().toLocalFile()), self.second_path)
 
+    def test_prepare_track_restores_paused_position_without_playing(self) -> None:
+        self.adapter.set_queue((self.first, self.second))
+
+        self.assertTrue(self.adapter.prepare_track("first", position_ms=420))
+
+        self.assertEqual(self.adapter.state.current_track, self.first)
+        self.assertEqual(self.adapter.state.position_ms, 420)
+        self.assertFalse(self.adapter.state.is_playing)
+        self.assertEqual(self.adapter.state.status, "paused")
+        self.assertEqual(
+            self.player._state,
+            QMediaPlayer.PlaybackState.StoppedState,
+        )
+        self.assertEqual(Path(self.player.source().toLocalFile()), self.first_path)
+
+        self.adapter.play()
+        self.assertTrue(self.adapter.state.is_playing)
+        self.assertEqual(self.player.position(), 420)
+
     def test_display_queue_tracks_follow_context_without_reordering_membership(self) -> None:
         self.adapter.set_queue((self.first, self.second))
         self.adapter.play_track("first")
@@ -378,7 +398,7 @@ class UiV2RealPlaybackTests(unittest.TestCase):
             deadline = time.monotonic() + 3.0
             while (
                 window.real_library_adapter is not None
-                and window.real_library_adapter.state == "loading"
+                and window.real_library_adapter.state not in {"loaded", "empty", "error"}
                 and time.monotonic() < deadline
             ):
                 self.app.processEvents()
@@ -394,6 +414,102 @@ class UiV2RealPlaybackTests(unittest.TestCase):
             self.app.processEvents()
             self.assertIs(window.immersive_shell.playback_adapter, self.adapter)
             self.assertIs(self.adapter.controller, self.controller)
+        finally:
+            window.close()
+            self.app.processEvents()
+
+    def test_real_main_window_restores_session_paused_after_library_load(self) -> None:
+        root = Path(self.temporary_directory.name)
+        library_file = root / "library.json"
+        playlists_file = root / "playlists.json"
+        stats_file = root / "stats.json"
+        remote_file = root / "remote_tracks.json"
+        settings_file = root / "settings.json"
+        library_file.write_text(
+            json.dumps(
+                [
+                    {
+                        "path": str(self.first_path),
+                        "title": "first",
+                        "artist": "Fixture Artist",
+                        "album": "Fixture Album",
+                        "duration": 1,
+                        "added_at": 1,
+                    },
+                    {
+                        "path": str(self.second_path),
+                        "title": "second",
+                        "artist": "Fixture Artist",
+                        "album": "Fixture Album",
+                        "duration": 1,
+                        "added_at": 2,
+                    },
+                ]
+            ),
+            encoding="utf-8",
+        )
+        playlists_file.write_text(json.dumps({"liked": {"members": []}}), encoding="utf-8")
+        stats_file.write_text("{}", encoding="utf-8")
+        remote_file.write_text(json.dumps({"version": 1, "tracks": {}}), encoding="utf-8")
+        settings_file.write_text(
+            json.dumps(
+                {
+                    "appearance_mode": "dark",
+                    "volume": 65,
+                    "restore_last_playback": True,
+                }
+            ),
+            encoding="utf-8",
+        )
+        first_identity = f"local:{str(self.first_path).casefold()}"
+        second_identity = f"local:{str(self.second_path).casefold()}"
+        PlaybackSessionStore(root / "playback_session.json").save(
+            PlaybackSession.create(
+                current_identity=first_identity,
+                queue_identities=(second_identity, first_identity),
+                position_ms=420,
+                route="immersive_lyrics",
+            )
+        )
+        services = UiV2RuntimeServices(
+            paths=AppPaths.resolve(),
+            settings_path=settings_file,
+            repository=LibraryRepository(library_file, playlists_file, stats_file),
+            remote_tracks=RemoteTrackStore(remote_file),
+            playback_adapter=self.adapter,
+            lyrics_adapter=LyricsAdapter(),
+        )
+        window = create_ui_v2_main_window(
+            data_mode="real",
+            services=services,
+            initialize_storage=False,
+        )
+        try:
+            deadline = time.monotonic() + 3.0
+            while (
+                window.real_library_adapter is not None
+                and window.real_library_adapter.state not in {"loaded", "empty", "error"}
+                and time.monotonic() < deadline
+            ):
+                self.app.processEvents()
+                time.sleep(0.005)
+            self.app.processEvents()
+
+            self.assertEqual(window.real_library_adapter.state, "loaded")
+            self.assertEqual(self.adapter.state.current_track.stable_identity, first_identity)
+            self.assertEqual(self.adapter.state.position_ms, 420)
+            self.assertFalse(self.adapter.state.is_playing)
+            self.assertEqual(window.navigation_adapter.route, "lyrics")
+            self.assertEqual(
+                [track.stable_identity for track in self.adapter.queue_tracks],
+                [second_identity, first_identity],
+            )
+            window._save_playback_session(force=True)
+            saved = PlaybackSessionStore(root / "playback_session.json").load()
+            self.assertIsNotNone(saved)
+            self.assertEqual(saved.current_identity, first_identity)
+            self.assertEqual(saved.position_ms, 420)
+            self.assertEqual(saved.route, "lyrics")
         finally:
             window.close()
             self.app.processEvents()

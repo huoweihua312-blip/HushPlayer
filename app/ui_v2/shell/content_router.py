@@ -137,6 +137,7 @@ class ContentRouter(QStackedWidget):
         self._content_safe_bottom = 0
         self._playing_track_id = ""
         self._is_playing = True
+        self._reduce_motion = False
         self._online_sources = OnlineSourceAdapter(online, self)
         self._playback_enabled = (
             not collection.read_only or playback.has_real_backend
@@ -419,6 +420,7 @@ class ContentRouter(QStackedWidget):
         page.fullscreen_requested.connect(self.immersive_fullscreen_requested)
         page.transparency_mode_changed.connect(self.immersive_transparency_requested)
         page.mode_changed.connect(self._switch_immersive_mode)
+        page.set_reduce_motion(self._reduce_motion)
         # The page may have been created while transparent mode was already
         # selected in Settings.  Its constructor cannot emit to this router yet.
         page.transparency_mode_changed.emit(page.background_mode == "transparent")
@@ -442,9 +444,10 @@ class ContentRouter(QStackedWidget):
             page.apply_options(options)
 
     def set_reduce_motion_preview(self, enabled: bool) -> None:
+        self._reduce_motion = bool(enabled)
         page = self._pages.get("immersive_lyrics")
         if isinstance(page, ImmersiveLyricsPage):
-            page.set_reduce_motion(enabled)
+            page.set_reduce_motion(self._reduce_motion)
 
     def _return_from_immersive(self) -> None:
         self._navigation.set_route(self._immersive_return_route)
