@@ -107,6 +107,7 @@ class DesktopLyricsWindow(QWidget):
         self._rendered_secondary: str | None = None
         self._stable_document_text_width: int | None = None
         self._stable_geometry_reset_pending = True
+        self._runtime_position_initialized = False
         self._settings = {
             "floating_lyrics_color": "white",
             "floating_lyrics_opacity": 100,
@@ -368,7 +369,7 @@ class DesktopLyricsWindow(QWidget):
         dragging = self._drag_offset is not None
         visible_center = (
             QPoint(self.frameGeometry().center())
-            if self.isVisible() and not dragging
+            if (self.isVisible() or self._runtime_position_initialized) and not dragging
             else None
         )
         if not dragging:
@@ -544,7 +545,8 @@ class DesktopLyricsWindow(QWidget):
     def _sync_render_visibility(self) -> None:
         should_show = self._enabled and self._has_renderable_lyric
         if should_show and not self.isVisible():
-            self._place_on_screen()
+            if not self._runtime_position_initialized:
+                self._place_on_screen()
             self.show()
             self.raise_()
         elif not should_show and self.isVisible():
@@ -584,6 +586,7 @@ class DesktopLyricsWindow(QWidget):
                 available.bottom() - self.height() - 48,
             )
         self.move(clamp_desktop_lyrics_position(position, self.size(), available))
+        self._runtime_position_initialized = True
 
     def _restore_window_center(self, center: QPoint) -> None:
         """Keep the visible lyric anchor stable after a transparent resize."""
@@ -591,6 +594,7 @@ class DesktopLyricsWindow(QWidget):
         delta = center - self.frameGeometry().center()
         if delta != QPoint(0, 0):
             self.move(self.pos() + delta)
+        self._runtime_position_initialized = True
 
     def reset_position(self) -> None:
         self._saved_x = -1
@@ -928,7 +932,8 @@ class DesktopLyricsWindow(QWidget):
         input_mode_change = self._changing_input_mode
         super().showEvent(event)
         if not input_mode_change:
-            self._place_on_screen()
+            if not self._runtime_position_initialized:
+                self._place_on_screen()
             self._cursor_timer.start()
             self.visible_changed.emit(True)
 

@@ -167,6 +167,52 @@ class DesktopLyricsWindowTests(unittest.TestCase):
             self.assertEqual(self.window.size(), stable_size)
             self.assertEqual(self.window.pos(), stable_position)
 
+    def test_track_change_keeps_visual_center_through_hidden_loading_state(self) -> None:
+        track = next(track for track in create_mock_tracks(80) if not track.is_missing)
+        self.window.apply_settings(
+            {
+                "floating_lyrics_font_size": 42,
+                "floating_lyrics_width": 420,
+                "floating_lyrics_height": 135,
+            }
+        )
+        self.lyrics.set_track(track)
+        self.window.show_for_current_screen()
+        self.app.processEvents()
+        self.window.move(120, 120)
+        self.window._emit_position()
+        before_center = QPoint(self.window.frameGeometry().center())
+
+        self.lyrics._active_line_index = -1
+        self.lyrics._set_document(None)
+        self.window._render()
+        self.app.processEvents()
+        self.assertFalse(self.window.isVisible())
+
+        long_line = LyricLine(
+            "next-track-line",
+            0,
+            5_000,
+            "切换歌曲以后这一行会明显变宽但歌词的视觉中心不能改变" * 2,
+        )
+        self.lyrics._set_document(
+            LyricsDocument(
+                "next-track",
+                "Next Track",
+                "Artist",
+                "mock",
+                (long_line,),
+            )
+        )
+        self.lyrics._set_state("ready", "", track.id, "mock")
+        self.lyrics.set_position(0, force=True)
+        self.window._render()
+        self.app.processEvents()
+
+        self.assertTrue(self.window.isVisible())
+        self.assertGreater(self.window.width(), 420)
+        self.assertEqual(self.window.frameGeometry().center(), before_center)
+
     def test_long_lyric_expands_width_and_stays_at_two_rows(self) -> None:
         self.window.show()
         self.window.apply_settings(
