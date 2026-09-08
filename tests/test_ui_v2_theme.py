@@ -94,8 +94,11 @@ class UiV2ThemeTests(unittest.TestCase):
         self.assertGreater(bold_path.stat().st_size, 1_000_000)
         self.assertTrue(license_path.is_file())
         self.assertIn("SIL OPEN FONT LICENSE", license_path.read_text(encoding="utf-8"))
-        self.assertIn('"Source Han Sans SC"', font_family_qss())
-        self.assertEqual(resolve_font_family(), "Source Han Sans SC")
+        self.assertEqual(font_family_qss(), f'"{resolve_font_family()}"')
+        from PySide6.QtGui import QFontDatabase
+        expected = next(family for family in ("Microsoft YaHei UI", "Microsoft YaHei", "Source Han Sans SC")
+                        if family in QFontDatabase.families())
+        self.assertEqual(resolve_font_family(), expected)
 
     def test_light_and_dark_row_state_colors_are_distinct_and_restrained(self) -> None:
         for mode in ("light", "dark"):

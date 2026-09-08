@@ -155,9 +155,9 @@ class TrackCollectionHero(QWidget):
         if reference < 950:
             extent = 82
         elif reference < 1220:
-            extent = 118
+            extent = 132
         else:
-            extent = 156
+            extent = 176
         self.artwork.setFixedSize(extent, extent)
         self._layout.setDirection(QBoxLayout.Direction.LeftToRight)
         self._layout.setSpacing(13 if reference < 950 else 17 if reference < 1220 else 22)

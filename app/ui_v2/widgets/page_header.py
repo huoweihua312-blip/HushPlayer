@@ -11,7 +11,7 @@ class PageHeader(QWidget):
     def __init__(self, title: str, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.setObjectName("contentPageHeader")
-        self.setMinimumHeight(70)
+        self.setMinimumHeight(86)
         self.accent_rail = QFrame(self)
         self.accent_rail.setObjectName("pageHeaderAccentRail")
         self.accent_rail.setFixedSize(3, 44)
@@ -56,10 +56,10 @@ class PageHeader(QWidget):
         self.setStyleSheet(
             f"QWidget#contentPageHeader {{ background: transparent; }}"
             f"QFrame#pageHeaderAccentRail {{ background: {c.accent}; border: 0; border-radius: 1px; }}"
-            f"QLabel#pageContext {{ color: {c.text_tertiary}; font-size: {theme.fonts.caption}px; font-weight: 600; }}"
+            f"QLabel#pageContext {{ color: {c.text_tertiary}; font-size: {theme.fonts.caption}px; font-weight: 400; }}"
             f"QLabel#pageCount {{ padding: 2px 8px; border: 1px solid {c.border}; border-radius: {theme.metrics.radius_sm}px; "
             f"background: {c.surface_secondary}; color: {c.text_secondary}; font-size: {theme.fonts.caption}px; }}"
         )
         self.title_label.setStyleSheet(
-            f"font-size: {theme.fonts.page_title}px; font-weight: 700; color: {c.primary_text};"
+            f"font-size: {theme.fonts.page_title}px; font-weight: 600; color: {c.primary_text};"
         )

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from enum import Enum
 
-from PySide6.QtCore import QRectF, Qt
+from PySide6.QtCore import QRectF, QSize, Qt
 from PySide6.QtGui import QColor, QFont, QPainter, QPainterPath, QPen
 from PySide6.QtWidgets import QStyle, QStyledItemDelegate
 
@@ -48,7 +48,7 @@ class TrackDelegate(QStyledItemDelegate):
 
     def sizeHint(self, option, index):  # noqa: N802
         hint = super().sizeHint(option, index)
-        return hint.expandedTo(option.fontMetrics.size(0, 48))
+        return hint.expandedTo(QSize(0, self._theme.metrics.track_row_height))
 
     def paint(self, painter: QPainter, option, index) -> None:  # noqa: N802
         track = index.data(TRACK_ROLE)
@@ -137,7 +137,7 @@ class TrackDelegate(QStyledItemDelegate):
                     secondary_color,
                 )
         elif column == TrackColumn.TITLE:
-            artwork_size = min(36, max(32, int(rect.height() - 12)))
+            artwork_size = min(self._theme.metrics.track_artwork_size, max(32, int(rect.height() - 12)))
             artwork_rect = QRectF(content.left(), content.center().y() - artwork_size / 2, artwork_size, artwork_size)
             self._draw_artwork(painter, artwork_rect, track)
             if playing:
@@ -148,8 +148,9 @@ class TrackDelegate(QStyledItemDelegate):
                 paint_icon(painter, "missing", marker, self._theme, "disabled")
             elif track.is_loading:
                 self._draw_loading_indicator(painter, artwork_rect)
-            left = artwork_rect.right() + 10
+            left = artwork_rect.right() + 14
             font = QFont(option.font)
+            font.setPixelSize(self._theme.fonts.track_title)
             font.setWeight(QFont.Weight.DemiBold if playing else QFont.Weight.Normal)
             painter.setFont(font)
             title_color = QColor(colors.accent) if playing and not disabled else text_color

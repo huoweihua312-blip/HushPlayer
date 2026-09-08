@@ -17,6 +17,9 @@ OPEN_FONT_FAMILIES = (
 
 
 FONT_FALLBACKS = (
+    # Prefer Windows' screen-tuned Chinese UI faces at desktop text sizes.
+    "Microsoft YaHei UI",
+    "Microsoft YaHei",
     # Source Han Sans SC is bundled under SIL OFL 1.1.  Its static Medium and
     # Bold faces remain visibly distinct on Windows instead of relying on a
     # platform's variable-font weight synthesis.
@@ -25,8 +28,6 @@ FONT_FALLBACKS = (
     # layouts and environments that reject one of the static OTF faces.
     "Noto Sans SC",
     "MiSans",
-    "Microsoft YaHei UI",
-    "Microsoft YaHei",
     "Segoe UI Variable Text",
     "Segoe UI",
     "DengXian",
@@ -91,10 +92,9 @@ def resolve_font_family() -> str:
 
 
 def font_family_qss() -> str:
-    """Return the approved ordered stack without requiring a QApplication."""
+    """Use the same available family for styled and directly painted text."""
 
-    _ensure_bundled_font_loaded()
-    return ", ".join(f'"{family}"' for family in FONT_FALLBACKS)
+    return f'"{resolve_font_family()}"'
 
 
 @dataclass(frozen=True, slots=True)
@@ -167,6 +167,8 @@ class ThemeMetrics:
     compact_sidebar_width: int = 76
     player_bar_height: int = 102
     content_safe_bottom: int = 18
+    track_row_height: int = 60
+    track_artwork_size: int = 44
 
 
 @dataclass(frozen=True, slots=True)
@@ -175,20 +177,20 @@ class ThemeFonts:
     # preserving the compact Quiet Orbit rhythm at 900px-wide windows.
     caption: int = 13
     body_small: int = 14
-    body: int = 15
+    body: int = 16
     control: int = 15
     section_title: int = 21
     page_title: int = 32
     hero_title: int = 36
-    track_title: int = 16
+    track_title: int = 17
     metadata: int = 14
     numeric: int = 14
     secondary: int = 15
     card_title: int = 15
     card_meta: int = 14
-    player_title: int = 15
+    player_title: int = 16
     player_meta: int = 14
-    family: str = "Source Han Sans SC"
+    family: str = "Microsoft YaHei UI"
 
 
 @dataclass(frozen=True, slots=True)
@@ -283,7 +285,7 @@ LIGHT_THEME = Theme(
         app="#f4f4f2", sidebar="#ededeb", content="#f8f8f6", player="#f0f0ee",
         surface="#ffffff", surface_secondary="#f2f2f0", elevated="#ffffff",
         hover="#e9e9e7", selected="#e5e5e3", playing="#f3eadb", pressed="#dddddb", divider="#d8d8d6",
-        primary="#1d1d1f", secondary="#505055", tertiary="#77777c", disabled="#a1a1a6",
+        primary="#1d1d1f", secondary="#505055", tertiary="#66666c", disabled="#a1a1a6",
         icon="#5b5b60", active="#a3844b", progress_track="#b2b2b1", accent="#a3844b",
         accent_hover="#b8955a", accent_pressed="#896b3d", danger="#bd625c",
         warning="#96732e", success="#3f8060", shadow="rgba(24, 24, 27, .16)",
