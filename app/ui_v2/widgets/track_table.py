@@ -103,7 +103,7 @@ class TrackHeaderView(QHeaderView):
             )
             paint_icon(painter, icon_name, icon_rect, self._theme, "selected")
             text_rect.setRight(icon_rect.left() - 4)
-        font = QFont(painter.font())
+        font = QFont(self.font())
         font.setWeight(QFont.Weight.DemiBold if is_sorted else QFont.Weight.Normal)
         painter.setFont(font)
         painter.setPen(QColor(colors.accent if is_sorted else colors.subtle_text))

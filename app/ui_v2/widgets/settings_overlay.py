@@ -607,6 +607,9 @@ class SettingsOverlay(QWidget):
         section.add_widget(logo)
         section.add_widget(app_name)
         section.add_widget(version)
+        font_notice = QLabel("本软件使用 MiSans 字体，版权归小米所有。字体许可协议随应用附带。", self)
+        font_notice.setWordWrap(True)
+        section.add_widget(font_notice)
         layout.addWidget(section)
 
         changelog = self._track_section(self._section("更新日志", "查看已发布版本的主要变化。"))

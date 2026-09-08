@@ -17,7 +17,7 @@ OPEN_FONT_FAMILIES = (
 
 
 FONT_FALLBACKS = (
-    # Prefer the user's selected MiSans face when installed locally.
+    # MiSans is loaded privately from the application's font resources.
     "MiSans",
     "Microsoft YaHei UI",
     "Microsoft YaHei",
@@ -38,6 +38,9 @@ FONT_FALLBACKS = (
 
 
 _BUNDLED_FONT_PATHS = (
+    Path(__file__).resolve().parents[1] / "assets" / "fonts" / "MiSans-Regular.ttf",
+    Path(__file__).resolve().parents[1] / "assets" / "fonts" / "MiSans-Semibold.ttf",
+    Path(__file__).resolve().parents[1] / "assets" / "fonts" / "MiSans-Bold.ttf",
     Path(__file__).resolve().parents[1] / "assets" / "fonts" / "SourceHanSansSC-Regular.otf",
     Path(__file__).resolve().parents[1] / "assets" / "fonts" / "SourceHanSansSC-Medium.otf",
     Path(__file__).resolve().parents[1] / "assets" / "fonts" / "SourceHanSansSC-Bold.otf",

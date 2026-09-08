@@ -31,6 +31,39 @@ class UiV2ThemeTests(unittest.TestCase):
     def setUpClass(cls) -> None:
         cls.app = QApplication.instance() or QApplication([])
 
+    def test_track_metadata_uses_option_font_not_incoming_painter_font(self) -> None:
+        from unittest.mock import patch
+        from PySide6.QtCore import QRect
+        from PySide6.QtGui import QFont, QPainter, QPixmap
+        from PySide6.QtWidgets import QStyleOptionViewItem
+        from app.ui_v2.mock.track_factory import create_mock_tracks
+        from app.ui_v2.models.track_table_model import TrackColumn, TrackTableModel
+        from app.ui_v2.widgets.track_delegate import TrackDelegate
+
+        model = TrackTableModel(create_mock_tracks(2))
+        delegate = TrackDelegate(get_theme("light"))
+        option = QStyleOptionViewItem()
+        option.rect = QRect(0, 0, 320, 60)
+        option.font = QFont(resolve_font_family())
+        option.font.setPixelSize(16)
+        pixmap = QPixmap(320, 60)
+        pixmap.fill(QColor("white"))
+        painter = QPainter(pixmap)
+        incoming = QFont("serif")
+        incoming.setPixelSize(9)
+        painter.setFont(incoming)
+        try:
+            for column in (TrackColumn.ARTIST, TrackColumn.ALBUM, TrackColumn.DURATION):
+                captured = []
+                with patch.object(delegate, "_draw_text", side_effect=lambda p, *args: captured.append(QFont(p.font()))):
+                    delegate.paint(painter, option, model.index(1, int(column)))
+                self.assertTrue(captured)
+                self.assertEqual(captured[0].family(), option.font.family())
+                self.assertEqual(captured[0].pixelSize(), 16)
+                self.assertEqual(painter.font().pixelSize(), 9)
+        finally:
+            painter.end()
+
     def test_light_and_dark_have_complete_distinct_color_tokens(self) -> None:
         required = {
             "app_background", "window_background", "content_background", "sidebar_background",

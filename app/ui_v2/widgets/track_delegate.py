@@ -56,6 +56,7 @@ class TrackDelegate(QStyledItemDelegate):
             return
         painter.save()
         painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        painter.setFont(option.font)
         rect = QRectF(option.rect)
         selected = bool(option.state & QStyle.StateFlag.State_Selected)
         table = self.parent()
