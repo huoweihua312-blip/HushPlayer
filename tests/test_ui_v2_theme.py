@@ -96,7 +96,7 @@ class UiV2ThemeTests(unittest.TestCase):
         self.assertIn("SIL OPEN FONT LICENSE", license_path.read_text(encoding="utf-8"))
         self.assertEqual(font_family_qss(), f'"{resolve_font_family()}"')
         from PySide6.QtGui import QFontDatabase
-        expected = next(family for family in ("Microsoft YaHei UI", "Microsoft YaHei", "Source Han Sans SC")
+        expected = next(family for family in ("MiSans", "Microsoft YaHei UI", "Microsoft YaHei", "Source Han Sans SC")
                         if family in QFontDatabase.families())
         self.assertEqual(resolve_font_family(), expected)
 

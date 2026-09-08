@@ -17,7 +17,8 @@ OPEN_FONT_FAMILIES = (
 
 
 FONT_FALLBACKS = (
-    # Prefer Windows' screen-tuned Chinese UI faces at desktop text sizes.
+    # Prefer the user's selected MiSans face when installed locally.
+    "MiSans",
     "Microsoft YaHei UI",
     "Microsoft YaHei",
     # Source Han Sans SC is bundled under SIL OFL 1.1.  Its static Medium and
@@ -27,7 +28,6 @@ FONT_FALLBACKS = (
     # Keep the previous bundled font as a safe fallback for older packaged
     # layouts and environments that reject one of the static OTF faces.
     "Noto Sans SC",
-    "MiSans",
     "Segoe UI Variable Text",
     "Segoe UI",
     "DengXian",
@@ -190,7 +190,7 @@ class ThemeFonts:
     card_meta: int = 14
     player_title: int = 16
     player_meta: int = 14
-    family: str = "Microsoft YaHei UI"
+    family: str = "MiSans"
 
 
 @dataclass(frozen=True, slots=True)
