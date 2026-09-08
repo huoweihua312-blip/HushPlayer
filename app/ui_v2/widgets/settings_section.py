@@ -18,7 +18,7 @@ class SettingsSection(QWidget):
         self.description.setWordWrap(True)
         self.rows_layout = QVBoxLayout()
         self.rows_layout.setContentsMargins(0, 0, 0, 0)
-        self.rows_layout.setSpacing(0)
+        self.rows_layout.setSpacing(8)
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(theme.metrics.spacing_sm)
@@ -40,5 +40,5 @@ class SettingsSection(QWidget):
 
     def set_theme(self, theme: Theme) -> None:
         self._theme = theme
-        self.title.setStyleSheet(f"font-size: {theme.fonts.section_title}px; font-weight: 700; color: {theme.colors.primary_text};")
+        self.title.setStyleSheet(f"font-size: {theme.fonts.section_title}px; font-weight: 600; color: {theme.colors.primary_text};")
         self.description.setStyleSheet(f"font-size: {theme.fonts.secondary}px; font-weight: 400; color: {theme.colors.secondary_text};")

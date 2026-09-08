@@ -115,7 +115,7 @@ class PlayerBar(QFrame):
             f"QFrame#playerBar {{ background: {c.playerbar_background}; border-top: 1px solid {c.border}; }}"
             f"QWidget#trackRegionInner, QWidget#utilityRegionInner {{ background: transparent; border: 0; border-radius: 0; }}"
             f"QWidget#trackMetadata, QWidget#volumeGroup, QWidget#transportRow, QWidget#progressRow {{ background: transparent; border: 0; }}"
-            f"QLabel#playerTitle {{ color: {c.text_primary}; font-size: {theme.fonts.player_title}px; font-weight: 600; }}"
+            f"QLabel#playerTitle {{ color: {c.text_primary}; font-size: {theme.fonts.player_title}px; font-weight: 400; }}"
             f"QLabel#playerArtist {{ color: {c.text_secondary}; font-size: {theme.fonts.player_meta}px; font-weight: 400; }}"
             f"QLabel#playerAvailability {{ padding: 1px 5px; border-radius: {m.radius_sm}px; background: {c.surface_pressed}; color: {c.warning}; font-size: {theme.fonts.caption}px; font-weight: 400; }}"
             f"QLabel#playerTime {{ color: {c.text_secondary}; font-size: {theme.fonts.caption}px; font-weight: 400; }}"
@@ -230,7 +230,7 @@ class PlayerBar(QFrame):
         metadata_layout.setContentsMargins(0, 0, 0, 0)
         metadata_layout.setSpacing(3)
         metadata_layout.setAlignment(Qt.AlignmentFlag.AlignVCenter)
-        self.title_label.setFixedHeight(18)
+        self.title_label.setFixedHeight(24)
         self.title_label.setSizePolicy(
             QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed
         )

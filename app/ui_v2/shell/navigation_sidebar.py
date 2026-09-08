@@ -218,7 +218,7 @@ class NavigationSidebar(QFrame):
             f"QToolButton#sidebarMoreButton {{ text-align: left; padding: 0 10px; border: 1px solid transparent; "
             f"border-radius: {theme.metrics.radius_md}px; color: {c.secondary_text}; background: transparent; }}"
             f"QToolButton#sidebarMoreButton:hover {{ color: {c.primary_text}; background: {c.hover_background}; border-color: {c.border}; }}"
-            f"QToolButton#sidebarMoreButton[active=\"true\"] {{ color: {c.primary_text}; background: {c.selected_background}; font-weight: 600; }}"
+            f"QToolButton#sidebarMoreButton[active=\"true\"] {{ color: {c.primary_text}; background: {c.selected_background}; font-weight: 400; }}"
             f"QLabel#navigationBrandMark {{ background: transparent; }}"
             f"QLabel#navigationBrandLabel {{ color: {c.text_primary}; font-size: 17px; font-weight: 600; }}"
         )
@@ -233,7 +233,7 @@ class NavigationSidebar(QFrame):
         )
         for label in self._section_labels:
             label.setStyleSheet(
-                f"padding-left: 12px; color: {c.text_tertiary}; font-size: {theme.fonts.caption}px; font-weight: 600;"
+                f"padding-left: 12px; color: {c.text_tertiary}; font-size: {theme.fonts.body_small}px; font-weight: 400;"
             )
         for item in (*self._items.values(), *self._playlist_items.values()):
             item.set_theme(theme)

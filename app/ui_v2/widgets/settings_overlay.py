@@ -244,7 +244,7 @@ class SettingsOverlay(QWidget):
         self.header_icon.setAutoRaise(True)
         self.header_icon.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self.title_label = QLabel("设置", self.dialog)
-        self.subtitle_label = QLabel("管理 HushPlayer 的现有设置", self.dialog)
+        self.subtitle_label = QLabel("按你的习惯调整播放器", self.dialog)
         self.close_button = QToolButton(self.dialog)
         self.close_button.setObjectName("settingsCloseButton")
         self.close_button.setIconSize(QSize(16, 16))
@@ -465,15 +465,15 @@ class SettingsOverlay(QWidget):
         return section
 
     def _build_general(self, layout: QVBoxLayout) -> None:
-        section = self._track_section(self._section("启动与窗口", "保留现有 HushPlayer 启动和窗口行为。"))
+        section = self._track_section(self._section("启动与窗口", "选择打开播放器和关闭窗口时的行为。"))
         section.add_row(self._toggle_row("auto_scan_music_folders_on_startup", "启动时自动扫描这些文件夹", "启动时扫描已保存的音乐文件夹。"))
-        section.add_row(self._toggle_row("floating_lyrics_auto_open", "启动时自动打开桌面歌词", "播放启动时自动打开现有桌面歌词窗口。"))
+        section.add_row(self._toggle_row("floating_lyrics_auto_open", "启动时自动打开桌面歌词", "启动播放器时显示桌面歌词窗口。"))
         section.add_row(self._toggle_row("remember_close_choice", "记住关闭窗口时的选择", "关闭后记住“直接退出”或“最小化到托盘”；关闭此项后恢复每次询问。"))
         layout.addWidget(section)
 
     def _build_appearance(self, layout: QVBoxLayout) -> None:
         section = self._track_section(self._section("主题", "选择舒适的明暗风格和动态效果。"))
-        section.add_row(self._combo_row("appearance_mode", "主题", "切换后立即应用，保存后写入现有设置文件。", (("跟随系统", "system"), ("浅色", "light"), ("深色", "dark"))))
+        section.add_row(self._combo_row("appearance_mode", "主题", "立即预览，点击保存后保留；取消可恢复原来的主题。", (("跟随系统", "system"), ("浅色", "light"), ("深色", "dark"))))
         section.add_row(self._toggle_row("reduce_motion", "减少动态效果", "关闭主题切换的扩散效果，减少沉浸歌词的过渡动画。"))
         layout.addWidget(section)
 
@@ -779,7 +779,7 @@ class SettingsOverlay(QWidget):
         state = self._save_state if self._save_state in {"success", "failed"} and not self._session.is_dirty else None
         self.footer.set_state(dirty=self._session.is_dirty, valid=True, state=state)
         if state is None:
-            self.footer.set_status(self._feedback or ("有未保存修改" if self._session.is_dirty else ""))
+            self.footer.set_status(self._feedback or ("有未保存修改" if self._session.is_dirty else "没有未保存的更改"))
 
     def open(self) -> None:  # noqa: A003
         self._session = SettingsEditSession.open(self.bridge.read_snapshot())
@@ -1006,7 +1006,7 @@ class SettingsOverlay(QWidget):
             f"QPushButton {{ min-height: {theme.metrics.control_height - 2}px; padding: 0 12px; border: 1px solid {c.border}; border-radius: {theme.metrics.radius_sm}px; background: {c.input_background}; color: {c.primary_text}; }}"
             f"QPushButton:hover {{ background: {c.hover_background}; }}"
         )
-        self.title_label.setStyleSheet(f"font-size: {theme.fonts.page_title}px; font-weight: 700; color: {c.primary_text};")
+        self.title_label.setStyleSheet(f"font-size: {theme.fonts.page_title}px; font-weight: 600; color: {c.primary_text};")
         self.subtitle_label.setStyleSheet(f"font-size: {theme.fonts.caption}px; font-weight: 400; color: {c.secondary_text};")
         self.header_icon.setIcon(fluent_settings_icon("general", theme, "selected", 20))
         self.header_icon.setIconSize(QSize(20, 20))

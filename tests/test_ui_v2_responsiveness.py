@@ -157,6 +157,22 @@ class ShellResponsivenessTests(unittest.TestCase):
         self.assertEqual(window.title_bar.search_input.text(), "Paper")
         self.assertEqual(window.library_adapter.query, "Paper")
 
+    def test_small_settings_window_keeps_categories_separate_and_scrollable(self):
+        window = self.window
+        window.resize(900, 600)
+        window.open_settings_overlay("general")
+        self.app.processEvents()
+        sidebar = window.settings_overlay.sidebar
+        buttons = list(sidebar._buttons.values())
+        self.assertTrue(all(button.height() >= 40 for button in buttons))
+        for first, second in zip(buttons, buttons[1:]):
+            self.assertLess(first.geometry().bottom(), second.geometry().top())
+        window.settings_overlay.set_category("about")
+        self.app.processEvents()
+        self.assertGreater(sidebar.scroll.verticalScrollBar().value(), 0)
+        self.assertEqual(sidebar._buttons["general"].font().weight(),
+                         sidebar._buttons["about"].font().weight())
+
     def test_motion_setting_previews_cancels_and_saves(self):
         window = self.window
         window.open_settings_overlay("appearance")

@@ -192,7 +192,7 @@ class ThemeFonts:
     card_title: int = 15
     card_meta: int = 14
     player_title: int = 16
-    player_meta: int = 14
+    player_meta: int = 15
     family: str = "MiSans"
 
 

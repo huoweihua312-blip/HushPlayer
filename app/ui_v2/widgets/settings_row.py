@@ -26,12 +26,12 @@ class SettingsRow(QFrame):
         self.control = control
         labels = QVBoxLayout()
         labels.setContentsMargins(0, 0, 0, 0)
-        labels.setSpacing(2)
+        labels.setSpacing(6)
         labels.addWidget(self.title_label)
         labels.addWidget(self.description_label)
         self._labels_layout = labels
         self._row_layout = QHBoxLayout(self)
-        self._row_layout.setContentsMargins(0, 10, 0, 10)
+        self._row_layout.setContentsMargins(16, 14, 16, 14)
         self._row_layout.setSpacing(18)
         self._row_layout.addLayout(labels, 1)
         self._row_layout.addWidget(control, 0, Qt.AlignmentFlag.AlignRight)
@@ -59,7 +59,7 @@ class SettingsRow(QFrame):
             QBoxLayout.Direction.TopToBottom if compact else QBoxLayout.Direction.LeftToRight
         )
         self._row_layout.setSpacing(8 if compact else 18)
-        self._row_layout.setContentsMargins(0, 8 if compact else 10, 0, 8 if compact else 10)
+        self._row_layout.setContentsMargins(16, 12 if compact else 14, 16, 12 if compact else 14)
         self._row_layout.setAlignment(self.control, Qt.AlignmentFlag.AlignLeft if compact else Qt.AlignmentFlag.AlignRight)
         self.updateGeometry()
 
@@ -68,10 +68,10 @@ class SettingsRow(QFrame):
 
     def set_theme(self, theme: Theme) -> None:
         self._theme = theme
-        background = theme.colors.selected_background if self._highlighted else "transparent"
-        self.setStyleSheet(f"SettingsRow {{ background: {background}; border-bottom: 1px solid {theme.colors.border}; }}")
-        self.title_label.setStyleSheet(f"font-size: {theme.fonts.body}px; font-weight: 600; color: {theme.colors.primary_text};")
-        self.description_label.setStyleSheet(f"font-size: {theme.fonts.caption}px; font-weight: 500; color: {theme.colors.secondary_text};")
+        background = theme.colors.selected_background if self._highlighted else theme.colors.surface_primary
+        self.setStyleSheet(f"SettingsRow {{ background: {background}; border: 1px solid {theme.colors.border}; border-radius: {theme.metrics.radius_md}px; }}")
+        self.title_label.setStyleSheet(f"background: transparent; font-size: {theme.fonts.body}px; font-weight: 400; color: {theme.colors.primary_text};")
+        self.description_label.setStyleSheet(f"background: transparent; font-size: {theme.fonts.body_small}px; font-weight: 400; color: {theme.colors.secondary_text};")
 
 
 SettingRow = SettingsRow
