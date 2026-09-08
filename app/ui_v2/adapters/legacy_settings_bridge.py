@@ -56,6 +56,7 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "volume": 65,
     "play_mode": "list_loop",
     "appearance_mode": "dark",
+    "reduce_motion": False,
     "auto_scan_music_folders_on_startup": True,
     "floating_lyrics_auto_open": False,
     "restore_last_playback": True,

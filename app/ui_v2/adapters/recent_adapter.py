@@ -18,6 +18,7 @@ class RecentAdapter(TrackListAdapter):
 
     def __init__(self, collection: LibraryCollectionAdapter, parent: QObject | None = None) -> None:
         self._range_days: int | None = None
+        self._range_cutoff = None
         super().__init__(
             collection,
             parent,
@@ -59,9 +60,15 @@ class RecentAdapter(TrackListAdapter):
             return False
         if self._range_days is None:
             return True
-        entries = self.collection.recent_entries()
-        latest = entries[0].last_played_at if entries else entry.last_played_at
-        return entry.last_played_at >= latest - timedelta(days=self._range_days)
+        return self._range_cutoff is None or entry.last_played_at >= self._range_cutoff
+
+    def _rebuild_visible_tracks(self, emit: bool = True) -> None:
+        self._range_cutoff = None
+        if self._range_days is not None:
+            entries = self.collection.recent_entries()
+            if entries:
+                self._range_cutoff = entries[0].last_played_at - timedelta(days=self._range_days)
+        super()._rebuild_visible_tracks(emit)
 
     def _sort_value(self, track: Track, column: TrackColumn):
         if column == TrackColumn.ADDED_AT:

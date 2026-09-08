@@ -472,8 +472,9 @@ class SettingsOverlay(QWidget):
         layout.addWidget(section)
 
     def _build_appearance(self, layout: QVBoxLayout) -> None:
-        section = self._track_section(self._section("主题", "沿用当前正式 Theme，不创建第二套壳层。"))
+        section = self._track_section(self._section("主题", "选择舒适的明暗风格和动态效果。"))
         section.add_row(self._combo_row("appearance_mode", "主题", "切换后立即应用，保存后写入现有设置文件。", (("跟随系统", "system"), ("浅色", "light"), ("深色", "dark"))))
+        section.add_row(self._toggle_row("reduce_motion", "减少动态效果", "关闭主题切换的扩散效果，减少沉浸歌词的过渡动画。"))
         layout.addWidget(section)
 
     def _build_playback(self, layout: QVBoxLayout) -> None:
@@ -633,7 +634,7 @@ class SettingsOverlay(QWidget):
                 "immersive_background_visual_mode",
                 normalize_immersive_background_visual_mode(None, value),
             )
-        if changed and key == "appearance_mode" and self._preview_callback is not None:
+        if changed and key in {"appearance_mode", "reduce_motion"} and self._preview_callback is not None:
             self._session.mark_previewed(key)
             self._preview_callback(self._session.working_snapshot.to_dict())
         self._refresh_state()

@@ -14,6 +14,11 @@ class EmptyState(QWidget):
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
+        self._theme: Theme | None = None
+        self._state = "empty"
+        self._detail = ""
+        self._search_query = ""
+        self._action_text = ""
         self.empty_icon_name = "playlist"
         self.icon_label = QLabel(self)
         self.title_label = QLabel(self)
@@ -36,22 +41,42 @@ class EmptyState(QWidget):
         self.set_state("empty")
 
     def set_state(self, state: str, detail: str = "") -> None:
+        self._state = state
+        self._detail = detail
+        self._refresh_content()
+
+    def set_search_query(self, query: str) -> None:
+        self._search_query = str(query or "").strip()
+        self._refresh_content()
+
+    def _refresh_content(self) -> None:
         content = {
             "empty": ("没有可显示的歌曲", "尝试调整搜索内容或添加音乐文件。", "playlist"),
             "loading": ("正在加载歌曲", "正在准备歌曲列表。", "library"),
             "error": ("无法显示歌曲", "请稍后重试。", "missing"),
         }
-        title, default_detail, icon_name = content.get(state, content["empty"])
+        title, default_detail, icon_name = content.get(self._state, content["empty"])
+        is_search_empty = self._state == "empty" and bool(self._search_query)
+        if is_search_empty:
+            title, default_detail, icon_name = (
+                "未找到匹配歌曲", "试试其他歌曲名、歌手或专辑，也可以清空搜索查看当前列表。", "search"
+            )
         self.empty_icon_name = icon_name
         self.title_label.setText(title)
-        self.detail_label.setText(detail or default_detail)
+        self.detail_label.setText(default_detail if is_search_empty else self._detail or default_detail)
+        action = "清空搜索" if is_search_empty else self._action_text
+        self.action_button.setText(action)
+        self.action_button.setToolTip(action)
+        self.action_button.setVisible(bool(action))
+        if self._theme is not None:
+            self.icon_label.setPixmap(icon(icon_name, self._theme, "normal").pixmap(32, 32))
 
     def set_action(self, text: str = "") -> None:
-        self.action_button.setText(text)
-        self.action_button.setToolTip(text)
-        self.action_button.setVisible(bool(text))
+        self._action_text = text
+        self._refresh_content()
 
     def set_theme(self, theme: Theme) -> None:
+        self._theme = theme
         self.icon_label.setPixmap(icon(self.empty_icon_name, theme, "normal").pixmap(32, 32))
         self.icon_label.setObjectName("emptyStateIcon")
         self.title_label.setStyleSheet(

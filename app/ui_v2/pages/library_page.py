@@ -151,6 +151,7 @@ class LibraryPage(QWidget):
 
     def _on_tracks_reset(self, tracks) -> None:
         self.header.set_count(len(tracks))
+        self.empty_state.set_search_query(self.adapter.query)
         if self.current_view_state == "content" and not tracks:
             self.set_view_state("empty")
         elif self.current_view_state == "empty" and tracks:

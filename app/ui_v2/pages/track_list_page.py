@@ -68,7 +68,7 @@ class TrackListPage(QWidget):
         self.toolbar.shuffle_requested.connect(lambda: self._request_queue(True))
         self.track_table.play_requested.connect(self._request_track)
         self.track_table.online_recovery_requested.connect(self.track_recovery_requested)
-        self.empty_state.action_requested.connect(self.browse_library_requested)
+        self.empty_state.action_requested.connect(self._on_empty_action)
         adapter.tracks_reset.connect(self._on_tracks_reset)
         self.set_theme(theme)
         self._apply_work_surface_margins()
@@ -112,6 +112,7 @@ class TrackListPage(QWidget):
 
     def _on_tracks_reset(self, tracks) -> None:
         self.header.set_count(len(tracks))
+        self.empty_state.set_search_query(self.adapter.query)
         has_playable_track = any(
             (not track.is_missing or track.is_online)
             and self._playback_enabled
@@ -124,6 +125,13 @@ class TrackListPage(QWidget):
         elif self.current_view_state == "empty":
             self.current_view_state = "content"
             self.view_stack.setCurrentWidget(self.track_table)
+
+    def _on_empty_action(self) -> None:
+        if self.adapter.query:
+            self.search_box.set_text("")
+            self.adapter.set_query("")
+        else:
+            self.browse_library_requested.emit()
 
     def _request_track(self, track_id: str) -> None:
         self.track_play_requested.emit(self.adapter.tracks(), track_id)

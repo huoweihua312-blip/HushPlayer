@@ -607,12 +607,10 @@ class MainWindow(QMainWindow):
         self._update_window_shape()
         if self._startup_diagnostics is not None:
             self._startup_diagnostics.mark("main_window.shell_ready")
+        self.library_page.empty_state.action_requested.connect(self._on_library_empty_action)
         if self.real_library_adapter is not None:
             self.real_library_adapter.state_changed.connect(self._on_real_library_state)
             self.real_library_adapter.data_loaded.connect(self._on_real_library_loaded)
-            self.library_page.empty_state.action_requested.connect(
-                self._on_library_empty_action
-            )
             # The snapshot work is already on a worker thread. Queue its
             # first start until the shell has had one event-loop turn so the
             # main window can paint before disk projection begins.
@@ -684,6 +682,9 @@ class MainWindow(QMainWindow):
         reveal_overlay: ThemeRevealOverlay | None = None,
     ) -> None:
         target_theme = get_theme("light" if mode == "light" else "dark")
+        if getattr(self, "_reduce_motion", False):
+            self._animate_next_theme_change = False
+            reveal_overlay = None
         animate = bool(
             reveal_overlay is not None
             or (
@@ -905,6 +906,7 @@ class MainWindow(QMainWindow):
 
         if not (
             self._theme_reveal_enabled
+            and not getattr(self, "_reduce_motion", False)
             and self.isVisible()
             and self._theme_reveal_overlay is None
         ):
@@ -1412,6 +1414,7 @@ class MainWindow(QMainWindow):
             return
         if self.navigation_adapter.route != "online_search":
             self.navigation_adapter.set_route("online_search")
+        self.title_bar.search_controller.sync_text(query)
         self.router.set_global_query(query)
         self.online_adapter.search()
 
@@ -1419,6 +1422,19 @@ class MainWindow(QMainWindow):
         """Keep the one shell search field clear about its current scope."""
 
         self.title_bar.set_search_context(route_id)
+        previous = getattr(self, "_search_query_adapter", None)
+        previous_signal = getattr(previous, "query_changed", None)
+        if previous_signal is not None:
+            previous_signal.disconnect(self._sync_search_text)
+        adapter = getattr(self.router.currentWidget(), "adapter", None)
+        self._search_query_adapter = adapter
+        signal = getattr(adapter, "query_changed", None)
+        if signal is not None:
+            signal.connect(self._sync_search_text)
+        self._sync_search_text(getattr(adapter, "query", ""))
+
+    def _sync_search_text(self, text: str) -> None:
+        self.title_bar.search_controller.sync_text(text)
 
     def open_settings_overlay(self, category: str | None = None) -> None:
         """Show the one cached Settings surface without changing the route."""
@@ -1651,6 +1667,7 @@ class MainWindow(QMainWindow):
     def _apply_settings_values(self, values: dict[str, object]) -> None:
         """Apply persisted settings to the small set of V2 runtime models."""
 
+        self._reduce_motion = bool(values.get("reduce_motion", False))
         appearance = str(values.get("appearance_mode", "dark"))
         resolved_appearance = "dark" if self._force_dark_theme else appearance
         self.immersive_lyrics_options.theme = (
@@ -2139,6 +2156,9 @@ class MainWindow(QMainWindow):
     def _on_library_empty_action(self) -> None:
         """Route the empty-library action to the appropriate safe next step."""
 
+        if self.library_adapter.query:
+            self.library_adapter.set_query("")
+            return
         if self.library_page.current_view_state == "error" and self.real_library_adapter is not None:
             self.real_library_adapter.refresh()
             return
