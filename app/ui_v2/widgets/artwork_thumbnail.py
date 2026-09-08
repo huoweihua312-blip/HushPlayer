@@ -12,14 +12,12 @@ from PySide6.QtWidgets import QLabel, QWidget
 from app.ui_v2.models.track import Track
 from app.ui_v2.theme.tokens import Theme
 from app.ui_v2.widgets.placeholder_cover import cover_pixmap
+from app.ui_v2.widgets.pixmap_cache import PixmapCache
 from app.ui_v2.widgets.track_display import display_track_text
 
 
-_ARTWORK_CACHE: dict[tuple[str, str, int, int], QPixmap] = {}
-_ARTWORK_SOURCE_CACHE: dict[
-    tuple[str, str, str, int, int], tuple[str, QPixmap]
-] = {}
-_ARTWORK_SOURCE_CACHE_LIMIT = 128
+_ARTWORK_CACHE = PixmapCache(64 * 1024 * 1024, 512)
+_ARTWORK_SOURCE_CACHE = PixmapCache(32 * 1024 * 1024, 128)
 
 
 def artwork_pixmap_for_track(track: Track | None, width: int, height: int) -> QPixmap:
@@ -31,39 +29,39 @@ def artwork_pixmap_for_track(track: Track | None, width: int, height: int) -> QP
         return cover_pixmap("hushplayer", width, height)
 
     data = bytes(track.artwork_data or b"")
-    source_cache_key = (
-        track.stable_id,
-        str(track.artwork_path or ""),
-        str(track.artwork_key or ""),
-        len(data),
-        id(data) if data else 0,
-    )
-    cached_source = _ARTWORK_SOURCE_CACHE.get(source_cache_key)
-    if cached_source is not None:
-        source_key, source = cached_source
-    else:
-        source_key = ""
-        source = QPixmap()
-        if data:
-            source_key = hashlib.sha256(data).hexdigest()[:20]
+    source_key = ""
+    source = QPixmap()
+    if data:
+        source_key = hashlib.sha256(data).hexdigest()
+        cached = _ARTWORK_CACHE.get((source_key, width, height))
+        if cached is not None:
+            return cached
+        cached_source = _ARTWORK_SOURCE_CACHE.get(source_key)
+        if cached_source is not None:
+            source = cached_source
+        else:
             source.loadFromData(data)
-        if source.isNull() and track.artwork_path:
-            path = Path(track.artwork_path)
-            if path.is_file():
-                source_key = f"file:{path}"
+            _ARTWORK_SOURCE_CACHE.put(source_key, source)
+    if source.isNull() and track.artwork_path:
+        path = Path(track.artwork_path)
+        try:
+            stat = path.stat()
+            source_key = f"file:{path}:{stat.st_mtime_ns}:{stat.st_size}:{track.artwork_key}"
+            cached = _ARTWORK_CACHE.get((source_key, width, height))
+            if cached is not None:
+                return cached
+            cached_source = _ARTWORK_SOURCE_CACHE.get(source_key)
+            if cached_source is not None:
+                source = cached_source
+            else:
                 source.load(str(path))
-        if not source.isNull():
-            _ARTWORK_SOURCE_CACHE[source_cache_key] = (source_key, source)
-            if len(_ARTWORK_SOURCE_CACHE) > _ARTWORK_SOURCE_CACHE_LIMIT:
-                oldest_key = next(iter(_ARTWORK_SOURCE_CACHE))
-                _ARTWORK_SOURCE_CACHE.pop(oldest_key, None)
+                _ARTWORK_SOURCE_CACHE.put(source_key, source)
+        except OSError:
+            pass
     if source.isNull():
         return cover_pixmap(track.stable_id, width, height)
 
-    cache_key = (track.stable_id, source_key, width, height)
-    cached = _ARTWORK_CACHE.get(cache_key)
-    if cached is not None and not cached.isNull():
-        return cached
+    cache_key = (source_key, width, height)
     scaled = source.scaled(
         width,
         height,
@@ -74,7 +72,7 @@ def artwork_pixmap_for_track(track: Track | None, width: int, height: int) -> QP
         left = max(0, (scaled.width() - width) // 2)
         top = max(0, (scaled.height() - height) // 2)
         scaled = scaled.copy(left, top, width, height)
-    _ARTWORK_CACHE[cache_key] = scaled
+    _ARTWORK_CACHE.put(cache_key, scaled)
     return scaled
 
 

@@ -38,7 +38,9 @@ class TrackListAdapter(QObject):
         self.collection = collection
         self._predicate = predicate or (lambda track: True)
         self._visible_tracks: list[Track] = []
+        self._visible_row_by_id: dict[str, int] = {}
         self._query = ""
+        self._folded_query = ""
         self._sort_column = sort_column
         self._sort_order = sort_order
         collection.tracks_changed.connect(self._rebuild_visible_tracks)
@@ -77,6 +79,7 @@ class TrackListAdapter(QObject):
         if query == self._query:
             return
         self._query = query
+        self._folded_query = query.casefold()
         self._rebuild_visible_tracks()
         self.query_changed.emit(query)
 
@@ -112,24 +115,23 @@ class TrackListAdapter(QObject):
         self.collection.set_favorite(track_id, value)
 
     def _on_track_updated(self, track: Track) -> None:
-        previous_row = next(
-            (row for row, item in enumerate(self._visible_tracks) if item.id == track.id), -1
-        )
+        previous_row = self._visible_row_by_id.get(track.id, -1)
         is_visible = self._matches(track)
         if (previous_row >= 0) != is_visible:
             self._rebuild_visible_tracks()
             return
         if previous_row >= 0:
+            previous = self._visible_tracks[previous_row]
+            if self._sort_value(previous, self._sort_column) != self._sort_value(track, self._sort_column):
+                self._rebuild_visible_tracks()
+                return
             self._visible_tracks[previous_row] = track
             self.track_updated.emit(track)
 
     def _matches(self, track: Track) -> bool:
         if not self._predicate(track):
             return False
-        query = self._query.casefold()
-        return not query or query in " ".join(
-            (track.title, track.artist, track.album, track.source_name)
-        ).casefold()
+        return not self._folded_query or self._folded_query in self.collection.search_text(track)
 
     def _rebuild_visible_tracks(self, emit: bool = True) -> None:
         reverse = self._sort_order == Qt.SortOrder.DescendingOrder
@@ -138,7 +140,11 @@ class TrackListAdapter(QObject):
             key=lambda track: self._sort_value(track, self._sort_column),
             reverse=reverse,
         )
-        self._visible_tracks = visible_tracks
+        self._set_visible_tracks(visible_tracks, emit)
+
+    def _set_visible_tracks(self, tracks: list[Track], emit: bool = True) -> None:
+        self._visible_tracks = tracks
+        self._visible_row_by_id = {track.id: row for row, track in enumerate(tracks)}
         if emit:
             self.tracks_reset.emit(tuple(self._visible_tracks))
 

@@ -31,6 +31,8 @@ class LibraryCollectionAdapter(QObject):
         super().__init__(parent)
         self._tracks: list[Track] = []
         self._track_by_id: dict[str, Track] = {}
+        self._row_by_id: dict[str, int] = {}
+        self._search_text_by_id: dict[str, str] = {}
         self._favorite_at: dict[str, datetime] = {}
         self._recent: dict[str, RecentPlay] = {}
         self._playing_track_id = ""
@@ -66,6 +68,15 @@ class LibraryCollectionAdapter(QObject):
     def track_for_id(self, track_id: str) -> Track | None:
         return self._track_by_id.get(str(track_id or ""))
 
+    def search_text(self, track: Track) -> str:
+        """Share lazy search text across pages; updates invalidate one entry."""
+
+        text = self._search_text_by_id.get(track.id)
+        if text is None:
+            text = " ".join((track.title, track.artist, track.album, track.source_name)).casefold()
+            self._search_text_by_id[track.id] = text
+        return text
+
     def tracks_for_ids(self, track_ids: Iterable[str]) -> tuple[Track, ...]:
         return tuple(
             track
@@ -76,6 +87,8 @@ class LibraryCollectionAdapter(QObject):
     def set_tracks(self, tracks: Iterable[Track], *, emit: bool = True) -> None:
         self._tracks = list(tracks)
         self._track_by_id = {track.id: track for track in self._tracks}
+        self._row_by_id = {track.id: row for row, track in enumerate(self._tracks)}
+        self._search_text_by_id.clear()
         if self._read_only:
             self._favorite_at = {
                 track.id: track.favorite_added_at or track.added_at
@@ -121,7 +134,7 @@ class LibraryCollectionAdapter(QObject):
             if backend is None or not backend(track, bool(value)):
                 return False
         updated = replace(track, is_favorite=bool(value))
-        index = next(index for index, item in enumerate(self._tracks) if item.id == track.id)
+        index = self._row_by_id[track.id]
         self._tracks[index] = updated
         self._track_by_id[updated.id] = updated
         if updated.is_favorite:
@@ -138,6 +151,7 @@ class LibraryCollectionAdapter(QObject):
         if self._read_only:
             return existing or track
         if existing is None:
+            self._row_by_id[track.id] = len(self._tracks)
             self._tracks.append(track)
             self._track_by_id[track.id] = track
             if track.is_favorite:
@@ -146,9 +160,10 @@ class LibraryCollectionAdapter(QObject):
             return track
         if existing == track:
             return existing
-        index = next(index for index, item in enumerate(self._tracks) if item.id == track.id)
+        index = self._row_by_id[track.id]
         self._tracks[index] = track
         self._track_by_id[track.id] = track
+        self._search_text_by_id.pop(track.id, None)
         self.track_updated.emit(track)
         return track
 
@@ -160,9 +175,10 @@ class LibraryCollectionAdapter(QObject):
             return None
         if existing == track:
             return existing
-        index = next(index for index, item in enumerate(self._tracks) if item.id == track.id)
+        index = self._row_by_id[track.id]
         self._tracks[index] = track
         self._track_by_id[track.id] = track
+        self._search_text_by_id.pop(track.id, None)
         self.track_updated.emit(track)
         return track
 

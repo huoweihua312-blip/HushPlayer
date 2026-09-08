@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import math
 from collections import defaultdict
 from dataclasses import dataclass, replace
 from datetime import datetime
@@ -50,6 +51,7 @@ class RealLibraryData:
     artist_track_ids: dict[str, tuple[str, ...]]
     album_track_ids: dict[str, tuple[str, ...]]
     playlist_track_ids: dict[str, tuple[str, ...]]
+    load_warning: str = ""
 
 
 class _SnapshotThread(QThread):
@@ -379,6 +381,7 @@ class RealLibraryAdapter(QObject):
             artist_track_ids=artist_track_ids,
             album_track_ids=album_track_ids,
             playlist_track_ids=playlist_track_ids,
+            load_warning=snapshot.library.warning,
         )
 
     def _start(self, generation: int) -> None:
@@ -420,7 +423,7 @@ class RealLibraryAdapter(QObject):
             read_only=True,
             can_mutate=self.playlist_adapter.mutation_backend is not None,
         )
-        self._set_state("empty" if not data.tracks else "loaded", "")
+        self._set_state("empty" if not data.tracks else "loaded", data.load_warning)
         self.data_loaded.emit()
 
     @Slot()
@@ -631,9 +634,9 @@ def _duplicate_id(track_id: str, index: int) -> str:
 def _duration_ms(value) -> int | None:
     try:
         duration = float(value or 0)
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):
         return None
-    if duration <= 0:
+    if not math.isfinite(duration) or duration <= 0:
         return None
     return int(round(duration if duration > 86_400 else duration * 1_000))
 

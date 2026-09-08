@@ -2118,6 +2118,7 @@ class MainWindow(QMainWindow):
             self.library_collection.set_favorite(current.id, favorite)
 
     def _on_real_library_state(self, state: str, detail: str) -> None:
+        self.library_page.header.count_label.setToolTip(detail)
         if state == "loading":
             self.library_page.empty_state.set_action("")
             self.library_page.set_view_state("loading", detail)
@@ -2127,6 +2128,8 @@ class MainWindow(QMainWindow):
             self.library_page.set_view_state("error", detail)
             return
         has_tracks = bool(self.library_collection.tracks())
+        if detail:
+            self._show_action_message(detail)
         self.library_page.empty_state.set_action("" if has_tracks else "添加音乐文件夹")
         self.library_page.set_view_state(
             "content" if state == "loaded" else "empty",

@@ -7,6 +7,7 @@ callbacks; they never open or write ``settings.json`` themselves.
 from __future__ import annotations
 
 import json
+import logging
 import os
 from copy import deepcopy
 from pathlib import Path
@@ -87,17 +88,30 @@ DEFAULT_SETTINGS: dict[str, Any] = {
 }
 
 
+def _read_settings_document(path: Path) -> dict[str, Any] | None:
+    """Distinguish a first launch from unreadable or damaged user settings."""
+
+    try:
+        document = json.loads(path.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        return None
+    except (OSError, UnicodeError, ValueError, RecursionError) as error:
+        raise SettingsBridgeError("原设置文件无法读取，已禁止覆盖；请先备份并修复 settings.json。") from error
+    if not isinstance(document, dict):
+        raise SettingsBridgeError("原设置文件格式无效，已禁止覆盖；请先备份并修复 settings.json。")
+    return document
+
+
 def load_settings_document(path: Path) -> dict[str, Any]:
     """Load the existing settings document with legacy normalization rules."""
 
-    if not path.exists():
-        return dict(DEFAULT_SETTINGS)
     try:
-        document = json.loads(path.read_text(encoding="utf-8"))
-    except Exception:
-        return dict(DEFAULT_SETTINGS)
-    if not isinstance(document, dict):
-        return dict(DEFAULT_SETTINGS)
+        document = _read_settings_document(path)
+    except SettingsBridgeError as error:
+        logging.getLogger(__name__).warning("%s", error)
+        return deepcopy(DEFAULT_SETTINGS)
+    if document is None:
+        return deepcopy(DEFAULT_SETTINGS)
 
     result = deepcopy(document)
     try:
@@ -186,6 +200,9 @@ def load_settings_document(path: Path) -> dict[str, Any]:
 def write_settings_document(path: Path, document: dict[str, Any]) -> None:
     """Atomically write the existing settings document path."""
 
+    # Every caller, including close-behavior persistence, must protect a
+    # damaged file even if it was changed after the settings dialog opened.
+    _read_settings_document(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary = path.with_suffix(path.suffix + ".tmp")
     temporary.write_text(

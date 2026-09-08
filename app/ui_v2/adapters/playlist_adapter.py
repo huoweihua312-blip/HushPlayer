@@ -339,9 +339,7 @@ class PlaylistTrackAdapter(TrackListAdapter):
                 for track in self.playlists.tracks_for_playlist(self._playlist_id)
                 if self._matches(track)
             ]
-            self._visible_tracks = visible_tracks
-            if emit:
-                self.tracks_reset.emit(tuple(self._visible_tracks))
+            self._set_visible_tracks(visible_tracks, emit)
             return
         super()._rebuild_visible_tracks(emit)
 

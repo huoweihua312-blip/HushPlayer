@@ -8,10 +8,12 @@ from pathlib import Path
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QPixmap
 
+from app.ui_v2.widgets.pixmap_cache import PixmapCache
+
 
 _COVER_DIRECTORY = Path(__file__).resolve().parents[1] / "assets" / "placeholder_covers"
 _COVER_NAMES = tuple(f"cover{number:02d}.svg" for number in range(1, 25))
-_PIXMAP_CACHE: dict[tuple[str, int, int], QPixmap] = {}
+_PIXMAP_CACHE = PixmapCache(16 * 1024 * 1024, 128)
 
 
 def placeholder_cover_path(stable_id: str) -> Path:
@@ -43,5 +45,5 @@ def cover_pixmap(stable_id: str, width: int, height: int) -> QPixmap:
             Qt.AspectRatioMode.KeepAspectRatioByExpanding,
             Qt.TransformationMode.SmoothTransformation,
         )
-    _PIXMAP_CACHE[key] = pixmap
+    _PIXMAP_CACHE.put(key, pixmap)
     return pixmap

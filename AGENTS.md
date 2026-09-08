@@ -58,7 +58,7 @@ Prefer incremental improvements over large rewrites.
 
 ## Hard Rules
 
-- Keep `app/ui/main_window.py` encoded as UTF-8.
+- Keep `app/ui_v2/shell/main_window.py` encoded as UTF-8.
 - Do not turn Chinese text into mojibake such as `鏈壘鍒版瓕璇`.
 - Follow the Backup Rules before modifying important files.
 - Do not delete existing features.
@@ -237,7 +237,7 @@ Do not begin a high-risk change until the user has approved the plan.
 Suggested manual backup command:
 
 ```powershell
-cd C:\Users\Administrator\Desktop
+cd F:\Projects
 $stamp = Get-Date -Format "yyyyMMdd_HHmmss"
 Compress-Archive -Path HushPlayer -DestinationPath "HushPlayer_backup_$stamp.zip" -Force
 ```
@@ -404,13 +404,13 @@ Stage only files intentionally modified for the current task.
 Prefer explicit file staging:
 
 ```powershell
-git add app/ui/main_window.py
+git add app/ui_v2/shell/main_window.py
 ```
 
 For multiple known task files:
 
 ```powershell
-git add app/ui/main_window.py app/widgets/example_widget.py
+git add app/ui_v2/shell/main_window.py app/ui_v2/widgets/example_widget.py
 ```
 
 When only part of a modified file belongs to the task, use careful patch staging when practical:
@@ -633,10 +633,10 @@ Also run task-specific checks appropriate to the change.
 ### Expected Project Directory
 
 ```powershell
-cd C:\Users\Administrator\Desktop\HushPlayer
+cd F:\Projects\HushPlayer
 ```
 
-Before running commands, verify that the current directory is the HushPlayer project root.
+Before running commands, verify that the current directory is the HushPlayer project root. Use the actual checkout path if it differs from this example.
 
 ### Python Interpreter Selection
 
@@ -648,10 +648,10 @@ Use the first working interpreter in this order:
    .\.venv\Scripts\python.exe
    ```
 
-2. Windows Python launcher with Python 3.12:
+2. Windows Python launcher with Python 3.13 (the documented build target):
 
    ```powershell
-   py -3.12
+   py -3.13
    ```
 
 3. Default Windows Python launcher:
@@ -666,7 +666,7 @@ Use the first working interpreter in this order:
    python
    ```
 
-First determine which interpreter is usable.
+First determine which interpreter is usable. Use an existing working project environment for local checks even if its version differs from the documented CPython 3.13 x64 build target; report the exact version and do not claim build compatibility. Do not recreate or upgrade it without approval.
 
 Do not repeatedly run a known-broken interpreter.
 
@@ -679,7 +679,7 @@ A simple interpreter check may use:
 or:
 
 ```powershell
-py -3.12 --version
+py -3.13 --version
 ```
 
 or:
@@ -702,7 +702,7 @@ For changes involving the main application, run at least:
 
 ```powershell
 <available-python> -m py_compile main.py
-<available-python> -m py_compile app\ui\main_window.py
+<available-python> -m py_compile app\ui_v2\shell\main_window.py
 ```
 
 Replace `<available-python>` with the actual working interpreter command.
@@ -710,8 +710,8 @@ Replace `<available-python>` with the actual working interpreter command.
 Examples:
 
 ```powershell
-py -3.12 -m py_compile main.py
-py -3.12 -m py_compile app\ui\main_window.py
+py -3.13 -m py_compile main.py
+py -3.13 -m py_compile app\ui_v2\shell\main_window.py
 ```
 
 If additional Python files were modified or created, run `py_compile` for each of them.
@@ -740,7 +740,7 @@ git status --short
 
 ### UTF-8 Check
 
-When `app/ui/main_window.py` or another file containing Chinese text is modified:
+When `app/ui_v2/shell/main_window.py` or another file containing Chinese text is modified:
 
 - Confirm the file remains UTF-8.
 - Search the changed area for obvious mojibake.
@@ -750,7 +750,7 @@ When `app/ui/main_window.py` or another file containing Chinese text is modified
 Where practical, use Python to verify UTF-8 decoding:
 
 ```powershell
-<available-python> -c "from pathlib import Path; Path(r'app/ui/main_window.py').read_text(encoding='utf-8'); print('UTF-8 OK')"
+<available-python> -c "from pathlib import Path; Path(r'app/ui_v2/shell/main_window.py').read_text(encoding='utf-8'); print('UTF-8 OK')"
 ```
 
 ### Task-Specific Checks
@@ -1008,10 +1008,10 @@ When adding online integrations:
 
 ## About `main_window.py`
 
-Most current code is concentrated in:
+The formal UI V2 main window is:
 
 ```text
-app/ui/main_window.py
+app/ui_v2/shell/main_window.py
 ```
 
 Do not split it aggressively in the short term.

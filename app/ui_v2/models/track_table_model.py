@@ -97,6 +97,10 @@ class TrackTableModel(QAbstractTableModel):
     def track_at(self, row: int) -> Track | None:
         return self._tracks[row] if 0 <= row < len(self._tracks) else None
 
+    def index_for_track(self, track_id: str, column: int = 0) -> QModelIndex:
+        row = self._row_by_id.get(track_id)
+        return self.index(row, column) if row is not None else QModelIndex()
+
     def tracks(self) -> tuple[Track, ...]:
         return tuple(self._tracks)
 

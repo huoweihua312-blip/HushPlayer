@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 
-from PySide6.QtCore import QModelIndex, QRectF, Qt, QTimer, Signal
+from PySide6.QtCore import QItemSelectionModel, QModelIndex, QRectF, QSignalBlocker, Qt, QTimer, Signal
 from PySide6.QtGui import QColor, QContextMenuEvent, QFont, QKeyEvent, QPainter, QPen
 from PySide6.QtWidgets import (
     QAbstractItemView,
@@ -196,12 +196,38 @@ class TrackTable(QTableView):
         self.verticalHeader().setDefaultSectionSize(48)
         self.verticalHeader().setMinimumSectionSize(48)
         self.header.setFixedHeight(36)
-        self.adapter.tracks_reset.connect(self.model.set_tracks)
+        self.adapter.tracks_reset.connect(self._reset_tracks)
         self.adapter.track_updated.connect(self.model.update_track)
         self.adapter.playing_track_changed.connect(self.model.set_playing_track)
         self.model.modelReset.connect(self._apply_visible_row_limit)
         self._apply_column_widths()
         self._apply_scrollbar_style()
+
+    def _reset_tracks(self, tracks) -> None:
+        """Keep browsing selection and scroll position across a data refresh."""
+
+        current = self.currentIndex()
+        track = self.model.track_at(current.row()) if current.isValid() else None
+        selected = current.isValid() and self.selectionModel().isSelected(current)
+        scroll = self.verticalScrollBar().value()
+        updates_enabled = self.updatesEnabled()
+        blocker = QSignalBlocker(self.selectionModel())
+        self.setUpdatesEnabled(False)
+        try:
+            self.model.set_tracks(tracks)
+            if track is not None:
+                restored = self.model.index_for_track(track.id, current.column())
+                self.selectionModel().setCurrentIndex(restored, QItemSelectionModel.SelectionFlag.NoUpdate)
+                if selected and restored.isValid():
+                    self.selectionModel().select(
+                        restored,
+                        QItemSelectionModel.SelectionFlag.ClearAndSelect | QItemSelectionModel.SelectionFlag.Rows,
+                    )
+            self._set_hovered_row(-1)
+            self.verticalScrollBar().setValue(scroll)
+        finally:
+            del blocker
+            self.setUpdatesEnabled(updates_enabled)
 
     def set_theme(self, theme: Theme) -> None:
         self._theme = theme

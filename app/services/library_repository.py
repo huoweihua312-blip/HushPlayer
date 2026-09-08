@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -17,6 +18,7 @@ class LibraryRecords:
     status: str
     error: str
     song_list_is_local_only: bool
+    warning: str = ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -99,19 +101,20 @@ class LibraryRepository:
 
         tracks: list[dict[str, Any]] = []
         song_list_is_local_only = True
-        try:
-            iterator = iter(songs)
-        except TypeError as error:
-            return LibraryRecords((), "error", str(error), True)
+        if not isinstance(songs, list):
+            return LibraryRecords((), "error", "音乐库根节点不是列表", True)
 
-        try:
-            for song in iterator:
+        skipped = 0
+        for song in songs:
+            try:
                 if not isinstance(song, dict):
                     raise TypeError("音乐库条目不是对象")
 
                 path = song.get("path", "")
                 if not path:
                     continue
+                if not isinstance(path, str):
+                    raise TypeError("音乐库路径不是文本")
                 path_exists, normalized_path = local_path_state(path)
                 if not path_exists:
                     continue
@@ -130,14 +133,19 @@ class LibraryRepository:
                 if song_data.get("recordKind") == "remote":
                     song_list_is_local_only = False
                 tracks.append(song_data)
-        except Exception as error:
-            return LibraryRecords((), "error", str(error), True)
+            except (TypeError, ValueError, OSError, OverflowError):
+                skipped += 1
+
+        warning = f"已跳过 {skipped} 条异常音乐库记录，原文件未修改。" if skipped else ""
+        if warning:
+            logging.getLogger(__name__).warning("%s", warning)
 
         return LibraryRecords(
             tuple(tracks),
             "loaded",
             "",
             song_list_is_local_only,
+            warning,
         )
 
     def load_playlist_records(
@@ -211,20 +219,24 @@ class LibraryRepository:
                 return {}
 
             cleaned_stats: dict[str, dict[str, int]] = {}
+            skipped = 0
             for path, stats in raw_stats.items():
                 if not isinstance(stats, dict):
+                    skipped += 1
                     continue
                 normalized_path = normalize_path(path)
                 if not normalized_path:
                     continue
-                cleaned_stats[normalized_path] = {
-                    "play_count": max(0, int(stats.get("play_count", 0))),
-                    "total_listen_time": max(
-                        0,
-                        int(stats.get("total_listen_time", 0)),
-                    ),
-                    "last_played": max(0, int(stats.get("last_played", 0))),
-                }
+                try:
+                    cleaned_stats[normalized_path] = {
+                        "play_count": max(0, int(stats.get("play_count", 0))),
+                        "total_listen_time": max(0, int(stats.get("total_listen_time", 0))),
+                        "last_played": max(0, int(stats.get("last_played", 0))),
+                    }
+                except (TypeError, ValueError, OverflowError):
+                    skipped += 1
+            if skipped:
+                logging.getLogger(__name__).warning("已跳过 %d 条异常播放统计，原文件未修改。", skipped)
             return cleaned_stats
         except Exception:
             return {}
