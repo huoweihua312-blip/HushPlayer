@@ -229,9 +229,11 @@ class DesktopLyricsWindowTests(unittest.TestCase):
         self.assertFalse(self.window._secondary_label.wordWrap())
         self.assertGreater(expanded_width, 420)
         self.assertLessEqual(expanded_height, 220)
-        self.assertEqual(
+        # QLabel rounds fractional FreeType metrics up to avoid clipping.
+        self.assertIn(
             self.window._main_label.height(),
-            self.window._main_label.fontMetrics().height(),
+            (self.window._main_label.fontMetrics().height(),
+             self.window._main_label.fontMetrics().height() + 1),
         )
 
         self.window._main_label.setText("短句")
@@ -358,9 +360,11 @@ class DesktopLyricsWindowTests(unittest.TestCase):
         self.assertEqual(self.window._surface.layout().geometry(), self.window._surface.rect())
         self.assertFalse(self.window._main_label.wordWrap())
         self.assertFalse(self.window._secondary_label.wordWrap())
-        self.assertEqual(
+        # Keep the single-row bound while allowing fractional metric rounding.
+        self.assertIn(
             self.window._main_label.height(),
-            self.window._main_label.fontMetrics().height(),
+            (self.window._main_label.fontMetrics().height(),
+             self.window._main_label.fontMetrics().height() + 1),
         )
         self.assertFalse(self.window._render_timer.isActive())
 

@@ -41,6 +41,10 @@ def configure_process_metadata() -> None:
 
 
 def configure_qt_runtime() -> None:
+    # Choose the font engine before Qt creates its platform integration.
+    # Keep explicit platform overrides (including offscreen tests) intact.
+    if sys.platform == "win32" and QGuiApplication.instance() is None:
+        os.environ.setdefault("QT_QPA_PLATFORM", "windows:fontengine=freetype")
     QGuiApplication.setHighDpiScaleFactorRoundingPolicy(
         Qt.HighDpiScaleFactorRoundingPolicy.PassThrough
     )
@@ -70,7 +74,7 @@ def apply_ui_theme(
     ui_font.setStyleStrategy(
         QFont.StyleStrategy.PreferQuality | QFont.StyleStrategy.PreferAntialias
     )
-    ui_font.setHintingPreference(QFont.HintingPreference.PreferFullHinting)
+    ui_font.setHintingPreference(QFont.HintingPreference.PreferNoHinting)
     app.setFont(ui_font)
     app.setPalette(build_application_palette(theme))
     app.setStyleSheet(build_stylesheet(theme))

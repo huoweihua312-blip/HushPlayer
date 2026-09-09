@@ -15,7 +15,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from PySide6.QtCore import QAbstractAnimation
+from PySide6.QtCore import QAbstractAnimation, QElapsedTimer
 from PySide6.QtGui import QColor, QPalette
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication
@@ -324,8 +324,11 @@ class UiV2MainWindowTests(unittest.TestCase):
         )
         self.assertAlmostEqual(overlay._origin.x(), expected_origin[0])
         self.assertAlmostEqual(overlay._origin.y(), expected_origin[1])
-        QTest.qWait(overlay._DURATION_MS + 80)
-        self.app.processEvents()
+        # Theme polishing can pause the animation while native fonts load.
+        deadline = QElapsedTimer()
+        deadline.start()
+        while self.window._theme_reveal_overlay is not None and deadline.elapsed() < overlay._DURATION_MS + 1500:
+            QTest.qWait(20)
         self.assertIsNone(self.window._theme_reveal_overlay)
 
     def test_theme_reveal_starts_before_theme_persistence(self) -> None:
