@@ -14,6 +14,7 @@ from app.ui_v2.widgets.empty_state import EmptyState
 from app.ui_v2.widgets.page_header import PageHeader
 from app.ui_v2.widgets.search_box import SearchBox
 from app.ui_v2.widgets.track_table import TrackTable
+from app.ui_v2.widgets.content_surface import ContentSurface
 
 
 class LibraryPage(QWidget):
@@ -71,9 +72,9 @@ class LibraryPage(QWidget):
                 self.header.trailing_layout.addWidget(self.state_toggle)
         self.track_table = TrackTable(adapter, self._theme, self)
         self.empty_state = EmptyState(self)
-        self.view_host = QWidget(self)
+        self.view_host = ContentSurface(self)
         self.view_host.setObjectName("libraryWorkSurface")
-        self.view_stack = QStackedLayout(self.view_host)
+        self.view_stack = self.view_host.stack
         self.view_stack.setContentsMargins(8, 8, 8, 8)
         self.view_stack.addWidget(self.track_table)
         self.view_stack.addWidget(self.empty_state)
@@ -98,12 +99,7 @@ class LibraryPage(QWidget):
 
     def _apply_work_surface_margins(self) -> None:
         inset = self._theme.metrics.spacing_sm
-        self.view_stack.setContentsMargins(
-            inset,
-            inset,
-            inset,
-            self._content_safe_bottom + inset,
-        )
+        self.view_host.set_insets(inset, self._content_safe_bottom)
 
     def set_responsive_reference_width(self, width: int) -> None:
         """Resize the table without replacing its model or adapter."""

@@ -23,6 +23,7 @@ from app.ui_v2.widgets.artwork_thumbnail import ArtworkThumbnail
 from app.ui_v2.widgets.elided_label import ElidedLabel
 from app.ui_v2.widgets.playback_button import PlayerIconButton
 from app.ui_v2.widgets.track_display import present_track_identity
+from app.ui_v2.widgets.track_identity import TrackIdentity
 
 
 class _PlayerSlider(QSlider):
@@ -216,7 +217,7 @@ class PlayerBar(QFrame):
         self.availability_label.setObjectName("playerAvailability")
         self.availability_label.setVisible(False)
         self.availability_label.setToolTip("")
-        self.metadata = QWidget(self.identity_stack)
+        self.metadata = TrackIdentity(self.title_label, self.artist_label, self.identity_stack)
         self.metadata.setObjectName("trackMetadata")
         # The approved track copy is one compact two-line group.  Give it a
         # fixed vertical rhythm instead of letting the two labels consume the
@@ -226,10 +227,6 @@ class PlayerBar(QFrame):
         self.metadata.setSizePolicy(
             QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed
         )
-        metadata_layout = QVBoxLayout(self.metadata)
-        metadata_layout.setContentsMargins(0, 0, 0, 0)
-        metadata_layout.setSpacing(3)
-        metadata_layout.setAlignment(Qt.AlignmentFlag.AlignVCenter)
         self.title_label.setFixedHeight(24)
         self.title_label.setSizePolicy(
             QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed
@@ -241,8 +238,6 @@ class PlayerBar(QFrame):
         self.availability_label.setSizePolicy(
             QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Fixed
         )
-        metadata_layout.addWidget(self.title_label)
-        metadata_layout.addWidget(self.artist_label)
         identity_layout.addWidget(self.metadata)
         identity_layout.addWidget(self.availability_label)
         track_inner_layout.addWidget(self.artwork)

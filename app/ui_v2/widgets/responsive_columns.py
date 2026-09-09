@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from app.ui_v2.models.track_table_model import TrackColumn
+from app.ui_v2.theme.responsive import BREAKPOINTS
 
 
 @dataclass(frozen=True, slots=True)
@@ -21,7 +22,7 @@ class ResponsiveColumnPolicy:
     @staticmethod
     def profile_for_width(width: int) -> ColumnProfile:
         value = int(width)
-        if value < 950:
+        if value < BREAKPOINTS.table_medium:
             return ColumnProfile(
                 "narrow",
                 (
@@ -32,7 +33,7 @@ class ResponsiveColumnPolicy:
                     TrackColumn.MORE,
                 ),
             )
-        if value < 1220:
+        if value < BREAKPOINTS.table_wide:
             return ColumnProfile(
                 "standard",
                 (

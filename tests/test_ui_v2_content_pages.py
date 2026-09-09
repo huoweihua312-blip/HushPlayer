@@ -78,7 +78,7 @@ class UiV2ContentPageTests(unittest.TestCase):
         self.assertTrue(table.isColumnHidden(6))  # source
         self.assertFalse(table.isColumnHidden(7))  # more
         self.assertEqual(table.horizontalScrollBarPolicy(), Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        self.assertEqual(table.verticalHeader().defaultSectionSize(), 48)
+        self.assertEqual(table.verticalHeader().defaultSectionSize(), self.window.theme.metrics.track_row_height)
         self.assertEqual(model, table.model)
 
     def test_browse_scroll_region_is_named_and_reveals_overflow(self) -> None:

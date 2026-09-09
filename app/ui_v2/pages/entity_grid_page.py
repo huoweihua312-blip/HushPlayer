@@ -11,7 +11,7 @@ from app.ui_v2.theme.styles import build_stylesheet
 from app.ui_v2.theme.tokens import Theme
 from app.ui_v2.widgets.empty_state import EmptyState
 from app.ui_v2.widgets.page_header import PageHeader
-from app.ui_v2.widgets.search_box import SearchBox
+from app.ui_v2.widgets.search_field import SearchField
 from app.ui_v2.widgets.view_toggle import ViewToggle
 
 
@@ -41,7 +41,7 @@ class EntityGridPage(QWidget):
         self._reflowing = False
         self._reflow_pending = False
         self.header = PageHeader(title, self)
-        self.search_box = SearchBox(self)
+        self.search_box = SearchField(self)
         self.search_box.setMinimumWidth(220)
         self.view_toggle = ViewToggle(theme, self)
         self.header.trailing_layout.addWidget(self.search_box)

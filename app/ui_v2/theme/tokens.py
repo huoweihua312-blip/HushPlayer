@@ -149,6 +149,35 @@ class ThemeColors:
     warning: str
     success: str
 
+    # Canonical aliases are derived, keeping existing constructors/replacements valid.
+    @property
+    def background(self) -> str:
+        return self.app_background
+
+    @property
+    def surface(self) -> str:
+        return self.surface_primary
+
+    @property
+    def sidebar(self) -> str:
+        return self.sidebar_background
+
+    @property
+    def text_muted(self) -> str:
+        return self.text_tertiary
+
+    @property
+    def surface_playing(self) -> str:
+        return self.playing_background
+
+    @property
+    def surface_disabled(self) -> str:
+        return self.surface_secondary
+
+    @property
+    def error(self) -> str:
+        return self.danger
+
 
 @dataclass(frozen=True, slots=True)
 class ThemeMetrics:
@@ -173,6 +202,22 @@ class ThemeMetrics:
     track_row_height: int = 60
     track_artwork_size: int = 44
 
+    @property
+    def control_height_md(self) -> int:
+        return self.control_height
+
+    @property
+    def radius_control(self) -> int:
+        return self.radius_sm
+
+    @property
+    def radius_card(self) -> int:
+        return self.radius_md
+
+    @property
+    def radius_dialog(self) -> int:
+        return self.radius_lg
+
 
 @dataclass(frozen=True, slots=True)
 class ThemeFonts:
@@ -194,6 +239,18 @@ class ThemeFonts:
     player_title: int = 16
     player_meta: int = 15
     family: str = "MiSans"
+
+    @property
+    def label(self) -> int:
+        return self.control
+
+    @property
+    def title(self) -> int:
+        return self.page_title
+
+    @property
+    def subtitle(self) -> int:
+        return self.section_title
 
 
 @dataclass(frozen=True, slots=True)
