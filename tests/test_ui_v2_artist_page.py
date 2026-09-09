@@ -52,6 +52,22 @@ class UiV2ArtistPageTests(unittest.TestCase):
         self.assertIs(self.page.hero.artist_aggregate, self.page.artist_aggregate)
         self.assertLessEqual(self.page.adapter.tracks().__len__(), 10)
 
+    def test_info_rail_uses_window_width_for_content_and_resize_updates(self) -> None:
+        for width, visible in ((1449, False), (1450, True), (1451, True), (1080, False)):
+            with self.subTest(window_width=width):
+                self.window.resize(width, 800)
+                self.app.processEvents()
+                self.page._set_info_rail('用于验证右侧介绍栏的固定文案')
+                self.assertEqual(not self.page.info_rail.isHidden(), visible)
+                for reference in (self.page.width(), 900, 1800):
+                    self.page._update_info_rail_visibility(reference)
+                    self.assertEqual(not self.page.info_rail.isHidden(), visible)
+        self.window.resize(1450, 800)
+        self.app.processEvents()
+        self.page._set_info_rail('')
+        self.assertTrue(self.page.info_rail.isHidden())
+        self.assertEqual(self.page.info_rail.width(), 0)
+
     def test_popular_tracks_use_shared_model_and_resize_keeps_instances(self) -> None:
         model = self.page.track_table.model
         adapter = self.page.adapter

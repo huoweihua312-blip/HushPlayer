@@ -359,14 +359,15 @@ class ArtistDetailPage(QWidget):
     def _set_info_rail(self, body: str) -> None:
         text = str(body or "").strip()
         self.info_body.setText(text)
-        has_content = bool(text)
-        self.info_rail.setFixedWidth(260 if has_content else 0)
-        self.info_rail.setVisible(has_content and self.width() >= 1450)
+        self._update_info_rail_visibility(self.window().width())
 
     def _update_info_rail_visibility(self, reference: int) -> None:
+        # 1450 is a window-width threshold, not the page/scroll viewport width.
+        # Keep the argument for compatibility with existing layout callers.
+        window_width = self.window().width()
         has_content = bool(self.info_body.text().strip())
         self.info_rail.setFixedWidth(260 if has_content else 0)
-        self.info_rail.setVisible(has_content and int(reference) >= 1450 and self._artist is not None)
+        self.info_rail.setVisible(has_content and window_width >= 1450 and self._artist is not None)
 
     def _set_popular_empty(self, title: str, detail: str) -> None:
         self.popular_empty_state.title_label.setText(title)
