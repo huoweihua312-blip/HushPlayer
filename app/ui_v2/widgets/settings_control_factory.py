@@ -374,6 +374,10 @@ class SettingsToggle(QCheckBox):
         self.setToolTip(self.toolTip())
         self.update()
 
+    def hitButton(self, pos) -> bool:  # noqa: N802
+        # The custom track spans the widget, unlike a native checkbox indicator.
+        return self.rect().contains(pos)
+
     def paintEvent(self, _event) -> None:  # noqa: N802
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
