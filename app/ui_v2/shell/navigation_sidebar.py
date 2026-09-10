@@ -14,6 +14,7 @@ from PySide6.QtWidgets import (
     QLabel,
     QMenu,
     QScrollArea,
+    QSizePolicy,
     QToolButton,
     QVBoxLayout,
     QWidget,
@@ -22,7 +23,9 @@ from PySide6.QtWidgets import (
 from app.ui_v2.adapters.navigation_adapter import NavigationAdapter
 from app.ui_v2.models.navigation_item import NavigationItem as NavigationValue
 from app.ui_v2.theme.icons import icon
-from app.ui_v2.theme.tokens import Theme
+from app.ui_v2.theme.tokens import Theme, get_theme
+from app.ui_v2.theme.button_styles import button_qss
+from app.ui_v2.theme.styles import focus_qss
 from app.ui_v2.widgets.navigation_item import NavigationItem
 from app.ui_v2.widgets.playlist_dialogs import PlaylistConfirmDialog, PlaylistNameDialog
 from app.ui_v2.widgets.quiet_context_menu import apply_menu_theme
@@ -98,6 +101,7 @@ class NavigationSidebar(QFrame):
         self.more_navigation_button.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
         self.more_navigation_button.setIconSize(QSize(18, 18))
         self.more_navigation_button.setFixedHeight(42)
+        self.more_navigation_button.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         self.more_navigation_button.setToolTip("更多页面")
         self.more_navigation_button.setAccessibleName("更多页面")
         self.more_navigation_button.clicked.connect(self._show_more_navigation_menu)
@@ -203,10 +207,11 @@ class NavigationSidebar(QFrame):
             item.set_badge_text(str(max(0, int(count))) if int(count) > 0 else "")
 
     def set_theme(self, theme: Theme) -> None:
-        self._theme = theme
+        self._theme = theme  # Keep dialog/business consumers on their existing theme.
+        theme = get_theme(theme.mode, profile="b2")
         c = theme.colors
         self.setStyleSheet(
-            f"QFrame#navigationSidebar {{ background: {c.sidebar_background}; border-right: 1px solid {c.border}; }}"
+            f"QFrame#navigationSidebar {{ background: {c.sidebar_background}; border: 0; }}"
             f"QScrollArea#navigationScrollArea, QAbstractScrollArea#navigationScrollArea::viewport, "
             f"QWidget#navigationViewport, QWidget#navigationContent {{ background: {c.sidebar_background}; border: 0; }}"
             f"QScrollArea#navigationScrollArea QScrollBar:vertical {{ width: 6px; background: transparent; margin: 2px 0; border: 0; }}"
@@ -215,11 +220,13 @@ class NavigationSidebar(QFrame):
             f"QScrollArea#navigationScrollArea QScrollBar::add-line:vertical, QScrollArea#navigationScrollArea QScrollBar::sub-line:vertical {{ height: 0; }}"
             f"QScrollArea#navigationScrollArea QScrollBar::add-page:vertical, QScrollArea#navigationScrollArea QScrollBar::sub-page:vertical {{ background: transparent; }}"
             f"QWidget#navigationSettingsBox {{ border-top: 1px solid {c.border}; }}"
-            f"QToolButton#sidebarMoreButton {{ text-align: left; padding: 0 10px; border: 1px solid transparent; "
-            f"border-radius: {theme.metrics.radius_md}px; color: {c.secondary_text}; background: transparent; }}"
-            f"QToolButton#sidebarMoreButton:hover {{ color: {c.primary_text}; background: {c.hover_background}; border-color: {c.border}; }}"
+            f"QToolButton#sidebarMoreButton {{ text-align: left; padding: 0 10px; border: 2px solid transparent; "
+            f"border-radius: {theme.metrics.radius_control}px; color: {c.secondary_text}; background: transparent; }}"
+            f"QToolButton#sidebarMoreButton:hover {{ color: {c.primary_text}; background: {c.hover_background}; }}"
             f"QToolButton#sidebarMoreButton[active=\"true\"] {{ color: {c.primary_text}; background: {c.selected_background}; font-weight: 400; }}"
-            f"QLabel#navigationBrandMark {{ background: transparent; }}"
+            + focus_qss(theme, "QToolButton#sidebarMoreButton")
+            + "QToolButton#sidebarMoreButton:focus { outline: 0; }"
+            + f"QLabel#navigationBrandMark {{ background: transparent; }}"
             f"QLabel#navigationBrandLabel {{ color: {c.text_primary}; font-size: 17px; font-weight: 600; }}"
         )
         logo_path = _QUIET_ORBIT_LOGO_LIGHT if theme.mode == "light" else _QUIET_ORBIT_LOGO
@@ -242,10 +249,8 @@ class NavigationSidebar(QFrame):
         self.playlist_add_button.setIconSize(QSize(17, 17))
         self.more_navigation_button.setIcon(icon("more", theme, "normal"))
         self.playlist_add_button.setStyleSheet(
-            f"QToolButton#playlistAddButton {{ border: 1px solid {c.border}; border-radius: {theme.metrics.radius_sm}px; "
-            f"background: {c.surface_secondary}; color: {c.secondary_text}; }}"
-            f"QToolButton#playlistAddButton:hover {{ background: {c.hover_background}; color: {c.primary_text}; border-color: {c.border_strong}; }}"
-            f"QToolButton#playlistAddButton:pressed {{ background: {c.playing_background}; }}"
+            button_qss(theme, role="icon", selector="QToolButton#playlistAddButton")
+            + "QToolButton#playlistAddButton { min-height: 22px; padding: 0; }"
         )
         self._apply_surface_backgrounds(c.sidebar_background)
 
@@ -300,7 +305,7 @@ class NavigationSidebar(QFrame):
 
     def _show_more_navigation_menu(self) -> None:
         routes = {"recent", "artists", "albums", "lyrics"}
-        menu = apply_menu_theme(QMenu(self), self._theme)
+        menu = apply_menu_theme(QMenu(self), get_theme(self._theme.mode, profile="b2"))
         for item in self.adapter.items():
             if item.route_id not in routes:
                 continue
@@ -386,7 +391,7 @@ class NavigationSidebar(QFrame):
     def _show_playlist_menu(self, playlist_id: str, global_position) -> None:
         if not self.adapter.playlist_adapter.can_mutate or playlist_id == "liked":
             return
-        menu = apply_menu_theme(QMenu(self), self._theme)
+        menu = apply_menu_theme(QMenu(self), get_theme(self._theme.mode, profile="b2"))
         rename_action = menu.addAction("重命名歌单")
         delete_action = menu.addAction("删除歌单")
         selected = menu.exec(global_position)

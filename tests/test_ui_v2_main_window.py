@@ -23,6 +23,7 @@ from PySide6.QtWidgets import QApplication
 from app.ui_v2.models.track import format_duration
 from app.ui_v2.models.track_table_model import TrackColumn
 from app.ui_v2.shell.content_router import ComingSoonPage
+from app.ui_v2.theme.tokens import get_theme
 from app.ui_v2.shell.main_window import MainWindow
 from app.ui_v2.widgets.custom_title_bar import _QUIET_ORBIT_LOGO, _QUIET_ORBIT_LOGO_LIGHT
 
@@ -233,7 +234,7 @@ class UiV2MainWindowTests(unittest.TestCase):
         light_navigation = "#e4e4e2"
         for mode in ("dark", "light"):
             self.window.set_theme(mode)
-            expected = self.window.theme.colors.navigation_background
+            expected = get_theme(mode, profile="b2").colors.navigation_background
             expected_color = QColor(expected).name().lower()
             for surface in surfaces:
                 self.assertEqual(

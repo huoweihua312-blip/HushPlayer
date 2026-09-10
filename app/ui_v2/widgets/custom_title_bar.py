@@ -5,11 +5,13 @@ from __future__ import annotations
 from pathlib import Path
 
 from PySide6.QtCore import QPoint, QSize, Qt, Signal
-from PySide6.QtGui import QPixmap
+from PySide6.QtGui import QColor, QPainter, QPixmap
 from PySide6.QtWidgets import QLabel, QFrame, QGridLayout, QHBoxLayout, QLineEdit, QToolButton, QWidget
 
 from app.ui_v2.theme.icons import fluent_settings_interactive_icon, icon
-from app.ui_v2.theme.tokens import Theme
+from app.ui_v2.theme.tokens import Theme, get_theme
+from app.ui_v2.theme.button_styles import button_qss
+from app.ui_v2.theme.styles import input_qss, surface_qss
 from app.ui_v2.widgets.line_edit import apply_optical_vertical_center
 from app.ui_v2.widgets.search_input_controller import SearchInputController
 
@@ -163,23 +165,28 @@ class CustomTitleBar(QFrame):
 
     def set_theme(self, theme: Theme) -> None:
         self._theme = theme
+        theme = get_theme(theme.mode, profile="b2")
         c = theme.colors
         self.setFixedHeight(theme.metrics.title_bar_height)
+        controls = ("QToolButton#titleBarButton", "QToolButton#titleBarWindowControl", "QToolButton#titleBarClose")
         self.setStyleSheet(
-            f"QFrame#customTitleBar {{ background: {c.titlebar_background}; border: 0; border-bottom: 1px solid {c.border}; }}"
-            f"QToolButton#titleBarButton, QToolButton#titleBarWindowControl, QToolButton#titleBarClose {{ border: 0; border-radius: 8px; background: transparent; color: {c.text_secondary}; }}"
-            f"QToolButton#titleBarButton:hover, QToolButton#titleBarWindowControl:hover {{ background: {c.surface_hover}; color: {c.text_primary}; }}"
-            f"QToolButton#titleBarButton:pressed, QToolButton#titleBarWindowControl:pressed {{ background: {c.surface_pressed}; color: {c.text_primary}; }}"
-            f"QToolButton#titleBarButton:disabled, QToolButton#titleBarWindowControl:disabled {{ background: transparent; color: {c.text_disabled}; }}"
-            f"QToolButton#titleBarClose:hover {{ background: {c.danger}; color: {c.text_primary}; }}"
-            f"QToolButton#titleBarClose:pressed {{ background: {c.accent_pressed}; color: {c.text_primary}; }}"
-            f"QWidget#titleBarBrand {{ background: transparent; }}"
-            f"QLabel#titleBarBrandMark {{ background: transparent; }}"
-            f"QLabel#titleBarBrandLabel {{ color: {c.text_primary}; font-size: 17px; font-weight: 700; }}"
-            f"QWidget#titleBarSearchBox {{ border-radius: {theme.metrics.radius_md}px; background: {c.surface_primary}; border: 1px solid {c.border}; }}"
-            f"QWidget#titleBarSearchBox:hover {{ border-color: {c.border_strong}; }}"
-            f"QLineEdit#titleBarSearchInput {{ border: 0; background: transparent; color: {c.text_primary}; font-size: {theme.fonts.body}px; }}"
-            f"QLineEdit#titleBarSearchInput:focus {{ border: 0; }}"
+            surface_qss(theme, selector="QFrame#customTitleBar", role="content")
+            + f"QFrame#customTitleBar {{ background: {c.app_background}; border: 0; }}"
+            + "".join(
+                button_qss(theme, role="icon", selector=selector)
+                + f"{selector} {{ min-height: 28px; padding: 0; }}"
+                + f"{selector}:disabled {{ background: transparent; }}"
+                + f"{selector}:focus {{ outline: 0; }}"
+                for selector in controls
+            )
+            + f"QToolButton#titleBarClose:hover {{ background: {c.danger}; color: {c.text_on_accent}; }}"
+            + f"QWidget#titleBarBrand {{ background: {c.sidebar_background}; }}"
+            + "QLabel#titleBarBrandMark { background: transparent; }"
+            + f"QLabel#titleBarBrandLabel {{ color: {c.primary_text}; font-size: 17px; font-weight: 600; }}"
+            + f"QWidget#titleBarSearchBox {{ border-radius: {theme.metrics.radius_control}px; background: {c.input_background}; border: 0; }}"
+            + input_qss(theme, selector="QLineEdit#titleBarSearchInput")
+            + f"QLineEdit#titleBarSearchInput {{ min-height: 0; padding: 0 6px; background: transparent; font-size: {theme.fonts.body}px; }}"
+            + "QLineEdit#titleBarSearchInput:focus { outline: 0; }"
         )
         for button, name in (
             (self.back_button, "back"), (self.forward_button, "forward"),
@@ -208,6 +215,13 @@ class CustomTitleBar(QFrame):
                 Qt.TransformationMode.SmoothTransformation,
             )
         )
+        # Tint the established waveform artwork without replacing the asset.
+        tinted_logo = self.brand_mark.pixmap().copy()
+        painter = QPainter(tinted_logo)
+        painter.setCompositionMode(QPainter.CompositionMode.CompositionMode_SourceIn)
+        painter.fillRect(tinted_logo.rect(), QColor(c.accent))
+        painter.end()
+        self.brand_mark.setPixmap(tinted_logo)
         target = "浅色模式" if theme.mode == "dark" else "深色模式"
         self.theme_button.setToolTip(f"切换到{target}")
 

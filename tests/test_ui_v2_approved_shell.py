@@ -88,7 +88,7 @@ class ApprovedShellMigrationTests(unittest.TestCase):
             title_bar.view_options_button,
         ):
             self.assertEqual(button.iconSize(), QSize(18, 18))
-        self.assertIn("border-radius: 8px", title_bar.styleSheet())
+        self.assertIn("border-radius: 5px", title_bar.styleSheet())
         self.assertFalse(title_bar.notifications_button.isVisible())
         self.assertFalse(title_bar.avatar_button.isVisible())
         self.assertTrue(title_bar.brand.isVisible())
@@ -226,7 +226,7 @@ class ApprovedShellMigrationTests(unittest.TestCase):
         self.assertEqual(selected.contentsRect(), unselected_contents)
         self.assertNotIn("border-left", selected.styleSheet())
         self.assertNotIn("border-left-color", selected.styleSheet())
-        self.assertIn("border: 1px solid transparent", selected.styleSheet())
+        self.assertIn("border: 2px solid transparent", selected.styleSheet())
         self.assertIn(
             "QToolButton:focus { border-color: transparent; }",
             selected.styleSheet(),
@@ -234,7 +234,7 @@ class ApprovedShellMigrationTests(unittest.TestCase):
         selected._focus_visible = True
         selected._refresh_visuals()
         self.assertIn(
-            f"QToolButton:focus {{ border-color: {get_theme('dark').colors.focus_ring}; }}",
+            f"QToolButton:focus {{ border-color: {get_theme('dark', profile='b2').colors.focus_ring}; }}",
             selected.styleSheet(),
         )
         source = inspect.getsource(navigation_item_module.NavigationItem)

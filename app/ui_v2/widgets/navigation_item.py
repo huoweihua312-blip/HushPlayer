@@ -8,7 +8,8 @@ from PySide6.QtWidgets import QSizePolicy, QToolButton, QWidget
 
 from app.ui_v2.models.navigation_item import NavigationItem as NavigationValue
 from app.ui_v2.theme.icons import fluent_settings_interactive_icon, icon
-from app.ui_v2.theme.tokens import Theme
+from app.ui_v2.theme.tokens import Theme, get_theme
+from app.ui_v2.theme.styles import focus_qss
 
 
 _NAVIGATION_ICON_SIZES = {
@@ -53,7 +54,7 @@ class NavigationItem(QToolButton):
         self.set_theme(theme)
 
     def set_theme(self, theme: Theme) -> None:
-        self._theme = theme
+        self._theme = get_theme(theme.mode, profile="b2")
         self._refresh_visuals()
 
     def set_compact(self, compact: bool) -> None:
@@ -153,16 +154,17 @@ class NavigationItem(QToolButton):
         self.setIconSize(QSize(icon_size, icon_size))
         self.setMinimumWidth(0)
         self.setStyleSheet(
-            f"QToolButton {{ text-align: left; padding: 0 10px; border: 1px solid transparent; "
-            f"border-radius: {self._theme.metrics.radius_md}px; font-size: {self._theme.fonts.body}px; "
+            f"QToolButton {{ text-align: left; padding: 0 10px; border: 2px solid transparent; "
+            f"border-radius: {self._theme.metrics.radius_control}px; font-size: {self._theme.fonts.body}px; "
             f"font-weight: 400; "
             f"color: {c.primary_text if self._selected else c.secondary_text}; "
             f"background: {c.selected_background if self._selected else 'transparent'}; }}"
-            f"QToolButton:hover {{ color: {c.primary_text}; background: {c.hover_background}; border-color: {c.border}; "
+            f"QToolButton:hover {{ color: {c.primary_text}; background: {c.selected_background if self._selected else c.hover_background}; "
             f"}}"
-            f"QToolButton:pressed {{ background: {c.playing_background}; }}"
+            f"QToolButton:pressed {{ background: {c.selected_background}; }}"
             f"QToolButton:focus {{ border-color: {focus_border}; }}"
-            f"QToolButton[hushKeyboardFocus=\"true\"]:focus {{ border-color: {c.focus_ring}; }}"
+            + focus_qss(self._theme, "QToolButton")
+            + "QToolButton:focus { outline: 0; }"
             f"QToolButton:disabled {{ color: {c.disabled_text}; background: transparent; }}"
             f"QToolButton:disabled:hover {{ color: {c.disabled_text}; background: transparent; }}"
         )
