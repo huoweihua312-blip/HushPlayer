@@ -18,7 +18,7 @@ from PySide6.QtWidgets import (
 from app.ui_v2.adapters.playback_adapter import PlaybackAdapter
 from app.ui_v2.models.playback_state import RepeatMode
 from app.ui_v2.models.track import Track, format_duration
-from app.ui_v2.theme.tokens import Theme
+from app.ui_v2.theme.tokens import Theme, get_theme
 from app.ui_v2.widgets.artwork_thumbnail import ArtworkThumbnail
 from app.ui_v2.widgets.elided_label import ElidedLabel
 from app.ui_v2.widgets.playback_button import PlayerIconButton
@@ -52,7 +52,7 @@ class _PlayerSlider(QSlider):
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         bounds = self.rect().adjusted(4, 0, -4, 0)
         center_y = bounds.center().y()
-        track = QRectF(float(bounds.left()), center_y - 1.5, float(bounds.width()), 3.0)
+        track = QRectF(float(bounds.left()), center_y - 1.0, float(bounds.width()), 2.0)
         track_color = self._track_color if self.isEnabled() else self._disabled_color
         painter.setPen(Qt.PenStyle.NoPen)
         painter.setBrush(track_color)
@@ -61,7 +61,7 @@ class _PlayerSlider(QSlider):
         minimum, maximum = self.minimum(), self.maximum()
         ratio = 0.0 if maximum <= minimum else (self.value() - minimum) / (maximum - minimum)
         ratio = max(0.0, min(1.0, ratio))
-        handle_radius = 5.0 if self.isEnabled() and self.underMouse() else 4.0
+        handle_radius = 4.0 if self.isEnabled() and (self.underMouse() or self.hasFocus() or self.isSliderDown()) else 2.5
         handle_x = track.left() + track.width() * ratio
         if ratio > 0:
             fill = QRectF(track.left(), track.top(), max(0.0, handle_x - track.left()), track.height())
@@ -69,6 +69,10 @@ class _PlayerSlider(QSlider):
             painter.drawRoundedRect(fill, 1.5, 1.5)
         painter.setBrush(self._handle_color if self.isEnabled() else self._disabled_color)
         painter.drawEllipse(QRectF(handle_x - handle_radius, center_y - handle_radius, handle_radius * 2, handle_radius * 2))
+        if self.hasFocus() and self.isEnabled():
+            painter.setBrush(Qt.BrushStyle.NoBrush)
+            painter.setPen(self._handle_color)
+            painter.drawRoundedRect(QRectF(self.rect()).adjusted(0.5, 0.5, -0.5, -0.5), 3, 3)
         painter.end()
 
 
@@ -106,6 +110,7 @@ class PlayerBar(QFrame):
         return self._compact
 
     def set_theme(self, theme: Theme) -> None:
+        theme = get_theme(theme.mode, profile="b2")
         self._theme = theme
         c = theme.colors
         m = theme.metrics
@@ -113,13 +118,13 @@ class PlayerBar(QFrame):
         self.progress_slider.set_visual_colors(theme)
         self.volume_slider.set_visual_colors(theme)
         self.setStyleSheet(
-            f"QFrame#playerBar {{ background: {c.playerbar_background}; border-top: 1px solid {c.border}; }}"
+            f"QFrame#playerBar {{ background: {c.playerbar_background}; border: 0; }}"
             f"QWidget#trackRegionInner, QWidget#utilityRegionInner {{ background: transparent; border: 0; border-radius: 0; }}"
             f"QWidget#trackMetadata, QWidget#volumeGroup, QWidget#transportRow, QWidget#progressRow {{ background: transparent; border: 0; }}"
             f"QLabel#playerTitle {{ color: {c.text_primary}; font-size: {theme.fonts.player_title}px; font-weight: 400; }}"
             f"QLabel#playerArtist {{ color: {c.text_secondary}; font-size: {theme.fonts.player_meta}px; font-weight: 400; }}"
             f"QLabel#playerAvailability {{ padding: 1px 5px; border-radius: {m.radius_sm}px; background: {c.surface_pressed}; color: {c.warning}; font-size: {theme.fonts.caption}px; font-weight: 400; }}"
-            f"QLabel#playerTime {{ color: {c.text_secondary}; font-size: {theme.fonts.caption}px; font-weight: 400; }}"
+            f"QLabel#playerTime {{ color: {c.subtle_text}; font-size: {theme.fonts.caption}px; font-weight: 400; }}"
             f"QSlider#playerProgress, QSlider#playerVolume {{ background: transparent; border: 0; }}"
             f"QSlider#playerProgress::groove:horizontal {{ height: 3px; border: 0; border-radius: 2px; background: {c.progress_track}; }}"
             f"QSlider#playerVolume::groove:horizontal {{ height: 3px; border: 0; border-radius: 2px; background: {c.progress_track}; }}"
@@ -134,6 +139,11 @@ class PlayerBar(QFrame):
         self.artwork.set_theme(theme)
         for button in self._buttons:
             button.set_theme(theme)
+        self.play_button.setStyleSheet(
+            self.play_button.styleSheet()
+            + f'QToolButton:hover {{ background: {c.secondary_text}; }}'
+            + f'QToolButton[hushKeyboardFocus="true"]:focus {{ border: 2px solid {c.focus_ring}; }}'
+        )
         self._refresh_repeat_tooltip()
 
     def set_compact(self, compact: bool) -> None:
@@ -155,11 +165,10 @@ class PlayerBar(QFrame):
     def _refresh_metadata_width(self) -> None:
         if not all(hasattr(self, name) for name in ("metadata", "artwork")):
             return
-        base_width = 160 if self._compact else 196
         region_width = max(0, self.track_region.width() - 32)
-        fixed_width = self.artwork.width() + 24
-        available = max(base_width, region_width - fixed_width)
-        width = min(320, available)
+        # Reserve cover, favourite hit area, inner margins and both gaps.
+        fixed_width = self.artwork.width() + 32 + 16 + 20
+        width = max(64, min(320, region_width - fixed_width))
         self.metadata.setFixedWidth(width)
         if hasattr(self, "identity_stack"):
             self.identity_stack.setFixedWidth(width)
@@ -267,10 +276,9 @@ class PlayerBar(QFrame):
         transport_layout.setContentsMargins(0, 0, 0, 0)
         transport_layout.setSpacing(12)
         transport_layout.addStretch(1)
-        # Keep the favorite action in the transport rail so long track
-        # metadata cannot cover it. This is the leftmost control in the rail.
+        # Favourite belongs to the identity region; the transport stays symmetric.
         self.favorite_button = PlayerIconButton(
-            "favorite", "收藏", self._theme, self.transport_row, size=32, icon_canvas_size=18,
+            "favorite", "收藏", self._theme, self.track_inner, size=32, icon_canvas_size=18,
             asset_family="fluent_player",
         )
         self.favorite_button.clicked.connect(self.adapter.toggle_favorite)
@@ -299,13 +307,9 @@ class PlayerBar(QFrame):
         self.play_button.clicked.connect(self.adapter.toggle_playback)
         self.next_button.clicked.connect(self.adapter.play_next)
         self.repeat_button.clicked.connect(self.adapter.cycle_repeat_mode)
-        transport_layout.addWidget(self.favorite_button)
+        track_inner_layout.addWidget(self.favorite_button)
         for button in (self.shuffle_button, self.previous_button, self.play_button, self.next_button, self.repeat_button):
             transport_layout.addWidget(button)
-        # The new leftmost favorite control adds 44px (button plus gap) to
-        # the control group. Match that width on the right so the play button
-        # stays on the bar's optical centre.
-        transport_layout.addSpacing(44)
         transport_layout.addStretch(1)
 
         self.progress_row = QWidget(self.center_region)
