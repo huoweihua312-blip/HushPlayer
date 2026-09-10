@@ -19,7 +19,7 @@ from app.ui_v2.adapters.library_adapter import LibraryAdapter
 from app.ui_v2.models.track import Track
 from app.ui_v2.models.track_table_model import TrackColumn, TrackTableModel
 from app.ui_v2.theme.icons import paint_icon
-from app.ui_v2.theme.tokens import Theme
+from app.ui_v2.theme.tokens import Theme, get_theme
 from app.ui_v2.widgets.quiet_context_menu import apply_menu_theme
 from app.ui_v2.widgets.responsive_columns import ResponsiveColumnPolicy
 from app.ui_v2.widgets.track_delegate import TrackDelegate
@@ -32,6 +32,7 @@ class TrackHeaderView(QHeaderView):
         super().__init__(Qt.Orientation.Horizontal, parent)
         self._theme = theme
         self._hovered_section = -1
+        self._b2 = False
         self.setMouseTracking(True)
         self.setHighlightSections(False)
 
@@ -72,11 +73,13 @@ class TrackHeaderView(QHeaderView):
             if is_sorted
             else colors.surface_primary
         )
+        if self._b2 and not is_hovered:
+            background = colors.content_background
         painter.save()
         painter.fillRect(rect, QColor(background))
         painter.setPen(QPen(QColor(colors.divider), 1))
         painter.drawLine(rect.bottomLeft(), rect.bottomRight())
-        if is_sorted:
+        if is_sorted and not self._b2:
             accent = QColor(colors.accent)
             accent.setAlpha(170)
             painter.fillRect(rect.left() + 8, rect.bottom() - 1, max(0, rect.width() - 16), 2, accent)
@@ -104,7 +107,7 @@ class TrackHeaderView(QHeaderView):
             paint_icon(painter, icon_name, icon_rect, self._theme, "selected")
             text_rect.setRight(icon_rect.left() - 4)
         font = QFont(self.font())
-        font.setWeight(QFont.Weight.DemiBold if is_sorted else QFont.Weight.Normal)
+        font.setWeight(QFont.Weight.DemiBold if is_sorted and not self._b2 else QFont.Weight.Normal)
         painter.setFont(font)
         painter.setPen(QColor(colors.accent if is_sorted else colors.subtle_text))
         text = painter.fontMetrics().elidedText(
@@ -236,6 +239,15 @@ class TrackTable(QTableView):
         self.header.set_theme(theme)
         self._apply_scrollbar_style()
         self.viewport().update()
+
+    def set_b2_theme(self, theme: Theme) -> None:
+        """Opt-in presentation only; keep the model, columns and input wiring."""
+        visual_theme = get_theme(theme.mode, profile="b2")
+        self.delegate._b2 = True
+        self.header._b2 = True
+        self.set_theme(visual_theme)
+        self.setStyleSheet(self.styleSheet() +
+            f"QTableView#trackTable {{ background: {visual_theme.colors.content_background}; }}")
 
     def _apply_theme_font(self, theme: Theme) -> None:
         font = QFont(self.font())

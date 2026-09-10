@@ -6,7 +6,8 @@ from PySide6.QtWidgets import QComboBox, QToolButton
 
 from app.ui_v2.adapters.recent_adapter import RecentAdapter
 from app.ui_v2.pages.track_list_page import TrackListPage
-from app.ui_v2.theme.tokens import Theme
+from app.ui_v2.theme.tokens import Theme, get_theme
+from app.ui_v2.widgets.collection_visuals import apply_collection_page
 
 
 class RecentPage(TrackListPage):
@@ -30,6 +31,8 @@ class RecentPage(TrackListPage):
 
     def set_theme(self, theme: Theme) -> None:
         super().set_theme(theme)
+        apply_collection_page(self, theme)
+        theme = get_theme(theme.mode, profile="b2")
         if not hasattr(self, "range_box"):
             return
         self.range_box.setStyleSheet(

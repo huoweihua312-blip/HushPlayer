@@ -5,6 +5,7 @@ from __future__ import annotations
 from app.ui_v2.adapters.favorites_adapter import FavoritesAdapter
 from app.ui_v2.pages.track_list_page import TrackListPage
 from app.ui_v2.theme.tokens import Theme
+from app.ui_v2.widgets.collection_visuals import apply_collection_page
 from app.ui_v2.widgets.track_collection_hero import TrackCollectionHero
 
 
@@ -21,11 +22,13 @@ class FavoritesPage(TrackListPage):
         self.empty_state.set_state("empty", "收藏歌曲会显示在这里。")
         self.empty_state.set_action("浏览音乐库")
         self._on_tracks_reset(adapter.tracks())
+        apply_collection_page(self, theme)
 
     def set_theme(self, theme: Theme) -> None:
         super().set_theme(theme)
         if hasattr(self, "collection_hero"):
             self.collection_hero.set_theme(theme)
+        apply_collection_page(self, theme)
 
     def set_responsive_reference_width(self, width: int) -> None:
         super().set_responsive_reference_width(width)

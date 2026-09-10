@@ -7,6 +7,7 @@ from PySide6.QtCore import Signal
 from app.ui_v2.pages.library_page import LibraryPage
 from app.ui_v2.models.track import format_duration
 from app.ui_v2.theme.tokens import Theme
+from app.ui_v2.widgets.collection_visuals import apply_collection_page
 from app.ui_v2.widgets.collection_action_bar import CollectionActionBar
 
 
@@ -32,11 +33,13 @@ class AllSongsPage(LibraryPage):
         self.collection_actions.shuffle_requested.connect(self.shuffle_requested)
         self.layout().insertWidget(1, self.collection_actions)
         self.set_playback_enabled(not adapter.collection.read_only)
+        apply_collection_page(self, theme)
 
     def set_theme(self, theme: Theme) -> None:
         super().set_theme(theme)
         if hasattr(self, "collection_actions"):
             self.collection_actions.set_theme(theme)
+        apply_collection_page(self, theme)
 
     def set_responsive_reference_width(self, width: int) -> None:
         super().set_responsive_reference_width(width)

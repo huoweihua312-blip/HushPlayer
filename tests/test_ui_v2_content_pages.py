@@ -114,7 +114,11 @@ class UiV2ContentPageTests(unittest.TestCase):
         self.assertEqual(table.model.headerData(int(TrackColumn.MORE), Qt.Orientation.Horizontal), "")
         self.assertFalse(table.header.is_sorted_section(int(TrackColumn.MORE)))
         playing = table.delegate.background_color(RowVisualState.PLAYING)
-        self.assertLess(playing.alpha(), 255)
+        # B2 precomposes its subtle tint so repeated paints cannot accumulate.
+        self.assertEqual(playing.alpha(), 255)
+        base = table.delegate.background_color(RowVisualState.NORMAL)
+        self.assertLess(max(abs(a - b) for a, b in zip(playing.getRgb()[:3], base.getRgb()[:3])), 16)
+        self.assertNotEqual(playing, table.delegate.background_color(RowVisualState.SELECTED))
         self.assertNotEqual(playing.name(), self.window.theme.colors.playing_background)
 
     def test_all_songs_header_has_no_second_search_or_preview_theme_control(self) -> None:
