@@ -8,11 +8,12 @@ from PySide6.QtCore import Qt, QTimer, Signal
 from PySide6.QtWidgets import QGridLayout, QScrollArea, QVBoxLayout, QWidget
 
 from app.ui_v2.theme.styles import build_stylesheet
-from app.ui_v2.theme.tokens import Theme
+from app.ui_v2.theme.tokens import Theme, get_theme
 from app.ui_v2.widgets.empty_state import EmptyState
 from app.ui_v2.widgets.page_header import PageHeader
 from app.ui_v2.widgets.search_field import SearchField
 from app.ui_v2.widgets.view_toggle import ViewToggle
+from app.ui_v2.widgets.discovery_visuals import style_entity_header
 
 
 class EntityGridPage(QWidget):
@@ -92,6 +93,7 @@ class EntityGridPage(QWidget):
             card = self._cards.get(entity_id)
             if card is None:
                 card = self._card_factory(entity)
+                card.set_theme(self._theme)
                 card.activated.connect(self.entity_requested)
                 self._cards[entity_id] = card
             self._card_updater(card, entity)
@@ -101,9 +103,11 @@ class EntityGridPage(QWidget):
         self._schedule_reflow()
 
     def set_theme(self, theme: Theme) -> None:
+        theme = get_theme(theme.mode, profile="b2")
         self._theme = theme
         self.setStyleSheet(build_stylesheet(theme))
         self.header.set_theme(theme)
+        style_entity_header(self, theme)
         self.search_box.set_theme(theme)
         self.view_toggle.set_theme(theme)
         self.empty_state.set_theme(theme)
@@ -142,9 +146,13 @@ class EntityGridPage(QWidget):
                 columns = 4
             else:
                 columns = 3
+            for column in range(5):
+                self.grid.setColumnStretch(column, 0)
             for index, entity in enumerate(self._entities):
                 card = self._cards[getattr(entity, "id")]
+                card.set_presentation(list_mode=columns == 1)
                 self.grid.addWidget(card, index // columns, index % columns)
-            self.grid.setColumnStretch(columns, 1)
+            for column in range(columns):
+                self.grid.setColumnStretch(column, 1)
         finally:
             self._reflowing = False

@@ -8,6 +8,7 @@ from PySide6.QtWidgets import QDialog, QHBoxLayout, QVBoxLayout, QWidget
 from app.ui_v2.adapters.playlist_adapter import PlaylistAdapter, PlaylistTrackAdapter
 from app.ui_v2.pages.track_list_page import TrackListPage
 from app.ui_v2.theme.tokens import Theme
+from app.ui_v2.widgets.discovery_visuals import style_collection_detail
 from app.ui_v2.widgets.content_heroes import PlaylistHero
 from app.ui_v2.widgets.playlist_dialogs import PlaylistConfirmDialog, PlaylistNameDialog
 from app.ui_v2.widgets.related_playlists_panel import RelatedPlaylistsPanel
@@ -66,7 +67,10 @@ class PlaylistPage(TrackListPage):
     def set_theme(self, theme: Theme) -> None:
         super().set_theme(theme)
         if hasattr(self, "related_playlists"):
-            self.related_playlists.set_theme(theme)
+            style_collection_detail(self, self.playlist_header, theme)
+            self.track_table.set_fit_columns_to_viewport(True)
+            self.related_playlists.set_theme(self.track_table.delegate._theme)
+            self.related_playlists.setStyleSheet("QWidget#relatedPlaylistsPanel { border: 0; background: transparent; }")
 
     def set_playlist(self, playlist_id: str) -> None:
         self.adapter.set_playlist(playlist_id)
@@ -77,7 +81,15 @@ class PlaylistPage(TrackListPage):
     def set_responsive_reference_width(self, width: int) -> None:
         super().set_responsive_reference_width(width)
         self.playlist_header.set_responsive_reference_width(width)
-        self.related_playlists.set_responsive_reference_width(width)
+        # Route creation can pass content width; this optional rail belongs
+        # to the window-wide 1450 contract, like the Artist information rail.
+        top_level = self.window()
+        window_width = top_level.width() if top_level is not self else width
+        self.related_playlists.set_responsive_reference_width(window_width)
+        # Account for the page-local rail before choosing an existing
+        # column profile; keep the trailing More action inside the table.
+        rail_space = self.related_playlists.width() + self._theme.metrics.spacing_xl if window_width >= 1450 else 0
+        self.track_table.set_responsive_reference_width(window_width - rail_space)
 
     def _on_tracks_reset(self, tracks) -> None:
         if not hasattr(self, "playlist_header"):

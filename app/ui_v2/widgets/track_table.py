@@ -249,6 +249,11 @@ class TrackTable(QTableView):
         self.setStyleSheet(self.styleSheet() +
             f"QTableView#trackTable {{ background: {visual_theme.colors.content_background}; }}")
 
+    def set_fit_columns_to_viewport(self, enabled: bool) -> None:
+        """Opt in for a page-local rail; retain existing profiles and actions."""
+        self._fit_columns_to_viewport = bool(enabled)
+        self._apply_column_widths()
+
     def _apply_theme_font(self, theme: Theme) -> None:
         font = QFont(self.font())
         font.setPixelSize(theme.fonts.body)
@@ -523,6 +528,17 @@ class TrackTable(QTableView):
         width = max(1, viewport_width - 16)
         profile_width = self._responsive_reference_width or viewport_width
         self._column_profile = ResponsiveColumnPolicy.profile_for_width(profile_width).name
+        if getattr(self, "_fit_columns_to_viewport", False):
+            for candidate in (self._column_profile, "standard", "narrow"):
+                # Never promote a profile, only fall back when columns would
+                # clip the trailing action inside a narrower page-local area.
+                if self._column_profile == "narrow":
+                    break
+                if sum(ResponsiveColumnPolicy.widths(candidate, width).values()) <= width:
+                    self._column_profile = candidate
+                    break
+            else:
+                self._column_profile = "narrow"
         self.setColumnHidden(
             int(TrackColumn.FAVORITE),
             self._column_profile == "narrow" or not self.adapter.collection.can_mutate_favorites,

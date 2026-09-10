@@ -7,6 +7,7 @@ from app.ui_v2.adapters.library_collection import LibraryCollectionAdapter
 from app.ui_v2.adapters.track_list_adapter import TrackListAdapter
 from app.ui_v2.pages.track_list_page import TrackListPage
 from app.ui_v2.theme.tokens import Theme
+from app.ui_v2.widgets.discovery_visuals import style_collection_detail
 from app.ui_v2.widgets.content_heroes import AlbumHero
 
 
@@ -45,7 +46,7 @@ class AlbumDetailPage(TrackListPage):
         super().set_theme(theme)
         if not hasattr(self, "back_button"):
             return
-        self.collection_hero.set_theme(theme)
+        style_collection_detail(self, self.collection_hero, theme)
 
     def set_responsive_reference_width(self, width: int) -> None:
         super().set_responsive_reference_width(width)

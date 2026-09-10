@@ -24,9 +24,10 @@ from app.ui_v2.adapters.track_list_adapter import TrackListAdapter
 from app.ui_v2.models.artist import Artist, ArtistAggregate
 from app.ui_v2.models.track import Track
 from app.ui_v2.theme.styles import build_stylesheet
-from app.ui_v2.theme.tokens import Theme
+from app.ui_v2.theme.tokens import Theme, get_theme
 from app.ui_v2.widgets.artist_album_card import ArtistAlbumCard
 from app.ui_v2.widgets.artist_hero import ArtistHero
+from app.ui_v2.widgets.collection_visuals import apply_collection_actions
 from app.ui_v2.widgets.empty_state import EmptyState
 from app.ui_v2.widgets.quiet_context_menu import apply_menu_theme
 from app.ui_v2.widgets.track_table import TrackTable
@@ -243,12 +244,14 @@ class ArtistDetailPage(QWidget):
         )
 
     def set_theme(self, theme: Theme) -> None:
+        theme = get_theme(theme.mode, profile="b2")
         self._theme = theme
         self.setStyleSheet(build_stylesheet(theme) + self._page_styles(theme))
         self.hero.set_theme(theme)
+        apply_collection_actions(self.hero.action_row, theme)
         self.empty_state.set_theme(theme)
         self.popular_empty_state.set_theme(theme)
-        self.track_table.set_theme(theme)
+        self.track_table.set_b2_theme(theme)
         self.popular_title.setStyleSheet(self._section_title_style(theme))
         self.albums_title.setStyleSheet(self._section_title_style(theme))
         self.popular_count.setStyleSheet(self._section_meta_style(theme))
@@ -479,6 +482,6 @@ class ArtistDetailPage(QWidget):
         return (
             f"QScrollArea#artistScrollArea {{ border: 0; background: {c.content_background}; }}"
             f"QWidget#artistContent {{ background: {c.content_background}; }}"
-            f"QFrame#artistInfoRail {{ border-left: 1px solid {c.divider}; background: {c.surface_primary}; }}"
+            f"QFrame#artistInfoRail {{ border: 0; background: transparent; }}"
             f"QLabel#artistHeroArtwork {{ border-radius: {theme.metrics.radius_lg}px; }}"
         )

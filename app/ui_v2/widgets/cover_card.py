@@ -16,7 +16,7 @@ from PySide6.QtWidgets import (
 
 from app.ui_v2.models.track import Track
 from app.ui_v2.theme.icons import icon
-from app.ui_v2.theme.tokens import Theme
+from app.ui_v2.theme.tokens import Theme, get_theme
 from app.ui_v2.widgets.elided_label import ElidedLabel
 from app.ui_v2.widgets.artwork_thumbnail import ArtworkThumbnail
 from app.ui_v2.widgets.track_display import display_track_text
@@ -167,7 +167,7 @@ class CoverCard(QFrame):
     def _apply_surface_style(self) -> None:
         c = self._theme.colors
         background = c.surface_secondary if self._hovered else "transparent"
-        border = c.border if self._hovered else "transparent"
+        border = c.border if self._hovered and self._theme is not get_theme(self._theme.mode, profile="b2") else "transparent"
         self.setStyleSheet(
             f"QFrame#coverCard {{ background: {background}; border: 1px solid {border}; "
             f"border-radius: {self._theme.metrics.radius_md}px; }}"

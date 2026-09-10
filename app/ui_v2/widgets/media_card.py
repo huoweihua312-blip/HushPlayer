@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
-from PySide6.QtCore import QSize, Qt, Signal
-from PySide6.QtGui import QMouseEvent
-from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QVBoxLayout, QWidget
+from PySide6.QtCore import QRectF, QSize, Qt, Signal
+from PySide6.QtGui import QMouseEvent, QPainter, QPainterPath, QPixmap
+from PySide6.QtWidgets import QBoxLayout, QFrame, QHBoxLayout, QLabel, QVBoxLayout, QWidget
 
 from app.ui_v2.theme.icons import IconName, icon
-from app.ui_v2.theme.tokens import Theme
+from app.ui_v2.theme.tokens import Theme, get_theme
 from app.ui_v2.widgets.elided_label import ElidedLabel
 from app.ui_v2.widgets.artwork_thumbnail import artwork_pixmap_for_track
 from app.ui_v2.models.track import Track
@@ -56,6 +56,17 @@ class MediaCard(QFrame):
         self.subtitle_label.set_full_text(subtitle)
         self.detail_label.set_full_text(detail)
 
+    def set_presentation(self, *, list_mode: bool) -> None:
+        """Reflow the same clickable card; entity identity/signals stay intact."""
+        self.layout().setDirection(QBoxLayout.Direction.LeftToRight if list_mode else QBoxLayout.Direction.TopToBottom)
+        size = 64 if list_mode else 176
+        self.cover_label.setFixedSize(size, size)
+        self.layout().setAlignment(self.cover_label, Qt.AlignmentFlag.AlignLeft)
+        self.setFixedHeight(84 if list_mode else 266)
+        for label in (self.title_label, self.subtitle_label, self.detail_label):
+            label.setFixedHeight(22)
+        self._refresh_artwork()
+
     def set_artwork(self, track: Track | None, *, circular: bool = False) -> None:
         self._representative = track
         self._circular_artwork = bool(circular)
@@ -64,17 +75,19 @@ class MediaCard(QFrame):
     def set_theme(self, theme: Theme) -> None:
         self._theme = theme
         self._refresh_artwork()
+        b2 = theme is get_theme(theme.mode, profile="b2")
+        hover_border = "transparent" if b2 else theme.colors.border_strong
         self.setStyleSheet(
             f"QFrame {{ border: 1px solid transparent; border-radius: {theme.metrics.radius_md}px; "
             f"background: transparent; }}"
-            f"QFrame:hover {{ border-color: {theme.colors.border_strong}; background: {theme.colors.hover_background}; }}"
+            f"QFrame:hover {{ border-color: {hover_border}; background: {theme.colors.hover_background}; }}"
         )
         self.cover_label.setStyleSheet(
-            f"background: {theme.colors.elevated_background}; border: 1px solid {theme.colors.border}; "
+            f"background: transparent; border: 0; "
             f"border-radius: {52 if self._circular_artwork else theme.metrics.radius_sm}px;"
         )
         self.title_label.setStyleSheet(
-            f"font-size: {theme.fonts.body}px; font-weight: 600; color: {theme.colors.primary_text};"
+            f"font-size: {theme.fonts.body}px; font-weight: 400; color: {theme.colors.primary_text};"
         )
         self.subtitle_label.setStyleSheet(
             f"font-size: {theme.fonts.secondary}px; font-weight: 400; color: {theme.colors.secondary_text};"
@@ -95,6 +108,17 @@ class MediaCard(QFrame):
             self.cover_label.setPixmap(icon(self._icon_name, self._theme, "selected").pixmap(QSize(30, 30)))
             return
         size = self.cover_label.size()
-        self.cover_label.setPixmap(
-            artwork_pixmap_for_track(self._representative, size.width(), size.height())
-        )
+        pixmap = artwork_pixmap_for_track(self._representative, size.width(), size.height())
+        if self._circular_artwork and self._theme is get_theme(self._theme.mode, profile="b2"):
+            clipped = QPixmap(pixmap.size())
+            clipped.setDevicePixelRatio(pixmap.devicePixelRatio())
+            clipped.fill(Qt.GlobalColor.transparent)
+            painter = QPainter(clipped)
+            painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+            path = QPainterPath()
+            path.addEllipse(QRectF(0, 0, size.width(), size.height()))
+            painter.setClipPath(path)
+            painter.drawPixmap(0, 0, pixmap)
+            painter.end()
+            pixmap = clipped
+        self.cover_label.setPixmap(pixmap)

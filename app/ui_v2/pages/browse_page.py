@@ -22,7 +22,7 @@ from app.ui_v2.adapters.online_adapter import OnlineAdapter
 from app.ui_v2.adapters.playlist_adapter import PlaylistAdapter
 from app.ui_v2.models.track import Track
 from app.ui_v2.theme.icons import fluent_settings_interactive_icon, icon
-from app.ui_v2.theme.tokens import Theme
+from app.ui_v2.theme.tokens import Theme, get_theme
 from app.ui_v2.widgets.cover_card import CoverCard
 
 
@@ -105,10 +105,11 @@ class BrowseSection(QFrame):
         return tuple(self._cards)
 
     def set_theme(self, theme: Theme) -> None:
+        theme = get_theme(theme.mode, profile="b2")
         self._theme = theme
         c = theme.colors
         self.setStyleSheet(
-            f"QFrame#browseSection {{ background: {c.surface_primary}; border: 1px solid {c.border}; border-radius: {theme.metrics.radius_lg}px; }}"
+            f"QFrame#browseSection {{ background: transparent; border: 0; }}"
             f"QLabel#browseSectionTitle {{ color: {c.text_primary}; font-size: {theme.fonts.section_title}px; font-weight: 700; }}"
             f"QLabel#browseSectionStatus {{ padding: 3px 8px; border-radius: {theme.metrics.radius_sm}px; background: {c.surface_secondary}; color: {c.text_secondary}; font-size: {theme.fonts.card_meta}px; font-weight: 400; }}"
             f"QLabel#browseSectionEmpty {{ color: {c.text_tertiary}; font-size: {theme.fonts.secondary}px; font-weight: 400; }}"
@@ -292,11 +293,12 @@ class BrowsePage(QWidget):
         return target
 
     def set_theme(self, theme: Theme) -> None:
+        theme = get_theme(theme.mode, profile="b2")
         self._theme = theme
         c = theme.colors
         self.setStyleSheet(
             f"QWidget#browsePage, QScrollArea#browseScrollArea, QWidget#browseContent {{ background: {c.content_background}; }}"
-            f"QFrame#browseIntroSurface {{ background: {c.surface_primary}; border: 1px solid {c.border}; border-radius: {theme.metrics.radius_lg}px; }}"
+            f"QFrame#browseIntroSurface {{ background: transparent; border: 0; }}"
             f"QLabel#browsePageTitle {{ color: {c.text_primary}; font-size: {theme.fonts.page_title}px; font-weight: 700; }}"
             f"QLabel#browsePageDetail {{ color: {c.secondary_text}; font-size: {theme.fonts.secondary}px; font-weight: 500; }}"
             f"QScrollArea#browseScrollArea QScrollBar:vertical {{ background: transparent; width: 10px; margin: 4px 2px 4px 0; }}"
@@ -304,6 +306,7 @@ class BrowsePage(QWidget):
             f"QScrollArea#browseScrollArea QScrollBar::handle:vertical:hover {{ background: {c.text_secondary}; }}"
             f"QScrollArea#browseScrollArea QScrollBar::add-line:vertical, QScrollArea#browseScrollArea QScrollBar::sub-line:vertical, QScrollArea#browseScrollArea QScrollBar::add-page:vertical, QScrollArea#browseScrollArea QScrollBar::sub-page:vertical {{ height: 0; background: transparent; }}"
         )
+        self.intro_surface.layout().setContentsMargins(0, 12, 0, 20)
         for section in self.sections.values():
             section.set_theme(theme)
         self._sync_recommendation_heading()
