@@ -13,6 +13,23 @@ from PySide6.QtSvg import QSvgRenderer
 from app.ui_v2.theme.tokens import Theme
 
 
+@dataclass(frozen=True, slots=True)
+class IconSizing:
+    """Logical-pixel guidance only; does not resize widgets or change hit tests."""
+    visual_size: int
+    hit_area: int
+
+
+def icon_sizing(theme: Theme, role: str = "normal") -> IconSizing:
+    m = theme.metrics
+    return {
+        "small": IconSizing(m.icon_sm, m.icon_hit_area),
+        "normal": IconSizing(m.icon_md, m.icon_hit_area),
+        "playback": IconSizing(m.icon_playback, m.icon_hit_area),
+        "primary_playback": IconSizing(m.icon_primary_playback, m.primary_playback_hit_area),
+    }[role]
+
+
 IconName = Literal[
     "brand",
     "favorite",

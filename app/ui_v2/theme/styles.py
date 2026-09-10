@@ -4,7 +4,36 @@ from __future__ import annotations
 
 from PySide6.QtGui import QColor, QPalette
 
-from app.ui_v2.theme.tokens import Theme, font_family_qss
+from app.ui_v2.theme.tokens import Theme, font_family_qss, get_theme
+
+
+def focus_qss(theme: Theme, selector: str, *, keyboard_only: bool = True) -> str:
+    """Keep focus geometry fixed; callers retain their existing focus handling."""
+    gate = '[hushKeyboardFocus="true"]' if keyboard_only else ''
+    return f'{selector}{gate}:focus {{ border-color: {theme.colors.focus_ring}; }}'
+
+
+def surface_qss(theme: Theme, *, selector: str, role: str = "surface") -> str:
+    """Background only: never alter child controls, layout or safe-area insets."""
+    roles = {"surface": theme.colors.surface_primary,
+             "content": theme.colors.content_background,
+             "elevated": theme.colors.surface_elevated}
+    return f'{selector} {{ background: {roles[role]}; }}'
+
+
+def divider_qss(theme: Theme, *, selector: str) -> str:
+    return f'{selector} {{ background: {theme.colors.divider}; border: 0; }}'
+
+
+def input_qss(theme: Theme, *, selector: str = "QLineEdit") -> str:
+    c, m = theme.colors, theme.metrics
+    return (
+        f'{selector} {{ background: {c.input_background}; color: {c.primary_text}; '
+        f'border: 2px solid transparent; border-radius: {m.radius_control}px; '
+        f'padding: 0 {m.spacing_md}px; min-height: {m.control_height}px; }}'
+        + focus_qss(theme, selector, keyboard_only=False)
+        + f'{selector}:disabled {{ color: {c.disabled_text}; background: {c.surface_secondary}; }}'
+    )
 
 
 def build_application_palette(theme: Theme) -> QPalette:
@@ -206,7 +235,10 @@ def build_stylesheet(theme: Theme) -> str:
         QScrollBar::handle:horizontal {{ min-width: 32px; border-radius: 4px; background: {c.divider}; }}
         QScrollBar::handle:horizontal:hover {{ background: {c.text_tertiary}; }}
         QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {{ width: 0; }}
-    """
+    """ + surface_qss(
+        get_theme(theme.mode, profile="b2"),
+        selector="QWidget#libraryWorkSurface", role="content",
+    )  # Phase 0's only production use: the existing ContentSurface background.
 
 
 def build_dialog_stylesheet(theme: Theme) -> str:

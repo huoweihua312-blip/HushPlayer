@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Literal
 
@@ -148,6 +148,18 @@ class ThemeColors:
     hover_background: str
     warning: str
     success: str
+    # Optional family overrides; public roles below always resolve to a color.
+    _primary_fill: str | None = None
+    _content_error: str | None = None
+    text_on_accent: str = "#211e17"
+
+    @property
+    def primary_button_fill(self) -> str:
+        return self._primary_fill or self.accent
+
+    @property
+    def content_error(self) -> str:
+        return self._content_error or self.danger
 
     # Canonical aliases are derived, keeping existing constructors/replacements valid.
     @property
@@ -201,6 +213,14 @@ class ThemeMetrics:
     content_safe_bottom: int = 18
     track_row_height: int = 60
     track_artwork_size: int = 44
+    spacing_2xl: int = 32
+    control_height_sm: int = 32
+    radius_artwork: int = 4
+    radius_floating_panel: int = 11
+    icon_playback: int = 21
+    icon_primary_playback: int = 19
+    icon_hit_area: int = 32
+    primary_playback_hit_area: int = 37
 
     @property
     def control_height_md(self) -> int:
@@ -239,6 +259,10 @@ class ThemeFonts:
     player_title: int = 16
     player_meta: int = 15
     family: str = "MiSans"
+    # Semantic roles only: no lyric consumer is migrated in Phase 0.
+    lyrics_active: int = 32
+    immersive_lyrics_active: int = 36
+    desktop_lyrics_active: int = 38
 
     @property
     def label(self) -> int:
@@ -371,7 +395,46 @@ DARK_THEME = Theme(
 )
 
 
-def get_theme(mode: str) -> Theme:
-    """Resolve one complete immutable Quiet Orbit theme."""
+# Versioned presets of the SAME Theme schema, selected explicitly by migrated
+# consumers. Existing themes and font rendering remain the default.
+_B2_METRICS = replace(ThemeMetrics(), radius_sm=5, radius_md=6, radius_lg=11,
+                      control_height=35)
+B2_DARK_THEME = Theme(
+    mode="dark", metrics=_B2_METRICS, fonts=DARK_THEME.fonts,
+    colors=replace(_colors(
+        app="#111111", sidebar="#171717", content="#111111", player="#191919",
+        surface="#1b1b1b", surface_secondary="#272823", elevated="#20211e",
+        hover="#1c1c1b", selected="#292927", playing="#06c9a86a",
+        pressed="#292927", divider="#292925", primary="#f2f1ee",
+        secondary="#c8c7c3", tertiary="#858580", disabled="#70716b",
+        icon="#c8c7c3", active="#c9a86a", progress_track="#383834",
+        accent="#c9a86a", accent_hover="#c9a86a", accent_pressed="#c9a86a",
+        danger="#dc9a8d", warning="#c9b37d", success="#a2b898",
+        shadow=DARK_THEME.colors.shadow, overlay="#99080a0a",
+    ), input_background="#272823", _content_error="#cf8d7e"),
+)
+B2_LIGHT_THEME = Theme(
+    mode="light", metrics=_B2_METRICS, fonts=LIGHT_THEME.fonts,
+    colors=replace(_colors(
+        app="#f5f5f3", sidebar="#eeeeec", content="#fafaf8", player="#f5f5f3",
+        surface="#f0f0ed", surface_secondary="#eaeae4", elevated="#f6f6f2",
+        hover="#eeeeea", selected="#e2e2dd", playing="#0898762e",
+        pressed="#e2e2dd", divider="#deded9", primary="#1d1d1f",
+        secondary="#66666a", tertiary="#73736f", disabled="#858580",
+        icon="#66666a", active="#876625", progress_track="#d0cfc5",
+        accent="#876625", accent_hover="#876625", accent_pressed="#876625",
+        danger="#9f493b", warning="#826423", success="#52684b",
+        shadow=LIGHT_THEME.colors.shadow, overlay="#45202922",
+    ), input_background="#eaeae4", _primary_fill="#c4a363", _content_error="#a6473d"),
+)
+# QColor/QSS use AARRGGBB above, converted from CSS RRGGBBAA explicitly.
 
-    return LIGHT_THEME if str(mode).casefold() == "light" else DARK_THEME
+
+def get_theme(mode: str, *, profile: Literal["legacy", "b2"] = "legacy") -> Theme:
+    """Resolve a compatible preset; B2 never replaces the application default."""
+    if profile not in {"legacy", "b2"}:
+        raise ValueError(f"Unknown theme profile: {profile}")
+    light = str(mode).casefold() == "light"
+    if profile == "b2":
+        return B2_LIGHT_THEME if light else B2_DARK_THEME
+    return LIGHT_THEME if light else DARK_THEME
