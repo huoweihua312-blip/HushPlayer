@@ -4,7 +4,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from PySide6.QtCore import QSize, Qt, Signal
+from PySide6.QtCore import QRectF, QSize, Qt, Signal
+from PySide6.QtGui import QColor, QFont
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QHBoxLayout,
@@ -12,12 +13,49 @@ from PySide6.QtWidgets import (
     QListWidget,
     QListWidgetItem,
     QToolButton,
+    QStyle,
+    QStyledItemDelegate,
     QVBoxLayout,
     QWidget,
 )
 
 from app.ui_v2.theme.tokens import Theme
 from app.ui_v2.widgets.page_header import PageHeader
+
+
+class _PendingRecordDelegate(QStyledItemDelegate):
+    """Paint the existing pending record without replacing its selection model."""
+
+    def paint(self, painter, option, index):
+        record = index.data(Qt.ItemDataRole.UserRole)
+        if not isinstance(record, dict):
+            return super().paint(painter, option, index)
+        theme = self.parent().parent()._theme
+        c = theme.colors
+        painter.save()
+        selected = bool(option.state & QStyle.StateFlag.State_Selected)
+        hovered = bool(option.state & QStyle.StateFlag.State_MouseOver)
+        painter.fillRect(option.rect, QColor(c.selected_background if selected else c.hover_background if hovered else c.content_background))
+        bounds = QRectF(option.rect).adjusted(12, 8, -12, -8)
+        title = str(record.get("title") or Path(str(record.get("path") or "")).stem or "未知歌曲")
+        lines = (
+            (title, theme.fonts.body, c.primary_text),
+            (f"{record.get('artist') or '未知艺术家'} · {record.get('album') or '未知专辑'}", theme.fonts.caption, c.secondary_text),
+            (str(record.get("path") or ""), theme.fonts.caption, c.subtle_text),
+        )
+        for row, (text, size, color) in enumerate(lines):
+            font = QFont(option.font)
+            font.setPixelSize(size)
+            font.setWeight(QFont.Weight.Normal)
+            painter.setFont(font)
+            painter.setPen(QColor(color))
+            value = painter.fontMetrics().elidedText(text, Qt.TextElideMode.ElideMiddle if row == 2 else Qt.TextElideMode.ElideRight, int(bounds.width()))
+            painter.drawText(QRectF(bounds.left(), bounds.top() + row * 22, bounds.width(), 22), Qt.AlignmentFlag.AlignVCenter, value)
+        if option.state & QStyle.StateFlag.State_HasFocus:
+            painter.setPen(QColor(c.focus_ring))
+            painter.setBrush(Qt.BrushStyle.NoBrush)
+            painter.drawRect(option.rect.adjusted(1, 1, -2, -2))
+        painter.restore()
 
 
 class PendingImportsPage(QWidget):
@@ -55,7 +93,10 @@ class PendingImportsPage(QWidget):
         )
         self.list_widget.setUniformItemSizes(False)
         self.list_widget.setWordWrap(True)
-        self.list_widget.setSpacing(4)
+        self.list_widget.setSpacing(0)
+        self.list_widget.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.list_widget.setItemDelegate(_PendingRecordDelegate(self.list_widget))
+        self.list_widget.setMouseTracking(True)
 
         self.empty_label = QLabel("当前没有待导入音乐。", self)
         self.empty_label.setObjectName("pendingImportsEmpty")
@@ -155,12 +196,12 @@ class PendingImportsPage(QWidget):
         self.setStyleSheet(
             f"QWidget#pendingImportsPage {{ background: {c.content_background}; }}"
             f"QLabel#pendingImportsDescription {{ color: {c.secondary_text}; font-size: {theme.fonts.secondary}px; }}"
-            f"QLabel#pendingImportsStatus {{ color: {c.accent}; font-size: {theme.fonts.secondary}px; }}"
+            f"QLabel#pendingImportsStatus {{ color: {c.secondary_text}; font-size: {theme.fonts.secondary}px; }}"
             f"QLabel#pendingImportsEmpty {{ color: {c.secondary_text}; font-size: {theme.fonts.body}px; }}"
-            f"QListWidget#pendingImportsList {{ background: {c.surface_primary}; border: 1px solid {c.border}; "
+            f"QListWidget#pendingImportsList {{ background: {c.content_background}; border: 0; "
             f"border-radius: {theme.metrics.radius_md}px; color: {c.primary_text}; padding: {theme.metrics.spacing_sm}px; }}"
             f"QListWidget#pendingImportsList::item {{ padding: {theme.metrics.spacing_sm}px; border-radius: {theme.metrics.radius_sm}px; }}"
-            f"QListWidget#pendingImportsList::item:selected {{ background: {c.playing_background}; color: {c.primary_text}; }}"
+            f"QListWidget#pendingImportsList::item:selected {{ background: {c.selected_background}; color: {c.primary_text}; }}"
         )
         self.header.set_theme(theme)
         for button in (
@@ -172,8 +213,8 @@ class PendingImportsPage(QWidget):
         ):
             primary = bool(button.property("pendingPrimary"))
             danger = bool(button.property("pendingDanger"))
-            background = c.accent if primary else c.danger if danger else c.surface_secondary
-            foreground = c.app_background if primary or danger else c.primary_text
+            background = c.accent if primary else "transparent"
+            foreground = c.app_background if primary else c.danger if danger else c.secondary_text
             hover = c.accent_hover if primary else c.hover_background
             button.setStyleSheet(
                 f"QToolButton {{ min-height: 34px; padding: 0 {theme.metrics.spacing_md}px; border: 1px solid {c.border}; "

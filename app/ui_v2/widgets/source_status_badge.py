@@ -40,7 +40,7 @@ class SourceStatusBadge(QLabel):
     def _refresh(self) -> None:
         colors = self._theme.colors
         color = {
-            "success": colors.success,
+            "success": colors.secondary_text,
             "ready": colors.secondary_text,
             "searching": colors.accent,
             "warning": colors.warning,
@@ -48,8 +48,8 @@ class SourceStatusBadge(QLabel):
             "disabled": colors.disabled_text,
         }.get(self._status, colors.secondary_text)
         self.setStyleSheet(
-            f"padding: 3px 8px; border: 1px solid {self._theme.colors.border}; "
+            f"padding: 3px 8px; border: 0; "
             f"border-radius: {self._theme.metrics.radius_sm}px; "
-            f"background: {self._theme.colors.surface_secondary}; color: {color}; "
-            f"font-size: {self._theme.fonts.caption}px; font-weight: 600;"
+            f"background: transparent; color: {color}; "
+            f"font-size: {self._theme.fonts.caption}px; font-weight: 400;"
         )

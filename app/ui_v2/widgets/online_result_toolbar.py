@@ -7,6 +7,7 @@ from PySide6.QtWidgets import QHBoxLayout, QLabel, QToolButton, QWidget
 
 from app.ui_v2.theme.tokens import Theme
 from app.ui_v2.widgets.settings_control_factory import ToolbarComboBox
+from app.ui_v2.widgets.elided_label import ElidedLabel
 
 
 class OnlineResultToolbar(QWidget):
@@ -22,7 +23,7 @@ class OnlineResultToolbar(QWidget):
         self.setMinimumHeight(56)
         self.summary_label = QLabel(self)
         self.summary_label.setObjectName("onlineResultCount")
-        self.warning_label = QLabel(self)
+        self.warning_label = ElidedLabel(self)
         self.warning_label.setObjectName("onlineResultWarning")
         self.source_filter = ToolbarComboBox(theme, self)
         self.source_filter.setAccessibleName("来源筛选")
@@ -49,10 +50,10 @@ class OnlineResultToolbar(QWidget):
         self.sources_button.setToolTip("管理在线来源的启用状态")
         self.sources_button.clicked.connect(self.sources_requested)
         layout = QHBoxLayout(self)
-        layout.setContentsMargins(12, 8, 12, 8)
+        layout.setContentsMargins(0, 8, 0, 12)
         layout.setSpacing(10)
         layout.addWidget(self.summary_label)
-        layout.addWidget(self.warning_label)
+        layout.addWidget(self.warning_label, 1)
         layout.addWidget(self.source_filter)
         layout.addWidget(self.sort_selector)
         layout.addStretch(1)
@@ -85,7 +86,7 @@ class OnlineResultToolbar(QWidget):
 
     def set_summary(self, count: int, warning: str) -> None:
         self.summary_label.setText(f"{count} 条结果")
-        self.warning_label.setText(warning)
+        self.warning_label.set_full_text(warning)
         self.warning_label.setVisible(bool(warning))
         self.retry_button.setVisible(bool(warning))
 
@@ -94,11 +95,11 @@ class OnlineResultToolbar(QWidget):
         colors = theme.colors
         metrics = theme.metrics
         self.setStyleSheet(
-            f"QWidget#onlineResultToolbar {{ background: {colors.surface_secondary}; border: 1px solid {colors.border}; "
+            f"QWidget#onlineResultToolbar {{ background: transparent; border: 0; "
             f"border-radius: {metrics.radius_md}px; }}"
         )
         self.summary_label.setStyleSheet(
-            f"padding: 3px 8px; border-radius: {metrics.radius_sm}px; background: {colors.elevated_background}; "
+            f"padding: 3px 0; background: transparent; "
             f"color: {colors.primary_text}; font-size: {theme.fonts.caption}px; font-weight: 600;"
         )
         self.warning_label.setStyleSheet(

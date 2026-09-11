@@ -12,6 +12,7 @@ from app.ui_v2.theme.styles import build_stylesheet
 from app.ui_v2.theme.tokens import Theme
 from app.ui_v2.widgets.source_import_dialog import SourceImportDialog, SourceRemoveConfirmDialog
 from app.ui_v2.widgets.source_status_badge import SourceStatusBadge
+from app.ui_v2.widgets.elided_label import ElidedLabel
 
 
 class SourceRow(QFrame):
@@ -25,10 +26,10 @@ class SourceRow(QFrame):
         self.source_id = source.id
         self.setObjectName("onlineSourceRow")
         self.setMinimumHeight(106)
-        self.name_label = QLabel(self)
-        self.detail_label = QLabel(self)
-        self.capability_label = QLabel(self)
-        self.error_label = QLabel(self)
+        self.name_label = ElidedLabel(self)
+        self.detail_label = ElidedLabel(self)
+        self.capability_label = ElidedLabel(self)
+        self.error_label = ElidedLabel(self)
         self.badge = SourceStatusBadge(theme, self)
         self.enabled_button = QToolButton(self)
         self.enabled_button.setObjectName("sourceToggleButton")
@@ -66,8 +67,8 @@ class SourceRow(QFrame):
     def set_source(self, source: OnlineSource) -> None:
         self.source_id = source.id
         self._enabled = source.enabled
-        self.name_label.setText(source.name)
-        self.detail_label.setText(
+        self.name_label.set_full_text(source.name)
+        self.detail_label.set_full_text(
             f"响应 {source.latency_ms} ms · 最近搜索 {source.result_count} 条结果"
         )
         capabilities = []
@@ -77,10 +78,10 @@ class SourceRow(QFrame):
             capabilities.append("下载")
         if source.supports_lyrics:
             capabilities.append("歌词")
-        self.capability_label.setText(
+        self.capability_label.set_full_text(
             "支持 " + " · ".join(capabilities) if capabilities else "当前不提供附加能力"
         )
-        self.error_label.setText(source.last_error)
+        self.error_label.set_full_text(source.last_error)
         self.error_label.setVisible(bool(source.last_error))
         self.badge.set_source(source)
         self.enabled_button.setText("停用" if source.enabled else "启用")
@@ -103,11 +104,11 @@ class SourceRow(QFrame):
         colors = theme.colors
         metrics = theme.metrics
         self.setStyleSheet(
-            f"QFrame#onlineSourceRow {{ border: 1px solid {colors.border}; border-radius: {metrics.radius_md}px; "
-            f"background: {colors.surface_primary}; }}"
+            f"QFrame#onlineSourceRow {{ border: 0; border-bottom: 1px solid {colors.divider}; border-radius: 0; "
+            f"background: transparent; }}"
             f"QFrame#onlineSourceRow:hover {{ border-color: {colors.border_strong}; background: {colors.surface_secondary}; }}"
         )
-        self.name_label.setStyleSheet(f"font-weight: 700; color: {colors.primary_text};")
+        self.name_label.setStyleSheet(f"font-weight: 600; color: {colors.primary_text};")
         self.detail_label.setStyleSheet(
             f"font-size: {theme.fonts.caption}px; font-weight: 400; color: {colors.secondary_text};"
         )
@@ -196,6 +197,7 @@ class OnlineSourcePage(QWidget):
         actions.addWidget(self.select_all_button)
         actions.addWidget(self.clear_button)
         actions.addWidget(self.back_button)
+        actions.addStretch(1)
         header_top = QHBoxLayout()
         header_top.setContentsMargins(0, 0, 0, 0)
         header_top.setSpacing(16)
@@ -205,15 +207,17 @@ class OnlineSourcePage(QWidget):
         heading.addWidget(self.title_label)
         heading.addWidget(self.detail_label)
         header_top.addLayout(heading, 1)
-        header_top.addLayout(actions)
+        # Page actions get their own line; long source names cannot squeeze them.
+
         header_bottom = QHBoxLayout()
         header_bottom.setContentsMargins(0, 0, 0, 0)
         header_bottom.addWidget(self.summary_label)
         header_bottom.addStretch(1)
         header_layout = QVBoxLayout(self.header_surface)
-        header_layout.setContentsMargins(20, 18, 20, 16)
+        header_layout.setContentsMargins(0, 12, 0, 18)
         header_layout.setSpacing(14)
         header_layout.addLayout(header_top)
+        header_layout.addLayout(actions)
         header_layout.addLayout(header_bottom)
         self.scroll_area = QScrollArea(self.list_surface)
         self.scroll_area.setObjectName("onlineSourceScrollArea")
@@ -222,13 +226,14 @@ class OnlineSourcePage(QWidget):
         self.scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         self.content = QWidget(self.scroll_area)
+        self.content.setObjectName("onlineSourceContent")
         self.content_layout = QVBoxLayout(self.content)
         self.content_layout.setContentsMargins(4, 4, 4, 4)
         self.content_layout.setSpacing(theme.metrics.spacing_sm)
         self.content_layout.addStretch(1)
         self.scroll_area.setWidget(self.content)
         list_layout = QVBoxLayout(self.list_surface)
-        list_layout.setContentsMargins(8, 8, 8, 8)
+        list_layout.setContentsMargins(0, 0, 0, 0)
         list_layout.setSpacing(0)
         list_layout.addWidget(self.scroll_area)
         layout = QVBoxLayout(self)
@@ -283,19 +288,20 @@ class OnlineSourcePage(QWidget):
         self.setStyleSheet(
             build_stylesheet(theme)
             + f"""
+            QWidget#onlineSourceContent {{ background: {colors.content_background}; }}
             QFrame#onlineSourceHeaderSurface {{
-                background: {colors.surface_primary};
-                border: 1px solid {colors.border};
-                border-radius: {metrics.radius_lg}px;
+                background: transparent;
+                border: 0;
+                border-radius: 0;
             }}
             QFrame#onlineSourceListSurface {{
-                background: {colors.surface_primary};
-                border: 1px solid {colors.border};
-                border-radius: {metrics.radius_lg}px;
+                background: transparent;
+                border: 0;
+                border-radius: 0;
             }}
             QLabel#onlineSourceTitle {{
                 font-size: {theme.fonts.page_title}px;
-                font-weight: 700;
+                font-weight: 600;
                 color: {colors.primary_text};
             }}
             QLabel#onlineSourceDetail {{ color: {colors.secondary_text}; }}

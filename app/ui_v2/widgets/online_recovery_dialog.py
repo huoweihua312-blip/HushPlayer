@@ -22,6 +22,7 @@ from app.ui_v2.theme.icons import icon
 from app.ui_v2.theme.styles import build_dialog_stylesheet
 from app.ui_v2.theme.tokens import Theme
 from app.ui_v2.widgets.elided_label import ElidedLabel
+from app.ui_v2.widgets.artwork_thumbnail import ArtworkThumbnail
 
 
 class _CandidateRow(QFrame):
@@ -39,17 +40,23 @@ class _CandidateRow(QFrame):
         )
         self.title_label.setAccessibleName("歌曲标题和歌手")
         self.detail_label.setAccessibleName("专辑、来源和时长")
-        layout = QVBoxLayout(self)
+        self.artwork = ArtworkThumbnail(theme, self, size=44)
+        self.artwork.set_track(track.as_track())
+        text = QVBoxLayout()
+        text.setSpacing(5)
+        text.addWidget(self.title_label)
+        text.addWidget(self.detail_label)
+        layout = QHBoxLayout(self)
         layout.setContentsMargins(10, 7, 10, 7)
-        layout.setSpacing(3)
-        layout.addWidget(self.title_label)
-        layout.addWidget(self.detail_label)
+        layout.setSpacing(14)
+        layout.addWidget(self.artwork)
+        layout.addLayout(text, 1)
         self.setMinimumHeight(70)
         self.set_theme(theme)
 
     def set_theme(self, theme: Theme) -> None:
         self.title_label.setStyleSheet(
-            f"font-size: {theme.fonts.body}px; font-weight: 700; color: {theme.colors.primary_text};"
+            f"font-size: {theme.fonts.body}px; font-weight: 600; color: {theme.colors.primary_text};"
         )
         self.detail_label.setStyleSheet(
             f"font-size: {theme.fonts.caption}px; color: {theme.colors.secondary_text};"
@@ -95,7 +102,7 @@ class OnlineRecoveryCandidateDialog(QDialog):
         content = QWidget(self.surface)
         eyebrow = QLabel("播放恢复", content)
         eyebrow.setObjectName("onlineRecoveryEyebrow")
-        title = QLabel("找到多个相似的在线版本", content)
+        title = QLabel("修复歌曲的播放来源" if self._candidates else "暂未找到可用版本", content)
         title.setObjectName("onlineRecoveryTitle")
         detail = QLabel(
             f"请选择最符合的一首。只会替换播放来源，歌单位置、收藏和本地信息都会保留（{len(self._candidates)} 个候选）。",
@@ -110,7 +117,7 @@ class OnlineRecoveryCandidateDialog(QDialog):
         self.list_widget.setAccessibleDescription("使用方向键选择版本，按 Enter 替换播放来源并播放")
         self.list_widget.setAlternatingRowColors(False)
         self.list_widget.setSelectionMode(QListWidget.SelectionMode.SingleSelection)
-        self.list_widget.setSpacing(4)
+        self.list_widget.setSpacing(2)
         self.list_widget.itemActivated.connect(lambda _item: self._accept_selected())
         for track in self._candidates:
             item = QListWidgetItem()
@@ -199,7 +206,7 @@ class OnlineRecoveryCandidateDialog(QDialog):
             }}
             QFrame#onlineRecoveryTitleBar {{
                 min-height: 40px;
-                background: {colors.surface_secondary};
+                background: transparent;
                 border: 0;
                 border-bottom: 1px solid {colors.border};
                 border-top-left-radius: {metrics.radius_lg}px;
@@ -224,19 +231,19 @@ class OnlineRecoveryCandidateDialog(QDialog):
             QLabel#onlineRecoveryEyebrow {{
                 color: {colors.accent};
                 font-size: {theme.fonts.caption}px;
-                font-weight: 700;
+                font-weight: 600;
             }}
             QLabel#onlineRecoveryTitle {{
                 color: {colors.primary_text};
                 font-size: {theme.fonts.section_title}px;
-                font-weight: 700;
+                font-weight: 600;
             }}
             QLabel#onlineRecoveryDetail {{ color: {colors.secondary_text}; }}
             QListWidget#onlineRecoveryCandidateList {{
                 padding: 6px;
-                border: 1px solid {colors.border};
+                border: 0;
                 border-radius: {metrics.radius_md}px;
-                background: {colors.input_background};
+                background: transparent;
             }}
             QListWidget#onlineRecoveryCandidateList::item {{
                 margin: 1px 0;
@@ -249,11 +256,11 @@ class OnlineRecoveryCandidateDialog(QDialog):
             }}
             QListWidget#onlineRecoveryCandidateList::item:selected {{
                 background: {colors.selected_background};
-                border: 1px solid {colors.focus_ring};
+                border: 0;
             }}
             QFrame#onlineRecoverySelectionSurface {{
-                background: {colors.surface_secondary};
-                border: 1px solid {colors.border};
+                background: transparent;
+                border: 0;
                 border-radius: {metrics.radius_sm}px;
             }}
             QLabel#onlineRecoverySelectionCaption {{
@@ -262,7 +269,7 @@ class OnlineRecoveryCandidateDialog(QDialog):
                 font-weight: 600;
             }}
             QFrame#onlineRecoveryFooter {{
-                background: {colors.surface_secondary};
+                background: transparent;
                 border: 0;
                 border-top: 1px solid {colors.border};
                 border-bottom-left-radius: {metrics.radius_lg}px;

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 
-from PySide6.QtCore import QModelIndex, QRectF, Qt, Signal
+from PySide6.QtCore import QModelIndex, QRectF, QSize, Qt, Signal
 from PySide6.QtGui import QColor, QContextMenuEvent, QFont, QPainter, QPen
 from PySide6.QtWidgets import (
     QAbstractItemView,
@@ -41,7 +41,7 @@ class OnlineResultDelegate(QStyledItemDelegate):
         self._theme = theme
 
     def sizeHint(self, option, index):  # noqa: N802
-        return super().sizeHint(option, index).expandedTo(option.fontMetrics.size(0, 52))
+        return QSize(0, self._theme.metrics.track_row_height)
 
     def paint(self, painter: QPainter, option, index) -> None:  # noqa: N802
         track = index.data(ONLINE_TRACK_ROLE)
@@ -62,13 +62,12 @@ class OnlineResultDelegate(QStyledItemDelegate):
             playback_detail=track.availability_detail,
         )
         painter.save()
+        painter.setFont(option.font)
         rect = QRectF(option.rect)
         painter.fillRect(rect, self._background(state))
-        painter.setPen(QPen(QColor(colors.border), 1))
-        painter.drawLine(rect.bottomLeft(), rect.bottomRight())
         column = OnlineColumn(index.column())
         content = rect.adjusted(10, 0, -10, 0)
-        disabled = state == RowVisualState.DISABLED
+        disabled = state in {RowVisualState.DISABLED, RowVisualState.SELECTED_DISABLED, RowVisualState.HOVER_DISABLED}
         text_color = QColor(colors.disabled_text if disabled else colors.primary_text)
         secondary = QColor(colors.disabled_text if disabled else colors.secondary_text)
         icon_state = "disabled" if disabled else "selected" if playing else "hover" if hovered else "normal"
@@ -84,13 +83,14 @@ class OnlineResultDelegate(QStyledItemDelegate):
             )
         elif column == OnlineColumn.TITLE:
             left = content.left()
-            artwork = artwork_pixmap_for_track(track.as_track(), 32, 32)
+            artwork_size = self._theme.metrics.track_artwork_size
+            artwork = artwork_pixmap_for_track(track.as_track(), artwork_size, artwork_size)
             painter.drawPixmap(
                 int(left),
-                int(content.center().y() - 16),
+                int(content.center().y() - artwork_size / 2),
                 artwork,
             )
-            left += 42
+            left += artwork_size + 14
             if playing:
                 paint_icon(painter, "playing", QRectF(left, content.center().y() - 8, 16, 16), self._theme, "selected")
                 left += 22
@@ -114,7 +114,7 @@ class OnlineResultDelegate(QStyledItemDelegate):
             elif identity.availability.is_resolving:
                 color = colors.subtle_text
             else:
-                color = colors.success
+                color = colors.subtle_text
             status_text = (
                 identity.availability.label
                 if identity.availability.is_visible
@@ -139,7 +139,7 @@ class OnlineResultDelegate(QStyledItemDelegate):
             playback_detail=track.availability_detail,
         )
         if identity.availability.is_confirmed_error and not identity.availability.is_retryable:
-            return RowVisualState.DISABLED
+            return RowVisualState.SELECTED_DISABLED if selected else RowVisualState.HOVER_DISABLED if hovered else RowVisualState.DISABLED
         if selected and playing:
             return RowVisualState.SELECTED_PLAYING
         if selected:
@@ -152,12 +152,14 @@ class OnlineResultDelegate(QStyledItemDelegate):
 
     def _background(self, state: RowVisualState) -> QColor:
         values = {
-            RowVisualState.NORMAL: self._theme.colors.surface_primary,
+            RowVisualState.NORMAL: self._theme.colors.content_background,
             RowVisualState.HOVER: self._theme.colors.hover_background,
             RowVisualState.SELECTED: self._theme.colors.selected_background,
             RowVisualState.PLAYING: self._theme.colors.playing_background,
             RowVisualState.SELECTED_PLAYING: self._theme.colors.selected_background,
-            RowVisualState.DISABLED: self._theme.colors.surface_primary,
+            RowVisualState.DISABLED: self._theme.colors.content_background,
+            RowVisualState.SELECTED_DISABLED: self._theme.colors.selected_background,
+            RowVisualState.HOVER_DISABLED: self._theme.colors.hover_background,
         }
         return QColor(values[state])
 
@@ -206,7 +208,7 @@ class OnlineResultTable(QTableView):
         self.setVerticalScrollMode(QAbstractItemView.ScrollMode.ScrollPerPixel)
         self.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.verticalHeader().hide()
-        self.verticalHeader().setDefaultSectionSize(52)
+        self.verticalHeader().setDefaultSectionSize(theme.metrics.track_row_height)
         self.horizontalHeader().setStretchLastSection(False)
         self.doubleClicked.connect(self._on_double_clicked)
         self.customContextMenuRequested.connect(self._show_context_menu)
@@ -223,11 +225,11 @@ class OnlineResultTable(QTableView):
         colors = theme.colors
         metrics = theme.metrics
         self.setStyleSheet(
-            f"QTableView#onlineResultTable {{ background: {colors.surface_primary}; border: 0; outline: 0; }}"
-            f"QTableView#onlineResultTable QHeaderView {{ background: {colors.surface_primary}; border: 0; }}"
+            f"QTableView#onlineResultTable {{ background: {colors.content_background}; border: 0; outline: 0; }}"
+            f"QTableView#onlineResultTable QHeaderView {{ background: {colors.content_background}; border: 0; }}"
             f"QTableView#onlineResultTable QHeaderView::section {{ height: 36px; padding: 0 {metrics.spacing_sm}px; "
-            f"background: {colors.surface_primary}; color: {colors.text_tertiary}; border: 0; "
-            f"border-bottom: 1px solid {colors.divider}; font-size: {theme.fonts.card_meta}px; font-weight: 600; }}"
+            f"background: {colors.content_background}; color: {colors.text_tertiary}; border: 0; "
+            f"border-bottom: 1px solid {colors.divider}; font-size: {theme.fonts.card_meta}px; font-weight: 400; }}"
             f"QTableView#onlineResultTable QScrollBar:vertical {{ width: 6px; margin: 4px 2px; background: transparent; border: 0; }}"
             f"QTableView#onlineResultTable QScrollBar::handle:vertical {{ min-height: 28px; border-radius: 3px; background: {colors.border_strong}; }}"
             f"QTableView#onlineResultTable QScrollBar::handle:vertical:hover {{ background: {colors.text_tertiary}; }}"
@@ -413,17 +415,18 @@ class OnlineResultTable(QTableView):
     def _apply_column_widths(self) -> None:
         width = max(1, self.viewport().width() - 12)
         profile = self._responsive_width or width
-        narrow = profile < 950
-        hidden = {OnlineColumn.ALBUM, OnlineColumn.QUALITY, OnlineColumn.STATUS} if narrow else set()
+        narrow = profile < 1100
+        hidden = {OnlineColumn.ALBUM, OnlineColumn.QUALITY} if narrow else set()
         for column in OnlineColumn:
             self.setColumnHidden(int(column), column in hidden)
         if narrow:
             values = {
                 OnlineColumn.FAVORITE: 38,
-                OnlineColumn.TITLE: max(160, width - 38 - 126 - 68 - 52),
-                OnlineColumn.ARTIST: 126,
+                OnlineColumn.TITLE: max(160, width - 38 - 146 - 68 - 118 - 88),
+                OnlineColumn.ARTIST: 146,
                 OnlineColumn.DURATION: 68,
-                OnlineColumn.SOURCE: 52,
+                OnlineColumn.SOURCE: 118,
+                OnlineColumn.STATUS: 88,
             }
         else:
             values = {

@@ -35,6 +35,7 @@ class SourceImportDialog(QDialog):
         self.setWindowFlags(Qt.WindowType.Dialog | Qt.WindowType.FramelessWindowHint)
         self.setModal(True)
         self.setMinimumWidth(520)
+        self.resize(660, 460)
 
         self.title_label = QLabel("添加在线来源", self)
         self.detail_label = QLabel(
@@ -48,7 +49,7 @@ class SourceImportDialog(QDialog):
         self.url_input.setPlaceholderText(
             "例如：\nhttps://example.invalid/open-source.js"
         )
-        self.url_input.setMinimumHeight(112)
+        self.url_input.setMinimumHeight(144)
         self.policy_combo = SettingsControlFactory.combo(
             (("内容明确授权开放使用", "open"), ("内容由我拥有", "user_owned")),
             "open",
@@ -74,8 +75,10 @@ class SourceImportDialog(QDialog):
         policy_row.setContentsMargins(0, 0, 0, 0)
         policy_row.setSpacing(8)
         policy_row.addWidget(self.policy_combo)
-        policy_row.addWidget(self.confirm_toggle)
-        policy_row.addWidget(self.confirm_label, 1)
+        confirmation_row = QHBoxLayout()
+        confirmation_row.addWidget(self.confirm_toggle)
+        confirmation_row.addWidget(self.confirm_label, 1)
+        self.confirm_label.setWordWrap(True)
 
         buttons = QHBoxLayout()
         buttons.setContentsMargins(0, 10, 0, 0)
@@ -86,11 +89,12 @@ class SourceImportDialog(QDialog):
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(24, 22, 24, 20)
-        layout.setSpacing(10)
+        layout.setSpacing(16)
         layout.addWidget(self.title_label)
         layout.addWidget(self.detail_label)
         layout.addWidget(self.url_input)
         layout.addLayout(policy_row)
+        layout.addLayout(confirmation_row)
         layout.addWidget(self.status_label)
         layout.addLayout(buttons)
 
@@ -109,11 +113,11 @@ class SourceImportDialog(QDialog):
             build_dialog_stylesheet(theme)
             + f"QDialog#sourceImportDialog {{ background: {c.surface_elevated}; border: 1px solid {c.border_strong}; border-radius: {m.radius_lg}px; }}"
             f"QLabel {{ color: {c.primary_text}; }}"
-            f"QPlainTextEdit#sourceImportUrls {{ min-height: 112px; padding: 10px; border: 1px solid {c.border}; border-radius: {m.radius_sm}px; background: {c.input_background}; color: {c.primary_text}; }}"
+            f"QPlainTextEdit#sourceImportUrls {{ min-height: 144px; padding: 10px; border: 1px solid {c.border}; border-radius: {m.radius_sm}px; background: {c.input_background}; color: {c.primary_text}; }}"
             f"QPlainTextEdit#sourceImportUrls:focus {{ border-color: {c.focus_ring}; }}"
         )
         self.title_label.setStyleSheet(
-            f"font-size: {theme.fonts.section_title}px; font-weight: 600; color: {c.primary_text};"
+            f"font-size: 26px; font-weight: 600; color: {c.primary_text};"
         )
         self.detail_label.setStyleSheet(
             f"font-size: {theme.fonts.body}px; color: {c.secondary_text};"
@@ -163,7 +167,7 @@ class SourceImportDialog(QDialog):
     def _on_completed(self, message: str) -> None:
         self._set_status(message)
         self.status_label.setStyleSheet(
-            f"font-size: {self._theme.fonts.caption}px; color: {self._theme.colors.success};"
+            f"font-size: {self._theme.fonts.caption}px; color: {self._theme.colors.secondary_text};"
         )
 
     def _on_failed(self, message: str) -> None:

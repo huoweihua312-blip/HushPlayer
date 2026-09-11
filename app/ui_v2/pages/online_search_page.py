@@ -16,6 +16,7 @@ from app.ui_v2.widgets.online_search_bar import OnlineSearchBar
 from app.ui_v2.widgets.search_history_view import SearchHistoryView
 from app.ui_v2.widgets.search_state_view import SearchStateView
 from app.ui_v2.widgets.source_selector import SourceSelector
+from app.ui_v2.widgets.elided_label import ElidedLabel
 
 
 class OnlineSearchPage(QWidget):
@@ -43,7 +44,7 @@ class OnlineSearchPage(QWidget):
         self.title_label.setObjectName("onlineSearchTitle")
         self.detail_label = QLabel("从已启用的在线来源聚合结果。", self.identity_surface)
         self.detail_label.setObjectName("onlineSearchDetail")
-        self.query_context_label = QLabel(self)
+        self.query_context_label = ElidedLabel(self)
         self.query_context_label.setObjectName("onlineSearchQueryContext")
         self.scope_label = QLabel("搜索范围：已启用的在线来源", self)
         self.scope_label.setObjectName("onlineSearchScope")
@@ -67,18 +68,18 @@ class OnlineSearchPage(QWidget):
         identity_context = QHBoxLayout()
         identity_context.setContentsMargins(0, 0, 0, 0)
         identity_context.setSpacing(theme.metrics.spacing_sm)
-        identity_context.addWidget(self.query_context_label)
+        identity_context.addWidget(self.query_context_label, 1)
         identity_context.addWidget(self.scope_label)
         identity_context.addWidget(self.source_summary_label)
         identity_context.addStretch(1)
         identity_context.addWidget(self.source_selector)
         identity_layout = QVBoxLayout(self.identity_surface)
-        identity_layout.setContentsMargins(20, 18, 20, 18)
+        identity_layout.setContentsMargins(0, 12, 0, 18)
         identity_layout.setSpacing(14)
         identity_layout.addLayout(identity_heading)
         identity_layout.addLayout(identity_context)
         result_layout = QVBoxLayout(self.result_surface)
-        result_layout.setContentsMargins(12, 12, 12, 12)
+        result_layout.setContentsMargins(0, 0, 0, 0)
         result_layout.setSpacing(theme.metrics.spacing_sm)
         result_layout.addWidget(self.result_toolbar)
         result_layout.addWidget(self.history_view)
@@ -127,18 +128,18 @@ class OnlineSearchPage(QWidget):
             build_stylesheet(theme)
             + f"""
             QFrame#onlineSearchIdentitySurface {{
-                background: {colors.surface_primary};
-                border: 1px solid {colors.border};
-                border-radius: {metrics.radius_lg}px;
+                background: transparent;
+                border: 0;
+                border-radius: 0;
             }}
             QFrame#onlineSearchResultSurface {{
-                background: {colors.surface_primary};
-                border: 1px solid {colors.border};
-                border-radius: {metrics.radius_lg}px;
+                background: transparent;
+                border: 0;
+                border-radius: 0;
             }}
             QLabel#onlineSearchTitle {{
                 font-size: {theme.fonts.page_title}px;
-                font-weight: 700;
+                font-weight: 600;
                 color: {colors.primary_text};
             }}
             QLabel#onlineSearchDetail {{ color: {colors.secondary_text}; }}
@@ -152,17 +153,17 @@ class OnlineSearchPage(QWidget):
                 font-size: {theme.fonts.caption}px;
             }}
             QWidget#onlineSearchHistorySurface {{
-                background: {colors.surface_secondary};
-                border: 1px solid {colors.border};
-                border-radius: {metrics.radius_md}px;
+                background: transparent;
+                border: 0;
+                border-radius: 0;
             }}
             QWidget#onlineSearchStateSurface {{
-                background: {colors.surface_secondary};
-                border: 1px solid {colors.border};
-                border-radius: {metrics.radius_md}px;
+                background: transparent;
+                border: 0;
+                border-radius: 0;
             }}
             QTableView#onlineResultTable {{
-                background: {colors.surface_primary};
+                background: {colors.content_background};
                 border: 0;
             }}
             """
@@ -229,7 +230,7 @@ class OnlineSearchPage(QWidget):
 
     def _sync_query_context(self) -> None:
         query = str(self.adapter.query or "").strip()
-        self.query_context_label.setText(
+        self.query_context_label.set_full_text(
             f"当前搜索：{query}" if query else "尚未输入关键词"
         )
 
