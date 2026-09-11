@@ -6,6 +6,8 @@ from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import QHBoxLayout, QLabel, QMenu, QToolButton, QWidget
 
 from app.ui_v2.theme.tokens import Theme
+from app.ui_v2.theme.styles import focus_qss
+from app.ui_v2.widgets.quiet_context_menu import apply_menu_theme
 
 
 class CompactLyricsToolbar(QWidget):
@@ -35,7 +37,7 @@ class CompactLyricsToolbar(QWidget):
         self.more_button.setMenu(self.more_menu)
         self.more_button.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
         self.setObjectName("compactLyricsToolbar")
-        self.setFixedHeight(58)
+        self.setFixedHeight(44)
         self.set_theme(theme)
 
     def _button(self, text: str, tooltip: str, *, checkable: bool = False) -> QToolButton:
@@ -50,21 +52,24 @@ class CompactLyricsToolbar(QWidget):
     def set_theme(self, theme: Theme) -> None:
         self._theme = theme
         self.title_label.setStyleSheet(
-            f"font-size: {theme.fonts.section_title}px; font-weight: 600; color: {theme.colors.primary_text};"
+            f"font-size: {theme.fonts.body}px; font-weight: 400; color: {theme.colors.secondary_text};"
         )
         style = (
-            "QToolButton { border: 0; border-radius: 6px; padding: 5px 8px; background: transparent; "
+            "QToolButton { border: 2px solid transparent; border-radius: 6px; padding: 3px 8px; background: transparent; font-weight: 400; "
             f"color: {theme.colors.secondary_text}; }}"
             f"QToolButton:hover {{ background: {theme.colors.hover_background}; color: {theme.colors.primary_text}; }}"
             f"QToolButton:checked {{ color: {theme.colors.accent}; background: transparent; }}"
         )
+        style += focus_qss(theme, "QToolButton")
+        style += f"QToolButton:disabled {{ color: {theme.colors.disabled_text}; }}"
         for button in (self.translation_button, self.more_button, self.immersive_button):
             button.setStyleSheet(style)
+        apply_menu_theme(self.more_menu, theme)
 
     def set_options(self, options: dict[str, object]) -> None:
         self.translation_button.setChecked(bool(options.get("translation", True)))
 
     def set_compact(self, compact: bool) -> None:
-        self.setFixedHeight(52 if compact else 58)
+        self.setFixedHeight(40 if compact else 44)
         self.translation_button.setText("译" if compact else "翻译")
         self.immersive_button.setText("沉浸" if not compact else "沉浸")

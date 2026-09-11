@@ -8,7 +8,8 @@ from PySide6.QtWidgets import QHBoxLayout, QStackedLayout, QVBoxLayout, QWidget
 from app.ui_v2.adapters.lyrics_adapter import LyricsAdapter
 from app.ui_v2.models.lyrics_document import LyricsDocument
 from app.ui_v2.models.lyrics_state import LyricsState
-from app.ui_v2.theme.tokens import Theme
+from app.ui_v2.theme.tokens import Theme, get_theme
+from app.ui_v2.theme.button_styles import button_qss
 from app.ui_v2.widgets.compact_lyrics_toolbar import CompactLyricsToolbar
 from app.ui_v2.widgets.lyrics_canvas_v2 import LyricsCanvasV2
 from app.ui_v2.widgets.lyrics_state_view import LyricsStateView
@@ -25,6 +26,7 @@ class LyricsPage(QWidget):
         self.adapter = adapter
         self._theme = theme
         self.setObjectName("lyricsPage")
+        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         self._content_container = QWidget(self)
         self._content_container.setObjectName("ordinaryLyricsContentContainer")
         self._content_container.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
@@ -90,18 +92,27 @@ class LyricsPage(QWidget):
         return False
 
     def set_theme(self, theme: Theme) -> None:
+        theme = get_theme(theme.mode, profile="b2")
         self._theme = theme
         self.setStyleSheet(f"QWidget#lyricsPage {{ background: {theme.colors.content_background}; }}")
         self.toolbar.set_theme(theme)
         self.lyrics_view.set_theme(theme)
         self.state_view.set_theme(theme)
+        # Scope B2 to this page: the shared canvas/state view also serve immersive.
+        self.lyrics_view.return_button.setStyleSheet(
+            button_qss(theme, role="ghost", selector="QToolButton#returnToCurrentLyrics")
+        )
+        for button in (self.state_view.retry_button, self.state_view.source_button):
+            button.setStyleSheet(button_qss(theme, role="ghost"))
 
     def set_responsive_reference_width(self, width: int, height: int | None = None) -> None:
         viewport_height = max(1, int(height or self.height() or 600))
         compact = width < 900
         self.lyrics_view.set_ordinary_viewport(width, viewport_height, self.devicePixelRatioF())
         metrics = self.lyrics_view.responsive_metrics
-        lyrics_max_width = metrics.lyrics_max_width if metrics is not None else min(820, width)
+        # Constrain the reading column, without changing the canvas metrics,
+        # current-line calculation or scrolling/animation algorithms.
+        lyrics_max_width = min(820, metrics.lyrics_max_width if metrics is not None else width)
         container_width = min(1020, max(320, min(width - (32 if compact else 64), lyrics_max_width + 40)))
         self._content_container.setMaximumWidth(container_width)
         self._content_container.setMinimumWidth(min(320, container_width))
