@@ -342,17 +342,21 @@ class DesktopLyricsWindow(QWidget):
             self._settings.get("floating_lyrics_font_family")
         )
         size = int(self._settings.get("floating_lyrics_font_size", 42))
-        secondary = f"rgba({lyric_color.red()}, {lyric_color.green()}, {lyric_color.blue()}, 0.72)"
+        # Keep the lyric itself as the surface: a restrained shadow improves
+        # readability over both light and dark wallpapers without creating a
+        # subtitle-style outline.
+        secondary = f"rgba({lyric_color.red()}, {lyric_color.green()}, {lyric_color.blue()}, 0.58)"
+        shadow = "text-shadow: 0 1px 5px rgba(0, 0, 0, 0.72);"
         # The application-wide QLabel stylesheet supplies a default font size,
         # so keep the explicit size here and update only these two labels during
         # a throttled preview tick instead of rebuilding the lyric contents.
         self._main_label.setStyleSheet(
             f"color: {lyric_color.name()}; font-family: '{family}'; "
-            f"font-size: {size}px; font-weight: 600;"
+            f"font-size: {size}px; font-weight: 600; {shadow}"
         )
         self._secondary_label.setStyleSheet(
             f"color: {secondary}; font-family: '{family}'; "
-            f"font-size: {max(14, size // 2)}px; font-weight: 400;"
+            f"font-size: {max(14, size // 2)}px; font-weight: 400; {shadow}"
         )
         main_font = QFont(family)
         main_font.setPixelSize(size)
