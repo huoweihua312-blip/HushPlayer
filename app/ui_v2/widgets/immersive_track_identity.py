@@ -5,8 +5,8 @@ from __future__ import annotations
 import re
 
 from PySide6.QtCore import QRect, QSize, Qt
-from PySide6.QtGui import QFontMetrics, QPainter
-from PySide6.QtWidgets import QBoxLayout, QLabel, QSizePolicy, QVBoxLayout, QWidget
+from PySide6.QtGui import QColor, QFontMetrics, QPainter
+from PySide6.QtWidgets import QBoxLayout, QGraphicsDropShadowEffect, QLabel, QSizePolicy, QVBoxLayout, QWidget
 
 from app.ui_v2.models.track import Track
 from app.ui_v2.theme.tokens import Theme
@@ -103,6 +103,10 @@ class ImmersiveTrackIdentity(QWidget):
         super().__init__(parent)
         self._theme = theme
         self.cover = AbstractArtwork(theme, self)
+        self._cover_shadow = QGraphicsDropShadowEffect(self.cover)
+        self._cover_shadow.setBlurRadius(18)
+        self._cover_shadow.setOffset(0, 4)
+        self.cover.setGraphicsEffect(self._cover_shadow)
         self.title_label = ElidedTrackLabel(self, max_lines=2)
         self.artist_label = ElidedTrackLabel(self)
         self.album_label = ElidedTrackLabel(self)
@@ -111,7 +115,7 @@ class ImmersiveTrackIdentity(QWidget):
         self.album_label.setObjectName("immersiveTrackAlbum")
         self._text_layout = QVBoxLayout()
         self._text_layout.setContentsMargins(0, 0, 0, 0)
-        self._text_layout.setSpacing(10)
+        self._text_layout.setSpacing(6)
         self._text_layout.addWidget(self.title_label)
         self._text_layout.addWidget(self.artist_label)
         self._text_layout.addWidget(self.album_label)
@@ -148,8 +152,9 @@ class ImmersiveTrackIdentity(QWidget):
     def set_theme(self, theme: Theme) -> None:
         self._theme = theme
         self.cover.set_theme(theme)
-        self.title_label.setStyleSheet(f"font-size: 26px; font-weight: 600; color: {theme.colors.primary_text};")
-        self.artist_label.setStyleSheet(f"font-size: 16px; color: {theme.colors.secondary_text};")
+        self._cover_shadow.setColor(QColor(5, 12, 14, 70 if theme.mode == "dark" else 35))
+        self.title_label.setStyleSheet(f"font-size: 24px; font-weight: 600; color: {theme.colors.primary_text};")
+        self.artist_label.setStyleSheet(f"font-size: 15px; color: {theme.colors.secondary_text};")
         self.album_label.setStyleSheet(f"font-size: {theme.fonts.secondary}px; color: {theme.colors.subtle_text};")
         self.title_label.setMinimumHeight(self.title_label.fontMetrics().height() * 2)
         self.artist_label.setMinimumHeight(self.artist_label.fontMetrics().height())
@@ -169,19 +174,19 @@ class ImmersiveTrackIdentity(QWidget):
         elif size_reference < 980:
             extent = 230
         elif size_reference < 1400:
-            extent = 285
+            extent = 320
         elif size_reference < 1700:
-            extent = 330
+            extent = 360
         else:
-            extent = 335
-        extent = max(120, min(410, round(extent * max(70, min(130, artwork_percent)) / 100)))
+            extent = 480 if size_reference >= 2200 else 440
+        extent = max(120, min(560, round(extent * max(70, min(130, artwork_percent)) / 100)))
         extent = min(extent, max(120, int(width)))
         self.cover.setFixedSize(extent, extent)
         self._group_layout.setDirection(QBoxLayout.Direction.LeftToRight if compact else QBoxLayout.Direction.TopToBottom)
-        self._group_layout.setSpacing(20 if compact else 16)
+        self._group_layout.setSpacing(16 if compact else 26)
         self._group_layout.setStretch(0, 0)
         self._group_layout.setStretch(1, 1 if compact else 0)
-        self._text_layout.setSpacing(10)
+        self._text_layout.setSpacing(6)
         self._group.setMaximumWidth(max(300, width))
         # The compact identity is a horizontal strip, with enough real width
         # for metadata beside the cover instead of an artwork-only sizeHint.

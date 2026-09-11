@@ -132,6 +132,7 @@ class ImmersiveLyricsPage(QWidget):
         self._identity_layout.addStretch(1)
         self.canvas = LyricsCanvasV2(theme, self.content)
         self.canvas.set_mode("immersive")
+        self.canvas.set_immersive_reading_style(True)
         self.lyrics_view = self.canvas  # Public semantic alias: one visual surface, no scroll list.
         self.lyrics_state_view = LyricsStateView(theme, self.content)
         self.lyrics_state_view.hide()
@@ -141,7 +142,7 @@ class ImmersiveLyricsPage(QWidget):
         self._content_layout.setContentsMargins(0, 0, 0, 0)
         self._content_layout.setSpacing(54)
         self._content_layout.addWidget(self.identity_column, 36)
-        self._content_layout.addWidget(self.canvas, 64)
+        self._content_layout.addWidget(self.canvas, 64, Qt.AlignmentFlag.AlignVCenter)
         self.content_stack.addWidget(self.content)
         self.now_playing_page = NowPlayingPage(playback, theme, self.content_stack)
         self.content_stack.addWidget(self.now_playing_page)
@@ -188,10 +189,10 @@ class ImmersiveLyricsPage(QWidget):
         self.header_fullscreen_button.clicked.connect(self.toggle_fullscreen)
         layout.addWidget(self.header_back_button)
         layout.addStretch(1)
-        layout.addWidget(self.header_now_playing)
-        layout.addSpacing(24)
         layout.addWidget(self.header_lyrics)
-        layout.addSpacing(8)
+        layout.addSpacing(12)
+        layout.addWidget(self.header_now_playing)
+        layout.addStretch(1)
         layout.addWidget(self.header_translation_button)
         layout.addSpacing(8)
         layout.addWidget(self.header_fullscreen_button)
@@ -224,7 +225,7 @@ class ImmersiveLyricsPage(QWidget):
         button.setText(text)
         button.setIcon(fluent_immersive_interactive_icon(icon_name, self._theme, 18))
         button.setIconSize(QSize(18, 18))
-        button.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
+        button.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextOnly)
         button.setCheckable(True)
         button.setFixedSize(width, 36)
         button.setToolTip(tooltip)
@@ -254,7 +255,7 @@ class ImmersiveLyricsPage(QWidget):
         colors = theme.colors
         self.header.setStyleSheet(
             f"QFrame#immersiveHeader {{ background: transparent; }}"
-            f"QToolButton {{ border: 1px solid transparent; border-radius: 6px; background: transparent; font-weight: 400; }}"
+            f"QToolButton {{ border: 1px solid transparent; border-radius: 6px; background: transparent; font-weight: 400; font-size: 13px; }}"
             f'QToolButton[hushKeyboardFocus="true"]:focus {{ border-color: {colors.focus_ring}; }}'
             f"QToolButton:hover {{ background: {colors.surface_hover}; }}"
             f"QToolButton#immersiveModeButton {{ border: 0; border-bottom: 2px solid transparent; "
@@ -911,7 +912,7 @@ class ImmersiveLyricsPage(QWidget):
 
         width = max(1, int(width or self.width() or 1400))
         height = max(1, self.height())
-        if width < 1100:
+        if width < 960:
             self._layout_band = "compact"
             compact = True
             direction = QBoxLayout.Direction.TopToBottom
@@ -920,7 +921,7 @@ class ImmersiveLyricsPage(QWidget):
             self._layout_band = "standard"
             compact = False
             direction = QBoxLayout.Direction.LeftToRight
-            margins, spacing, canvas_scale = 42, 34, 0.92
+            margins, spacing, canvas_scale = 42, 38, 0.96
         elif width < 1700:
             self._layout_band = "wide"
             compact = False
@@ -930,13 +931,15 @@ class ImmersiveLyricsPage(QWidget):
             self._layout_band = "ultra"
             compact = False
             direction = QBoxLayout.Direction.LeftToRight
-            margins, spacing, canvas_scale = 64, 48, 1.04
+            margins, spacing, canvas_scale = 64, 64, 1.12
 
         top_margin = 70 if height > 500 else 60
-        control_width = min(680, max(320, width - 40))
+        control_width = min(480 if self._mode == "lyrics" else 680, max(320, width - 40))
         control_height = max(132, self.controls.sizeHint().height())
         content_height = max(180, height - top_margin - control_height - 24)
         content_width = max(320, width - margins * 2)
+        if self._mode == "lyrics" and not compact:
+            content_width = min(1840, content_width)
         content_x = max(0, (width - content_width) // 2)
         self.content_stack.setVisible(True)
         self.content_stack.setGeometry(content_x, top_margin, content_width, content_height)
@@ -948,31 +951,41 @@ class ImmersiveLyricsPage(QWidget):
             control_height,
         )
         self.controls.set_compact(width <= 960)
+        self.controls.set_reading_scene(self._mode == "lyrics")
+        self.background.set_reading_scene(self._mode == "lyrics")
 
+        # A centered reading stage, rather than a full-height lyric column.
+        # The canvas owns all anchoring/scrolling inside its allocated viewport.
+        reading_height = min(content_height, max(260, round(height * 0.48)))
+        self.canvas.setFixedHeight(reading_height if not compact else max(160, content_height - 170))
         self._content_layout.setDirection(direction)
         self._content_layout.setSpacing(spacing)
         if compact:
             self.identity_column.setMaximumWidth(16_777_215)
+        elif width < 1100:
+            self.identity_column.setMaximumWidth(min(430, max(330, round(content_width * 0.36))))
         else:
-            self.identity_column.setMaximumWidth(min(560, max(390, round(content_width * 0.32))))
-        self._content_layout.setStretch(0, 0 if compact else 36)
-        self._content_layout.setStretch(1, 1 if compact else 64)
+            self.identity_column.setMaximumWidth(min(560, max(430, round(content_width * 0.40))))
+        self._content_layout.setStretch(0, 0 if compact else 40)
+        self._content_layout.setStretch(1, 1 if compact else 60)
         self._content_layout.activate()
         self.lyrics_state_view.setGeometry(self.canvas.geometry())
         self._on_state_changed(self.lyrics_adapter.state)
-        identity_inset = max(0, (content_width - 820) // 2) if compact else 36 if self._layout_band == "standard" else 64 if self._layout_band == "wide" else 96
+        identity_inset = max(0, (content_width - 820) // 2) if compact else 22 if self._layout_band == "standard" else 46 if self._layout_band == "wide" else 72
         self._identity_layout.setContentsMargins(identity_inset, 0, 0, 0)
         identity_width = max(300, (self.identity_column.width() or content_width) - identity_inset)
         self.identity.apply_responsive_layout(
             identity_width,
             compact,
             self.options.artwork_size,
-            reference_width=content_width,
+            # Use the viewport width for artwork tiers so the visual scale
+            # remains stable when the content margins change.
+            reference_width=width,
         )
         self.now_playing_page.set_responsive_reference_width(width, height)
         self.canvas.set_responsive_scale(canvas_scale)
         if self._mode == "lyrics":
-            identity_allowance = 40 if compact else max(260, round(content_width * 0.36))
+            identity_allowance = 40 if compact else max(300, round(content_width * 0.42))
             max_text_width = min(
                 760 if self._layout_band == "ultra" else self.options.lyrics_max_width,
                 max(360, content_width - identity_allowance - spacing - 28),

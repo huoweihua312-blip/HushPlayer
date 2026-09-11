@@ -97,6 +97,7 @@ class ImmersiveControls(QWidget):
         self.volume_slider.setFixedWidth(76)
         self.setObjectName("immersiveControls")
         self.setMinimumHeight(126)
+        self._reading_scene = False
         self.setAutoFillBackground(False)
         for widget in (self.progress_slider, self.volume_slider):
             widget.installEventFilter(self)
@@ -146,6 +147,7 @@ class ImmersiveControls(QWidget):
         self._on_repeat_changed(adapter.state.repeat_mode)
 
     def set_theme(self, theme: Theme) -> None:
+        reading = self._reading_scene
         self._theme = theme
         colors = theme.colors
         subtle = (
@@ -197,6 +199,26 @@ class ImmersiveControls(QWidget):
                 f"QSlider::handle:horizontal {{ width: 10px; margin: -4px 0; border: 0; border-radius: 5px; background: {_rgba(colors.primary_text, 238)}; }}"
                 "QSlider:focus { outline: 0; }"
             )
+
+        self._reading_scene = not reading
+        self.set_reading_scene(reading)
+
+    def set_reading_scene(self, enabled: bool) -> None:
+        """Quiet presentation; adapters, widgets and hit areas stay intact."""
+        enabled = bool(enabled)
+        if self._reading_scene == enabled:
+            return
+        self._reading_scene = enabled
+        colors = self._theme.colors
+        for label in (self.elapsed_label, self.duration_label):
+            label.setStyleSheet(
+                f"background: transparent; color: {_rgba(colors.secondary_text, 160 if enabled else 224)}; "
+                f"font-size: {11 if enabled else self._theme.fonts.caption}px;"
+            )
+        for slider in (self.progress_slider, self.volume_slider):
+            slider.set_handle_radius(3.0 if enabled else 4.0)
+            slider.set_track_height(2.0 if enabled else 4.0)
+        self.update()
 
     def set_compact(self, compact: bool) -> None:
         self.volume_slider.setVisible(not compact)
