@@ -148,8 +148,8 @@ class ImmersiveTrackIdentity(QWidget):
     def set_theme(self, theme: Theme) -> None:
         self._theme = theme
         self.cover.set_theme(theme)
-        self.title_label.setStyleSheet(f"font-size: 29px; font-weight: 600; color: {theme.colors.primary_text};")
-        self.artist_label.setStyleSheet(f"font-size: 18px; color: {theme.colors.secondary_text};")
+        self.title_label.setStyleSheet(f"font-size: 26px; font-weight: 600; color: {theme.colors.primary_text};")
+        self.artist_label.setStyleSheet(f"font-size: 16px; color: {theme.colors.secondary_text};")
         self.album_label.setStyleSheet(f"font-size: {theme.fonts.secondary}px; color: {theme.colors.subtle_text};")
         self.title_label.setMinimumHeight(self.title_label.fontMetrics().height() * 2)
         self.artist_label.setMinimumHeight(self.artist_label.fontMetrics().height())
@@ -165,7 +165,7 @@ class ImmersiveTrackIdentity(QWidget):
     ) -> None:
         size_reference = max(int(width), int(reference_width or width))
         if compact:
-            extent = 150 if size_reference < 900 else 205
+            extent = 112 if size_reference < 900 else 128
         elif size_reference < 980:
             extent = 230
         elif size_reference < 1400:
@@ -175,9 +175,16 @@ class ImmersiveTrackIdentity(QWidget):
         else:
             extent = 335
         extent = max(120, min(410, round(extent * max(70, min(130, artwork_percent)) / 100)))
+        extent = min(extent, max(120, int(width)))
         self.cover.setFixedSize(extent, extent)
         self._group_layout.setDirection(QBoxLayout.Direction.LeftToRight if compact else QBoxLayout.Direction.TopToBottom)
-        self._group_layout.setSpacing(12 if compact else 8)
+        self._group_layout.setSpacing(20 if compact else 16)
+        self._group_layout.setStretch(0, 0)
+        self._group_layout.setStretch(1, 1 if compact else 0)
         self._text_layout.setSpacing(10)
         self._group.setMaximumWidth(max(300, width))
-        self.setMaximumHeight(195 if compact else 16_777_215)
+        # The compact identity is a horizontal strip, with enough real width
+        # for metadata beside the cover instead of an artwork-only sizeHint.
+        self._group.setMinimumWidth(min(max(300, width), 720) if compact else 0)
+        self.setMinimumHeight(extent if compact else 0)
+        self.setMaximumHeight(max(152, extent) if compact else 16_777_215)

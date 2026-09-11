@@ -171,9 +171,15 @@ class ImmersiveSettingsPanel(QFrame):
         layout.addWidget(slider, 1)
         layout.addWidget(value_label)
         self._value_labels[slider] = value_label
+        value_label.setProperty("valueSuffix", suffix)
         slider.valueChanged.connect(lambda value, label=value_label, unit=suffix: label.setText(f"{value}{unit}"))
         value_label.setText(f"{slider.value()}{suffix}")
         return host
+
+    def refresh_value_labels(self) -> None:
+        """Refresh text after a blocked programmatic load; never emit edits."""
+        for slider, label in self._value_labels.items():
+            label.setText(f"{slider.value()}{label.property('valueSuffix') or ''}")
 
     def _add_section(self, form: QFormLayout, title: str) -> None:
         label = QLabel(title, self.content_widget)

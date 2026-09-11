@@ -15,6 +15,7 @@ from app.ui_v2.adapters.playback_adapter import PlaybackAdapter
 from app.ui_v2.models.track import Track, format_duration
 from app.ui_v2.theme.icons import fluent_icon, icon
 from app.ui_v2.theme.tokens import Theme
+from app.ui_v2.theme.styles import focus_qss
 from app.ui_v2.widgets.artwork_thumbnail import ArtworkThumbnail
 from app.ui_v2.widgets.elided_label import ElidedLabel
 from app.ui_v2.widgets.track_display import present_track_identity
@@ -124,12 +125,13 @@ class NowPlayingPage(QFrame):
         self.setStyleSheet(
             f"QFrame#nowPlayingPage {{ background: transparent; }}"
             f"QLabel#nowPlayingTitle {{ color: {colors.text_primary}; font-size: {theme.fonts.page_title}px; font-weight: 600; }}"
-            f"QLabel#nowPlayingArtist {{ color: {colors.text_secondary}; font-size: {theme.fonts.secondary}px; }}"
+            f"QLabel#nowPlayingArtist {{ color: {colors.text_secondary}; font-size: 18px; }}"
             f"QLabel#nowPlayingAlbum {{ color: {colors.text_tertiary}; font-size: {theme.fonts.body}px; }}"
             f"QLabel#nowPlayingDetail {{ color: {colors.text_secondary}; font-size: {theme.fonts.caption}px; }}"
             f"QLabel#nowPlayingError {{ color: {colors.danger}; font-size: {theme.fonts.caption}px; }}"
-            f"QToolButton {{ border: 0; border-radius: 19px; background: transparent; }}"
+            f"QToolButton {{ border: 2px solid transparent; border-radius: 6px; background: transparent; }}"
             f"QToolButton:hover {{ background: {colors.surface_hover}; }}"
+            + focus_qss(theme, "QToolButton")
         )
         self.artwork.set_theme(theme)
         self.favorite_button.setIcon(fluent_icon("favorite_filled" if self.playback.state.is_favorite else "favorite", theme, "selected" if self.playback.state.is_favorite else "normal", size=20))
@@ -169,7 +171,7 @@ class NowPlayingPage(QFrame):
             self.album_label.hide()
         else:
             self._layout.setContentsMargins(24, 20, 24, 20)
-            self._layout.setSpacing(56)
+            self._layout.setSpacing(40 if width < 1100 else 64)
             self._meta_layout.setSpacing(10)
             self._actions_layout.setContentsMargins(0, 10, 0, 0)
             self.detail_label.show()

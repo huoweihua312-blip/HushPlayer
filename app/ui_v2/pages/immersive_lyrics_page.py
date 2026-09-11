@@ -254,7 +254,8 @@ class ImmersiveLyricsPage(QWidget):
         colors = theme.colors
         self.header.setStyleSheet(
             f"QFrame#immersiveHeader {{ background: transparent; }}"
-            f"QToolButton {{ border: 0; border-radius: 18px; background: transparent; }}"
+            f"QToolButton {{ border: 1px solid transparent; border-radius: 6px; background: transparent; font-weight: 400; }}"
+            f'QToolButton[hushKeyboardFocus="true"]:focus {{ border-color: {colors.focus_ring}; }}'
             f"QToolButton:hover {{ background: {colors.surface_hover}; }}"
             f"QToolButton#immersiveModeButton {{ border: 0; border-bottom: 2px solid transparent; "
             f"border-radius: 0px; background: transparent; padding: 0 0 3px 0; color: {colors.text_secondary}; }}"
@@ -263,14 +264,14 @@ class ImmersiveLyricsPage(QWidget):
             f"border-bottom: 2px solid {colors.accent}; }}"
             f"QToolButton#immersiveModeButton:pressed {{ background: transparent; }}"
             f"QToolButton#immersiveToggleButton, QToolButton#immersiveTextButton {{ min-width: 0; "
-            f"padding: 0 8px; border: 1px solid transparent; border-radius: 16px; background: transparent; "
+            f"padding: 0 8px; border: 1px solid transparent; border-radius: 6px; background: transparent; "
             f"color: {colors.text_secondary}; }}"
             f"QToolButton#immersiveToggleButton:hover, QToolButton#immersiveTextButton:hover {{ "
             f"background: {colors.surface_hover}; color: {colors.text_primary}; }}"
-            f"QToolButton#immersiveToggleButton:checked {{ background: {colors.selected_background}; "
-            f"border-color: {colors.border}; color: {colors.text_primary}; }}"
+            f"QToolButton#immersiveToggleButton:checked {{ background: transparent; "
+            f"border-color: transparent; color: {colors.accent}; }}"
             f"QToolButton#immersiveToggleButton:pressed, QToolButton#immersiveTextButton:pressed {{ "
-            f"background: {colors.surface_pressed}; }}"
+            f"background: {colors.surface_hover}; }}"
             f"QToolButton#immersiveModeButton[hushKeyboardFocus=\"true\"]:focus {{ background: transparent; border-bottom: 2px solid {colors.focus_ring}; }}"
         )
         for name, button in (("back", self.header_back_button), ("window_minimize", self._window_buttons[0]), ("window_maximize", self._window_buttons[1]), ("window_close", self._window_buttons[2])):
@@ -441,6 +442,7 @@ class ImmersiveLyricsPage(QWidget):
         self.canvas.set_playback_active(self.playback_adapter.state.is_playing)
 
     def set_theme(self, theme: Theme) -> None:
+        theme = get_theme(theme.mode, profile="b2")
         self._theme = theme
         self._style_header(theme)
         self.background.set_theme(theme)
@@ -896,6 +898,7 @@ class ImmersiveLyricsPage(QWidget):
         previous = panel.auto_hide_check.blockSignals(True)
         panel.auto_hide_check.setChecked(self.options.controls_auto_hide)
         panel.auto_hide_check.blockSignals(previous)
+        panel.refresh_value_labels()
         panel._set_custom_path(self.options.background_custom_path)
 
     def _sync_options(self) -> None:
@@ -930,7 +933,7 @@ class ImmersiveLyricsPage(QWidget):
             margins, spacing, canvas_scale = 64, 48, 1.04
 
         top_margin = 70 if height > 500 else 60
-        control_width = min(860, max(320, width - 40))
+        control_width = min(680, max(320, width - 40))
         control_height = max(132, self.controls.sizeHint().height())
         content_height = max(180, height - top_margin - control_height - 24)
         content_width = max(320, width - margins * 2)
@@ -957,7 +960,7 @@ class ImmersiveLyricsPage(QWidget):
         self._content_layout.activate()
         self.lyrics_state_view.setGeometry(self.canvas.geometry())
         self._on_state_changed(self.lyrics_adapter.state)
-        identity_inset = 0 if compact else 36 if self._layout_band == "standard" else 64 if self._layout_band == "wide" else 96
+        identity_inset = max(0, (content_width - 820) // 2) if compact else 36 if self._layout_band == "standard" else 64 if self._layout_band == "wide" else 96
         self._identity_layout.setContentsMargins(identity_inset, 0, 0, 0)
         identity_width = max(300, (self.identity_column.width() or content_width) - identity_inset)
         self.identity.apply_responsive_layout(
@@ -976,7 +979,7 @@ class ImmersiveLyricsPage(QWidget):
             )
             self.canvas.set_max_text_width(max_text_width)
 
-        panel_width = 400 if width >= 1400 else 365 if width >= 1100 else 325
+        panel_width = 410 if width >= 1400 else 390 if width >= 1100 else 360
         panel_top = 70 if height > 500 else 54
         panel_bottom_gap = 16
         controls_top = self.controls.geometry().top()

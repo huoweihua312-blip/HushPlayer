@@ -117,16 +117,17 @@ class _QueueDelegate(QStyledItemDelegate):
         rect = option.rect.adjusted(4, 3, -4, -3)
         if option.state & QStyle.StateFlag.State_Selected:
             background = self._theme.colors.selected_background
-            border = self._theme.colors.accent
         elif option.state & QStyle.StateFlag.State_MouseOver:
             background = self._theme.colors.hover_background
-            border = self._theme.colors.hover_background
         else:
-            background = self._theme.colors.surface_elevated
-            border = self._theme.colors.surface_elevated
-        painter.setPen(border)
+            background = Qt.GlobalColor.transparent
+        painter.setPen(Qt.PenStyle.NoPen)
         painter.setBrush(background)
-        painter.drawRoundedRect(rect, 8, 8)
+        painter.drawRoundedRect(rect, 4, 4)
+        if option.state & QStyle.StateFlag.State_HasFocus:
+            painter.setBrush(Qt.BrushStyle.NoBrush)
+            painter.setPen(self._theme.colors.focus_ring)
+            painter.drawRoundedRect(rect, 4, 4)
 
         artwork_rect = rect.adjusted(8, 8, 0, -8)
         artwork_rect.setWidth(46)
@@ -149,7 +150,7 @@ class _QueueDelegate(QStyledItemDelegate):
         duration_width = 48
         text_width = max(80, rect.right() - text_left - duration_width - 10)
         title_font = option.font
-        title_font.setWeight(QFont.Weight.DemiBold)
+        title_font.setWeight(QFont.Weight.Normal)
         painter.setFont(title_font)
         painter.setPen(self._theme.colors.text_primary)
         title_text = QFontMetrics(title_font).elidedText(
@@ -274,8 +275,8 @@ class ImmersiveQueuePanel(QFrame):
         self._delegate.set_theme(theme)
         colors = theme.colors
         self.setStyleSheet(
-            f"QFrame#immersiveQueuePanel {{ background: {colors.surface_elevated}; border: 1px solid {colors.divider}; border-radius: 14px; }}"
-            f"QFrame#immersiveQueueCurrentRow {{ background: {colors.playing_background}; border: 1px solid {colors.accent}; border-radius: 9px; }}"
+            f"QFrame#immersiveQueuePanel {{ background: {colors.surface_elevated}; border: 1px solid {colors.divider}; border-radius: 10px; }}"
+            f"QFrame#immersiveQueueCurrentRow {{ background: {colors.playing_background}; border: 0; border-radius: 4px; }}"
             f"QLabel {{ background: transparent; color: {colors.text_primary}; }}"
             f"QListView {{ background: transparent; border: 0; outline: 0; padding: 0; }}"
             f"QListView::item {{ background: transparent; padding: 0; border: 0; }}"
@@ -295,7 +296,7 @@ class ImmersiveQueuePanel(QFrame):
             f"font-size: {theme.fonts.caption}px; font-weight: 650; color: {colors.text_primary};"
         )
         self.current_title_label.setStyleSheet(
-            f"font-size: {theme.fonts.body}px; font-weight: 650; color: {colors.text_primary};"
+            f"font-size: {theme.fonts.body}px; font-weight: 600; color: {colors.accent};"
         )
         self.current_playing_label.setStyleSheet(
             f"font-size: {theme.fonts.caption}px; color: {colors.accent};"

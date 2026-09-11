@@ -11,6 +11,7 @@ from app.ui_v2.models.playback_state import RepeatMode
 from app.ui_v2.models.track import format_duration
 from app.ui_v2.theme.icons import fluent_icon, icon
 from app.ui_v2.theme.tokens import Theme
+from app.ui_v2.theme.styles import focus_qss
 from app.ui_v2.widgets.settings_control_factory import FlatSlider
 
 
@@ -90,8 +91,8 @@ class ImmersiveControls(QWidget):
         self._layout = QVBoxLayout(self)
         self._layout.setContentsMargins(0, 0, 0, 0)
         self._layout.setSpacing(10)
-        self._layout.addWidget(self.time_row)
         self._layout.addWidget(self.transport_row)
+        self._layout.addWidget(self.time_row)
         self._layout.addWidget(self.secondary_row)
         self.volume_slider.setFixedWidth(76)
         self.setObjectName("immersiveControls")
@@ -148,19 +149,21 @@ class ImmersiveControls(QWidget):
         self._theme = theme
         colors = theme.colors
         subtle = (
-            "QToolButton { min-width: 34px; min-height: 34px; border: 0; border-radius: 17px; padding: 0; "
+            "QToolButton { min-width: 34px; min-height: 34px; border: 2px solid transparent; border-radius: 6px; padding: 0; "
             f"background: transparent; color: {_rgba(colors.primary_text, 228)}; }}"
             f"QToolButton:hover {{ background: {colors.hover_background}; color: {colors.primary_text}; }}"
         )
         for button in (self.shuffle_button, self.previous_button, self.next_button, self.repeat_button, self.queue_button, self.lyrics_button, self.volume_button, self.more_button):
-            button.setStyleSheet(subtle)
+            button.setStyleSheet(subtle + focus_qss(theme, "QToolButton") +
+                f"QToolButton:disabled {{ color: {colors.disabled_text}; }}")
         self.play_button.setStyleSheet(
-            "QToolButton#immersivePlayButton { min-width: 58px; min-height: 58px; "
-            "max-width: 58px; max-height: 58px; border: 0; border-radius: 29px; padding: 0; "
+            "QToolButton#immersivePlayButton { min-width: 54px; min-height: 54px; "
+            "max-width: 54px; max-height: 54px; border: 2px solid transparent; border-radius: 29px; padding: 0; "
             "background: #F4F4F6; }"
             "QToolButton#immersivePlayButton:hover { background: #FFFFFF; }"
             "QToolButton#immersivePlayButton:pressed { background: #E7E7EB; }"
             f"QToolButton#immersivePlayButton:disabled {{ background: {colors.surface_pressed}; }}"
+            + focus_qss(theme, "QToolButton#immersivePlayButton")
         )
         self.previous_button.setIcon(icon("previous", theme))
         self.next_button.setIcon(icon("next", theme))
@@ -172,13 +175,17 @@ class ImmersiveControls(QWidget):
         self.lyrics_button.setIcon(fluent_icon("lyrics", theme, size=18))
         self._on_playing_changed(self._adapter.state.is_playing if self._adapter else False)
         for label in (self.elapsed_label, self.duration_label):
-            label.setStyleSheet(f"background: transparent; color: {_rgba(colors.primary_text, 224)}; font-size: {theme.fonts.caption}px;")
+            label.setStyleSheet(f"background: transparent; color: {_rgba(colors.secondary_text, 224)}; font-size: {theme.fonts.caption}px;")
         for slider in (self.progress_slider, self.volume_slider):
-            slider.set_handle_radius(5.0)
+            slider.set_handle_radius(4.0)
+            # QColor does not parse QSS rgba(...) strings. Pass QColor objects
+            # so translucent tracks/handles remain valid on both themes.
+            track_color = QColor(colors.primary_text)
+            track_color.setAlpha(64)
             slider.set_visual_colors(
-                _rgba(colors.primary_text, 112),
-                colors.accent,
-                _rgba(colors.primary_text, 238),
+                track_color,
+                colors.secondary_text,
+                colors.primary_text,
                 disabled_color=colors.disabled_text,
                 focus_color=colors.focus_ring,
             )

@@ -16,6 +16,7 @@ from app.ui_v2.adapters.legacy_settings_bridge import (
 from app.ui_v2.models.settings_edit_session import SettingsEditSession
 from app.ui_v2.models.settings_snapshot import SettingsSnapshot
 from app.ui_v2.theme.tokens import Theme
+from app.ui_v2.theme.button_styles import button_qss
 from app.ui_v2.widgets.immersive_settings_panel import ImmersiveSettingsPanel
 
 
@@ -44,6 +45,9 @@ class LyricsQuickSettingsFloatingPanel(ImmersiveSettingsPanel):
         self._add_transaction_footer()
         self.changed.connect(self._sync_session_from_controls)
         self.custom_path_button.clicked.connect(self._choose_custom_path)
+        self.title_label.setText("沉浸设置")
+        self.content_widget.layout().setVerticalSpacing(14)
+        self.set_theme(theme)
 
     def _add_formal_controls(self) -> None:
         form = self.content_widget.layout()
@@ -99,7 +103,10 @@ class LyricsQuickSettingsFloatingPanel(ImmersiveSettingsPanel):
         self.save_button.setText("保存")
         self.cancel_button.clicked.connect(self.cancel_requested)
         self.save_button.clicked.connect(self.save_requested)
-        footer.insertWidget(0, self.status_label)
+        # Preview status occupies its own line; actions stay reachable at 1080.
+        self.status_label.setContentsMargins(14, 6, 14, 0)
+        self.status_label.setWordWrap(True)
+        self.layout().insertWidget(self.layout().count() - 1, self.status_label)
         footer.addStretch(1)
         footer.addWidget(self.cancel_button)
         footer.addWidget(self.save_button)
@@ -280,7 +287,6 @@ class LyricsQuickSettingsFloatingPanel(ImmersiveSettingsPanel):
             self.status_label.setStyleSheet(
                 f"font-size: {theme.fonts.caption}px; color: {theme.colors.text_secondary};"
             )
-            self.save_button.setStyleSheet(
-                f"QToolButton {{ color: {theme.colors.accent}; font-weight: 650; }}"
-                f"QToolButton:hover {{ background: {theme.colors.hover_background}; }}"
-            )
+            self.save_button.setStyleSheet(button_qss(theme, role="primary"))
+            for button in (self.cancel_button, self.reset_button):
+                button.setStyleSheet(button_qss(theme, role="ghost"))
