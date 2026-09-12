@@ -55,7 +55,7 @@ class OnlineImportVisualContracts(unittest.TestCase):
         self.assertTrue(table.isColumnHidden(int(OnlineColumn.ALBUM)))
         self.assertFalse(table.isColumnHidden(int(OnlineColumn.STATUS)))
         self.assertGreater(table.columnWidth(int(OnlineColumn.TITLE)), 260)
-        self.assertFalse(page.search_bar.isVisible())
+        self.assertTrue(page.search_bar.isVisible())
         page.close()
         page.deleteLater()
 

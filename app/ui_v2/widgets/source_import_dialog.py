@@ -15,8 +15,10 @@ from PySide6.QtWidgets import (
 
 from app.services.online_source_importer import OnlineSourceImporter
 from app.ui_v2.theme.styles import build_dialog_stylesheet
-from app.ui_v2.theme.tokens import Theme
-from app.ui_v2.widgets.settings_control_factory import SettingsControlFactory, SettingsToggle
+from app.ui_v2.theme.tokens import Theme, get_theme
+from app.ui_v2.widgets.settings_control_factory import SettingsControlFactory
+from app.ui_v2.theme.icons import icon
+from app.ui_v2.widgets.online_presentation import style_action, OnlineCheckBox
 
 
 class SourceImportDialog(QDialog):
@@ -29,13 +31,14 @@ class SourceImportDialog(QDialog):
         parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
+        theme = get_theme(theme.mode, profile="b2")
         self.importer = importer
         self._theme = theme
         self.setObjectName("sourceImportDialog")
         self.setWindowFlags(Qt.WindowType.Dialog | Qt.WindowType.FramelessWindowHint)
         self.setModal(True)
         self.setMinimumWidth(520)
-        self.resize(660, 460)
+        self.resize(610, 498)
 
         self.title_label = QLabel("添加在线来源", self)
         self.detail_label = QLabel(
@@ -49,7 +52,9 @@ class SourceImportDialog(QDialog):
         self.url_input.setPlaceholderText(
             "例如：\nhttps://example.invalid/open-source.js"
         )
-        self.url_input.setMinimumHeight(144)
+        self.url_input.setFixedHeight(116)
+        self.url_label = QLabel("来源 URL", self)
+        self.url_label.setBuddy(self.url_input)
         self.policy_combo = SettingsControlFactory.combo(
             (("内容明确授权开放使用", "open"), ("内容由我拥有", "user_owned")),
             "open",
@@ -57,7 +62,7 @@ class SourceImportDialog(QDialog):
             self,
         )
         self.policy_combo.setAccessibleName("来源内容授权范围")
-        self.confirm_toggle = SettingsToggle(False, theme, self)
+        self.confirm_toggle = OnlineCheckBox(self)
         self.confirm_toggle.setAccessibleName("确认来源授权范围")
         self.confirm_label = QLabel("我确认以上 URL 符合所选授权范围", self)
         self.status_label = QLabel("", self)
@@ -74,6 +79,11 @@ class SourceImportDialog(QDialog):
         policy_row = QHBoxLayout()
         policy_row.setContentsMargins(0, 0, 0, 0)
         policy_row.setSpacing(8)
+        self.policy_label = QLabel("授权范围", self)
+        self.policy_label.setBuddy(self.policy_combo)
+        policy_row.addWidget(self.policy_label)
+        policy_row.addStretch(1)
+        self.policy_combo.setFixedWidth(238)
         policy_row.addWidget(self.policy_combo)
         confirmation_row = QHBoxLayout()
         confirmation_row.addWidget(self.confirm_toggle)
@@ -88,14 +98,24 @@ class SourceImportDialog(QDialog):
         buttons.addWidget(self.import_button)
 
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(24, 22, 24, 20)
-        layout.setSpacing(16)
-        layout.addWidget(self.title_label)
+        layout.setContentsMargins(28, 24, 28, 22)
+        layout.setSpacing(14)
+        self.close_button = QToolButton(self)
+        self.close_button.setIcon(icon("window_close", theme))
+        self.close_button.setAccessibleName("关闭添加来源")
+        self.close_button.setToolTip("关闭")
+        self.close_button.clicked.connect(self.reject)
+        heading = QHBoxLayout()
+        heading.addWidget(self.title_label, 1)
+        heading.addWidget(self.close_button)
+        layout.addLayout(heading)
         layout.addWidget(self.detail_label)
+        layout.addSpacing(4)
+        layout.addWidget(self.url_label)
         layout.addWidget(self.url_input)
         layout.addLayout(policy_row)
         layout.addLayout(confirmation_row)
-        layout.addWidget(self.status_label)
+        layout.addWidget(self.status_label, 1)
         layout.addLayout(buttons)
 
         importer.status_changed.connect(self._set_status)
@@ -106,21 +126,22 @@ class SourceImportDialog(QDialog):
         self.url_input.setFocus()
 
     def set_theme(self, theme: Theme) -> None:
+        theme = get_theme(theme.mode, profile="b2")
         self._theme = theme
         c = theme.colors
         m = theme.metrics
         self.setStyleSheet(
             build_dialog_stylesheet(theme)
-            + f"QDialog#sourceImportDialog {{ background: {c.surface_elevated}; border: 1px solid {c.border_strong}; border-radius: {m.radius_lg}px; }}"
+            + f"QDialog#sourceImportDialog {{ background: {c.surface_elevated}; border: 1px solid {c.border_strong}; border-radius: 10px; }}"
             f"QLabel {{ color: {c.primary_text}; }}"
-            f"QPlainTextEdit#sourceImportUrls {{ min-height: 144px; padding: 10px; border: 1px solid {c.border}; border-radius: {m.radius_sm}px; background: {c.input_background}; color: {c.primary_text}; }}"
+            f"QPlainTextEdit#sourceImportUrls {{ padding: 10px; font-size: 13px; border: 1px solid {c.border}; border-radius: {m.radius_sm}px; background: {c.input_background}; color: {c.primary_text}; }}"
             f"QPlainTextEdit#sourceImportUrls:focus {{ border-color: {c.focus_ring}; }}"
         )
         self.title_label.setStyleSheet(
-            f"font-size: 26px; font-weight: 600; color: {c.primary_text};"
+            f"font-size: 22px; font-weight: 600; color: {c.primary_text};"
         )
         self.detail_label.setStyleSheet(
-            f"font-size: {theme.fonts.body}px; color: {c.secondary_text};"
+            f"font-size: 13px; color: {c.secondary_text};"
         )
         self.confirm_label.setStyleSheet(
             f"font-size: {theme.fonts.caption}px; color: {c.secondary_text};"
@@ -128,8 +149,14 @@ class SourceImportDialog(QDialog):
         self.status_label.setStyleSheet(
             f"font-size: {theme.fonts.caption}px; color: {c.secondary_text};"
         )
-        self._style_button(self.cancel_button, theme, primary=False)
-        self._style_button(self.import_button, theme, primary=True)
+        style_action(self.cancel_button, theme)
+        style_action(self.import_button, theme, primary=True)
+        style_action(self.close_button, theme)
+        self.close_button.setStyleSheet(self.close_button.styleSheet() + "QToolButton { min-width: 28px; max-width: 28px; padding: 0; }")
+        self.confirm_toggle.set_theme(theme)
+        self.confirm_toggle.setFixedWidth(16)
+        for label in (self.url_label, self.policy_label):
+            label.setStyleSheet(f"font-size: 13px; color: {c.secondary_text};")
 
     @staticmethod
     def _style_button(button: QToolButton, theme: Theme, *, primary: bool) -> None:

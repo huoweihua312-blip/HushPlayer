@@ -19,8 +19,10 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from app.ui_v2.theme.tokens import Theme
+from app.ui_v2.theme.tokens import Theme, get_theme
 from app.ui_v2.widgets.page_header import PageHeader
+from app.ui_v2.widgets.placeholder_cover import cover_pixmap
+from app.ui_v2.widgets.online_presentation import style_action, style_caption
 
 
 class _PendingRecordDelegate(QStyledItemDelegate):
@@ -35,13 +37,30 @@ class _PendingRecordDelegate(QStyledItemDelegate):
         painter.save()
         selected = bool(option.state & QStyle.StateFlag.State_Selected)
         hovered = bool(option.state & QStyle.StateFlag.State_MouseOver)
-        painter.fillRect(option.rect, QColor(c.selected_background if selected else c.hover_background if hovered else c.content_background))
+        painter.fillRect(option.rect, QColor(c.selected_background if selected else c.hover_background if hovered else c.app_background))
         bounds = QRectF(option.rect).adjusted(12, 8, -12, -8)
+        painter.setRenderHint(painter.RenderHint.Antialiasing)
+        marker = QRectF(bounds.left(), bounds.center().y() - 6, 12, 12)
+        painter.setPen(QColor(c.accent if selected else c.border_strong))
+        painter.setBrush(QColor(c.accent) if selected else Qt.BrushStyle.NoBrush)
+        painter.drawRoundedRect(marker, 2, 2)
+        if selected:
+            painter.setPen(QColor(c.app_background))
+            painter.drawText(marker.adjusted(-2, -4, 2, 4), Qt.AlignmentFlag.AlignCenter, "✓")
+        artwork = cover_pixmap(str(record.get("path") or record.get("title") or "pending"), 44, 44)
+        painter.drawPixmap(int(bounds.left() + 32), int(bounds.center().y() - 22), artwork)
+        suffix = Path(str(record.get("path") or "")).suffix.lstrip(".").upper()
+        font = QFont(option.font)
+        font.setPixelSize(12)
+        painter.setFont(font)
+        painter.setPen(QColor(c.subtle_text))
+        painter.drawText(bounds, Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter, suffix)
+        bounds.adjust(92, 0, -70, 0)
         title = str(record.get("title") or Path(str(record.get("path") or "")).stem or "未知歌曲")
         lines = (
-            (title, theme.fonts.body, c.primary_text),
+            (title, 15, c.primary_text),
             (f"{record.get('artist') or '未知艺术家'} · {record.get('album') or '未知专辑'}", theme.fonts.caption, c.secondary_text),
-            (str(record.get("path") or ""), theme.fonts.caption, c.subtle_text),
+            (str(record.get("path") or ""), 11, c.subtle_text),
         )
         for row, (text, size, color) in enumerate(lines):
             font = QFont(option.font)
@@ -70,11 +89,16 @@ class PendingImportsPage(QWidget):
         self._theme = theme
         self._records: list[dict] = []
         self.setObjectName("pendingImportsPage")
+        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
 
         self.header = PageHeader("待导入音乐", self)
         self.header.set_context("资料库")
         self.header.title_label.setMinimumWidth(110)
         self.header.count_label.setMinimumWidth(64)
+        self.header.accent_rail.hide()
+        self.header.title_row.layout().removeWidget(self.header.count_label)
+        self.header.identity.layout().addWidget(self.header.count_label)
+        self.header.identity.layout().setSpacing(9)
 
         self.description = QLabel(
             "扫描发现的新音乐会先在这里确认；加入音乐库或忽略后，记录会从列表移除。",
@@ -117,28 +141,25 @@ class PendingImportsPage(QWidget):
         action_row = QHBoxLayout()
         action_row.setContentsMargins(0, 0, 0, 0)
         action_row.setSpacing(8)
-        for button in (
-            self.select_all_button,
-            self.clear_selection_button,
-            self.import_button,
-            self.ignore_button,
-            self.open_folder_button,
-        ):
-            action_row.addWidget(button)
+        self.selection_count = QLabel(self)
+        action_row.addWidget(self.selection_count)
+        action_row.addWidget(self.select_all_button)
+        action_row.addWidget(self.clear_selection_button)
         action_row.addStretch(1)
+        action_row.addWidget(self.import_button)
+        action_row.addWidget(self.ignore_button)
+        action_row.addWidget(self.open_folder_button)
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(
-            theme.metrics.page_margin,
-            theme.metrics.spacing_lg,
-            theme.metrics.page_margin,
-            theme.metrics.page_margin,
+            42, 32, 42, 30,
         )
         layout.setSpacing(theme.metrics.spacing_md)
         layout.addWidget(self.header)
         layout.addWidget(self.description)
-        layout.addWidget(self.status_label)
+        layout.addSpacing(14)
         layout.addLayout(action_row)
+        layout.addWidget(self.status_label)
         layout.addWidget(self.list_widget, 1)
         layout.addWidget(self.empty_label, 1)
         self.list_widget.itemSelectionChanged.connect(self._sync_action_state)
@@ -191,19 +212,24 @@ class PendingImportsPage(QWidget):
         ]
 
     def set_theme(self, theme: Theme) -> None:
+        theme = get_theme(theme.mode, profile="b2")
         self._theme = theme
         c = theme.colors
         self.setStyleSheet(
-            f"QWidget#pendingImportsPage {{ background: {c.content_background}; }}"
+            f"QWidget#pendingImportsPage {{ background: {c.app_background}; }}"
             f"QLabel#pendingImportsDescription {{ color: {c.secondary_text}; font-size: {theme.fonts.secondary}px; }}"
             f"QLabel#pendingImportsStatus {{ color: {c.secondary_text}; font-size: {theme.fonts.secondary}px; }}"
             f"QLabel#pendingImportsEmpty {{ color: {c.secondary_text}; font-size: {theme.fonts.body}px; }}"
-            f"QListWidget#pendingImportsList {{ background: {c.content_background}; border: 0; "
-            f"border-radius: {theme.metrics.radius_md}px; color: {c.primary_text}; padding: {theme.metrics.spacing_sm}px; }}"
-            f"QListWidget#pendingImportsList::item {{ padding: {theme.metrics.spacing_sm}px; border-radius: {theme.metrics.radius_sm}px; }}"
+            f"QListWidget#pendingImportsList {{ background: {c.app_background}; border: 0; "
+            f"border-radius: {theme.metrics.radius_md}px; color: {c.primary_text}; padding: 0; }}"
+            f"QListWidget#pendingImportsList::item {{ padding: 0; border-radius: {theme.metrics.radius_sm}px; }}"
             f"QListWidget#pendingImportsList::item:selected {{ background: {c.selected_background}; color: {c.primary_text}; }}"
         )
         self.header.set_theme(theme)
+        style_caption(self.header.count_label, theme)
+        style_caption(self.selection_count, theme)
+        style_caption(self.description, theme)
+        style_caption(self.status_label, theme, subtle=True)
         for button in (
             self.select_all_button,
             self.clear_selection_button,
@@ -213,15 +239,11 @@ class PendingImportsPage(QWidget):
         ):
             primary = bool(button.property("pendingPrimary"))
             danger = bool(button.property("pendingDanger"))
-            background = c.accent if primary else "transparent"
-            foreground = c.app_background if primary else c.danger if danger else c.secondary_text
-            hover = c.accent_hover if primary else c.hover_background
-            button.setStyleSheet(
-                f"QToolButton {{ min-height: 34px; padding: 0 {theme.metrics.spacing_md}px; border: 1px solid {c.border}; "
-                f"border-radius: {theme.metrics.radius_sm}px; background: {background}; color: {foreground}; }}"
-                f"QToolButton:hover {{ background: {hover}; }}"
-                f"QToolButton:disabled {{ background: {c.surface_secondary}; color: {c.disabled_text}; }}"
-            )
+            style_action(button, theme, primary=primary, danger=danger)
+
+    def set_responsive_reference_width(self, width: int) -> None:
+        inset = 28 if width < 950 else 42
+        self.layout().setContentsMargins(inset, 32, inset, 30)
 
     def _format_record(self, record: dict) -> str:
         title = str(record.get("title") or Path(str(record.get("path") or "")).stem or "未知歌曲")
@@ -234,6 +256,7 @@ class PendingImportsPage(QWidget):
         self.status_label.setText(str(text or ""))
 
     def _sync_action_state(self) -> None:
+        self.selection_count.setText(f"已选择 {len(self.list_widget.selectedItems())} 首")
         has_records = bool(self._records)
         has_selection = bool(self.list_widget.selectedItems())
         self.select_all_button.setEnabled(has_records)

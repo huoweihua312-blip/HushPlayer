@@ -257,11 +257,11 @@ class OnlineSearchPageTests(unittest.TestCase):
         self.assertEqual(controls[0].accessibleName(), "来源筛选")
         self.assertEqual(controls[1].accessibleName(), "排序方式")
         self.assertTrue(all(control.native_arrow_suppressed for control in controls))
-        self.assertTrue(all(control.height() == self.window.theme.metrics.control_height for control in controls))
+        self.assertTrue(all(control.height() == page._theme.metrics.control_height for control in controls))
 
         for mode in ("light", "dark"):
             self.window.set_theme(mode)
-            theme = self.window.theme
+            theme = page._theme
             for control in controls:
                 palette = control.view().palette()
                 self.assertEqual(
@@ -302,17 +302,18 @@ class OnlineSearchPageTests(unittest.TestCase):
         self.assertEqual(page.result_toolbar.sort_selector.width(), 104)
         self.assertFalse(page.result_table.horizontalScrollBar().isVisible())
 
-    def test_results_promote_table_and_keep_source_controls_in_toolbar(self) -> None:
+    def test_results_keep_query_scope_and_filters_anchored(self) -> None:
         page = self._search_page()
         self._complete_search(page, "Paper Moon")
         self.assertTrue(page.result_table.isVisible())
-        self.assertFalse(page.detail_label.isVisible())
-        self.assertFalse(page.scope_label.isVisible())
+        self.assertTrue(page.detail_label.isVisible())
+        self.assertTrue(page.scope_label.isVisible())
+        self.assertTrue(page.search_bar.isVisible())
         self.assertFalse(page.source_summary_label.isVisible())
         self.assertTrue(page.result_toolbar.isVisible())
         self.assertTrue(page.result_toolbar.source_filter.isVisible())
         self.assertTrue(page.result_toolbar.sort_selector.isVisible())
-        self.assertGreaterEqual(page.result_table.minimumHeight(), 220)
+        self.assertGreaterEqual(page.result_table.minimumHeight(), 180)
 
         self.window.online_adapter.load_mock_scenario("empty")
         self._complete_search(page, "没有结果")

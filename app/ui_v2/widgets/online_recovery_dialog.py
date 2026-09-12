@@ -12,15 +12,17 @@ from PySide6.QtWidgets import (
     QListWidgetItem,
     QPushButton,
     QToolButton,
+    QSizePolicy,
     QVBoxLayout,
     QWidget,
 )
 
 from app.ui_v2.models.online_track import OnlineTrack
-from app.ui_v2.models.track import format_duration
+from app.ui_v2.models.track import Track, format_duration
+from app.ui_v2.widgets.online_presentation import style_action, style_caption
 from app.ui_v2.theme.icons import icon
 from app.ui_v2.theme.styles import build_dialog_stylesheet
-from app.ui_v2.theme.tokens import Theme
+from app.ui_v2.theme.tokens import Theme, get_theme
 from app.ui_v2.widgets.elided_label import ElidedLabel
 from app.ui_v2.widgets.artwork_thumbnail import ArtworkThumbnail
 
@@ -33,14 +35,14 @@ class _CandidateRow(QFrame):
         self.setObjectName("onlineRecoveryCandidateRow")
         self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
         self.title_label = ElidedLabel(self)
-        self.title_label.set_full_text(f"{track.title}  —  {track.artist}")
+        self.title_label.set_full_text(track.title)
         self.detail_label = ElidedLabel(self)
         self.detail_label.set_full_text(
-            f"{track.album} · {track.source_name} · {format_duration(track.duration_ms)}"
+            f"{track.artist} · {track.album}"
         )
         self.title_label.setAccessibleName("歌曲标题和歌手")
         self.detail_label.setAccessibleName("专辑、来源和时长")
-        self.artwork = ArtworkThumbnail(theme, self, size=44)
+        self.artwork = ArtworkThumbnail(theme, self, size=38)
         self.artwork.set_track(track.as_track())
         text = QVBoxLayout()
         text.setSpacing(5)
@@ -51,12 +53,23 @@ class _CandidateRow(QFrame):
         layout.setSpacing(14)
         layout.addWidget(self.artwork)
         layout.addLayout(text, 1)
+        self.source_label = ElidedLabel(self)
+        self.source_label.set_full_text(track.source_name)
+        self.source_label.setFixedWidth(116)
+        self.source_label.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Preferred)
+        self.duration_label = QLabel(format_duration(track.duration_ms), self)
+        self.duration_label.setFixedWidth(44)
+        self.duration_label.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+        layout.addWidget(self.source_label)
+        layout.addWidget(self.duration_label)
+        style_caption(self.source_label, theme, subtle=True)
+        style_caption(self.duration_label, theme, subtle=True)
         self.setMinimumHeight(70)
         self.set_theme(theme)
 
     def set_theme(self, theme: Theme) -> None:
         self.title_label.setStyleSheet(
-            f"font-size: {theme.fonts.body}px; font-weight: 600; color: {theme.colors.primary_text};"
+            f"font-size: 15px; font-weight: 400; color: {theme.colors.primary_text};"
         )
         self.detail_label.setStyleSheet(
             f"font-size: {theme.fonts.caption}px; color: {theme.colors.secondary_text};"
@@ -66,16 +79,17 @@ class _CandidateRow(QFrame):
 class OnlineRecoveryCandidateDialog(QDialog):
     """Choose a recoverable online source without changing song identity."""
 
-    def __init__(self, candidates: tuple[OnlineTrack, ...], theme: Theme, parent=None) -> None:
+    def __init__(self, candidates: tuple[OnlineTrack, ...], theme: Theme, parent=None, *, original_track: Track | None = None) -> None:
         super().__init__(parent)
+        theme = get_theme(theme.mode, profile="b2")
         self._candidates = tuple(candidates)
         self.selected_track: OnlineTrack | None = None
         self.setWindowTitle("选择在线版本")
         self.setObjectName("onlineRecoveryCandidateDialog")
         self.setWindowFlags(Qt.WindowType.Dialog | Qt.WindowType.FramelessWindowHint)
         self.setModal(True)
-        self.setMinimumSize(720, 560)
-        self.resize(780, min(760, 470 + min(8, len(self._candidates)) * 36))
+        self.setMinimumSize(640, 560)
+        self.resize(760, 636)
         self._apply_theme(theme)
 
         self.surface = QFrame(self)
@@ -83,7 +97,7 @@ class OnlineRecoveryCandidateDialog(QDialog):
 
         title_bar = QFrame(self.surface)
         title_bar.setObjectName("onlineRecoveryTitleBar")
-        window_title = QLabel("选择在线版本", title_bar)
+        window_title = QLabel("修复歌曲的播放来源" if self._candidates else "暂未找到可用版本", title_bar)
         window_title.setObjectName("onlineRecoveryWindowTitle")
         self.close_button = QToolButton(title_bar)
         self.close_button.setObjectName("onlineRecoveryCloseButton")
@@ -93,7 +107,7 @@ class OnlineRecoveryCandidateDialog(QDialog):
         self.close_button.setAccessibleName("关闭在线版本选择")
         self.close_button.clicked.connect(self.reject)
         title_bar_layout = QHBoxLayout(title_bar)
-        title_bar_layout.setContentsMargins(18, 10, 10, 10)
+        title_bar_layout.setContentsMargins(28, 24, 20, 4)
         title_bar_layout.setSpacing(10)
         title_bar_layout.addWidget(window_title)
         title_bar_layout.addStretch(1)
@@ -140,7 +154,8 @@ class OnlineRecoveryCandidateDialog(QDialog):
         self.selection_label.setAccessibleName("当前选中的在线版本")
         self.selection_label.setMinimumHeight(24)
         selection_layout = QHBoxLayout(self.selection_surface)
-        selection_layout.setContentsMargins(12, 7, 12, 7)
+        selection_layout.setContentsMargins(0, 7, 0, 7)
+        style_caption(self.selection_label, theme)
         selection_layout.setSpacing(10)
         selection_layout.addWidget(selection_caption)
         selection_layout.addWidget(self.selection_label, 1)
@@ -158,19 +173,48 @@ class OnlineRecoveryCandidateDialog(QDialog):
         play.setEnabled(bool(self._candidates))
         play.clicked.connect(self._accept_selected)
         footer_layout = QHBoxLayout(footer)
-        footer_layout.setContentsMargins(18, 12, 18, 12)
+        footer_layout.setContentsMargins(28, 12, 28, 22)
         footer_layout.setSpacing(8)
+        self.keyboard_hint = QLabel("↑ ↓ 选择 · Enter 确认", footer)
+        style_caption(self.keyboard_hint, theme, subtle=True)
+        footer_layout.addWidget(self.keyboard_hint)
         footer_layout.addStretch(1)
+        style_action(cancel, theme)
+        style_action(play, theme, primary=True)
         footer_layout.addWidget(cancel)
         footer_layout.addWidget(play)
 
         content_layout = QVBoxLayout(content)
-        content_layout.setContentsMargins(24, 20, 24, 18)
+        content_layout.setContentsMargins(28, 12, 28, 8)
         content_layout.setSpacing(8)
-        content_layout.addWidget(eyebrow)
-        content_layout.addWidget(title)
+        eyebrow.hide()
+        title.hide()
         content_layout.addWidget(detail)
-        content_layout.addSpacing(4)
+        content_layout.addSpacing(16)
+        self.original_surface = QFrame(content)
+        self.original_surface.setObjectName("onlineRecoveryOriginal")
+        original_layout = QHBoxLayout(self.original_surface)
+        original_layout.setContentsMargins(0, 0, 0, 18)
+        original_layout.setSpacing(14)
+        self.original_artwork = ArtworkThumbnail(theme, self.original_surface, size=44)
+        self.original_artwork.set_track(original_track)
+        self.original_title = ElidedLabel(self.original_surface)
+        self.original_title.set_full_text(original_track.title if original_track else "原歌曲")
+        self.original_metadata = ElidedLabel(self.original_surface)
+        self.original_metadata.set_full_text(
+            f"{original_track.artist} · {original_track.album}" if original_track else "仅替换播放来源，保留歌曲信息"
+        )
+        identity_layout = QVBoxLayout()
+        identity_layout.setSpacing(4)
+        identity_layout.addWidget(self.original_title)
+        identity_layout.addWidget(self.original_metadata)
+        original_layout.addWidget(self.original_artwork)
+        original_layout.addLayout(identity_layout, 1)
+        self.original_title.setStyleSheet(f"font-size: 15px; color: {theme.colors.primary_text};")
+        style_caption(self.original_metadata, theme)
+        content_layout.addWidget(self.original_surface)
+        self.original_surface.setVisible(original_track is not None)
+        content_layout.addSpacing(8)
         content_layout.addWidget(self.list_widget, 1)
         content_layout.addWidget(self.selection_surface)
 
@@ -196,25 +240,25 @@ class OnlineRecoveryCandidateDialog(QDialog):
             + f"""
             QDialog#onlineRecoveryCandidateDialog {{
                 background: {colors.app_background};
-                border: 1px solid {colors.border_strong};
-                border-radius: {metrics.radius_lg}px;
+                border: 0;
+                border-radius: 10px;
             }}
             QFrame#onlineRecoveryDialogSurface {{
                 background: {colors.surface_elevated};
-                border: 1px solid {colors.border_strong};
-                border-radius: {metrics.radius_lg}px;
+                border: 0;
+                border-radius: 10px;
             }}
             QFrame#onlineRecoveryTitleBar {{
                 min-height: 40px;
                 background: transparent;
                 border: 0;
-                border-bottom: 1px solid {colors.border};
+                border-bottom: 0;
                 border-top-left-radius: {metrics.radius_lg}px;
                 border-top-right-radius: {metrics.radius_lg}px;
             }}
             QLabel#onlineRecoveryWindowTitle {{
-                color: {colors.secondary_text};
-                font-size: {theme.fonts.caption}px;
+                color: {colors.primary_text};
+                font-size: 22px;
                 font-weight: 600;
             }}
             QToolButton#onlineRecoveryCloseButton {{
@@ -238,9 +282,10 @@ class OnlineRecoveryCandidateDialog(QDialog):
                 font-size: {theme.fonts.section_title}px;
                 font-weight: 600;
             }}
-            QLabel#onlineRecoveryDetail {{ color: {colors.secondary_text}; }}
+            QLabel#onlineRecoveryDetail {{ color: {colors.secondary_text}; font-size: 13px; }}
+            QFrame#onlineRecoveryOriginal {{ background: transparent; border: 0; border-bottom: 1px solid {colors.divider}; }}
             QListWidget#onlineRecoveryCandidateList {{
-                padding: 6px;
+                padding: 0;
                 border: 0;
                 border-radius: {metrics.radius_md}px;
                 background: transparent;
@@ -248,6 +293,7 @@ class OnlineRecoveryCandidateDialog(QDialog):
             QListWidget#onlineRecoveryCandidateList::item {{
                 margin: 1px 0;
                 padding: 0;
+                border: 1px solid transparent;
                 border-radius: {metrics.radius_sm}px;
             }}
             QFrame#onlineRecoveryCandidateRow {{
@@ -256,7 +302,7 @@ class OnlineRecoveryCandidateDialog(QDialog):
             }}
             QListWidget#onlineRecoveryCandidateList::item:selected {{
                 background: {colors.selected_background};
-                border: 0;
+                border: 1px solid {colors.accent};
             }}
             QFrame#onlineRecoverySelectionSurface {{
                 background: transparent;
@@ -271,7 +317,7 @@ class OnlineRecoveryCandidateDialog(QDialog):
             QFrame#onlineRecoveryFooter {{
                 background: transparent;
                 border: 0;
-                border-top: 1px solid {colors.border};
+                border-top: 0;
                 border-bottom-left-radius: {metrics.radius_lg}px;
                 border-bottom-right-radius: {metrics.radius_lg}px;
             }}

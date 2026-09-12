@@ -8,6 +8,7 @@ from PySide6.QtWidgets import QHBoxLayout, QLabel, QToolButton, QWidget
 from app.ui_v2.theme.tokens import Theme
 from app.ui_v2.widgets.settings_control_factory import ToolbarComboBox
 from app.ui_v2.widgets.elided_label import ElidedLabel
+from app.ui_v2.widgets.online_presentation import style_action
 
 
 class OnlineResultToolbar(QWidget):
@@ -54,9 +55,9 @@ class OnlineResultToolbar(QWidget):
         layout.setSpacing(10)
         layout.addWidget(self.summary_label)
         layout.addWidget(self.warning_label, 1)
+        layout.addStretch(1)
         layout.addWidget(self.source_filter)
         layout.addWidget(self.sort_selector)
-        layout.addStretch(1)
         layout.addWidget(self.retry_button)
         layout.addWidget(self.sources_button)
         self.set_compact(False)
@@ -87,7 +88,7 @@ class OnlineResultToolbar(QWidget):
     def set_summary(self, count: int, warning: str) -> None:
         self.summary_label.setText(f"{count} 条结果")
         self.warning_label.set_full_text(warning)
-        self.warning_label.setVisible(bool(warning))
+        self.warning_label.hide()
         self.retry_button.setVisible(bool(warning))
 
     def set_theme(self, theme: Theme) -> None:
@@ -107,19 +108,14 @@ class OnlineResultToolbar(QWidget):
         )
         self.source_filter.set_theme(theme)
         self.sort_selector.set_theme(theme)
-        self.retry_button.setStyleSheet(
-            f"QToolButton {{ min-height: {metrics.control_height}px; padding: 0 {metrics.spacing_md}px; "
-            f"border: 1px solid {colors.border}; border-radius: {metrics.radius_sm}px; color: {colors.warning}; "
-            f"background: {colors.surface_primary}; }}"
-            f"QToolButton:hover {{ color: {colors.primary_text}; background: {colors.hover_background}; border-color: {colors.border_strong}; }}"
-        )
-        self.sources_button.setStyleSheet(
-            f"QToolButton {{ min-height: {metrics.control_height}px; padding: 0 {metrics.spacing_md}px; "
-            f"border: 1px solid {colors.border}; border-radius: {metrics.radius_sm}px; color: {colors.secondary_text}; "
-            f"background: {colors.surface_primary}; }}"
-            f"QToolButton:hover {{ color: {colors.primary_text}; background: {colors.hover_background}; border-color: {colors.border_strong}; }}"
-            f"QToolButton[hushKeyboardFocus=\"true\"]:focus {{ border-color: {colors.focus_ring}; }}"
-        )
+        for control in (self.source_filter, self.sort_selector):
+            control.setStyleSheet(control.styleSheet() +
+                "QComboBox[quietOrbitComboVariant='toolbar'] { border: 1px solid transparent; background: transparent; font-size: 13px; }"
+                f"QComboBox[quietOrbitComboVariant='toolbar']:focus {{ border-color: {colors.focus_ring}; }}")
+        style_action(self.retry_button, theme)
+        style_action(self.sources_button, theme)
+        # Feedback belongs above the results, independent of table filters.
+        self.warning_label.hide()
 
     def _emit_source_filter(self) -> None:
         self.source_filter_changed.emit(str(self.source_filter.currentData() or ""))

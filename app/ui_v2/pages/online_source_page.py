@@ -3,16 +3,18 @@
 from __future__ import annotations
 
 from PySide6.QtCore import QSize, Qt, Signal
-from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QScrollArea, QToolButton, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QMenu, QScrollArea, QToolButton, QVBoxLayout, QWidget
 
 from app.ui_v2.adapters.online_source_adapter import OnlineSourceAdapter
 from app.ui_v2.models.online_source import OnlineSource
 from app.ui_v2.theme.icons import icon
 from app.ui_v2.theme.styles import build_stylesheet
-from app.ui_v2.theme.tokens import Theme
+from app.ui_v2.theme.tokens import Theme, get_theme
 from app.ui_v2.widgets.source_import_dialog import SourceImportDialog, SourceRemoveConfirmDialog
 from app.ui_v2.widgets.source_status_badge import SourceStatusBadge
 from app.ui_v2.widgets.elided_label import ElidedLabel
+from app.ui_v2.widgets.settings_control_factory import SettingsToggle
+from app.ui_v2.widgets.online_presentation import style_action, style_caption
 
 
 class SourceRow(QFrame):
@@ -25,13 +27,16 @@ class SourceRow(QFrame):
         self._theme = theme
         self.source_id = source.id
         self.setObjectName("onlineSourceRow")
-        self.setMinimumHeight(106)
+        self.setMinimumHeight(115)
         self.name_label = ElidedLabel(self)
         self.detail_label = ElidedLabel(self)
         self.capability_label = ElidedLabel(self)
         self.error_label = ElidedLabel(self)
         self.badge = SourceStatusBadge(theme, self)
-        self.enabled_button = QToolButton(self)
+        self.enabled_button = SettingsToggle(source.enabled, theme, self)
+        self.source_icon = QLabel(self)
+        self.source_icon.setFixedSize(38, 38)
+        self.source_icon.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.enabled_button.setObjectName("sourceToggleButton")
         self.enabled_button.clicked.connect(self._toggle)
         self.retry_button = QToolButton(self)
@@ -39,27 +44,39 @@ class SourceRow(QFrame):
         self.retry_button.setAccessibleName("重试在线来源")
         self.retry_button.clicked.connect(self.retry_requested)
         self.remove_button = QToolButton(self)
-        self.remove_button.setText("移除")
+        self.remove_button.setText("…")
+        self.remove_button.setToolTip("更多来源操作")
+        self.remove_button.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
+        self.remove_menu = QMenu(self.remove_button)
+        self.remove_button.setMenu(self.remove_menu)
+        self.remove_action = self.remove_menu.addAction("移除来源")
         self.remove_button.setAccessibleName("移除在线来源")
-        self.remove_button.clicked.connect(lambda: self.remove_requested.emit(self.source_id))
+        self.remove_action.triggered.connect(lambda: self.remove_requested.emit(self.source_id))
         text = QVBoxLayout()
         text.setContentsMargins(0, 0, 0, 0)
         text.setSpacing(5)
         text.addWidget(self.name_label)
-        text.addWidget(self.detail_label)
         text.addWidget(self.capability_label)
+        text.addWidget(self.detail_label)
         text.addWidget(self.error_label)
         actions = QHBoxLayout()
         actions.setContentsMargins(0, 0, 0, 0)
         actions.setSpacing(8)
+        health = QVBoxLayout()
+        health.setSpacing(0)
+        health.addWidget(self.badge)
+        health.addWidget(self.retry_button)
+        actions.addLayout(health)
+        actions.addSpacing(28)
         actions.addWidget(self.enabled_button)
-        actions.addWidget(self.retry_button)
+        actions.addSpacing(14)
         actions.addWidget(self.remove_button)
         layout = QHBoxLayout(self)
-        layout.setContentsMargins(18, 14, 18, 14)
+        layout.setContentsMargins(8, 18, 8, 18)
         layout.setSpacing(16)
+        layout.addWidget(self.source_icon)
+        layout.addSpacing(8)
         layout.addLayout(text, 1)
-        layout.addWidget(self.badge, 0, Qt.AlignmentFlag.AlignTop)
         layout.addLayout(actions, 0)
         self.set_source(source)
         self.set_theme(theme)
@@ -84,7 +101,7 @@ class SourceRow(QFrame):
         self.error_label.set_full_text(source.last_error)
         self.error_label.setVisible(bool(source.last_error))
         self.badge.set_source(source)
-        self.enabled_button.setText("停用" if source.enabled else "启用")
+        self.enabled_button.setChecked(source.enabled)
         self.enabled_button.setToolTip(
             f"停用 {source.name}；来源仍会保留，可再次启用"
             if source.enabled
@@ -100,15 +117,18 @@ class SourceRow(QFrame):
         self.set_theme(self._theme)
 
     def set_theme(self, theme: Theme) -> None:
+        theme = get_theme(theme.mode, profile="b2")
         self._theme = theme
         colors = theme.colors
         metrics = theme.metrics
         self.setStyleSheet(
             f"QFrame#onlineSourceRow {{ border: 0; border-bottom: 1px solid {colors.divider}; border-radius: 0; "
             f"background: transparent; }}"
-            f"QFrame#onlineSourceRow:hover {{ border-color: {colors.border_strong}; background: {colors.surface_secondary}; }}"
+            f"QFrame#onlineSourceRow:hover {{ background: {colors.hover_background}; }}"
         )
-        self.name_label.setStyleSheet(f"font-weight: 600; color: {colors.primary_text};")
+        self.name_label.setStyleSheet(f"font-size: 17px; font-weight: 600; color: {colors.primary_text if self._enabled else colors.secondary_text};")
+        self.source_icon.setPixmap(icon("online", theme).pixmap(QSize(22, 22)))
+        self.source_icon.setStyleSheet(f"background: {colors.surface_secondary}; border: 0; border-radius: 5px;")
         self.detail_label.setStyleSheet(
             f"font-size: {theme.fonts.caption}px; font-weight: 400; color: {colors.secondary_text};"
         )
@@ -119,31 +139,14 @@ class SourceRow(QFrame):
             f"font-size: {theme.fonts.caption}px; font-weight: 400; color: {colors.danger};"
         )
         self.badge.set_theme(theme)
-        if self._enabled:
-            self.enabled_button.setStyleSheet(
-                f"QToolButton {{ min-height: {metrics.control_height}px; padding: 0 {metrics.spacing_md}px; "
-                f"border: 1px solid {colors.border}; border-radius: {metrics.radius_sm}px; "
-                f"color: {colors.secondary_text}; background: {colors.surface_secondary}; font-weight: 400; }}"
-                f"QToolButton:hover {{ color: {colors.primary_text}; background: {colors.hover_background}; border-color: {colors.border_strong}; }}"
-            )
-        else:
-            self.enabled_button.setStyleSheet(
-                f"QToolButton {{ min-height: {metrics.control_height}px; padding: 0 {metrics.spacing_md}px; "
-                f"border: 1px solid transparent; border-radius: {metrics.radius_sm}px; "
-                f"color: {colors.content_background}; background: {colors.accent}; font-weight: 600; }}"
-                f"QToolButton:hover {{ background: {colors.accent_hover}; }}"
-            )
-        self.retry_button.setStyleSheet(
-            f"QToolButton {{ min-height: {metrics.control_height}px; padding: 0 {metrics.spacing_sm}px; "
-            f"border: 1px solid {colors.border}; border-radius: {metrics.radius_sm}px; color: {colors.warning}; "
-                f"background: {colors.surface_secondary}; font-weight: 400; }}"
-            f"QToolButton:hover {{ color: {colors.primary_text}; background: {colors.hover_background}; }}"
-        )
-        self.remove_button.setStyleSheet(
-            f"QToolButton {{ min-height: {metrics.control_height}px; padding: 0 {metrics.spacing_sm}px; "
-                f"border: 1px solid transparent; border-radius: {metrics.radius_sm}px; color: {colors.secondary_text}; background: transparent; font-weight: 400; }}"
-            f"QToolButton:hover {{ color: {colors.danger}; background: {colors.hover_background}; }}"
-        )
+        self.enabled_button.setStyleSheet("")
+        self.enabled_button.set_theme(theme)
+        style_caption(self.detail_label, theme, subtle=True)
+        style_caption(self.capability_label, theme)
+        style_action(self.retry_button, theme)
+        style_action(self.remove_button, theme)
+        self.remove_button.setStyleSheet(self.remove_button.styleSheet() + "QToolButton::menu-indicator { image: none; }")
+        self.remove_menu.setStyleSheet(build_stylesheet(theme))
 
     def _toggle(self) -> None:
         self.toggle_requested.emit(self.source_id, not self._enabled)
@@ -159,6 +162,7 @@ class OnlineSourcePage(QWidget):
         self._theme = theme
         self._rows: dict[str, SourceRow] = {}
         self.setObjectName("onlineSourcePage")
+        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         self.setAccessibleName("在线来源管理")
         self.header_surface = QFrame(self)
         self.header_surface.setObjectName("onlineSourceHeaderSurface")
@@ -183,39 +187,43 @@ class OnlineSourcePage(QWidget):
         self.add_source_button.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
         self.add_source_button.clicked.connect(self._open_import_dialog)
         self.select_all_button = QToolButton(self)
-        self.select_all_button.setText("全选")
+        self.select_all_button.setText("启用全部")
         self.select_all_button.setAccessibleName("启用全部在线来源")
         self.select_all_button.clicked.connect(adapter.select_all)
         self.clear_button = QToolButton(self)
-        self.clear_button.setText("清空")
+        self.clear_button.setText("停用全部")
         self.clear_button.setAccessibleName("停用全部在线来源")
         self.clear_button.clicked.connect(adapter.clear_selection)
         actions = QHBoxLayout()
         actions.setContentsMargins(0, 0, 0, 0)
         actions.setSpacing(8)
-        actions.addWidget(self.add_source_button)
+        actions.addWidget(self.summary_label)
+        actions.addStretch(1)
         actions.addWidget(self.select_all_button)
         actions.addWidget(self.clear_button)
-        actions.addWidget(self.back_button)
-        actions.addStretch(1)
         header_top = QHBoxLayout()
         header_top.setContentsMargins(0, 0, 0, 0)
         header_top.setSpacing(16)
         heading = QVBoxLayout()
         heading.setContentsMargins(0, 0, 0, 0)
-        heading.setSpacing(3)
+        heading.setSpacing(9)
+        self.eyebrow = QLabel("在线音乐", self)
+        heading.addWidget(self.eyebrow)
         heading.addWidget(self.title_label)
         heading.addWidget(self.detail_label)
         header_top.addLayout(heading, 1)
-        # Page actions get their own line; long source names cannot squeeze them.
+        header_top.addWidget(self.back_button)
+        header_top.addWidget(self.add_source_button)
 
         header_bottom = QHBoxLayout()
         header_bottom.setContentsMargins(0, 0, 0, 0)
-        header_bottom.addWidget(self.summary_label)
-        header_bottom.addStretch(1)
+        self.hint_label = QLabel("来源状态会随搜索更新；停用来源不会移除已收藏的歌曲。", self)
+        self.hint_label.setWordWrap(True)
+        header_bottom.addWidget(self.hint_label, 1)
+
         header_layout = QVBoxLayout(self.header_surface)
-        header_layout.setContentsMargins(0, 12, 0, 18)
-        header_layout.setSpacing(14)
+        header_layout.setContentsMargins(0, 0, 0, 0)
+        header_layout.setSpacing(24)
         header_layout.addLayout(header_top)
         header_layout.addLayout(actions)
         header_layout.addLayout(header_bottom)
@@ -228,8 +236,12 @@ class OnlineSourcePage(QWidget):
         self.content = QWidget(self.scroll_area)
         self.content.setObjectName("onlineSourceContent")
         self.content_layout = QVBoxLayout(self.content)
-        self.content_layout.setContentsMargins(4, 4, 4, 4)
-        self.content_layout.setSpacing(theme.metrics.spacing_sm)
+        self.content_layout.setContentsMargins(0, 0, 0, 0)
+        self.content_layout.setSpacing(0)
+        self.empty_label = QLabel("还没有在线来源\n使用“添加来源”导入可用的来源地址。", self.content)
+        self.empty_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.empty_label.setMinimumHeight(180)
+        self.content_layout.addWidget(self.empty_label)
         self.content_layout.addStretch(1)
         self.scroll_area.setWidget(self.content)
         list_layout = QVBoxLayout(self.list_surface)
@@ -238,7 +250,7 @@ class OnlineSourcePage(QWidget):
         list_layout.addWidget(self.scroll_area)
         layout = QVBoxLayout(self)
         metrics = theme.metrics
-        layout.setContentsMargins(metrics.page_margin, metrics.spacing_lg, metrics.page_margin, metrics.page_margin)
+        layout.setContentsMargins(42, 32, 42, 30)
         layout.setSpacing(metrics.spacing_md)
         layout.addWidget(self.header_surface)
         layout.addWidget(self.list_surface, 1)
@@ -247,6 +259,7 @@ class OnlineSourcePage(QWidget):
         self.set_theme(theme)
 
     def set_sources(self, sources) -> None:
+        self.empty_label.setVisible(not sources)
         is_searching = any(source.status == "searching" for source in sources)
         enabled_count = sum(source.enabled for source in sources)
         disabled_count = len(sources) - enabled_count
@@ -282,13 +295,14 @@ class OnlineSourcePage(QWidget):
         )
 
     def set_theme(self, theme: Theme) -> None:
+        theme = get_theme(theme.mode, profile="b2")
         self._theme = theme
         colors = theme.colors
         metrics = theme.metrics
         self.setStyleSheet(
             build_stylesheet(theme)
             + f"""
-            QWidget#onlineSourceContent {{ background: {colors.content_background}; }}
+            QWidget#onlineSourcePage, QWidget#onlineSourceContent {{ background: {colors.app_background}; }}
             QFrame#onlineSourceHeaderSurface {{
                 background: transparent;
                 border: 0;
@@ -327,17 +341,14 @@ class OnlineSourcePage(QWidget):
             self.select_all_button,
             self.clear_button,
         ):
-            primary = button is self.add_source_button
-            button.setStyleSheet(
-                f"QToolButton {{ min-height: {metrics.control_height}px; padding: 0 {metrics.spacing_md}px; "
-                f"border: 1px solid {'transparent' if primary else colors.border}; border-radius: {metrics.radius_sm}px; "
-                f"background: {colors.accent if primary else colors.surface_secondary}; "
-                f"color: {colors.content_background if primary else colors.secondary_text}; "
-                f"font-weight: {'600' if primary else '500'}; }}"
-                f"QToolButton:hover {{ color: {colors.content_background if primary else colors.primary_text}; "
-                f"background: {colors.accent_hover if primary else colors.hover_background}; border-color: {'transparent' if primary else colors.border_strong}; }}"
-                f"QToolButton:disabled {{ color: {colors.disabled_text}; background: {colors.surface_pressed}; }}"
-            )
+            style_action(button, theme, primary=button is self.add_source_button)
+        for button in (self.back_button, self.select_all_button, self.clear_button):
+            style_action(button, theme)
+        style_action(self.add_source_button, theme, primary=True)
+        for label in (self.eyebrow, self.hint_label, self.empty_label):
+            style_caption(label, theme, subtle=True)
+        for label in (self.detail_label, self.summary_label):
+            style_caption(label, theme)
         for row in self._rows.values():
             row.set_theme(theme)
 
@@ -363,8 +374,10 @@ class OnlineSourcePage(QWidget):
 
     def set_responsive_reference_width(self, width: int) -> None:
         compact = width < 950
-        self.detail_label.setVisible(not compact)
-        self.summary_label.setVisible(not compact)
+        inset = 28 if compact else 42
+        self.layout().setContentsMargins(inset, 32, inset, 30)
+        self.detail_label.setVisible(True)
+        self.summary_label.setVisible(True)
         self.add_source_button.setText("添加" if compact else "添加来源")
-        self.select_all_button.setText("全选" if not compact else "全")
-        self.clear_button.setText("清空" if not compact else "清")
+        self.select_all_button.setText("启用全部")
+        self.clear_button.setText("停用全部")

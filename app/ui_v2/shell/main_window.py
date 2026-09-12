@@ -1978,7 +1978,7 @@ class MainWindow(QMainWindow):
         if not values:
             self._show_recovery_message("没有找到可靠的在线版本。")
             return
-        dialog = OnlineRecoveryCandidateDialog(values, self._theme, self)
+        dialog = OnlineRecoveryCandidateDialog(values, self._theme, self, original_track=source)
         if dialog.exec() == QDialog.DialogCode.Accepted and dialog.selected_track is not None:
             self._play_recovery_candidate(source, dialog.selected_track)
 

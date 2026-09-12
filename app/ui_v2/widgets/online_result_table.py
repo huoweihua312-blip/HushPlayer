@@ -71,8 +71,6 @@ class OnlineResultDelegate(QStyledItemDelegate):
         text_color = QColor(colors.disabled_text if disabled else colors.primary_text)
         secondary = QColor(colors.disabled_text if disabled else colors.secondary_text)
         icon_state = "disabled" if disabled else "selected" if playing else "hover" if hovered else "normal"
-        if playing and column == OnlineColumn.FAVORITE:
-            painter.fillRect(QRectF(rect.left(), rect.top() + 6, 3, rect.height() - 12), QColor(colors.accent))
         if column == OnlineColumn.FAVORITE:
             paint_icon(
                 painter,
@@ -83,6 +81,16 @@ class OnlineResultDelegate(QStyledItemDelegate):
             )
         elif column == OnlineColumn.TITLE:
             left = content.left()
+            marker = QRectF(left, content.center().y() - 8, 16, 16)
+            if playing:
+                paint_icon(painter, "playing", marker, self._theme, "selected")
+            else:
+                font = QFont(option.font)
+                font.setPixelSize(11)
+                painter.setFont(font)
+                self._draw_text(painter, marker, f"{index.row() + 1:02d}", QColor(colors.subtle_text))
+            painter.setFont(option.font)
+            left += 28
             artwork_size = self._theme.metrics.track_artwork_size
             artwork = artwork_pixmap_for_track(track.as_track(), artwork_size, artwork_size)
             painter.drawPixmap(
@@ -91,13 +99,18 @@ class OnlineResultDelegate(QStyledItemDelegate):
                 artwork,
             )
             left += artwork_size + 14
-            if playing:
-                paint_icon(painter, "playing", QRectF(left, content.center().y() - 8, 16, 16), self._theme, "selected")
-                left += 22
             title_rect = QRectF(left, content.top(), content.right() - left, content.height())
             if track.explicit:
                 title_rect.setRight(max(title_rect.left(), title_rect.right() - 22))
+            if identity.availability.is_visible:
+                title_rect.setHeight(30)
+                title_rect.moveTop(content.top() + 6)
             self._draw_text(painter, title_rect, identity.title, QColor(colors.accent) if playing else text_color, bold=playing)
+            if identity.availability.is_visible:
+                font = QFont(option.font)
+                font.setPixelSize(11)
+                painter.setFont(font)
+                self._draw_text(painter, QRectF(left, content.top() + 33, title_rect.width(), 20), identity.availability.label, QColor(colors.disabled_text if disabled else colors.subtle_text))
             if track.explicit and content.width() > 72:
                 badge = QRectF(content.right() - 18, content.center().y() - 8, 16, 16)
                 painter.setPen(Qt.PenStyle.NoPen)
@@ -106,23 +119,15 @@ class OnlineResultDelegate(QStyledItemDelegate):
                 painter.setPen(QColor(colors.primary_text))
                 painter.drawText(badge, Qt.AlignmentFlag.AlignCenter, "E")
         elif column == OnlineColumn.SOURCE:
-            paint_icon(painter, "online", QRectF(content.left(), content.center().y() - 8, 16, 16), self._theme, icon_state)
-            self._draw_text(painter, content.adjusted(22, 0, 0, 0), track.source_name, secondary)
+            font = QFont(option.font)
+            font.setPixelSize(12)
+            painter.setFont(font)
+            self._draw_text(painter, content.adjusted(0, 6, 0, -25), track.source_name, secondary)
+            font.setPixelSize(11)
+            painter.setFont(font)
+            self._draw_text(painter, content.adjusted(0, 31, 0, -7), track.quality, QColor(colors.subtle_text))
         elif column == OnlineColumn.STATUS:
-            if identity.availability.is_confirmed_error:
-                color = colors.disabled_text
-            elif identity.availability.is_resolving:
-                color = colors.subtle_text
-            else:
-                color = colors.subtle_text
-            status_text = (
-                identity.availability.label
-                if identity.availability.is_visible
-                else "可用"
-                if identity.availability.is_playable
-                else "未解析"
-            )
-            self._draw_text(painter, content, status_text, QColor(color))
+            paint_icon(painter, "more", QRectF(content.center().x() - 8, content.center().y() - 8, 16, 16), self._theme, icon_state)
         elif column == OnlineColumn.DURATION:
             self._draw_text(painter, content, index.data(Qt.ItemDataRole.DisplayRole) or "", secondary, align=Qt.AlignmentFlag.AlignRight)
         else:
@@ -152,12 +157,12 @@ class OnlineResultDelegate(QStyledItemDelegate):
 
     def _background(self, state: RowVisualState) -> QColor:
         values = {
-            RowVisualState.NORMAL: self._theme.colors.content_background,
+            RowVisualState.NORMAL: self._theme.colors.app_background,
             RowVisualState.HOVER: self._theme.colors.hover_background,
             RowVisualState.SELECTED: self._theme.colors.selected_background,
             RowVisualState.PLAYING: self._theme.colors.playing_background,
             RowVisualState.SELECTED_PLAYING: self._theme.colors.selected_background,
-            RowVisualState.DISABLED: self._theme.colors.content_background,
+            RowVisualState.DISABLED: self._theme.colors.app_background,
             RowVisualState.SELECTED_DISABLED: self._theme.colors.selected_background,
             RowVisualState.HOVER_DISABLED: self._theme.colors.hover_background,
         }
@@ -197,6 +202,8 @@ class OnlineResultTable(QTableView):
         self._sort_mode = "relevance"
         self.setObjectName("onlineResultTable")
         self.setModel(self.model)
+        self.model.HEADERS = (*self.model.HEADERS[:-1], "")
+        self.setAccessibleDescription("右键或行末更多按钮查看歌曲操作；状态显示于歌名下方")
         self.setItemDelegate(self.delegate)
         self.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
@@ -210,6 +217,10 @@ class OnlineResultTable(QTableView):
         self.verticalHeader().hide()
         self.verticalHeader().setDefaultSectionSize(theme.metrics.track_row_height)
         self.horizontalHeader().setStretchLastSection(False)
+        self.horizontalHeader().setDefaultAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+        # Logical IDs stay unchanged, including favorite hit testing and tooltips.
+        self.horizontalHeader().moveSection(0, len(OnlineColumn) - 1)
+        self.horizontalHeader().moveSection(self.horizontalHeader().visualIndex(int(OnlineColumn.STATUS)), len(OnlineColumn) - 1)
         self.doubleClicked.connect(self._on_double_clicked)
         self.customContextMenuRequested.connect(self._show_context_menu)
         adapter.search_results_changed.connect(self._set_all_tracks)
@@ -225,10 +236,10 @@ class OnlineResultTable(QTableView):
         colors = theme.colors
         metrics = theme.metrics
         self.setStyleSheet(
-            f"QTableView#onlineResultTable {{ background: {colors.content_background}; border: 0; outline: 0; }}"
-            f"QTableView#onlineResultTable QHeaderView {{ background: {colors.content_background}; border: 0; }}"
+            f"QTableView#onlineResultTable {{ background: {colors.app_background}; border: 0; outline: 0; }}"
+            f"QTableView#onlineResultTable QHeaderView {{ background: {colors.app_background}; border: 0; }}"
             f"QTableView#onlineResultTable QHeaderView::section {{ height: 36px; padding: 0 {metrics.spacing_sm}px; "
-            f"background: {colors.content_background}; color: {colors.text_tertiary}; border: 0; "
+            f"background: {colors.app_background}; color: {colors.text_tertiary}; border: 0; "
             f"border-bottom: 1px solid {colors.divider}; font-size: {theme.fonts.card_meta}px; font-weight: 400; }}"
             f"QTableView#onlineResultTable QScrollBar:vertical {{ width: 6px; margin: 4px 2px; background: transparent; border: 0; }}"
             f"QTableView#onlineResultTable QScrollBar::handle:vertical {{ min-height: 28px; border-radius: 3px; background: {colors.border_strong}; }}"
@@ -283,6 +294,10 @@ class OnlineResultTable(QTableView):
         if event.button() == Qt.MouseButton.LeftButton and index.isValid() and index.column() == int(OnlineColumn.FAVORITE):
             if not self.adapter.collection.read_only or self.adapter.can_mutate_remote:
                 self.adapter.toggle_favorite(self.model.track_at(index.row()).id)
+            event.accept()
+            return
+        if event.button() == Qt.MouseButton.LeftButton and index.isValid() and index.column() == int(OnlineColumn.STATUS):
+            self._show_context_menu(event.position().toPoint())
             event.accept()
             return
         super().mouseReleaseEvent(event)
@@ -416,28 +431,27 @@ class OnlineResultTable(QTableView):
         width = max(1, self.viewport().width() - 12)
         profile = self._responsive_width or width
         narrow = profile < 1100
-        hidden = {OnlineColumn.ALBUM, OnlineColumn.QUALITY} if narrow else set()
+        hidden = {OnlineColumn.ALBUM, OnlineColumn.QUALITY} if narrow else {OnlineColumn.QUALITY}
         for column in OnlineColumn:
             self.setColumnHidden(int(column), column in hidden)
         if narrow:
             values = {
                 OnlineColumn.FAVORITE: 38,
-                OnlineColumn.TITLE: max(160, width - 38 - 146 - 68 - 118 - 88),
-                OnlineColumn.ARTIST: 146,
-                OnlineColumn.DURATION: 68,
-                OnlineColumn.SOURCE: 118,
-                OnlineColumn.STATUS: 88,
+                OnlineColumn.TITLE: max(160, width - 38 - 120 - 58 - 124 - 36),
+                OnlineColumn.ARTIST: 120,
+                OnlineColumn.DURATION: 58,
+                OnlineColumn.SOURCE: 124,
+                OnlineColumn.STATUS: 36,
             }
         else:
             values = {
                 OnlineColumn.FAVORITE: 40,
-                OnlineColumn.TITLE: max(160, width - 40 - 160 - 190 - 78 - 118 - 72 - 88),
-                OnlineColumn.ARTIST: 160,
-                OnlineColumn.ALBUM: 190,
-                OnlineColumn.DURATION: 78,
-                OnlineColumn.SOURCE: 118,
-                OnlineColumn.QUALITY: 72,
-                OnlineColumn.STATUS: 88,
+                OnlineColumn.TITLE: max(160, width - 40 - 150 - 160 - 64 - 150 - 36),
+                OnlineColumn.ARTIST: 150,
+                OnlineColumn.ALBUM: 160,
+                OnlineColumn.DURATION: 64,
+                OnlineColumn.SOURCE: 150,
+                OnlineColumn.STATUS: 36,
             }
         header = self.horizontalHeader()
         for column, value in values.items():
@@ -451,4 +465,4 @@ class OnlineResultTable(QTableView):
         self._hovered_row = row
         for changed in (previous, row):
             if 0 <= changed < self.model.rowCount():
-                self.viewport().update(self.visualRect(self.model.index(changed, 0)).united(self.visualRect(self.model.index(changed, self.model.columnCount() - 1))))
+                self.viewport().update(0, self.rowViewportPosition(changed), self.viewport().width(), self.rowHeight(changed))

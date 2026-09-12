@@ -2,14 +2,14 @@
 
 from __future__ import annotations
 
-from PySide6.QtCore import Signal
+from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QVBoxLayout, QWidget
 
 from app.ui_v2.adapters.online_adapter import OnlineAdapter
 from app.ui_v2.adapters.playlist_adapter import PlaylistAdapter
 from app.ui_v2.models.online_search_state import OnlineSearchState
 from app.ui_v2.theme.styles import build_stylesheet
-from app.ui_v2.theme.tokens import Theme
+from app.ui_v2.theme.tokens import Theme, get_theme
 from app.ui_v2.widgets.online_result_table import OnlineResultTable
 from app.ui_v2.widgets.online_result_toolbar import OnlineResultToolbar
 from app.ui_v2.widgets.online_search_bar import OnlineSearchBar
@@ -17,6 +17,7 @@ from app.ui_v2.widgets.search_history_view import SearchHistoryView
 from app.ui_v2.widgets.search_state_view import SearchStateView
 from app.ui_v2.widgets.source_selector import SourceSelector
 from app.ui_v2.widgets.elided_label import ElidedLabel
+from app.ui_v2.widgets.online_presentation import style_action, style_caption, OnlineCheckBox
 
 
 class OnlineSearchPage(QWidget):
@@ -36,6 +37,7 @@ class OnlineSearchPage(QWidget):
         self._theme = theme
         self._responsive_width: int | None = None
         self.setObjectName("onlineSearchPage")
+        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         self.identity_surface = QFrame(self)
         self.identity_surface.setObjectName("onlineSearchIdentitySurface")
         self.result_surface = QFrame(self)
@@ -51,33 +53,49 @@ class OnlineSearchPage(QWidget):
         self.search_bar = OnlineSearchBar(theme, self)
         self.source_selector = SourceSelector(adapter, theme, self)
         self.source_summary_label = QLabel(self)
-        # The shell title bar is the single production query input. Keep this
-        # control as a compatibility handle for deterministic tests.
-        self.search_bar.setVisible(False)
+        self.search_bar.setMaximumWidth(760)
+        self._scope_checks: dict[str, OnlineCheckBox] = {}
         self.result_toolbar = OnlineResultToolbar(theme, self.result_surface)
         self.result_table = OnlineResultTable(adapter, playlists, theme, self.result_surface)
         self.history_view = SearchHistoryView(theme, self.result_surface)
         self.history_view.setObjectName("onlineSearchHistorySurface")
         self.state_view = SearchStateView(theme, self.result_surface)
         self.state_view.setObjectName("onlineSearchStateSurface")
+        self.state_view.progress.setFixedSize(180, 3)
+        self.state_view.progress.setTextVisible(False)
+        self.state_view.layout().setAlignment(self.state_view.progress, Qt.AlignmentFlag.AlignHCenter)
         identity_heading = QVBoxLayout()
         identity_heading.setContentsMargins(0, 0, 0, 0)
-        identity_heading.setSpacing(3)
+        identity_heading.setSpacing(9)
+        self.eyebrow = QLabel("在线音乐", self)
+        identity_heading.addWidget(self.eyebrow)
         identity_heading.addWidget(self.title_label)
         identity_heading.addWidget(self.detail_label)
         identity_context = QHBoxLayout()
         identity_context.setContentsMargins(0, 0, 0, 0)
         identity_context.setSpacing(theme.metrics.spacing_sm)
-        identity_context.addWidget(self.query_context_label, 1)
+        self.scope_label.setText("搜索来源")
         identity_context.addWidget(self.scope_label)
-        identity_context.addWidget(self.source_summary_label)
+        self.scope_options = QHBoxLayout()
+        self.scope_options.setSpacing(18)
+        identity_context.addLayout(self.scope_options)
         identity_context.addStretch(1)
         identity_context.addWidget(self.source_selector)
+        self.source_summary_label.hide()
+        self.query_context_label.hide()
         identity_layout = QVBoxLayout(self.identity_surface)
-        identity_layout.setContentsMargins(0, 12, 0, 18)
-        identity_layout.setSpacing(14)
-        identity_layout.addLayout(identity_heading)
+        identity_layout.setContentsMargins(0, 0, 0, 14)
+        identity_layout.setSpacing(18)
+        top = QHBoxLayout()
+        top.addLayout(identity_heading, 1)
+        top.addWidget(self.result_toolbar.sources_button, 0, Qt.AlignmentFlag.AlignVCenter)
+        identity_layout.addLayout(top)
+        identity_layout.addSpacing(6)
+        identity_layout.addWidget(self.search_bar)
         identity_layout.addLayout(identity_context)
+        self.feedback_label = ElidedLabel(self)
+        identity_layout.addSpacing(12)
+        identity_layout.addWidget(self.feedback_label)
         result_layout = QVBoxLayout(self.result_surface)
         result_layout.setContentsMargins(0, 0, 0, 0)
         result_layout.setSpacing(theme.metrics.spacing_sm)
@@ -87,11 +105,11 @@ class OnlineSearchPage(QWidget):
         result_layout.addWidget(self.result_table, 1)
         layout = QVBoxLayout(self)
         metrics = theme.metrics
-        layout.setContentsMargins(metrics.page_margin, metrics.spacing_lg, metrics.page_margin, metrics.page_margin)
+        layout.setContentsMargins(42, 32, 42, 30)
         layout.setSpacing(metrics.spacing_md)
         layout.addWidget(self.identity_surface)
         layout.addWidget(self.result_surface, 1)
-        self.result_table.setMinimumHeight(260)
+        self.result_table.setMinimumHeight(180)
         self.search_bar.query_changed.connect(adapter.set_query)
         self.search_bar.search_requested.connect(self._search)
         self.history_view.query_requested.connect(self._search_history)
@@ -121,12 +139,14 @@ class OnlineSearchPage(QWidget):
         self._sync_state(adapter.state)
 
     def set_theme(self, theme: Theme) -> None:
+        theme = get_theme(theme.mode, profile="b2")
         self._theme = theme
         colors = theme.colors
         metrics = theme.metrics
         self.setStyleSheet(
             build_stylesheet(theme)
             + f"""
+            QWidget#onlineSearchPage {{ background: {colors.app_background}; }}
             QFrame#onlineSearchIdentitySurface {{
                 background: transparent;
                 border: 0;
@@ -178,15 +198,33 @@ class OnlineSearchPage(QWidget):
         self.result_table.set_theme(theme)
         self.history_view.set_theme(theme)
         self.state_view.set_theme(theme)
+        self.history_view.setStyleSheet(self.history_view.styleSheet() +
+            "QWidget#onlineSearchHistorySurface, QWidget#searchHistoryRow { border: 0; background: transparent; }")
+        self.state_view.title_label.setStyleSheet(f"font-size: 20px; font-weight: 500; color: {colors.primary_text};")
+        self.state_view.detail_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        style_caption(self.state_view.detail_label, theme)
+        for button in (self.state_view.cancel_button, self.state_view.sources_button, self.state_view.history_button):
+            style_action(button, theme)
+        style_action(self.state_view.retry_button, theme, primary=True)
+        for label in (self.eyebrow, self.scope_label, self.feedback_label):
+            style_caption(label, theme, subtle=True)
+        style_caption(self.detail_label, theme)
+        style_action(self.result_toolbar.sources_button, theme)
+        for check in self._scope_checks.values():
+            check.set_theme(theme)
+        self.source_selector.setStyleSheet(self.source_selector.styleSheet() +
+            "QToolButton#onlineSourceSelector { border: 0; background: transparent; font-size: 13px; }")
 
     def set_responsive_reference_width(self, width: int) -> None:
         self._responsive_width = max(1, int(width))
         narrow = width < 950
+        inset = 28 if narrow else 42
+        self.layout().setContentsMargins(inset, 32, inset, 30)
         self.source_selector.set_compact(narrow)
         self.result_table.set_responsive_reference_width(width)
         self.result_toolbar.set_compact(narrow)
         self.result_toolbar.sources_button.setText("来源" if narrow else "管理来源")
-        self.identity_surface.setMinimumHeight(112 if narrow else 126)
+        self.identity_surface.setMinimumHeight(0)
         self._sync_header_visibility()
 
     def _search(self) -> None:
@@ -204,23 +242,47 @@ class OnlineSearchPage(QWidget):
         self.result_toolbar.setVisible(state.phase == "results" and has_results)
         self.state_view.setVisible(not (state.phase == "results" and has_results))
         self.state_view.set_state(state)
+        self.state_view.progress.setToolTip(f"搜索进度：{state.progress}%")
         self.result_toolbar.set_summary(len(self.adapter.results()), state.message)
+        self.feedback_label.set_full_text(state.message or ("聚合查询完成 · 来源信息仅供选择时参考" if has_results else ""))
+        for check in self._scope_checks.values():
+            check.setEnabled(state.phase != "searching")
         self._sync_query_context()
-        self._sync_header_visibility(has_results)
+        self._sync_header_visibility()
 
-    def _sync_header_visibility(self, has_results: bool | None = None) -> None:
-        """Give the result table priority once a search has completed."""
+    def _sync_header_visibility(self) -> None:
+        """Keep query and scope anchored across loading, failure and results."""
 
-        if has_results is None:
-            has_results = bool(self.adapter.results()) and self.adapter.state.phase == "results"
         narrow = (self._responsive_width or 1200) < 950
-        show_context = not bool(has_results)
-        self.detail_label.setVisible(show_context and not narrow)
-        self.scope_label.setVisible(show_context and not narrow)
-        self.source_summary_label.setVisible(show_context and not narrow)
-        self.identity_surface.setMinimumHeight(88 if has_results else 112 if narrow else 126)
+        self.detail_label.setVisible(True)
+        self.scope_label.setVisible(True)
+        self.source_summary_label.hide()
+        self.identity_surface.setMinimumHeight(0)
+        for i, check in enumerate(self._scope_checks.values()):
+            check.setVisible(i < (2 if narrow else 3))
 
     def _sync_sources(self, sources) -> None:
+        ids = {source.id for source in sources}
+        for source_id in tuple(self._scope_checks):
+            if source_id not in ids:
+                check = self._scope_checks.pop(source_id)
+                self.scope_options.removeWidget(check)
+                check.deleteLater()
+        for source in sources:
+            check = self._scope_checks.get(source.id)
+            if check is None:
+                check = OnlineCheckBox(self)
+                check.setMaximumWidth(160)
+                check.clicked.connect(lambda checked, key=source.id: self.adapter.set_source_enabled(key, checked))
+                self._scope_checks[source.id] = check
+                self.scope_options.addWidget(check)
+            check.setText(source.name if len(source.name) <= 10 else source.name[:9] + "…")
+            check.setAccessibleName(source.name)
+            check.setToolTip(source.name)
+            check.setChecked(source.enabled)
+            check.setEnabled(self.adapter.state.phase != "searching")
+            check.set_theme(self._theme)
+        self._sync_header_visibility()
         enabled = [source for source in sources if source.enabled]
         unavailable = [source for source in enabled if source.status in {"failed", "disabled"}]
         summary = f"已启用 {len(enabled)} 个在线来源"
@@ -230,6 +292,11 @@ class OnlineSearchPage(QWidget):
 
     def _sync_query_context(self) -> None:
         query = str(self.adapter.query or "").strip()
+        # Mirror shell/history edits without feeding a second edit into the adapter.
+        if self.search_bar.line_edit.text() != self.adapter.query:
+            blocked = self.search_bar.line_edit.blockSignals(True)
+            self.search_bar.set_text(self.adapter.query)
+            self.search_bar.line_edit.blockSignals(blocked)
         self.query_context_label.set_full_text(
             f"当前搜索：{query}" if query else "尚未输入关键词"
         )
