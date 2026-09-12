@@ -40,7 +40,8 @@ from app.ui_v2.pages.online_source_page import OnlineSourcePage
 from app.ui_v2.pages.pending_imports_page import PendingImportsPage
 from app.services.music_folder_scan import MusicFolderImportService
 from app.ui_v2.theme.icons import fluent_settings_icon, fluent_settings_interactive_icon
-from app.ui_v2.theme.tokens import Theme
+from app.ui_v2.theme.tokens import Theme, get_theme
+from app.ui_v2.widgets.settings_presentation import arrange_rows, style_overlay
 from app.ui_v2.widgets.settings_control_factory import (
     SettingsControlFactory,
     SettingSlider,
@@ -190,6 +191,7 @@ class SettingsOverlay(QWidget):
         parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
+        theme = get_theme(theme.mode, profile="b2")
         self.bridge = bridge
         self._theme = theme
         self._online_sources = online_sources
@@ -251,14 +253,14 @@ class SettingsOverlay(QWidget):
         self.close_button.setToolTip("关闭设置")
         self.close_button.setAccessibleName("关闭设置")
         header = QHBoxLayout()
-        header.setContentsMargins(24, 18, 18, 14)
+        header.setContentsMargins(29, 16, 26, 16)
         header.setSpacing(10)
         heading = QVBoxLayout()
         heading.setContentsMargins(0, 0, 0, 0)
         heading.setSpacing(2)
         heading.addWidget(self.title_label)
         heading.addWidget(self.subtitle_label)
-        header.addWidget(self.header_icon)
+        self.header_icon.hide()
         header.addLayout(heading, 1)
         header.addWidget(self.close_button, 0, Qt.AlignmentFlag.AlignTop)
 
@@ -326,7 +328,7 @@ class SettingsOverlay(QWidget):
             page = QWidget(self.content_stack)
             page.setObjectName(f"settingsCategory_{category.key}")
             outer = QVBoxLayout(page)
-            outer.setContentsMargins(24, 12, 24, 24)
+            outer.setContentsMargins(32, 18, 32, 30)
             outer.setSpacing(0)
             scroll = QScrollArea(page)
             scroll.setObjectName(f"settingsScroll_{category.key}")
@@ -358,6 +360,9 @@ class SettingsOverlay(QWidget):
         page = OnlineSourcePage(self._online_sources, self._theme, self.content_stack)
         page.setObjectName("settingsCategory_online_sources")
         page.back_button.hide()
+        note = QLabel("此页操作立即生效，不由底部“保存”提交。", page)
+        note.setObjectName("settingsImmediateNote")
+        page.layout().insertWidget(0, note)
         return page
 
     def _build_pending_imports_page(self) -> PendingImportsPage:
@@ -365,6 +370,9 @@ class SettingsOverlay(QWidget):
 
         page = PendingImportsPage(self._theme, self.content_stack)
         page.header.set_context("设置")
+        note = QLabel("此页操作立即生效，不由底部“保存”提交。", page)
+        note.setObjectName("settingsImmediateNote")
+        page.layout().insertWidget(0, note)
         page.import_requested.connect(self.pending_import_requested)
         page.ignore_requested.connect(self.pending_ignore_requested)
         page.open_folder_requested.connect(self.pending_open_folder_requested)
@@ -478,21 +486,21 @@ class SettingsOverlay(QWidget):
         layout.addWidget(section)
 
     def _build_playback(self, layout: QVBoxLayout) -> None:
-        section = self._track_section(self._section("播放恢复", "沿用现有播放会话恢复语义。"))
-        section.add_row(self._toggle_row("restore_last_playback", "启动时恢复上次播放的歌曲和进度", "启动时读取现有播放会话。"))
+        section = self._track_section(self._section("播放恢复", "下次打开时，从上次停下的地方继续。"))
+        section.add_row(self._toggle_row("restore_last_playback", "启动时恢复上次播放的歌曲和进度", "恢复上次歌曲与进度，不会自动开始播放。"))
         layout.addWidget(section)
 
     def _build_lyrics(self, layout: QVBoxLayout) -> None:
-        immersive = self._track_section(self._section("沉浸歌词", "保留现有沉浸歌词设置，不改变 Lyrics 或沉浸页面结构。"))
-        immersive.add_row(self._toggle_row("immersive_auto_hide_ui", "自动隐藏控制层", "播放中静止后按现有规则隐藏控制层。"))
+        immersive = self._track_section(self._section("沉浸歌词", "调整沉浸播放时的背景和歌词阅读体验。"))
+        immersive.add_row(self._toggle_row("immersive_auto_hide_ui", "自动隐藏控制层", "播放时静止片刻隐藏控制层，移动鼠标后重新显示。"))
         immersive.add_row(self._combo_row("immersive_background_mode", "背景模式", "使用封面、纯色、半透明或自定义背景。", (("封面背景", "cover"), ("纯色背景", "default"), ("半透明背景", "translucent"), ("自定义图片", "custom"))))
         immersive.add_row(self._path_row("immersive_background_custom_path", "自定义背景图片", "仅在选择自定义背景时使用。"))
-        immersive.add_row(self._slider_row("immersive_background_blur", "背景模糊", "保留现有背景模糊范围。", 0, 40, " px"))
+        immersive.add_row(self._slider_row("immersive_background_blur", "背景模糊", "柔化背景细节，让歌词更清晰。", 0, 40, " px"))
         immersive.add_row(self._slider_row("immersive_background_darkness", "背景暗度", "仅影响背景图层。", 0, 90, "%"))
         immersive.add_row(self._slider_row("immersive_background_image_opacity", "背景图片不透明度", "仅影响背景图片。", 20, 100, "%"))
-        immersive.add_row(self._slider_row("immersive_background_transparency", "背景透明度", "沿用现有透明度语义。", 0, 85, "%"))
+        immersive.add_row(self._slider_row("immersive_background_transparency", "背景透明度", "调整背景透明程度，不改变歌词和控件的不透明度。", 0, 85, "%"))
         immersive.add_row(self._combo_row("immersive_background_fill_mode", "背景填充方式", "选择封面填充或完整显示。", (("填充", "cover"), ("完整显示", "contain"))))
-        immersive.add_row(self._slider_row("immersive_lyrics_font_scale", "沉浸歌词字号比例", "沿用现有 70% 到 160% 范围。", 70, 160, "%"))
+        immersive.add_row(self._slider_row("immersive_lyrics_font_scale", "沉浸歌词字号比例", "调整沉浸歌词的阅读大小。", 70, 160, "%"))
         layout.addWidget(immersive)
 
     def merge_external_snapshot(
@@ -515,7 +523,7 @@ class SettingsOverlay(QWidget):
         self._refresh_state()
 
     def _build_library(self, layout: QVBoxLayout) -> None:
-        section = self._track_section(self._section("音乐文件夹", "修改后保存到现有扫描设置；手动扫描仍是独立操作。"))
+        section = self._track_section(self._section("音乐文件夹", "文件夹修改需要保存；手动扫描可独立执行。"))
         self.folder_list = QListWidget(self)
         self.folder_list.setObjectName("settingsFolderList")
         self.folder_list.setMinimumHeight(100)
@@ -533,11 +541,11 @@ class SettingsOverlay(QWidget):
         buttons.addWidget(scan)
         buttons.addStretch(1)
         section.add_layout(buttons)
-        section.add_row(self._combo_row("music_scan_import_mode", "扫描新音乐后的处理方式", "沿用待导入或自动加入音乐库的现有语义。", (("进入待导入列表，手动确认", "pending"), ("自动加入音乐库", "auto"))))
+        section.add_row(self._combo_row("music_scan_import_mode", "扫描新音乐后的处理方式", "先确认再加入音乐库，或选择自动加入。", (("进入待导入列表，手动确认", "pending"), ("自动加入音乐库", "auto"))))
         layout.addWidget(section)
 
     def _build_cache(self, layout: QVBoxLayout) -> None:
-        section = self._track_section(self._section("缓存", "缓存命令不参与 Save/Dirty；仅调用现有服务。"))
+        section = self._track_section(self._section("缓存", "路径修改需要保存并重启，清理操作立即执行。"))
         cache_path_row = self._path_row(
             "cache_directory",
             "缓存位置",
@@ -554,13 +562,13 @@ class SettingsOverlay(QWidget):
         operations.setObjectName("settingsCacheOperations")
         operations_layout = QGridLayout(operations)
         operations_layout.setContentsMargins(0, 4, 0, 0)
-        operations_layout.setHorizontalSpacing(10)
-        operations_layout.setVerticalSpacing(10)
-        for index, (text, action) in enumerate((
-            ("清理封面 / 歌词失败缓存", "clear_missing_cache"),
-            ("打开音频缓存目录", "open_audio_cache_directory"),
-            ("清理未完成音频缓存", "clear_incomplete_audio_cache"),
-            ("清理全部音频缓存", "clear_all_audio_cache"),
+        operations_layout.setHorizontalSpacing(0)
+        operations_layout.setVerticalSpacing(0)
+        for index, (title, description, text, action) in enumerate((
+            ("失败封面与歌词缓存", "清理失败记录，使下次匹配能够重新尝试。", "清理失败缓存", "clear_missing_cache"),
+            ("音频缓存目录", "查看已经缓存的在线音频。", "打开目录", "open_audio_cache_directory"),
+            ("未完成音频", "清理中断下载产生的临时缓存。", "清理未完成音频", "clear_incomplete_audio_cache"),
+            ("全部音频缓存", "移除已缓存音频，下次播放可能需要重新获取。", "清理全部音频", "clear_all_audio_cache"),
         )):
             button = (
                 SettingsActionButton(text, self._theme, self)
@@ -568,16 +576,19 @@ class SettingsOverlay(QWidget):
                 else SettingsDangerAction(text, self._theme, self)
             )
             self._aux_controls.append(button)
+            if action in {"clear_missing_cache", "clear_incomplete_audio_cache"}:
+                button.setProperty("settingsTone", "warning")
             button.clicked.connect(lambda _checked=False, name=action: self._run_action(name))
             button.setEnabled(self.bridge.has_action(action))
-            operations_layout.addWidget(button, index // 2, index % 2)
+            row = self._track_row(SettingsRow(f"cache_action:{action}", title, description, button, self._theme, self))
+            operations_layout.addWidget(row, index, 0)
         section.add_widget(operations)
         layout.addWidget(section)
 
     def _build_updates(self, layout: QVBoxLayout) -> None:
-        section = self._track_section(self._section("应用更新", "更新检查沿用现有 AppUpdateService。"))
-        section.add_row(self._toggle_row("auto_check_updates_on_startup", "启动后自动检查更新", "下次启动时按现有服务规则检查。"))
-        section.add_row(self._combo_row("update_check_delay_seconds", "启动后延迟", "保留现有 5 到 300 秒范围。", (("5 秒", "5"), ("15 秒", "15"), ("30 秒", "30"), ("60 秒", "60"))))
+        section = self._track_section(self._section("应用更新", "检查新版本，下载前仍由你确认。"))
+        section.add_row(self._toggle_row("auto_check_updates_on_startup", "启动后自动检查更新", "下次启动时按保存的设置检查。"))
+        section.add_row(self._combo_row("update_check_delay_seconds", "启动后延迟", "选择启动后等待多久再检查更新。", (("5 秒", "5"), ("15 秒", "15"), ("30 秒", "30"), ("60 秒", "60"))))
         self.update_status = QLabel("尚未检查更新。", self)
         self.update_status.setWordWrap(True)
         section.add_widget(self.update_status)
@@ -604,9 +615,17 @@ class SettingsOverlay(QWidget):
         version = QLabel(f"版本 {APP_VERSION}", self)
         version.setObjectName("settingsAboutVersion")
         version.setWordWrap(True)
-        section.add_widget(logo)
-        section.add_widget(app_name)
-        section.add_widget(version)
+        section.title.hide()
+        section.description.hide()
+        brand = QHBoxLayout()
+        brand.setSpacing(15)
+        identity = QVBoxLayout()
+        identity.setSpacing(6)
+        identity.addWidget(app_name)
+        identity.addWidget(version)
+        brand.addWidget(logo)
+        brand.addLayout(identity, 1)
+        section.add_layout(brand)
         font_notice = QLabel("本软件使用 MiSans 字体，版权归小米所有。字体许可协议随应用附带。", self)
         font_notice.setWordWrap(True)
         section.add_widget(font_notice)
@@ -926,7 +945,7 @@ class SettingsOverlay(QWidget):
         self._current_category = key
         self.sidebar.set_current(key)
         self.content_stack.setCurrentWidget(self._category_pages[key])
-        self.subtitle_label.setText(category_for_key(key).title)
+        self.subtitle_label.setText("按你的习惯调整播放器")
 
     def set_appearance_mode(self, mode: str) -> None:
         """Route the shell's quick theme action through this edit session."""
@@ -940,6 +959,8 @@ class SettingsOverlay(QWidget):
 
     def set_responsive_reference_width(self, width: int) -> None:
         compact = int(width) < 1000
+        navigation_changed = compact != self.sidebar._compact
+        self._presentation_window_width = int(width)
         self.sidebar.set_compact(compact)
         for row in self._rows:
             row.set_compact(compact)
@@ -948,6 +969,11 @@ class SettingsOverlay(QWidget):
             online_sources_page, "set_responsive_reference_width"
         ):
             online_sources_page.set_responsive_reference_width(int(width))
+
+        if navigation_changed:
+            style_overlay(self, self._theme)
+        else:
+            arrange_rows(self, int(width))
 
     def keyPressEvent(self, event: QKeyEvent) -> None:  # noqa: N802
         if event.key() == Qt.Key.Key_Escape:
@@ -980,10 +1006,10 @@ class SettingsOverlay(QWidget):
     def _dialog_geometry(self):
         """Keep the fixed header/footer inside the body at narrow heights."""
 
-        margin = 24 if self.width() < 1000 else 36
-        width = min(920, max(820, self.width() - margin * 2))
+        margin = 24 if self.width() <= 1080 else 36
+        width = min(1120, max(0, self.width() - margin * 2))
         available_height = max(0, self.height() - margin * 2)
-        height = min(740, max(360, available_height))
+        height = min(748, available_height)
         return QRect(
             (self.width() - width) // 2,
             (self.height() - height) // 2,
@@ -992,6 +1018,7 @@ class SettingsOverlay(QWidget):
         )
 
     def set_theme(self, theme: Theme) -> None:
+        theme = get_theme(theme.mode, profile="b2")
         self._theme = theme
         c = theme.colors
         overlay_color = "rgba(31, 48, 41, 62)" if theme.mode == "light" else "rgba(0, 0, 0, 110)"
@@ -1055,3 +1082,5 @@ class SettingsOverlay(QWidget):
                 page.setStyleSheet(f"background: {c.content_background};")
         for scroll in self._category_scrolls.values():
             scroll.setStyleSheet(f"QScrollArea {{ border: 0; background: {c.content_background}; }} QAbstractScrollArea::viewport {{ background: {c.content_background}; }} QScrollBar:vertical {{ width: 9px; background: transparent; }} QScrollBar::handle:vertical {{ min-height: 32px; border-radius: 4px; background: {c.border_strong}; }} QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{ height: 0; }}")
+
+        style_overlay(self, theme)

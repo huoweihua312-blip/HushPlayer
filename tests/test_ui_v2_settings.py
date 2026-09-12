@@ -246,7 +246,7 @@ class SettingsOverlayIntegrationTests(unittest.TestCase):
         self.assertNotIn("## 未发布", changelog)
         self.assertNotIn("mock", changelog.casefold())
 
-    def test_cache_directory_uses_two_column_actions_and_restart_feedback(self) -> None:
+    def test_cache_directory_keeps_actions_and_restart_feedback(self) -> None:
         overlay = self.open_overlay()
         overlay.set_category("cache")
         self.app.processEvents()
@@ -296,7 +296,7 @@ class SettingsOverlayIntegrationTests(unittest.TestCase):
         self.window.resize(900, 600)
         self.app.processEvents()
         self.assertEqual(id(self.window.settings_overlay), overlay_id)
-        self.assertEqual(overlay.sidebar.minimumWidth(), 156)
+        self.assertEqual(overlay.sidebar.minimumWidth(), 160)
         self.window.resize(1600, 900)
         self.app.processEvents()
         overlay.close()
