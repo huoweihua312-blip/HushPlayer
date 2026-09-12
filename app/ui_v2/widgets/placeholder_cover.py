@@ -5,8 +5,9 @@ from __future__ import annotations
 import hashlib
 from pathlib import Path
 
-from PySide6.QtCore import Qt
-from PySide6.QtGui import QPixmap
+from PySide6.QtCore import QRectF, Qt
+from PySide6.QtGui import QPainter, QPixmap
+from PySide6.QtSvg import QSvgRenderer
 
 from app.ui_v2.widgets.pixmap_cache import PixmapCache
 
@@ -38,6 +39,17 @@ def cover_pixmap(stable_id: str, width: int, height: int) -> QPixmap:
     if cached is not None:
         return cached
     pixmap = QPixmap(str(path))
+    if not pixmap.isNull() and (key[1] > pixmap.width() or key[2] > pixmap.height()):
+        # Render vectors at the requested resolution instead of enlarging the
+        # SVG's small default raster. Keep existing thumbnail rendering intact.
+        renderer = QSvgRenderer(str(path))
+        if renderer.isValid():
+            size = renderer.defaultSize().scaled(key[1], key[2], Qt.AspectRatioMode.KeepAspectRatioByExpanding)
+            pixmap = QPixmap(size)
+            pixmap.fill(Qt.GlobalColor.transparent)
+            painter = QPainter(pixmap)
+            renderer.render(painter, QRectF(pixmap.rect()))
+            painter.end()
     if not pixmap.isNull():
         pixmap = pixmap.scaled(
             key[1],

@@ -140,6 +140,7 @@ class LyricsCanvasV2(QWidget):
         self._base_sizes = (42, 27, 19, 16)
         self._font_weight = "Semibold"
         self._inactive_opacity = 74
+        self._immersive_reading_style = False
         self._text_protection = "轻微阴影"
         self._max_text_width = 820
         self._responsive_scale = 1.0
@@ -212,6 +213,13 @@ class LyricsCanvasV2(QWidget):
         active, normal, translation, romanization = self._base_sizes
         if self._mode == "ordinary":
             active_bounds, normal_bounds = (34, 48), (22, 32)
+        elif self._immersive_reading_style:
+            # Opt-in B2 reading typography; keep the user's scale/size inputs.
+            # Ordinary lyrics and the legacy immersive profile stay unchanged.
+            active = max(40, min(72, active))
+            normal = max(22, min(38, normal))
+            translation = max(16, min(26, translation))
+            active_bounds, normal_bounds = (32, 76), (18, 52)
         else:
             # Keep the approved 100% immersive baseline while scaling the
             # actual rendered size at every setting value. The former hard
@@ -225,7 +233,7 @@ class LyricsCanvasV2(QWidget):
         return (
             max(active_bounds[0], min(active_bounds[1], round(active * scale))),
             max(normal_bounds[0], min(normal_bounds[1], round(normal * scale))),
-            max(14 if self._mode == "ordinary" else 18, min(26, round(translation * scale))),
+            max(14 if self._mode == "ordinary" or self._immersive_reading_style else 18, min(26, round(translation * scale))),
             max(13 if self._mode == "ordinary" else 15, min(22, round(romanization * scale))),
         )
 
@@ -244,6 +252,10 @@ class LyricsCanvasV2(QWidget):
 
     def inactive_alpha_for_distance(self, distance: int) -> int:
         baseline = max(32, min(92, self._inactive_opacity)) / 100
+        if self._mode == "immersive" and self._immersive_reading_style:
+            # Context remains readable but no longer competes with the lyric.
+            attenuation = 0.68 if distance <= 1 else 0.50 if distance == 2 else 0.24
+            return round(255 * baseline * attenuation)
         if distance <= 1:
             return round(255 * max(0.68, baseline))
         if distance == 2:
@@ -555,6 +567,11 @@ class LyricsCanvasV2(QWidget):
         self._max_text_width = max(360, min(920, int(value)))
         self.update()
 
+    def set_immersive_reading_style(self, enabled: bool) -> None:
+        """Opt into B2 paint metrics without changing lyric or browse state."""
+        self._immersive_reading_style = bool(enabled)
+        self.update()
+
     def set_responsive_scale(self, value: float) -> None:
         self._responsive_scale = max(0.72, min(1.12, float(value)))
         self.update()
@@ -701,7 +718,7 @@ class LyricsCanvasV2(QWidget):
             if active and self._translation_visible and line.translation:
                 sub_font = self._font(sizes[2], QFont.Weight.Medium)
                 sub_rect = self._text_rect(source_rect.x(), y, text_width, sub_font, line.translation, 3)
-                self._draw_text(painter, sub_rect, line.translation, sub_font, _with_alpha(self._theme.colors.secondary_text, 230), shadow=False)
+                self._draw_text(painter, sub_rect, line.translation, sub_font, _with_alpha(self._theme.colors.secondary_text, 200 if self._mode == "immersive" and self._immersive_reading_style else 230), shadow=False)
                 y += sub_rect.height() + 2
         painter.end()
         self._last_metrics = {
@@ -825,7 +842,7 @@ class LyricsCanvasV2(QWidget):
             if is_active and self._translation_visible and line.translation:
                 sub_font = self._font(sizes[2], QFont.Weight.Medium)
                 sub_rect = self._text_rect(x, y, text_width, sub_font, line.translation, 3)
-                self._draw_text(painter, sub_rect, line.translation, sub_font, _with_alpha(self._theme.colors.secondary_text, 230), shadow=False)
+                self._draw_text(painter, sub_rect, line.translation, sub_font, _with_alpha(self._theme.colors.secondary_text, 200 if self._mode == "immersive" and self._immersive_reading_style else 230), shadow=False)
                 y += sub_rect.height() + 2
             y += self._section_spacing()
         painter.end()
@@ -869,7 +886,7 @@ class LyricsCanvasV2(QWidget):
     def _section_spacing(self) -> int:
         if self._mode == "ordinary" and self._ordinary_metrics is not None:
             return self._ordinary_metrics.section_spacing
-        return max(10, round((17 if self._mode == "ordinary" else 25) * self._responsive_scale))
+        return max(10, round((17 if self._mode == "ordinary" else 21 if self._immersive_reading_style else 25) * self._responsive_scale))
 
     def _font(self, size: int, weight: QFont.Weight) -> QFont:
         font = QFont(self.font())

@@ -36,6 +36,7 @@ class FlatSlider(QSlider):
         self._disabled_color = QColor("#6b6b6b")
         self._focus_color = QColor("#c9a86a")
         self._handle_radius = 6.0
+        self._track_height = 4.0
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, False)
         self.setAutoFillBackground(False)
         self.setMouseTracking(True)
@@ -62,6 +63,11 @@ class FlatSlider(QSlider):
         self._handle_radius = max(3.0, float(radius))
         self.update()
 
+    def set_track_height(self, height: float) -> None:
+        """Set painted thickness independently of the native slider hit area."""
+        self._track_height = max(1.0, min(4.0, float(height)))
+        self.update()
+
     def paintEvent(self, event) -> None:  # noqa: N802
         if self.orientation() != Qt.Orientation.Horizontal:
             return super().paintEvent(event)
@@ -76,7 +82,7 @@ class FlatSlider(QSlider):
             painter.end()
             return
         center_y = float(self.rect().center().y())
-        track_height = min(4.0, max(2.0, float(self.height()) / 4.0))
+        track_height = min(self._track_height, max(2.0, float(self.height()) / 4.0))
         track = QRectF(left, center_y - track_height / 2.0, width, track_height)
         enabled = self.isEnabled()
         track_color = self._track_color if enabled else self._disabled_color

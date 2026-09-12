@@ -122,6 +122,7 @@ class ArtworkAtmosphere(QWidget):
     def __init__(self, theme: Theme, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self._theme = theme
+        self._reading_scene = False
         self._palette = ArtworkPalette()
         self._mode = "artwork"
         # Keep the artwork-derived field atmospheric rather than turning the
@@ -156,6 +157,12 @@ class ArtworkAtmosphere(QWidget):
     def set_theme(self, theme: Theme) -> None:
         self._theme = theme
         self.update()
+
+    def set_reading_scene(self, enabled: bool) -> None:
+        """Mute the generated color field only for the lyric reading scene."""
+        if self._reading_scene != bool(enabled):
+            self._reading_scene = bool(enabled)
+            self.update()
 
     def set_mode(self, mode: str) -> None:
         self._mode = mode if mode in {"artwork", "gradient", "solid", "transparent", "custom"} else "artwork"
@@ -236,6 +243,18 @@ class ArtworkAtmosphere(QWidget):
             painter.setPen(Qt.PenStyle.NoPen)
             painter.setBrush(glow)
             painter.drawEllipse(QRectF(center.x() - radius, center.y() - radius, radius * 2, radius * 2))
+
+        if self._reading_scene and self._mode in {"artwork", "gradient"}:
+            # A continuous neutral veil, not separate surfaces behind widgets.
+            # Custom images and desktop transparency retain their exact paint.
+            dark = self._theme.mode == "dark"
+            veil = QLinearGradient(0, 0, 0, self.height())
+            base = "#101b1e" if dark else "#f5f2ec"
+            alpha = round(self._overlay_strength * (1.5 if dark else 0.8))
+            veil.setColorAt(0, _color(base, alpha))
+            veil.setColorAt(0.68, _color(base, alpha))
+            veil.setColorAt(1, _color("#081114" if dark else base, min(225, alpha + 65)))
+            painter.fillRect(self.rect(), veil)
 
     def _paint_custom_image(self, painter: QPainter) -> None:
         rect = self.rect()
