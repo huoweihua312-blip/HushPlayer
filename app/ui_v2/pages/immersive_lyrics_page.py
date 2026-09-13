@@ -200,7 +200,7 @@ class ImmersiveLyricsPage(QWidget):
         for name, tip, callback in (
             ("window_minimize", "最小化", lambda: self.window().showMinimized()),
             ("window_maximize", "最大化", self._toggle_host_maximized),
-            ("window_close", "关闭", lambda: self.window().close()),
+            ("window_close", "关闭", self._request_host_close),
         ):
             button = self._header_button(name, tip)
             button.clicked.connect(callback)
@@ -239,6 +239,9 @@ class ImmersiveLyricsPage(QWidget):
         button = self._header_text_button(text, tooltip, width)
         button.setObjectName("immersiveToggleButton")
         button.setCheckable(True)
+        button.setIcon(icon("translate", self._theme))
+        button.setIconSize(QSize(16, 16))
+        button.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
         return button
 
     def _header_text_button(self, text: str, tooltip: str, width: int) -> QToolButton:
@@ -248,6 +251,10 @@ class ImmersiveLyricsPage(QWidget):
         button.setFixedSize(width, 36)
         button.setToolTip(tooltip)
         button.setAccessibleName(text)
+        if text in {"全屏", "退出全屏"}:
+            button.setIcon(icon("fullscreen", self._theme))
+            button.setIconSize(QSize(16, 16))
+            button.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
         button.setCursor(Qt.CursorShape.PointingHandCursor)
         return button
 
@@ -279,8 +286,19 @@ class ImmersiveLyricsPage(QWidget):
             button.setIcon(icon(name, theme, "normal"))
         self.header_now_playing.setIcon(fluent_immersive_interactive_icon("now_playing", theme, 18))
         self.header_lyrics.setIcon(fluent_immersive_interactive_icon("lyrics", theme, 18))
+        self.header_translation_button.setIcon(icon("translate", theme))
+        self.header_fullscreen_button.setIcon(icon("exit_fullscreen" if self._host_fullscreen else "fullscreen", theme))
         self._sync_mode_buttons()
         self._sync_fullscreen_button()
+
+    def _request_host_close(self) -> None:
+        """Use the same user-close entry as CustomTitleBar, including Cancel."""
+        host = self.window()
+        request = getattr(host, "request_user_close", None)
+        if callable(request):
+            request()
+        else:
+            host.close()
 
     def _toggle_host_maximized(self) -> None:
         window = self.window()
@@ -640,6 +658,7 @@ class ImmersiveLyricsPage(QWidget):
         self.header_fullscreen_button.setText(text)
         self.header_fullscreen_button.setToolTip(tooltip)
         self.header_fullscreen_button.setAccessibleName(tooltip)
+        self.header_fullscreen_button.setIcon(icon("exit_fullscreen" if self._host_fullscreen else "fullscreen", self._theme))
 
     def set_active(self, active: bool) -> None:
         self._active = bool(active)
@@ -926,7 +945,10 @@ class ImmersiveLyricsPage(QWidget):
             self._layout_band = "wide"
             compact = False
             direction = QBoxLayout.Direction.LeftToRight
-            margins, spacing, canvas_scale = 56, 44, 1.0
+            # B2's wide reference keeps the scene open at the edges so the
+            # artwork and lyric column read as one stage.  The old 56px inset
+            # made the identity column feel like a fixed sidebar.
+            margins, spacing, canvas_scale = 40, 70, 1.0
         else:
             self._layout_band = "ultra"
             compact = False
@@ -939,7 +961,7 @@ class ImmersiveLyricsPage(QWidget):
         content_height = max(180, height - top_margin - control_height - 24)
         content_width = max(320, width - margins * 2)
         if self._mode == "lyrics" and not compact:
-            content_width = min(1840, content_width)
+            content_width = min(1900, content_width)
         content_x = max(0, (width - content_width) // 2)
         self.content_stack.setVisible(True)
         self.content_stack.setGeometry(content_x, top_margin, content_width, content_height)
@@ -966,12 +988,22 @@ class ImmersiveLyricsPage(QWidget):
             self.identity_column.setMaximumWidth(min(430, max(330, round(content_width * 0.36))))
         else:
             self.identity_column.setMaximumWidth(min(560, max(430, round(content_width * 0.40))))
-        self._content_layout.setStretch(0, 0 if compact else 40)
-        self._content_layout.setStretch(1, 1 if compact else 60)
+        # Give the lyric stage a little more visual authority without changing
+        # the canvas timing or its scroll/positioning contract.
+        self._content_layout.setStretch(0, 0 if compact else 38)
+        self._content_layout.setStretch(1, 1 if compact else 62)
         self._content_layout.activate()
         self.lyrics_state_view.setGeometry(self.canvas.geometry())
         self._on_state_changed(self.lyrics_adapter.state)
-        identity_inset = max(0, (content_width - 820) // 2) if compact else 22 if self._layout_band == "standard" else 46 if self._layout_band == "wide" else 72
+        identity_inset = (
+            max(0, (content_width - 820) // 2)
+            if compact
+            else 22
+            if self._layout_band == "standard"
+            else 60
+            if self._layout_band == "wide"
+            else 56
+        )
         self._identity_layout.setContentsMargins(identity_inset, 0, 0, 0)
         identity_width = max(300, (self.identity_column.width() or content_width) - identity_inset)
         self.identity.apply_responsive_layout(
