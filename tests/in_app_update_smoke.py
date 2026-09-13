@@ -49,10 +49,7 @@ def _manifest(package: Path) -> object:
         "package_filename": package_name,
         "release_notes": ["应用内更新测试"],
     }
-    return parse_update_manifest(
-        json.dumps(document).encode("utf-8"),
-        expected_channel="beta",
-    )
+    return parse_update_manifest(json.dumps(document).encode("utf-8"))
 
 
 def _create_package(path: Path, *, include_helper: bool = True, unsafe: bool = False) -> None:
@@ -87,10 +84,7 @@ def package_manifest_checks(root: Path) -> None:
         "sha256": hashlib.sha256(b"MZ" + b"s" * 2046).hexdigest(),
         "release_notes": [],
     }
-    legacy = parse_update_manifest(
-        json.dumps(legacy_document).encode("utf-8"),
-        expected_channel="beta",
-    )
+    legacy = parse_update_manifest(json.dumps(legacy_document).encode("utf-8"))
     assert not legacy.has_in_app_package
     assert legacy.download_url == legacy.setup_url
 

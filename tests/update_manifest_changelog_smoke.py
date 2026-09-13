@@ -79,7 +79,7 @@ def manifest_document() -> dict:
 def manifest_version(sequence: int) -> tuple[str, str]:
     major, minor, patch, _ = APP_NUMERIC_VERSION
     numeric_version = (major, minor, patch, sequence)
-    if UPDATE_CHANNEL == "stable" and sequence == 0:
+    if sequence == 0:
         return APP_VERSION, numeric_version_text(numeric_version)
     return (
         f"{major}.{minor}.{patch}-{UPDATE_CHANNEL}.{sequence}",
@@ -149,7 +149,7 @@ def main() -> None:
     current_document = manifest_document()
     current_document.update(
         {
-            "channel": "stable",
+            "channel": UPDATE_CHANNEL,
             "version": APP_VERSION,
             "numeric_version": APP_NUMERIC_VERSION_TEXT,
             "setup_url": (
@@ -163,23 +163,6 @@ def main() -> None:
         current_releases,
     )
     helper.validate_prebuild_manifest(current_document, current_releases)
-    migration_document = helper.build_beta_migration_manifest(
-        current_document,
-        current_releases,
-    )
-    assert migration_document["channel"] == "beta"
-    assert migration_document["version"] == "1.0.0"
-    assert migration_document["numeric_version"] == "1.0.0.0"
-    assert any(
-        entry["version"] == "0.6.0-beta.13"
-        for entry in migration_document["release_history"]
-    )
-    assert migration_document["release_history"][-1]["version"] == "1.0.0"
-    helper.validate_beta_migration_manifest(
-        migration_document,
-        current_releases,
-    )
-
     _, _, _, current_sequence = APP_NUMERIC_VERSION
     current_version, current_numeric_version = manifest_version(current_sequence)
     current_release_document = dict(current_document)
@@ -213,7 +196,7 @@ def main() -> None:
         helper.validate_prebuild_manifest(previous_document, current_releases)
         assert_validation_rejected(
             lambda: helper.validate_manifest_matches_application(previous_document),
-            "channel 与当前应用不一致",
+            "version 与 app/core/version.py",
         )
 
         stale_version, stale_numeric_version = manifest_version(current_sequence - 2)
@@ -245,7 +228,7 @@ def main() -> None:
         )
         assert_validation_rejected(
             lambda: helper.validate_prebuild_manifest(previous_document, current_releases),
-            "channel 与当前应用不一致",
+            "major/minor/patch",
         )
 
         stale_document = dict(current_document)
@@ -264,7 +247,7 @@ def main() -> None:
         )
         assert_validation_rejected(
             lambda: helper.validate_prebuild_manifest(stale_document, current_releases),
-            "channel 与当前应用不一致",
+            "major/minor/patch",
         )
 
     future_version, future_numeric_version = manifest_version(current_sequence + 1)
@@ -302,7 +285,7 @@ def main() -> None:
         )
 
     wrong_channel = dict(current_document)
-    wrong_channel["channel"] = "beta"
+    wrong_channel["channel"] = "stable"
     assert_validation_rejected(
         lambda: helper.validate_prebuild_manifest(wrong_channel, current_releases),
         "channel",
@@ -395,7 +378,7 @@ def main() -> None:
                 current_releases,
                 installer,
             ),
-            "channel 与当前应用不一致",
+            "version 与 app/core/version.py",
         )
         wrong_size = dict(staged_document, setup_size=installer.stat().st_size + 1)
         assert_validation_rejected(

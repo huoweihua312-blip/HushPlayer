@@ -40,22 +40,22 @@ def main() -> None:
     assert parse_numeric_version(APP_NUMERIC_VERSION_TEXT) == APP_NUMERIC_VERSION
     assert APP_VERSION == "1.0.0"
     assert APP_VERSION in APP_USER_AGENT
-    assert UPDATE_CHANNEL == "stable"
+    assert UPDATE_CHANNEL == "beta"
     assert UPDATE_ARCHITECTURE == "win-x64"
     assert UPDATE_MANIFEST_URL == (
         "https://api.gitcode.com/api/v5/repos/gcw_iPVB8B5g/"
-        "HushPlayer-updates/raw/updates/stable/win-x64.json?ref=main"
+        "HushPlayer-updates/raw/updates/beta/win-x64.json?ref=main"
     )
     assert UPDATE_MANIFEST_SOURCES == (
         (
             "GitCode",
             "https://api.gitcode.com/api/v5/repos/gcw_iPVB8B5g/"
-            "HushPlayer-updates/raw/updates/stable/win-x64.json?ref=main",
+            "HushPlayer-updates/raw/updates/beta/win-x64.json?ref=main",
         ),
         (
             "GitHub",
             "https://raw.githubusercontent.com/huoweihua312-blip/"
-            "HushPlayer/main/updates/stable/win-x64.json",
+            "HushPlayer/main/updates/beta/win-x64.json",
         ),
     )
 

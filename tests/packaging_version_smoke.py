@@ -104,8 +104,8 @@ def check_sources() -> None:
     assert "--stage-installer $InstallerPath" in installer_build_source
     assert "--final-installer $InstallerPath" in installer_build_source
     assert "build\\release-manifest\\win-x64.json" in installer_build_source
-    assert 'updates\\stable\\win-x64.json' in release_source
-    assert 'updates\\stable\\win-x64.json' in installer_build_source
+    assert 'updates\\beta\\win-x64.json' in release_source
+    assert 'updates\\beta\\win-x64.json' in installer_build_source
     assert "--write" not in release_source
     assert "--write" not in installer_build_source
     assert 'Remove-ProjectOutputDirectory "build"' not in release_source

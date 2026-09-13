@@ -298,7 +298,6 @@ def parse_update_manifest(
     payload: bytes,
     *,
     allow_insecure_localhost: bool = False,
-    expected_channel: str | None = None,
 ) -> UpdateManifest:
     if len(payload) > MAX_MANIFEST_BYTES:
         raise UpdateValidationError("更新清单响应超过 128 KB 安全上限。")
@@ -328,8 +327,7 @@ def parse_update_manifest(
         raise UpdateValidationError("更新清单 schema_version 不受支持。")
 
     channel = str(document["channel"] or "").strip()
-    required_channel = str(expected_channel or UPDATE_CHANNEL).strip()
-    if channel != required_channel:
+    if channel != UPDATE_CHANNEL:
         raise UpdateValidationError("更新清单通道与当前应用通道不匹配。")
 
     architecture = str(document["architecture"] or "").strip()

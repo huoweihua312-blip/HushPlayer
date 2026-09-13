@@ -212,16 +212,13 @@ def parser_checks(setup: bytes) -> None:
     old = dict(valid, version=old_version, numeric_version=old_numeric_version)
     old["channel"] = "beta"
     assert not parse_update_manifest(encoded_manifest(same)).is_newer
-    assert not parse_update_manifest(
-        encoded_manifest(old),
-        expected_channel="beta",
-    ).is_newer
+    assert not parse_update_manifest(encoded_manifest(old)).is_newer
 
     missing = dict(valid)
     missing.pop("sha256")
     assert_manifest_rejected(missing, "缺少字段")
     assert_manifest_rejected(dict(valid, setup_url="http://example.com/a.exe"), "HTTPS")
-    assert_manifest_rejected(dict(valid, channel="beta"), "通道")
+    assert_manifest_rejected(dict(valid, channel="stable"), "通道")
     assert_manifest_rejected(dict(valid, architecture="win-arm64"), "架构")
     assert_manifest_rejected(dict(valid, sha256="not-a-hash"), "SHA-256")
     assert_manifest_rejected(dict(valid, setup_size=0), "安装包大小")
@@ -241,36 +238,23 @@ def parser_checks(setup: bytes) -> None:
         raise AssertionError("oversized manifest accepted")
 
 
-def stable_and_migration_manifest_checks(setup: bytes) -> None:
+def stable_release_manifest_checks(setup: bytes) -> None:
     stable_document = manifest_document(
         "https://example.com/HushPlayer-1.0.0-win-x64-setup.exe",
         setup,
         version="1.0.0",
         numeric_version="1.0.0.0",
     )
-    stable_document["channel"] = "stable"
     stable_manifest = parse_update_manifest(encoded_manifest(stable_document))
     assert stable_manifest.version == "1.0.0"
-    assert stable_manifest.channel == "stable"
+    assert stable_manifest.channel == "beta"
     assert stable_manifest.numeric_version == (1, 0, 0, 0)
     assert stable_manifest.installer_filename == (
         "HushPlayer-1.0.0-win-x64-setup.exe"
     )
 
-    migration_document = dict(stable_document)
-    migration_document["channel"] = "beta"
-    migration_manifest = parse_update_manifest(
-        encoded_manifest(migration_document),
-        expected_channel="beta",
-    )
-    assert migration_manifest.version == "1.0.0"
-    assert migration_manifest.channel == "beta"
-    assert migration_manifest.numeric_version == (1, 0, 0, 0)
-    assert migration_manifest.installer_filename == (
-        "HushPlayer-1.0.0-win-x64-setup.exe"
-    )
     service = AppUpdateService(manifest_url="https://example.com/manifest")
-    dialog = UpdateDialog(service, migration_manifest)
+    dialog = UpdateDialog(service, stable_manifest)
     try:
         assert any(
             "发现新版本 1.0.0" in label.text()
@@ -740,7 +724,7 @@ def manifest_source_fallback_checks(
 
     invalid_case = "invalid-schema"
     invalid_document = valid_document(invalid_case)
-    invalid_document["channel"] = "beta"
+    invalid_document["channel"] = "stable"
     expect_controlled_parse_fallback(
         invalid_case,
         encoded_manifest(invalid_document),
@@ -1202,7 +1186,7 @@ def main() -> None:
     _ = app
     setup = b"MZ" + bytes((index % 251 for index in range(8190)))
     parser_checks(setup)
-    stable_and_migration_manifest_checks(setup)
+    stable_release_manifest_checks(setup)
     release_history_checks(setup)
     server = FixtureServer()
     try:
