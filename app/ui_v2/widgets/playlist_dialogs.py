@@ -13,7 +13,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from app.ui_v2.theme.styles import build_dialog_stylesheet
+from app.ui_v2.theme.system_surfaces import button_stylesheet, dialog_stylesheet
 from app.ui_v2.theme.tokens import Theme
 from app.ui_v2.widgets.line_edit import apply_optical_vertical_center
 
@@ -34,7 +34,8 @@ class PlaylistNameDialog(QDialog):
         self.setObjectName("playlistNameDialog")
         self.setWindowFlags(Qt.WindowType.Dialog | Qt.WindowType.FramelessWindowHint)
         self.setModal(True)
-        self.setMinimumWidth(380)
+        self.setMinimumWidth(550)
+        self.setMinimumHeight(260)
 
         self.title_label = QLabel(title, self)
         self.title_label.setObjectName("playlistDialogTitle")
@@ -60,15 +61,18 @@ class PlaylistNameDialog(QDialog):
         self.name_input.returnPressed.connect(self.accept)
 
         buttons = QHBoxLayout()
-        buttons.setContentsMargins(0, 12, 0, 0)
+        buttons.setContentsMargins(0, 28, 0, 0)
         buttons.setSpacing(8)
         buttons.addStretch(1)
         buttons.addWidget(self.cancel_button)
         buttons.addWidget(self.confirm_button)
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(22, 20, 22, 18)
-        layout.setSpacing(8)
+        layout.setContentsMargins(28, 28, 28, 24)
+        layout.setSpacing(16)
         layout.addWidget(self.title_label)
+        name_label = QLabel("歌单名称", self)
+        name_label.setBuddy(self.name_input)
+        layout.addWidget(name_label)
         layout.addWidget(self.name_input)
         layout.addWidget(self.error_label)
         layout.addLayout(buttons)
@@ -81,24 +85,9 @@ class PlaylistNameDialog(QDialog):
 
     def set_theme(self, theme: Theme) -> None:
         self._theme = theme
-        c = theme.colors
-        m = theme.metrics
-        self.setStyleSheet(
-            build_dialog_stylesheet(theme)
-            + f"QDialog#playlistNameDialog {{ background: {c.surface_elevated}; border: 1px solid {c.border_strong}; border-radius: {m.radius_lg}px; }}"
-            f"QLabel#playlistDialogTitle {{ color: {c.primary_text}; font-size: {theme.fonts.section_title}px; font-weight: 600; }}"
-            f"QLineEdit#playlistNameInput {{ min-height: {m.control_height}px; padding: 0 {m.spacing_md}px; border: 1px solid {c.border}; border-radius: {m.radius_sm}px; background: {c.input_background}; color: {c.primary_text}; selection-background-color: {c.selected_background}; }}"
-            f"QLineEdit#playlistNameInput:focus {{ border: 1px solid {c.accent}; }}"
-            f"QLabel#playlistDialogError {{ color: {c.danger}; font-size: {theme.fonts.caption}px; }}"
-        )
-        self.cancel_button.setStyleSheet(
-            f"QPushButton {{ min-height: {m.control_height}px; padding: 0 {m.spacing_md}px; border: 1px solid {c.border}; border-radius: {m.radius_sm}px; background: {c.surface_secondary}; color: {c.primary_text}; }}"
-            f"QPushButton:hover {{ background: {c.hover_background}; border-color: {c.border_strong}; }}"
-        )
-        self.confirm_button.setStyleSheet(
-            f"QPushButton {{ min-height: {m.control_height}px; padding: 0 {m.spacing_md}px; border: 0; border-radius: {m.radius_sm}px; background: {c.accent}; color: {c.content_background}; font-weight: 600; }}"
-            f"QPushButton:hover {{ background: {c.accent_hover}; }}"
-        )
+        self.setStyleSheet(dialog_stylesheet(theme))
+        self.cancel_button.setStyleSheet(button_stylesheet(theme, "secondary"))
+        self.confirm_button.setStyleSheet(button_stylesheet(theme, "primary"))
 
     def accept(self) -> None:  # noqa: D401
         """Accept only a non-empty, trimmed playlist name."""
@@ -127,7 +116,8 @@ class PlaylistConfirmDialog(QDialog):
         self.setObjectName("playlistConfirmDialog")
         self.setWindowFlags(Qt.WindowType.Dialog | Qt.WindowType.FramelessWindowHint)
         self.setModal(True)
-        self.setMinimumWidth(410)
+        self.setMinimumWidth(550)
+        self.setMinimumHeight(260)
 
         self.title_label = QLabel(title, self)
         self.title_label.setObjectName("playlistDialogTitle")
@@ -144,14 +134,14 @@ class PlaylistConfirmDialog(QDialog):
         self.confirm_button.clicked.connect(self.accept)
 
         buttons = QHBoxLayout()
-        buttons.setContentsMargins(0, 12, 0, 0)
+        buttons.setContentsMargins(0, 28, 0, 0)
         buttons.setSpacing(8)
         buttons.addStretch(1)
         buttons.addWidget(self.cancel_button)
         buttons.addWidget(self.confirm_button)
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(22, 20, 22, 18)
-        layout.setSpacing(8)
+        layout.setContentsMargins(28, 28, 28, 24)
+        layout.setSpacing(16)
         layout.addWidget(self.title_label)
         layout.addWidget(self.message_label)
         layout.addLayout(buttons)
@@ -160,19 +150,6 @@ class PlaylistConfirmDialog(QDialog):
 
     def set_theme(self, theme: Theme) -> None:
         self._theme = theme
-        c = theme.colors
-        m = theme.metrics
-        self.setStyleSheet(
-            build_dialog_stylesheet(theme)
-            + f"QDialog#playlistConfirmDialog {{ background: {c.surface_elevated}; border: 1px solid {c.border_strong}; border-radius: {m.radius_lg}px; }}"
-            f"QLabel#playlistDialogTitle {{ color: {c.primary_text}; font-size: {theme.fonts.section_title}px; font-weight: 600; }}"
-            f"QLabel#playlistDialogMessage {{ color: {c.secondary_text}; font-size: {theme.fonts.body}px; }}"
-        )
-        self.cancel_button.setStyleSheet(
-            f"QPushButton {{ min-height: {m.control_height}px; padding: 0 {m.spacing_md}px; border: 1px solid {c.border}; border-radius: {m.radius_sm}px; background: {c.surface_secondary}; color: {c.primary_text}; }}"
-            f"QPushButton:hover {{ background: {c.hover_background}; border-color: {c.border_strong}; }}"
-        )
-        self.confirm_button.setStyleSheet(
-            f"QPushButton {{ min-height: {m.control_height}px; padding: 0 {m.spacing_md}px; border: 1px solid {c.danger}; border-radius: {m.radius_sm}px; background: transparent; color: {c.danger}; font-weight: 600; }}"
-            f"QPushButton:hover {{ background: {c.danger}; color: {c.content_background}; }}"
-        )
+        self.setStyleSheet(dialog_stylesheet(theme))
+        self.cancel_button.setStyleSheet(button_stylesheet(theme, "secondary"))
+        self.confirm_button.setStyleSheet(button_stylesheet(theme, "danger"))

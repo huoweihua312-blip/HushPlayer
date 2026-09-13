@@ -211,6 +211,12 @@ class CloseBehaviorController(QObject):
         dialog.addButton("取消", QMessageBox.ButtonRole.RejectRole)
         remember_box = QCheckBox("记住我的选择", dialog)
         dialog.setCheckBox(remember_box)
+        # Presentation only: native roles and the decision mapping stay unchanged.
+        from app.ui_v2.theme.tokens import get_theme
+        from app.ui_v2.theme.system_surfaces import button_stylesheet
+
+        theme = get_theme(str(self._app.property("hushUiV2ThemeMode") or "dark"))
+        tray_button.setStyleSheet(button_stylesheet(theme, "primary"))
         dialog.exec()
         clicked = dialog.clickedButton()
         if clicked is exit_button:

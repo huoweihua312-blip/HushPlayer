@@ -18,7 +18,7 @@ from PySide6.QtWidgets import (
 )
 
 from app.ui_v2.models.track import Track, format_duration
-from app.ui_v2.theme.styles import build_dialog_stylesheet
+from app.ui_v2.theme.system_surfaces import button_stylesheet, dialog_stylesheet
 from app.ui_v2.theme.tokens import Theme
 from app.ui_v2.widgets.track_display import present_track_identity
 
@@ -33,17 +33,18 @@ class TrackInfoDialog(QDialog):
         self.setWindowFlags(Qt.WindowType.Dialog | Qt.WindowType.FramelessWindowHint)
         self.setModal(False)
         self.setWindowTitle("歌曲信息")
-        self.setMinimumWidth(440)
+        self.setMinimumWidth(550)
 
         self.title_label = QLabel(self)
         self.title_label.setObjectName("trackInfoTitle")
+        self.title_label.setWordWrap(True)
         self.detail_label = QLabel(self)
         self.detail_label.setObjectName("trackInfoDetail")
         self.detail_label.setWordWrap(True)
         self.form = QFormLayout()
         self.form.setContentsMargins(0, 8, 0, 0)
         self.form.setHorizontalSpacing(18)
-        self.form.setVerticalSpacing(8)
+        self.form.setVerticalSpacing(14)
         self.close_button = QPushButton("关闭", self)
         self.close_button.setAccessibleName("关闭歌曲信息")
         self.close_button.clicked.connect(self.close)
@@ -53,8 +54,8 @@ class TrackInfoDialog(QDialog):
         buttons.addStretch(1)
         buttons.addWidget(self.close_button)
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(22, 20, 22, 18)
-        layout.setSpacing(6)
+        layout.setContentsMargins(28, 28, 28, 24)
+        layout.setSpacing(16)
         layout.addWidget(self.title_label)
         layout.addWidget(self.detail_label)
         layout.addLayout(self.form)
@@ -83,18 +84,8 @@ class TrackInfoDialog(QDialog):
 
     def set_theme(self, theme: Theme) -> None:
         self._theme = theme
-        c = theme.colors
-        self.setStyleSheet(
-            build_dialog_stylesheet(theme)
-            + f"QDialog#trackInfoDialog {{ background: {c.surface_elevated}; border: 1px solid {c.border_strong}; border-radius: {theme.metrics.radius_lg}px; }}"
-            + f"QLabel#trackInfoTitle {{ color: {c.primary_text}; font-size: {theme.fonts.section_title}px; font-weight: 600; }}"
-            + f"QLabel#trackInfoDetail {{ color: {c.secondary_text}; font-size: {theme.fonts.body}px; }}"
-            + f"QLabel {{ color: {c.secondary_text}; }}"
-        )
-        self.close_button.setStyleSheet(
-            f"QPushButton {{ min-height: {theme.metrics.control_height}px; padding: 0 {theme.metrics.spacing_md}px; border: 1px solid {c.border}; border-radius: {theme.metrics.radius_sm}px; background: {c.surface_secondary}; color: {c.primary_text}; }}"
-            f"QPushButton:hover {{ background: {c.hover_background}; border-color: {c.border_strong}; }}"
-        )
+        self.setStyleSheet(dialog_stylesheet(theme))
+        self.close_button.setStyleSheet(button_stylesheet(theme, "secondary"))
 
 
 class PlaylistSelectionDialog(QDialog):
@@ -106,11 +97,12 @@ class PlaylistSelectionDialog(QDialog):
         self.setObjectName("playlistSelectionDialog")
         self.setWindowFlags(Qt.WindowType.Dialog | Qt.WindowType.FramelessWindowHint)
         self.setModal(True)
-        self.setMinimumWidth(380)
+        self.setMinimumWidth(550)
         self.setWindowTitle("添加到歌单")
 
         self.title_label = QLabel("添加到歌单", self)
         self.title_label.setObjectName("trackInfoTitle")
+        self.title_label.setWordWrap(True)
         self.list_widget = QListWidget(self)
         self.list_widget.setAccessibleName("可用歌单")
         for playlist in playlists:
@@ -131,13 +123,13 @@ class PlaylistSelectionDialog(QDialog):
         self.confirm_button.setEnabled(self.list_widget.count() > 0)
 
         buttons = QHBoxLayout()
-        buttons.setContentsMargins(0, 12, 0, 0)
+        buttons.setContentsMargins(0, 28, 0, 0)
         buttons.addStretch(1)
         buttons.addWidget(self.cancel_button)
         buttons.addWidget(self.confirm_button)
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(22, 20, 22, 18)
-        layout.setSpacing(8)
+        layout.setContentsMargins(28, 28, 28, 24)
+        layout.setSpacing(16)
         layout.addWidget(self.title_label)
         layout.addWidget(self.list_widget)
         layout.addWidget(self.empty_label)
@@ -153,24 +145,6 @@ class PlaylistSelectionDialog(QDialog):
 
     def set_theme(self, theme: Theme) -> None:
         self._theme = theme
-        c = theme.colors
-        self.setStyleSheet(
-            build_dialog_stylesheet(theme)
-            + f"QDialog#playlistSelectionDialog {{ background: {c.surface_elevated}; border: 1px solid {c.border_strong}; border-radius: {theme.metrics.radius_lg}px; }}"
-            + f"QLabel#trackInfoTitle {{ color: {c.primary_text}; font-size: {theme.fonts.section_title}px; font-weight: 600; }}"
-            + f"QLabel {{ color: {c.secondary_text}; }}"
-            + f"QListWidget {{ min-height: 170px; background: {c.input_background}; border: 1px solid {c.border}; border-radius: {theme.metrics.radius_sm}px; color: {c.primary_text}; }}"
-            + f"QListWidget::item {{ padding: 8px; border-radius: {theme.metrics.radius_sm}px; }}"
-            + f"QListWidget::item:selected {{ background: {c.selected_background}; color: {c.primary_text}; }}"
-        )
-        for button, primary in ((self.cancel_button, False), (self.confirm_button, True)):
-            if primary:
-                button.setStyleSheet(
-                    f"QPushButton {{ min-height: {theme.metrics.control_height}px; padding: 0 {theme.metrics.spacing_md}px; border: 0; border-radius: {theme.metrics.radius_sm}px; background: {c.accent}; color: {c.content_background}; font-weight: 600; }}"
-                    f"QPushButton:hover {{ background: {c.accent_hover}; }}"
-                )
-            else:
-                button.setStyleSheet(
-                    f"QPushButton {{ min-height: {theme.metrics.control_height}px; padding: 0 {theme.metrics.spacing_md}px; border: 1px solid {c.border}; border-radius: {theme.metrics.radius_sm}px; background: {c.surface_secondary}; color: {c.primary_text}; }}"
-                    f"QPushButton:hover {{ background: {c.hover_background}; }}"
-                )
+        self.setStyleSheet(dialog_stylesheet(theme))
+        self.cancel_button.setStyleSheet(button_stylesheet(theme, "secondary"))
+        self.confirm_button.setStyleSheet(button_stylesheet(theme, "primary"))

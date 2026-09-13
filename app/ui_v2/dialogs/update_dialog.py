@@ -24,7 +24,7 @@ from app.services.app_update_service import (
     UpdateReleaseNotesSection,
     select_update_release_notes,
 )
-from app.ui_v2.theme.styles import build_dialog_stylesheet
+from app.ui_v2.theme.system_surfaces import button_stylesheet, dialog_stylesheet
 from app.ui_v2.theme.tokens import get_theme
 
 
@@ -40,7 +40,7 @@ class UpdateDialog(QDialog):
         self.manifest = manifest
         self.setWindowTitle("HushPlayer 更新")
         self.setObjectName("updateDialog")
-        self.setMinimumSize(560, 430)
+        self.setMinimumSize(620, 500)
         self.setModal(True)
 
         app = QApplication.instance()
@@ -49,13 +49,13 @@ class UpdateDialog(QDialog):
             if app is not None
             else "dark"
         )
-        theme = get_theme(theme_mode)
+        theme = get_theme(theme_mode, profile="b2")
         if app is not None and app.property("hushUiFlavor") == "ui-v2":
-            self.setStyleSheet(build_dialog_stylesheet(theme))
+            self.setStyleSheet(dialog_stylesheet(theme))
         metrics = theme.metrics
 
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(24, 20, 24, 20)
+        layout.setContentsMargins(28, 28, 28, 24)
         layout.setSpacing(metrics.spacing_md)
 
         title = QLabel(f"发现新版本 {manifest.version}")
@@ -67,15 +67,19 @@ class UpdateDialog(QDialog):
         self.subtitle.setObjectName("settingsDialogSubtitle")
         self.subtitle.setWordWrap(True)
         layout.addWidget(title)
+        brand = QLabel("HushPlayer", self)
+        brand.setObjectName("systemBrand")
+        layout.addSpacing(12)
+        layout.addWidget(brand)
         layout.addWidget(self.subtitle)
 
         notice = QFrame()
         notice.setObjectName("settingsCard")
         notice_layout = QVBoxLayout(notice)
-        notice_layout.setContentsMargins(16, 12, 16, 12)
+        notice_layout.setContentsMargins(0, 8, 0, 8)
         notice_layout.setSpacing(metrics.spacing_xs)
         mandatory_text = (
-            "发布者将此版本标记为必须更新，但第一阶段仍由你确认下载和安装。"
+            "发布者将此版本标记为必须更新。下载和安装仍需你确认。"
             if manifest.mandatory
             else "这是可选更新。你可以现在安装，也可以稍后再处理。"
         )
@@ -109,7 +113,8 @@ class UpdateDialog(QDialog):
         self.progress_bar = QProgressBar()
         self.progress_bar.setRange(0, 100)
         self.progress_bar.setValue(0)
-        self.progress_bar.setTextVisible(True)
+        self.progress_bar.setTextVisible(False)
+        self.progress_bar.setFixedHeight(3)
         self.progress_bar.hide()
         layout.addWidget(self.progress_bar)
 
@@ -151,14 +156,23 @@ class UpdateDialog(QDialog):
         close_button = QPushButton("稍后")
         close_button.setObjectName("settingsSecondaryButton")
         close_button.clicked.connect(self.close)
-        button_row.addWidget(self.download_button)
-        button_row.addWidget(self.cancel_button)
+        auxiliary_row = QHBoxLayout()
+        auxiliary_row.setSpacing(8)
+        auxiliary_row.addWidget(self.cancel_button)
+        if self.fallback_install_button is not None:
+            auxiliary_row.addWidget(self.fallback_install_button)
+        auxiliary_row.addStretch(1)
+        layout.addLayout(auxiliary_row)
         button_row.addStretch(1)
         button_row.addWidget(close_button)
-        if self.fallback_install_button is not None:
-            button_row.addWidget(self.fallback_install_button)
+        button_row.addWidget(self.download_button)
         button_row.addWidget(self.install_button)
         layout.addLayout(button_row)
+        for button in (close_button, self.cancel_button, self.fallback_install_button):
+            if button is not None:
+                button.setStyleSheet(button_stylesheet(theme))
+        for button in (self.download_button, self.install_button):
+            button.setStyleSheet(button_stylesheet(theme, "primary"))
 
         service.downloadStarted.connect(self.on_download_started)
         service.downloadProgress.connect(self.on_download_progress)

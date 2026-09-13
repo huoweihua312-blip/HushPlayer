@@ -5,6 +5,7 @@ from __future__ import annotations
 from PySide6.QtGui import QColor, QPalette
 
 from app.ui_v2.theme.tokens import Theme, font_family_qss, get_theme
+from app.ui_v2.theme.system_surfaces import global_system_stylesheet
 
 
 def focus_qss(theme: Theme, selector: str, *, keyboard_only: bool = True) -> str:
@@ -238,7 +239,7 @@ def build_stylesheet(theme: Theme) -> str:
     """ + surface_qss(
         get_theme(theme.mode, profile="b2"),
         selector="QWidget#libraryWorkSurface", role="content",
-    )  # Phase 0's only production use: the existing ContentSurface background.
+    ) + global_system_stylesheet(theme)
 
 
 def build_dialog_stylesheet(theme: Theme) -> str:
