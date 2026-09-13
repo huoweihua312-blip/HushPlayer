@@ -5,20 +5,20 @@ from collections.abc import Sequence
 
 
 APP_NAME = "HushPlayer"
-APP_VERSION = "0.6.0-beta.13"
-APP_NUMERIC_VERSION = (0, 6, 0, 13)
-UPDATE_CHANNEL = "beta"
+APP_VERSION = "1.0.0"
+APP_NUMERIC_VERSION = (1, 0, 0, 0)
+UPDATE_CHANNEL = "stable"
 UPDATE_ARCHITECTURE = "win-x64"
 UPDATE_MANIFEST_SOURCES = (
     (
         "GitCode",
         "https://api.gitcode.com/api/v5/repos/gcw_iPVB8B5g/"
-        "HushPlayer-updates/raw/updates/beta/win-x64.json?ref=main",
+        "HushPlayer-updates/raw/updates/stable/win-x64.json?ref=main",
     ),
     (
         "GitHub",
         "https://raw.githubusercontent.com/huoweihua312-blip/"
-        "HushPlayer/main/updates/beta/win-x64.json",
+        "HushPlayer/main/updates/stable/win-x64.json",
     ),
 )
 # Keep the legacy single-source import available for injected callers.

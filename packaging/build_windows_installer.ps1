@@ -23,7 +23,7 @@ if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
 $VersionMetadataHelper = Join-Path $ProjectRoot "packaging\prepare_version_metadata.py"
 $UpdateManifestHelper = Join-Path $ProjectRoot "packaging\prepare_update_manifest.py"
-$UpdateManifest = Join-Path $ProjectRoot "updates\beta\win-x64.json"
+$UpdateManifest = Join-Path $ProjectRoot "updates\stable\win-x64.json"
 $InstallerScript = Join-Path $ProjectRoot "packaging\installer\HushPlayer.iss"
 foreach ($RequiredFile in @($VersionMetadataHelper, $UpdateManifestHelper, $UpdateManifest, $InstallerScript)) {
     if (-not (Test-Path -LiteralPath $RequiredFile -PathType Leaf)) {

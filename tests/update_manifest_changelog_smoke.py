@@ -79,6 +79,8 @@ def manifest_document() -> dict:
 def manifest_version(sequence: int) -> tuple[str, str]:
     major, minor, patch, _ = APP_NUMERIC_VERSION
     numeric_version = (major, minor, patch, sequence)
+    if UPDATE_CHANNEL == "stable" and sequence == 0:
+        return APP_VERSION, numeric_version_text(numeric_version)
     return (
         f"{major}.{minor}.{patch}-{UPDATE_CHANNEL}.{sequence}",
         numeric_version_text(numeric_version),
@@ -143,19 +145,46 @@ def main() -> None:
             raise AssertionError("stale release_history unexpectedly validated")
 
     current_changelog = PROJECT_ROOT / "CHANGELOG.md"
-    current_manifest = PROJECT_ROOT / "updates" / "beta" / "win-x64.json"
     current_releases = helper.parse_changelog_releases(current_changelog)
-    current_document = json.loads(current_manifest.read_text(encoding="utf-8"))
+    current_document = manifest_document()
+    current_document.update(
+        {
+            "channel": "stable",
+            "version": APP_VERSION,
+            "numeric_version": APP_NUMERIC_VERSION_TEXT,
+            "setup_url": (
+                "https://example.com/"
+                f"HushPlayer-{APP_VERSION}-win-x64-setup.exe"
+            ),
+        }
+    )
+    current_document = helper.synchronize_manifest_document(
+        current_document,
+        current_releases,
+    )
     helper.validate_prebuild_manifest(current_document, current_releases)
+    migration_document = helper.build_beta_migration_manifest(
+        current_document,
+        current_releases,
+    )
+    assert migration_document["channel"] == "beta"
+    assert migration_document["version"] == "1.0.0"
+    assert migration_document["numeric_version"] == "1.0.0.0"
+    assert any(
+        entry["version"] == "0.6.0-beta.13"
+        for entry in migration_document["release_history"]
+    )
+    assert migration_document["release_history"][-1]["version"] == "1.0.0"
+    helper.validate_beta_migration_manifest(
+        migration_document,
+        current_releases,
+    )
 
     _, _, _, current_sequence = APP_NUMERIC_VERSION
     current_version, current_numeric_version = manifest_version(current_sequence)
     current_release_document = dict(current_document)
     current_release_document["version"] = current_version
     current_release_document["numeric_version"] = current_numeric_version
-    current_release_document["package_filename"] = (
-        f"HushPlayer-{current_version}-win-x64-update.zip"
-    )
     current_release_document = helper.synchronize_manifest_document(
         current_release_document,
         current_releases,
@@ -184,7 +213,7 @@ def main() -> None:
         helper.validate_prebuild_manifest(previous_document, current_releases)
         assert_validation_rejected(
             lambda: helper.validate_manifest_matches_application(previous_document),
-            "version 与 app/core/version.py 不一致",
+            "channel 与当前应用不一致",
         )
 
         stale_version, stale_numeric_version = manifest_version(current_sequence - 2)
@@ -216,7 +245,7 @@ def main() -> None:
         )
         assert_validation_rejected(
             lambda: helper.validate_prebuild_manifest(previous_document, current_releases),
-            "major/minor/patch",
+            "channel 与当前应用不一致",
         )
 
         stale_document = dict(current_document)
@@ -235,7 +264,7 @@ def main() -> None:
         )
         assert_validation_rejected(
             lambda: helper.validate_prebuild_manifest(stale_document, current_releases),
-            "major/minor/patch",
+            "channel 与当前应用不一致",
         )
 
     future_version, future_numeric_version = manifest_version(current_sequence + 1)
@@ -273,7 +302,7 @@ def main() -> None:
         )
 
     wrong_channel = dict(current_document)
-    wrong_channel["channel"] = "stable"
+    wrong_channel["channel"] = "beta"
     assert_validation_rejected(
         lambda: helper.validate_prebuild_manifest(wrong_channel, current_releases),
         "channel",
@@ -299,11 +328,11 @@ def main() -> None:
     wrong_platform_version = dict(current_document)
     wrong_platform_version["version"] = (
         f"{APP_NUMERIC_VERSION[0] + 1}.{APP_NUMERIC_VERSION[1]}."
-        f"{APP_NUMERIC_VERSION[2]}-{UPDATE_CHANNEL}.{current_sequence - 1}"
+        f"{APP_NUMERIC_VERSION[2]}"
     )
     wrong_platform_version["numeric_version"] = (
         f"{APP_NUMERIC_VERSION[0] + 1}.{APP_NUMERIC_VERSION[1]}."
-        f"{APP_NUMERIC_VERSION[2]}.{current_sequence - 1}"
+        f"{APP_NUMERIC_VERSION[2]}.0"
     )
     assert_validation_rejected(
         lambda: helper.validate_published_manifest_for_source(
@@ -366,7 +395,7 @@ def main() -> None:
                 current_releases,
                 installer,
             ),
-            "version 与 app/core/version.py 不一致",
+            "channel 与当前应用不一致",
         )
         wrong_size = dict(staged_document, setup_size=installer.stat().st_size + 1)
         assert_validation_rejected(

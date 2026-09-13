@@ -30,15 +30,17 @@ from app.core.version import (
 _RELEASE_HEADING_PATTERN = re.compile(
     r"^##\s+(?P<version>"
     r"(?P<major>0|[1-9]\d*)\.(?P<minor>0|[1-9]\d*)\."
-    r"(?P<patch>0|[1-9]\d*)-(?P<channel>[a-z][a-z0-9-]*)\."
-    r"(?P<sequence>0|[1-9]\d*)"
+    r"(?P<patch>0|[1-9]\d*)"
+    r"(?:-(?P<channel>[a-z][a-z0-9-]*)\."
+    r"(?P<sequence>0|[1-9]\d*))?"
     r")\s+(?:—|-)\s+(?P<release_date>\d{4}-\d{2}-\d{2})\s*$",
     re.MULTILINE,
 )
 _MANIFEST_VERSION_PATTERN = re.compile(
     r"^(?P<major>0|[1-9]\d*)\.(?P<minor>0|[1-9]\d*)\."
-    r"(?P<patch>0|[1-9]\d*)-(?P<channel>[a-z][a-z0-9-]*)\."
-    r"(?P<sequence>0|[1-9]\d*)$"
+    r"(?P<patch>0|[1-9]\d*)"
+    r"(?:-(?P<channel>[a-z][a-z0-9-]*)\."
+    r"(?P<sequence>0|[1-9]\d*))?$"
 )
 _SUMMARY_HEADING_PATTERN = re.compile(r"^### 在线更新摘要\s*$", re.MULTILINE)
 _SECTION_HEADING_PATTERN = re.compile(r"^#{2,3}\s+", re.MULTILINE)
@@ -138,7 +140,7 @@ def parse_changelog_releases(path: str | Path) -> tuple[ChangelogRelease, ...]:
                     heading.group("major"),
                     heading.group("minor"),
                     heading.group("patch"),
-                    heading.group("sequence"),
+                    heading.group("sequence") or "0",
                 )
             )
         )
@@ -177,7 +179,7 @@ def parse_changelog_releases(path: str | Path) -> tuple[ChangelogRelease, ...]:
                 version=version,
                 numeric_version=numeric_version,
                 numeric_version_text=numeric_version_text(numeric_version),
-                channel=heading.group("channel"),
+                channel=heading.group("channel") or "stable",
                 release_date=release_date,
                 notes=notes,
             )
@@ -233,6 +235,76 @@ def synchronize_manifest_document(
     synchronized["release_notes"] = list(target.notes)
     synchronized["release_history"] = build_release_history(document, releases)
     return synchronized
+
+
+def build_beta_migration_manifest(
+    document: dict[str, Any],
+    releases: tuple[ChangelogRelease, ...] | None = None,
+) -> dict[str, Any]:
+    """Create the one-time beta-channel view of a stable release manifest."""
+
+    migration = dict(document)
+    if migration.get("version") != APP_VERSION:
+        raise ChangelogValidationError(
+            "beta 迁移清单必须以当前 1.0.0 stable 清单为基础。"
+        )
+    if migration.get("numeric_version") != APP_NUMERIC_VERSION_TEXT:
+        raise ChangelogValidationError(
+            "beta 迁移清单 numeric_version 必须是 1.0.0.0。"
+        )
+    if migration.get("channel") != UPDATE_CHANNEL:
+        raise ChangelogValidationError(
+            "beta 迁移清单必须以 stable 清单为基础。"
+        )
+    migration["channel"] = "beta"
+    if releases is not None:
+        target = _target_release(document, releases)
+        migration["release_notes"] = list(target.notes)
+        migration["release_history"] = [
+            release.to_manifest_history()
+            for release in releases
+            if release.numeric_version <= target.numeric_version
+            and release.channel in {"beta", "stable"}
+        ]
+    return migration
+
+
+def validate_beta_migration_manifest(
+    document: dict[str, Any],
+    releases: tuple[ChangelogRelease, ...],
+) -> None:
+    """Validate a beta-channel manifest that points at the stable 1.0.0 release."""
+
+    _validate_manifest_transport_fields(document)
+    if document.get("channel") != "beta":
+        raise ChangelogValidationError("beta 迁移清单 channel 必须是 beta。")
+    if document.get("version") != APP_VERSION:
+        raise ChangelogValidationError(
+            "beta 迁移清单 version 必须是 1.0.0。"
+        )
+    if document.get("numeric_version") != APP_NUMERIC_VERSION_TEXT:
+        raise ChangelogValidationError(
+            "beta 迁移清单 numeric_version 必须是 1.0.0.0。"
+        )
+    if document.get("architecture") != UPDATE_ARCHITECTURE:
+        raise ChangelogValidationError(
+            "beta 迁移清单 architecture 与当前应用不一致。"
+        )
+    target = _target_release(document, releases)
+    if document.get("release_notes") != list(target.notes):
+        raise ChangelogValidationError(
+            "beta 迁移清单 release_notes 必须使用 1.0.0 stable 摘要。"
+        )
+    expected_history = [
+        release.to_manifest_history()
+        for release in releases
+        if release.numeric_version <= target.numeric_version
+        and release.channel in {"beta", "stable"}
+    ]
+    if document.get("release_history") != expected_history:
+        raise ChangelogValidationError(
+            "beta 迁移清单必须保留 beta 历史并包含 1.0.0 stable 条目。"
+        )
 
 
 def validate_manifest_document(
@@ -348,13 +420,13 @@ def _manifest_release_identity(
         int(match.group("major")),
         int(match.group("minor")),
         int(match.group("patch")),
-        int(match.group("sequence")),
+        int(match.group("sequence") or "0"),
     )
     if numeric_version != label_numeric_version:
         raise ChangelogValidationError(
             "更新清单 version 与 numeric_version 不一致。"
         )
-    return numeric_version, match.group("channel")
+    return numeric_version, match.group("channel") or "stable"
 
 
 def validate_application_release_identity() -> None:
@@ -365,13 +437,13 @@ def validate_application_release_identity() -> None:
         int(match.group("major")),
         int(match.group("minor")),
         int(match.group("patch")),
-        int(match.group("sequence")),
+        int(match.group("sequence") or "0"),
     )
     if label_numeric_version != APP_NUMERIC_VERSION:
         raise ChangelogValidationError(
             "APP_VERSION 与 APP_NUMERIC_VERSION 不一致。"
         )
-    if match.group("channel") != UPDATE_CHANNEL:
+    if (match.group("channel") or "stable") != UPDATE_CHANNEL:
         raise ChangelogValidationError("APP_VERSION channel 与当前更新通道不一致。")
 
 

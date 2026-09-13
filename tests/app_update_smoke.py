@@ -22,7 +22,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PySide6.QtCore import QCoreApplication, QEvent, QUrl
 from PySide6.QtNetwork import QNetworkReply, QNetworkRequest
-from PySide6.QtWidgets import QApplication
+from PySide6.QtWidgets import QApplication, QLabel
 
 from app.services.app_update_service import (
     MAX_MANIFEST_BYTES,
@@ -129,13 +129,19 @@ def fixture_numeric_version(offset: int) -> tuple[int, int, int, int]:
     """Build fixture versions relative to the installed application version."""
 
     major, minor, patch, sequence = APP_NUMERIC_VERSION
+    if offset < 0:
+        return (0, 6, 0, 13)
     candidate = (major, minor, patch, sequence + offset)
     assert candidate[3] >= 0
     return candidate
 
 
 def fixture_release(offset: int) -> tuple[str, str]:
+    if offset < 0:
+        return "0.6.0-beta.13", "0.6.0.13"
     numeric_version = fixture_numeric_version(offset)
+    if offset == 0:
+        return "1.0.0", numeric_version_text(numeric_version)
     version = (
         f"{numeric_version[0]}.{numeric_version[1]}.{numeric_version[2]}-"
         f"{UPDATE_CHANNEL}.{numeric_version[3]}"
@@ -204,14 +210,18 @@ def parser_checks(setup: bytes) -> None:
     old_version, old_numeric_version = fixture_release(-1)
     same = dict(valid, version=same_version, numeric_version=same_numeric_version)
     old = dict(valid, version=old_version, numeric_version=old_numeric_version)
+    old["channel"] = "beta"
     assert not parse_update_manifest(encoded_manifest(same)).is_newer
-    assert not parse_update_manifest(encoded_manifest(old)).is_newer
+    assert not parse_update_manifest(
+        encoded_manifest(old),
+        expected_channel="beta",
+    ).is_newer
 
     missing = dict(valid)
     missing.pop("sha256")
     assert_manifest_rejected(missing, "缺少字段")
     assert_manifest_rejected(dict(valid, setup_url="http://example.com/a.exe"), "HTTPS")
-    assert_manifest_rejected(dict(valid, channel="stable"), "通道")
+    assert_manifest_rejected(dict(valid, channel="beta"), "通道")
     assert_manifest_rejected(dict(valid, architecture="win-arm64"), "架构")
     assert_manifest_rejected(dict(valid, sha256="not-a-hash"), "SHA-256")
     assert_manifest_rejected(dict(valid, setup_size=0), "安装包大小")
@@ -229,6 +239,48 @@ def parser_checks(setup: bytes) -> None:
         assert "128 KB" in str(error)
     else:
         raise AssertionError("oversized manifest accepted")
+
+
+def stable_and_migration_manifest_checks(setup: bytes) -> None:
+    stable_document = manifest_document(
+        "https://example.com/HushPlayer-1.0.0-win-x64-setup.exe",
+        setup,
+        version="1.0.0",
+        numeric_version="1.0.0.0",
+    )
+    stable_document["channel"] = "stable"
+    stable_manifest = parse_update_manifest(encoded_manifest(stable_document))
+    assert stable_manifest.version == "1.0.0"
+    assert stable_manifest.channel == "stable"
+    assert stable_manifest.numeric_version == (1, 0, 0, 0)
+    assert stable_manifest.installer_filename == (
+        "HushPlayer-1.0.0-win-x64-setup.exe"
+    )
+
+    migration_document = dict(stable_document)
+    migration_document["channel"] = "beta"
+    migration_manifest = parse_update_manifest(
+        encoded_manifest(migration_document),
+        expected_channel="beta",
+    )
+    assert migration_manifest.version == "1.0.0"
+    assert migration_manifest.channel == "beta"
+    assert migration_manifest.numeric_version == (1, 0, 0, 0)
+    assert migration_manifest.installer_filename == (
+        "HushPlayer-1.0.0-win-x64-setup.exe"
+    )
+    service = AppUpdateService(manifest_url="https://example.com/manifest")
+    dialog = UpdateDialog(service, migration_manifest)
+    try:
+        assert any(
+            "发现新版本 1.0.0" in label.text()
+            for label in dialog.findChildren(QLabel)
+        )
+    finally:
+        dialog.close()
+        dialog.deleteLater()
+        QCoreApplication.sendPostedEvents(dialog, QEvent.Type.DeferredDelete)
+        service.shutdown()
 
 
 def release_history_entry(offset: int, notes: list[str]) -> dict:
@@ -688,7 +740,7 @@ def manifest_source_fallback_checks(
 
     invalid_case = "invalid-schema"
     invalid_document = valid_document(invalid_case)
-    invalid_document["channel"] = "stable"
+    invalid_document["channel"] = "beta"
     expect_controlled_parse_fallback(
         invalid_case,
         encoded_manifest(invalid_document),
@@ -1150,6 +1202,7 @@ def main() -> None:
     _ = app
     setup = b"MZ" + bytes((index % 251 for index in range(8190)))
     parser_checks(setup)
+    stable_and_migration_manifest_checks(setup)
     release_history_checks(setup)
     server = FixtureServer()
     try:

@@ -24,7 +24,7 @@ from app.core.version import (
 
 def main() -> None:
     match = re.fullmatch(
-        r"(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)-beta\.(0|[1-9]\d*)",
+        r"(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)",
         APP_VERSION,
     )
     assert match is not None
@@ -33,31 +33,35 @@ def main() -> None:
         isinstance(part, int) and not isinstance(part, bool) and part >= 0
         for part in APP_NUMERIC_VERSION
     )
-    assert APP_NUMERIC_VERSION == tuple(int(part) for part in match.groups())
+    assert APP_NUMERIC_VERSION == tuple(int(part) for part in match.groups()) + (0,)
     assert APP_NUMERIC_VERSION_TEXT == ".".join(
         str(part) for part in APP_NUMERIC_VERSION
     )
     assert parse_numeric_version(APP_NUMERIC_VERSION_TEXT) == APP_NUMERIC_VERSION
+    assert APP_VERSION == "1.0.0"
     assert APP_VERSION in APP_USER_AGENT
-    assert UPDATE_CHANNEL == "beta"
+    assert UPDATE_CHANNEL == "stable"
     assert UPDATE_ARCHITECTURE == "win-x64"
     assert UPDATE_MANIFEST_URL == (
         "https://api.gitcode.com/api/v5/repos/gcw_iPVB8B5g/"
-        "HushPlayer-updates/raw/updates/beta/win-x64.json?ref=main"
+        "HushPlayer-updates/raw/updates/stable/win-x64.json?ref=main"
     )
     assert UPDATE_MANIFEST_SOURCES == (
         (
             "GitCode",
             "https://api.gitcode.com/api/v5/repos/gcw_iPVB8B5g/"
-            "HushPlayer-updates/raw/updates/beta/win-x64.json?ref=main",
+            "HushPlayer-updates/raw/updates/stable/win-x64.json?ref=main",
         ),
         (
             "GitHub",
             "https://raw.githubusercontent.com/huoweihua312-blip/"
-            "HushPlayer/main/updates/beta/win-x64.json",
+            "HushPlayer/main/updates/stable/win-x64.json",
         ),
     )
 
+    assert APP_NUMERIC_VERSION == (1, 0, 0, 0)
+    assert parse_numeric_version("1.0.0.0") == (1, 0, 0, 0)
+    assert is_newer_numeric_version("1.0.0.0", "0.6.0.13")
     assert is_newer_numeric_version("0.5.0.2", "0.5.0.1")
     assert is_newer_numeric_version("0.5.0.10", "0.5.0.2")
     assert not is_newer_numeric_version("0.5.0.2", "0.5.0.2")

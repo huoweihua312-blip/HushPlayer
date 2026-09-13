@@ -52,7 +52,7 @@ if (-not (Test-Path -LiteralPath $VersionMetadataHelper -PathType Leaf)) {
     throw "The version metadata helper is missing: $VersionMetadataHelper"
 }
 $UpdateManifestHelper = Join-Path $ProjectRoot "packaging\prepare_update_manifest.py"
-$UpdateManifest = Join-Path $ProjectRoot "updates\beta\win-x64.json"
+$UpdateManifest = Join-Path $ProjectRoot "updates\stable\win-x64.json"
 foreach ($RequiredReleaseFile in @($UpdateManifestHelper, $UpdateManifest)) {
     if (-not (Test-Path -LiteralPath $RequiredReleaseFile -PathType Leaf)) {
         throw "Required release changelog input is missing: $RequiredReleaseFile"

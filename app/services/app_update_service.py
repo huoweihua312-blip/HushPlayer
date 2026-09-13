@@ -60,6 +60,9 @@ _VERSION_PATTERN = re.compile(
     r"^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)-"
     r"([a-z][a-z0-9-]*)\.(0|[1-9]\d*)$"
 )
+_STABLE_VERSION_PATTERN = re.compile(
+    r"^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$"
+)
 _UPDATE_FILENAME_PATTERN = re.compile(
     r"^HushPlayer-[0-9A-Za-z.-]+-win-x64-setup\.exe(?:\..+)?$"
 )
@@ -194,13 +197,21 @@ def _parse_release_history_entry(
 
     version = str(raw_entry.get("version") or "").strip()
     version_match = _VERSION_PATTERN.fullmatch(version)
-    if version_match is None or len(version) > 64:
+    stable_version_match = _STABLE_VERSION_PATTERN.fullmatch(version)
+    if (
+        version_match is None
+        and stable_version_match is None
+    ) or len(version) > 64:
         raise UpdateValidationError("历史版本条目的 version 格式无效。")
-    version_major, version_minor, version_patch, version_channel, version_sequence = (
-        version_match.groups()
-    )
-    if version_channel != channel:
-        raise UpdateValidationError("历史版本条目的 channel 与更新清单不一致。")
+    if version_match is not None:
+        version_major, version_minor, version_patch, version_channel, version_sequence = (
+            version_match.groups()
+        )
+        if version_channel != channel:
+            raise UpdateValidationError("历史版本条目的 channel 与更新清单不一致。")
+    else:
+        version_major, version_minor, version_patch = stable_version_match.groups()
+        version_sequence = "0"
 
     try:
         numeric_version = parse_numeric_version(
@@ -287,6 +298,7 @@ def parse_update_manifest(
     payload: bytes,
     *,
     allow_insecure_localhost: bool = False,
+    expected_channel: str | None = None,
 ) -> UpdateManifest:
     if len(payload) > MAX_MANIFEST_BYTES:
         raise UpdateValidationError("更新清单响应超过 128 KB 安全上限。")
@@ -316,8 +328,9 @@ def parse_update_manifest(
         raise UpdateValidationError("更新清单 schema_version 不受支持。")
 
     channel = str(document["channel"] or "").strip()
-    if channel != UPDATE_CHANNEL:
-        raise UpdateValidationError("更新清单通道与当前 beta 通道不匹配。")
+    required_channel = str(expected_channel or UPDATE_CHANNEL).strip()
+    if channel != required_channel:
+        raise UpdateValidationError("更新清单通道与当前应用通道不匹配。")
 
     architecture = str(document["architecture"] or "").strip()
     if architecture != UPDATE_ARCHITECTURE:
@@ -325,13 +338,21 @@ def parse_update_manifest(
 
     version = str(document["version"] or "").strip()
     version_match = _VERSION_PATTERN.fullmatch(version)
-    if version_match is None or len(version) > 64:
+    stable_version_match = _STABLE_VERSION_PATTERN.fullmatch(version)
+    if (
+        version_match is None
+        and stable_version_match is None
+    ) or len(version) > 64:
         raise UpdateValidationError("更新清单 version 格式无效。")
-    version_major, version_minor, version_patch, version_channel, version_sequence = (
-        version_match.groups()
-    )
-    if version_channel != channel:
-        raise UpdateValidationError("更新清单 version 与 channel 不一致。")
+    if version_match is not None:
+        version_major, version_minor, version_patch, version_channel, version_sequence = (
+            version_match.groups()
+        )
+        if version_channel != channel:
+            raise UpdateValidationError("更新清单 version 与 channel 不一致。")
+    else:
+        version_major, version_minor, version_patch = stable_version_match.groups()
+        version_sequence = "0"
 
     try:
         numeric_version = parse_numeric_version(str(document["numeric_version"] or ""))
