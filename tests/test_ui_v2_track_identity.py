@@ -136,6 +136,32 @@ class TrackIdentityPresentationTests(unittest.TestCase):
         bar.deleteLater()
         adapter.deleteLater()
 
+    def test_long_identity_is_elided_inside_reserved_favorite_region(self) -> None:
+        adapter = PlaybackAdapter(timer_enabled=False)
+        bar = PlayerBar(adapter, LIGHT_THEME)
+        track = _track(
+            title="超长中文标题用于验证不会穿过收藏按钮或组件边界" * 3,
+            artist="阿YueYue、刘兆宇" * 6,
+            album="冬眠·2023" * 8,
+        )
+        adapter.set_queue((track,))
+        adapter.play_track(track.id)
+        bar.show()
+        for width in (1080, 1450, 900):
+            bar.resize(width, LIGHT_THEME.metrics.player_bar_height)
+            bar.set_compact(width < 1000)
+            self.app.processEvents()
+            inner = bar.track_inner
+            favorite = bar.favorite_button
+            self.assertLessEqual(favorite.geometry().right(), inner.rect().right())
+            self.assertLessEqual(bar.metadata.geometry().right(), favorite.geometry().left() - 10)
+            self.assertEqual(bar.title_label.full_text, track.title)
+            self.assertEqual(bar.artist_label.full_text, "阿YueYue、刘兆宇" * 6 + " · " + "冬眠·2023" * 8)
+            self.assertEqual(bar.title_label.toolTip(), track.title)
+            self.assertTrue(bar.title_label.text().endswith("…") or bar.title_label.text() == track.title)
+        bar.deleteLater()
+        adapter.deleteLater()
+
     def test_player_bar_controls_have_stable_accessible_names(self) -> None:
         adapter = PlaybackAdapter(timer_enabled=False)
         bar = PlayerBar(adapter, LIGHT_THEME)

@@ -164,13 +164,24 @@ class PlayerBar(QFrame):
     def _refresh_metadata_width(self) -> None:
         if not all(hasattr(self, name) for name in ("metadata", "artwork")):
             return
-        region_width = max(0, self.track_region.width() - 32)
+        measured_region = self.track_region.width()
+        # A standalone PlayerBar can be measured before its parent grid has
+        # assigned side-column geometry. Derive the same half-side budget
+        # from the fixed center region so labels still receive a useful
+        # bounded width in tests, dialogs and previews.
+        if measured_region <= 100 and hasattr(self, "center_region"):
+            measured_region = max(
+                measured_region,
+                (self.width() - self.center_region.width()) // 2,
+            )
+        region_width = max(0, measured_region - 32)
         # Reserve cover, favourite hit area, inner margins and both gaps.
-        fixed_width = self.artwork.width() + 32 + 16 + 20
-        width = max(64, min(320, region_width - fixed_width))
+        fixed_width = self.artwork.width() + self.favorite_button.width() + 16 + 20
+        width = min(320, max(118, region_width - fixed_width))
         self.metadata.setFixedWidth(width)
-        if hasattr(self, "identity_stack"):
-            self.identity_stack.setFixedWidth(width)
+        self.identity_stack.setFixedWidth(width)
+        total_width = self.artwork.width() + width + self.favorite_button.width() + 16 + 20
+        self.track_inner.setFixedWidth(total_width)
 
     def set_read_only(
         self,
@@ -204,7 +215,7 @@ class PlayerBar(QFrame):
         self.track_inner = QWidget(self.track_region)
         self.track_inner.setObjectName("trackRegionInner")
         self.track_inner.setSizePolicy(
-            QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Fixed
+            QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed
         )
         track_inner_layout = QHBoxLayout(self.track_inner)
         track_inner_layout.setContentsMargins(8, 6, 8, 6)
@@ -216,7 +227,8 @@ class PlayerBar(QFrame):
         self.artist_label.setObjectName("playerArtist")
         self.identity_stack = QWidget(self.track_inner)
         self.identity_stack.setObjectName("playerIdentityStack")
-        self.identity_stack.setFixedWidth(154)
+        self.identity_stack.setMinimumWidth(48)
+        self.identity_stack.setMaximumWidth(320)
         self.identity_stack.setFixedHeight(76)
         identity_layout = QVBoxLayout(self.identity_stack)
         identity_layout.setContentsMargins(0, 0, 0, 0)
@@ -230,17 +242,18 @@ class PlayerBar(QFrame):
         # The approved track copy is one compact two-line group.  Give it a
         # fixed vertical rhythm instead of letting the two labels consume the
         # full-height side region independently.
-        self.metadata.setFixedWidth(154)
+        self.metadata.setMinimumWidth(48)
+        self.metadata.setMaximumWidth(320)
         self.metadata.setFixedHeight(64)
         self.metadata.setSizePolicy(
-            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed
+            QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Fixed
         )
         self.title_label.setFixedHeight(24)
         self.title_label.setSizePolicy(
             QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed
         )
         self.artist_label.setSizePolicy(
-            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred
+            QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Fixed
         )
         self.availability_label.setFixedHeight(16)
         self.availability_label.setSizePolicy(
