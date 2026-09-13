@@ -15,7 +15,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from PySide6.QtCore import QObject, QUrl, Signal
+from PySide6.QtCore import QObject, QUrl, QSize, Signal
 from PySide6.QtMultimedia import QMediaPlayer
 from PySide6.QtWidgets import QApplication
 
@@ -300,6 +300,35 @@ class OnlinePlaybackQ5B1Tests(unittest.TestCase):
         self.assertFalse(self.controller.is_muted)
         self.assertEqual(self.controller.volume, 68)
         self.assertEqual(self.adapter.state.volume, 68)
+
+    def test_immersive_primary_transport_keeps_geometry_and_renders_both_states(self) -> None:
+        controls = ImmersiveControls(get_theme("dark"))
+        controls.bind_playback(self.adapter)
+        controls.resize(420, 150)
+        controls.show()
+        self.app.processEvents()
+
+        geometry = controls.play_button.geometry()
+        size_hint = controls.play_button.sizeHint()
+        icon_size = controls.play_button.iconSize()
+        self.assertEqual(icon_size, QSize(24, 24))
+        self.assertFalse(controls.play_button.icon().isNull())
+
+        self.adapter.set_queue((self._local_track(),))
+        self.adapter.play_track("local")
+        self._process_events()
+        self.assertFalse(controls.play_button.icon().isNull())
+        playing_geometry = controls.play_button.geometry()
+        playing_size_hint = controls.play_button.sizeHint()
+        self.assertEqual(playing_geometry, geometry)
+        self.assertEqual(playing_size_hint, size_hint)
+
+        self.controller.pause()
+        self._process_events()
+        self.assertFalse(controls.play_button.icon().isNull())
+        self.assertEqual(controls.play_button.geometry(), geometry)
+        self.assertEqual(controls.play_button.sizeHint(), size_hint)
+        controls.hide()
 
     def test_complete_cache_hit_skips_online_resolve(self) -> None:
         remote = _remote_track("cached")

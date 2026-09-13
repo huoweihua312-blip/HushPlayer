@@ -141,7 +141,6 @@ class PlayerBar(QFrame):
             button.set_theme(theme)
         self.play_button.setStyleSheet(
             self.play_button.styleSheet()
-            + f'QToolButton:hover {{ background: {c.secondary_text}; }}'
             + f'QToolButton[hushKeyboardFocus="true"]:focus {{ border: 2px solid {c.focus_ring}; }}'
         )
         self._refresh_repeat_tooltip()

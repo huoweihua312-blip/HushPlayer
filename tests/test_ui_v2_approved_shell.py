@@ -14,7 +14,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from PySide6.QtCore import QPoint, QSize, Qt
+from PySide6.QtCore import QPoint, QRectF, QSize, Qt
 from PySide6.QtGui import QColor
 from PySide6.QtWidgets import QApplication, QHBoxLayout, QVBoxLayout
 
@@ -24,7 +24,9 @@ from app.ui_v2.theme.icons import (
     _FLUENT_PLAYER_PIXMAP_CACHE,
     _SVG_PIXMAP_CACHE,
     _svg_pixmap,
+    _transport_glyph_pixmap,
     clear_svg_icon_cache,
+    icon_stroke_width,
     icon,
     optical_scale_for,
     palette_for,
@@ -315,6 +317,15 @@ class ApprovedShellMigrationTests(unittest.TestCase):
             self.assertGreater(min(y for _x, y in alpha_points), 0, name)
             self.assertLess(max(y for _x, y in alpha_points), image.height() - 1, name)
 
+    def test_custom_icon_strokes_use_one_controlled_visual_weight(self) -> None:
+        small = icon_stroke_width(QRectF(0, 0, 14, 14))
+        normal = icon_stroke_width(QRectF(0, 0, 20, 20))
+        large = icon_stroke_width(QRectF(0, 0, 32, 32))
+        self.assertGreaterEqual(small, 1.25)
+        self.assertLessEqual(large, 1.9)
+        self.assertLess(small, normal)
+        self.assertEqual(large, 1.9)
+
     def test_icon_canvas_sizes_raise_visibility_without_changing_controls(self) -> None:
         sidebar = self.window.sidebar
         bar = self.window.player_bar
@@ -379,36 +390,67 @@ class ApprovedShellMigrationTests(unittest.TestCase):
             bar.favorite_button.geometry().right(), bar.transport_row.width()
         )
 
-    def test_playerbar_uses_only_the_fixed_local_fluent_manifest(self) -> None:
-        manifest_path = PROJECT_ROOT / "app" / "ui_v2" / "assets" / "icons" / "fluent_player" / "MANIFEST.json"
-        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-        manifest_files = {entry["filename"] for entry in manifest["icons"]}
-        self.assertEqual(manifest_files, set(FLUENT_PLAYER_ASSETS.values()))
+    def test_playerbar_uses_only_the_fixed_local_phosphor_manifest(self) -> None:
+        asset_dir = PROJECT_ROOT / "app" / "ui_v2" / "assets" / "icons" / "phosphor"
+        self.assertTrue(asset_dir.is_dir())
+        self.assertTrue(set(FLUENT_PLAYER_ASSETS.values()).issubset(
+            {path.name for path in asset_dir.glob("*.svg")}
+        ))
         bar = self.window.player_bar
         expected = {
-            bar.favorite_button: "heart_20_regular.svg",
-            bar.shuffle_button: "arrow_shuffle_20_regular.svg",
-            bar.previous_button: "previous_frame_20_filled.svg",
-            bar.play_button: "play_24_filled.svg",
-            bar.next_button: "next_frame_20_filled.svg",
-            bar.repeat_button: "arrow_repeat_all_20_regular.svg",
-            bar.queue_button: "document_queue_24_regular.svg",
-            bar.lyrics_button: "subtitles_20_regular.svg",
-            bar.desktop_lyrics_button: "desktop_lyrics_20_regular.svg",
-            bar.volume_button: "speaker_2_20_regular.svg",
-            bar.more_button: "more_horizontal_20_regular.svg",
+            bar.favorite_button: "heart.svg",
+            bar.shuffle_button: "shuffle.svg",
+            bar.previous_button: "skip-back.svg",
+            bar.play_button: "play.svg",
+            bar.next_button: "skip-forward.svg",
+            bar.repeat_button: "repeat.svg",
+            bar.queue_button: "queue.svg",
+            bar.lyrics_button: "subtitles.svg",
+            bar.desktop_lyrics_button: "monitor-play.svg",
+            bar.volume_button: "speaker-high.svg",
+            bar.more_button: "dots-three.svg",
         }
         self.assertTrue(all(button.asset_family == "fluent_player" for button in expected))
         self.assertEqual({button.asset_filename for button in expected}, set(expected.values()))
         self.assertNotEqual(bar.lyrics_button.asset_filename, bar.desktop_lyrics_button.asset_filename)
-        self.assertTrue(all(path.read_text(encoding="utf-8").isascii() for path in manifest_path.parent.glob("*.svg")))
+        self.assertTrue(all(path.read_text(encoding="utf-8").isascii() for path in asset_dir.glob("*.svg")))
+
+    def test_primary_transport_glyphs_are_filled_and_keep_canvas_contract(self) -> None:
+        for size in (16, 18, 20, 24):
+            for name in ("play", "pause"):
+                pixmap = _transport_glyph_pixmap(name, size, QColor("#ffffff"), dpr=1.0)
+                image = pixmap.toImage()
+                alpha = [
+                    (x, y)
+                    for y in range(image.height())
+                    for x in range(image.width())
+                    if image.pixelColor(x, y).alpha() > 0
+                ]
+                self.assertTrue(alpha, (name, size))
+                self.assertEqual((image.width(), image.height()), (size, size))
+                if name == "play":
+                    self.assertGreater(image.pixelColor(round(size * 0.56), size // 2).alpha(), 0)
+                else:
+                    self.assertGreater(image.pixelColor(round(size * 0.36), size // 2).alpha(), 0)
+                    self.assertGreater(image.pixelColor(round(size * 0.61), size // 2).alpha(), 0)
+
+    def test_primary_transport_visual_does_not_change_button_geometry(self) -> None:
+        bar = self.window.player_bar
+        geometry = bar.play_button.geometry()
+        size_hint = bar.play_button.sizeHint()
+        icon_size = bar.play_button.iconSize()
+        bar.play_button.set_icon_name("pause")
+        self.app.processEvents()
+        self.assertEqual(bar.play_button.geometry(), geometry)
+        self.assertEqual(bar.play_button.sizeHint(), size_hint)
+        self.assertEqual(bar.play_button.iconSize(), icon_size)
 
     def test_fluent_player_render_cache_includes_file_size_color_dpr_and_play_offset(self) -> None:
         bar = self.window.player_bar
         bar.play_button._refresh_icon()
         bar.favorite_button._refresh_icon()
-        self.assertTrue(any(key[0] == "play_24_filled.svg" and key[1] == 22 for key in _FLUENT_PLAYER_PIXMAP_CACHE))
-        self.assertTrue(any(key[0] == "heart_20_regular.svg" and key[1] == 18 for key in _FLUENT_PLAYER_PIXMAP_CACHE))
+        self.assertTrue(any(key[0] == "play.svg" and key[1] == 22 for key in _FLUENT_PLAYER_PIXMAP_CACHE))
+        self.assertTrue(any(key[0] == "heart.svg" and key[1] == 18 for key in _FLUENT_PLAYER_PIXMAP_CACHE))
 
     def test_player_icon_button_uses_one_state_system_without_geometry_jumps(self) -> None:
         bar = self.window.player_bar

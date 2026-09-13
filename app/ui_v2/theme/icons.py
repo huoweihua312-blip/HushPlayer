@@ -5,9 +5,19 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
+from xml.etree import ElementTree
 
-from PySide6.QtCore import QByteArray, QRectF, QSize, Qt
-from PySide6.QtGui import QColor, QGuiApplication, QIcon, QPainter, QPainterPath, QPen, QPixmap
+from PySide6.QtCore import QByteArray, QPointF, QRectF, QSize, Qt
+from PySide6.QtGui import (
+    QColor,
+    QGuiApplication,
+    QIcon,
+    QPainter,
+    QPainterPath,
+    QPen,
+    QPixmap,
+    QPolygonF,
+)
 from PySide6.QtSvg import QSvgRenderer
 
 from app.ui_v2.theme.tokens import Theme
@@ -79,6 +89,10 @@ IconName = Literal[
     "window_maximize",
     "window_restore",
     "window_close",
+    "fullscreen",
+    "exit_fullscreen",
+    "translate",
+    "immersive_settings",
 ]
 IconState = Literal["normal", "hover", "selected", "disabled", "inverse"]
 
@@ -107,22 +121,14 @@ _ICON_ASSET_DIR = Path(__file__).resolve().parent.parent / "assets" / "icons"
 _FLUENT_PLAYER_ASSET_DIR = _ICON_ASSET_DIR / "fluent_player"
 _FLUENT_SETTINGS_ASSET_DIR = _ICON_ASSET_DIR / "fluent_settings"
 _FLUENT_IMMERSIVE_ASSET_DIR = _ICON_ASSET_DIR / "fluent_immersive"
+_PHOSPHOR_ASSET_DIR = _ICON_ASSET_DIR / "phosphor"
 FLUENT_PLAYER_ASSETS: dict[str, str] = {
-    "favorite": "heart_20_regular.svg",
-    "favorite_filled": "heart_20_filled.svg",
-    "shuffle": "arrow_shuffle_20_regular.svg",
-    "previous": "previous_frame_20_filled.svg",
-    "play": "play_24_filled.svg",
-    "pause": "pause_24_filled.svg",
-    "next": "next_frame_20_filled.svg",
-    "repeat": "arrow_repeat_all_20_regular.svg",
-    "repeat_one": "arrow_repeat_1_24_regular.svg",
-    "queue": "document_queue_24_regular.svg",
-    "lyrics": "subtitles_20_regular.svg",
-    "desktop_lyrics": "desktop_lyrics_20_regular.svg",
-    "volume": "speaker_2_20_regular.svg",
-    "volume_mute": "speaker_mute_20_regular.svg",
-    "more": "more_horizontal_20_regular.svg",
+    "favorite": "heart.svg", "favorite_filled": "favorite_filled.svg",
+    "shuffle": "shuffle.svg", "previous": "skip-back.svg", "play": "play.svg",
+    "pause": "pause.svg", "next": "skip-forward.svg", "repeat": "repeat.svg",
+    "repeat_one": "repeat-once.svg", "queue": "queue.svg", "lyrics": "subtitles.svg",
+    "desktop_lyrics": "monitor-play.svg", "volume": "speaker-high.svg",
+    "volume_mute": "speaker-slash.svg", "more": "dots-three.svg",
 }
 FLUENT_SETTINGS_ASSETS: dict[str, str] = {
     "general": "settings_20_regular.svg",
@@ -137,9 +143,13 @@ FLUENT_SETTINGS_ASSETS: dict[str, str] = {
     "dismiss": "dismiss_20_regular.svg",
 }
 FLUENT_IMMERSIVE_ASSETS: dict[str, str] = {
-    "now_playing": "music_note_2_play_20_regular.svg",
-    "lyrics": "subtitles_20_regular.svg",
-    "return_current": "target_arrow_20_regular.svg",
+    "now_playing": "playlist.svg",
+    "lyrics": "subtitles.svg",
+    "return_current": "arrow-clockwise.svg",
+    "fullscreen": "corners-out.svg",
+    "exit_fullscreen": "corners-in.svg",
+    "translate": "translate.svg",
+    "immersive_settings": "sliders-horizontal.svg",
 }
 _SVG_ASSET_NAMES: dict[str, str] = {
     "brand": "brand",
@@ -208,6 +218,15 @@ ICON_OPTICAL_SCALE: dict[str, float] = {
     "more": 1.03,
 }
 
+# Custom fallback glyphs share the same optical language as the vendored
+# Fluent set: a restrained outline at normal sizes, with a small minimum so
+# 14–16 logical-pixel navigation icons do not dissolve after rasterization.
+# The upper bound is intentional; without it, the old width*0.1 rule made
+# larger toolbar glyphs visibly heavier than the 1.7–1.9 SVG paths.
+ICON_STROKE_MIN = 1.25
+ICON_STROKE_MAX = 1.9
+ICON_STROKE_RATIO = 0.095
+
 
 def clear_svg_icon_cache() -> None:
     """Discard colored SVG pixmaps after a display DPR changes."""
@@ -228,6 +247,14 @@ def optical_scale_for(name: str) -> float:
     """Return the centre-preserving visual scale for one approved glyph."""
 
     return round(float(ICON_OPTICAL_SCALE.get(name, 1.0)), 3)
+
+
+def icon_stroke_width(rect: QRectF) -> float:
+    """Return the shared outline width for a custom vector fallback."""
+
+    logical_size = max(1.0, min(float(rect.width()), float(rect.height())))
+    width = logical_size * ICON_STROKE_RATIO
+    return round(max(ICON_STROKE_MIN, min(ICON_STROKE_MAX, width)), 3)
 
 
 def _svg_source(name: str, color: QColor) -> bytes:
@@ -277,7 +304,7 @@ def _svg_pixmap(
 def _fluent_player_source(filename: str, color: QColor) -> bytes:
     """Load one vendored Fluent path and apply its semantic color at runtime."""
 
-    source = (_FLUENT_PLAYER_ASSET_DIR / filename).read_bytes()
+    source = (_PHOSPHOR_ASSET_DIR / filename).read_bytes()
     # The package leaves the path fill implicit.  Keep the vendored SVGs
     # untouched and inject the current token only in the renderer input.
     return source.replace(
@@ -290,7 +317,11 @@ def _fluent_player_source(filename: str, color: QColor) -> bytes:
 def _fluent_settings_source(filename: str, color: QColor) -> bytes:
     """Load one vendored Settings glyph and apply the current theme color."""
 
-    source = (_FLUENT_SETTINGS_ASSET_DIR / filename).read_bytes()
+    phosphor_name = {"general": "gear.svg", "dismiss": "x.svg"}.get(filename, filename)
+    source_path = _PHOSPHOR_ASSET_DIR / phosphor_name
+    if not source_path.exists():
+        source_path = _FLUENT_SETTINGS_ASSET_DIR / filename
+    source = source_path.read_bytes()
     return source.replace(
         b"<path ",
         b'<path fill="' + color.name().encode("ascii") + b'" ',
@@ -301,7 +332,10 @@ def _fluent_settings_source(filename: str, color: QColor) -> bytes:
 def _fluent_immersive_source(filename: str, color: QColor) -> bytes:
     """Load one vendored Immersive glyph and apply the current theme color."""
 
-    source = (_FLUENT_IMMERSIVE_ASSET_DIR / filename).read_bytes()
+    source_path = _PHOSPHOR_ASSET_DIR / filename
+    if not source_path.exists():
+        source_path = _FLUENT_IMMERSIVE_ASSET_DIR / filename
+    source = source_path.read_bytes()
     return source.replace(
         b"<path ",
         b'<path fill="' + color.name().encode("ascii") + b'" ',
@@ -344,32 +378,115 @@ def _fluent_player_pixmap(
     color: QColor,
     dpr: float | None = None,
 ) -> QPixmap:
-    """Render one fixed Fluent PlayerBar glyph into a centered canvas."""
+    """Render one local Phosphor glyph into a centered, DPI-aware canvas.
 
-    filename = FLUENT_PLAYER_ASSETS.get(name)
-    if filename is None:
+    The public helper name is retained for compatibility with existing
+    callers; the actual asset source is now the unified Phosphor set.
+    """
+
+    legacy_filename = FLUENT_PLAYER_ASSETS.get(name)
+    if legacy_filename is None:
         return QPixmap()
     dpr = _device_pixel_ratio() if dpr is None else round(float(dpr), 3)
-    offset_x = 0.5 if name == "play" else 0.0
-    key = (filename, max(1, int(size)), color.rgba(), dpr, offset_x)
+    filename = FLUENT_PLAYER_ASSETS[name]
+    cache_asset = "monitor-subtitles-composite" if name == "desktop_lyrics" else filename
+    key = (cache_asset, max(1, int(size)), color.rgba(), dpr, 0.0)
     cached = _FLUENT_PLAYER_PIXMAP_CACHE.get(key)
     if cached is not None:
         return cached
     physical_size = max(1, round(size * dpr))
     pixmap = QPixmap(physical_size, physical_size)
     pixmap.fill(Qt.GlobalColor.transparent)
-    renderer = QSvgRenderer(QByteArray(_fluent_player_source(filename, color)))
+    source = (_desktop_lyrics_source() if name == "desktop_lyrics"
+              else (_PHOSPHOR_ASSET_DIR / filename).read_bytes())
+    source = source.replace(b"<path ", b'<path fill="' + color.name().encode("ascii") + b'" ', 1)
+    source = source.replace(b"currentColor", color.name().encode("ascii"))
+    renderer = QSvgRenderer(QByteArray(source))
     if renderer.isValid():
         painter = QPainter(pixmap)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-        renderer.render(
-            painter,
-            QRectF(offset_x * dpr, 0, physical_size, physical_size),
-        )
+        renderer.render(painter, QRectF(0, 0, physical_size, physical_size))
         painter.end()
     pixmap.setDevicePixelRatio(dpr)
     _FLUENT_PLAYER_PIXMAP_CACHE[key] = pixmap
     return pixmap
+
+
+def _transport_glyph_pixmap(
+    name: str,
+    size: int,
+    color: QColor,
+    dpr: float | None = None,
+) -> QPixmap:
+    """Render the primary transport glyph as a compact filled shape.
+
+    The vendored Phosphor play/pause assets are outline constructions.  The
+    primary transport controls intentionally use a filled glyph while keeping
+    the same semantic key, canvas size, and icon cache contract.
+    """
+
+    if name not in {"play", "pause"}:
+        return QPixmap()
+    dpr = _device_pixel_ratio() if dpr is None else round(float(dpr), 3)
+    logical_size = max(1, int(size))
+    key = (FLUENT_PLAYER_ASSETS[name], logical_size, color.rgba(), dpr, 1.0)
+    cached = _FLUENT_PLAYER_PIXMAP_CACHE.get(key)
+    if cached is not None:
+        return cached
+
+    physical_size = max(1, round(logical_size * dpr))
+    pixmap = QPixmap(physical_size, physical_size)
+    pixmap.fill(Qt.GlobalColor.transparent)
+    painter = QPainter(pixmap)
+    painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+    painter.setPen(Qt.PenStyle.NoPen)
+    painter.setBrush(color)
+    if name == "play":
+        triangle = QRectF(
+            physical_size * 0.30,
+            physical_size * 0.14,
+            physical_size * 0.56,
+            physical_size * 0.72,
+        )
+        # The triangle's optical centre sits slightly right of the canvas
+        # centre, matching the familiar play symbol without an outline.
+        points = QPolygonF(
+            (
+                triangle.topLeft(),
+                QPointF(triangle.right(), triangle.center().y()),
+                triangle.bottomLeft(),
+            )
+        )
+        painter.drawPolygon(points)
+    else:
+        bar_width = physical_size * 0.20
+        bar_height = physical_size * 0.72
+        top = physical_size * 0.14
+        painter.drawRect(QRectF(physical_size * 0.25, top, bar_width, bar_height))
+        painter.drawRect(QRectF(physical_size * 0.55, top, bar_width, bar_height))
+    painter.end()
+    pixmap.setDevicePixelRatio(dpr)
+    _FLUENT_PLAYER_PIXMAP_CACHE[key] = pixmap
+    return pixmap
+
+
+def _desktop_lyrics_source() -> bytes:
+    """Compose existing official subpaths; keep upstream files untouched.
+
+    The monitor's last subpath is its play triangle. Subtitles' first
+    subpath is its frame. Retain the monitor frame/stand and subtitle text,
+    moving the latter upward inside the screen. No new glyph path is drawn.
+    """
+    def path_data(filename: str) -> str:
+        root = ElementTree.fromstring((_PHOSPHOR_ASSET_DIR / filename).read_bytes())
+        return root.find('{http://www.w3.org/2000/svg}path').attrib['d']
+    monitor = path_data('monitor-play.svg')
+    subtitles = path_data('subtitles.svg')
+    assert 'Zm-3.56' in monitor and 'ZM48,136' in subtitles, 'Unexpected upstream artwork'
+    frame = monitor.split('Zm-3.56', 1)[0] + 'Z'
+    text = 'M48,136' + subtitles.split('ZM48,136', 1)[1]
+    return (f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="currentColor">'
+            f'<path d="{frame}"/><g transform="translate(0,-24)"><path d="{text}"/></g></svg>').encode()
 
 
 def _fluent_immersive_pixmap(
@@ -402,8 +519,15 @@ def _fluent_immersive_pixmap(
     return pixmap
 
 
-def fluent_icon(name: str, theme: Theme, state: IconState = "normal", size: int = 18) -> QIcon:
-    """Return a local Fluent glyph for the formal PlayerBar only."""
+def fluent_icon(
+    name: str,
+    theme: Theme,
+    state: IconState = "normal",
+    size: int = 18,
+    *,
+    solid: bool = False,
+) -> QIcon:
+    """Resolve a local player glyph, with optional filled primary transport."""
 
     if name not in FLUENT_PLAYER_ASSETS:
         return QIcon()
@@ -413,6 +537,14 @@ def fluent_icon(name: str, theme: Theme, state: IconState = "normal", size: int 
         if name == "favorite_filled" and state == "selected"
         else getattr(palette, state)
     )
+    if solid and name in {"play", "pause"}:
+        # Primary playback glyphs stay white in every enabled state so the
+        # filled mark remains the stable focal point on both themes.
+        if state != "disabled":
+            color = QColor("#ffffff")
+        result = QIcon()
+        result.addPixmap(_transport_glyph_pixmap(name, size, color))
+        return result
     result = QIcon()
     result.addPixmap(_fluent_player_pixmap(name, size, color))
     return result
@@ -537,7 +669,7 @@ def _heart_path(rect: QRectF) -> QPainterPath:
 def _paint_shape(painter: QPainter, name: IconName, rect: QRectF, color: QColor) -> None:
     painter.save()
     painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-    pen = QPen(color, max(1.35, rect.width() * 0.1))
+    pen = QPen(color, icon_stroke_width(rect))
     pen.setCapStyle(Qt.PenCapStyle.RoundCap)
     pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
     painter.setPen(pen)
@@ -663,11 +795,18 @@ def _paint_shape(painter: QPainter, name: IconName, rect: QRectF, color: QColor)
         painter.drawLine(rect.left() + rect.width() * 0.5, rect.top() + rect.height() * 0.18, rect.left() + rect.width() * 0.5, rect.top() + rect.height() * 0.82)
         painter.drawLine(rect.left() + rect.width() * 0.18, rect.top() + rect.height() * 0.5, rect.left() + rect.width() * 0.82, rect.top() + rect.height() * 0.5)
     elif name == "lyrics":
-        body = rect.adjusted(rect.width() * 0.18, rect.height() * 0.12, -rect.width() * 0.18, -rect.height() * 0.12)
-        painter.drawRoundedRect(body, rect.width() * 0.08, rect.width() * 0.08)
-        for row, width in enumerate((0.44, 0.34, 0.48)):
-            y = rect.top() + rect.height() * (0.33 + row * 0.18)
-            painter.drawLine(rect.left() + rect.width() * 0.29, y, rect.left() + rect.width() * (0.29 + width), y)
+        # Open text lines are deliberately distinct from both a document and
+        # the queue list at 16–20px.
+        for row, (start, width) in enumerate(((0.18, 0.64), (0.18, 0.46), (0.18, 0.58), (0.18, 0.34))):
+            y = rect.top() + rect.height() * (0.24 + row * 0.18)
+            painter.drawLine(rect.left() + rect.width() * start, y, rect.left() + rect.width() * (start + width), y)
+    elif name == "desktop_lyrics":
+        # Monitor frame plus two lyric rules, unlike the in-app text glyph.
+        monitor = rect.adjusted(rect.width() * 0.1, rect.height() * 0.1, -rect.width() * 0.1, -rect.height() * 0.28)
+        painter.drawRoundedRect(monitor, rect.width() * 0.06, rect.width() * 0.06)
+        painter.drawLine(rect.center().x(), monitor.bottom(), rect.center().x(), rect.bottom() - rect.height() * 0.13)
+        painter.drawLine(rect.left() + rect.width() * 0.3, rect.bottom() - rect.height() * 0.13, rect.right() - rect.width() * 0.3, rect.bottom() - rect.height() * 0.13)
+        painter.drawLine(rect.left() + rect.width() * 0.27, monitor.top() + rect.height() * 0.28, rect.right() - rect.width() * 0.27, monitor.top() + rect.height() * 0.28)
     elif name in ("lock", "unlock"):
         body = QRectF(
             rect.left() + rect.width() * 0.18,
@@ -766,6 +905,20 @@ def _paint_shape(painter: QPainter, name: IconName, rect: QRectF, color: QColor)
     elif name == "window_close":
         painter.drawLine(rect.left() + rect.width() * 0.25, rect.top() + rect.height() * 0.25, rect.right() - rect.width() * 0.25, rect.bottom() - rect.height() * 0.25)
         painter.drawLine(rect.right() - rect.width() * 0.25, rect.top() + rect.height() * 0.25, rect.left() + rect.width() * 0.25, rect.bottom() - rect.height() * 0.25)
+    elif name in ("fullscreen", "exit_fullscreen"):
+        inset = rect.width() * 0.2
+        if name == "fullscreen":
+            for x1, y1, x2, y2 in ((inset, inset, inset * 2.1, inset), (rect.right() - inset, inset, rect.right() - inset * 2.1, inset), (inset, rect.bottom() - inset, inset * 2.1, rect.bottom() - inset), (rect.right() - inset, rect.bottom() - inset, rect.right() - inset * 2.1, rect.bottom() - inset)):
+                painter.drawLine(x1, y1, x2, y2)
+        else:
+            painter.drawRect(rect.adjusted(rect.width() * .22, rect.height() * .22, -rect.width() * .22, -rect.height() * .22))
+            painter.drawLine(rect.left() + rect.width() * .1, rect.top() + rect.height() * .1, rect.left() + rect.width() * .3, rect.top() + rect.height() * .1)
+            painter.drawLine(rect.left() + rect.width() * .1, rect.top() + rect.height() * .1, rect.left() + rect.width() * .1, rect.top() + rect.height() * .3)
+    elif name == "translate":
+        painter.drawRect(rect.adjusted(rect.width() * .12, rect.height() * .16, -rect.width() * .12, -rect.height() * .16))
+        painter.drawLine(rect.left() + rect.width() * .24, rect.top() + rect.height() * .36, rect.left() + rect.width() * .58, rect.top() + rect.height() * .36)
+        painter.drawLine(rect.left() + rect.width() * .4, rect.top() + rect.height() * .28, rect.left() + rect.width() * .4, rect.top() + rect.height() * .62)
+        painter.drawLine(rect.left() + rect.width() * .67, rect.top() + rect.height() * .44, rect.left() + rect.width() * .88, rect.top() + rect.height() * .78)
     elif name == "shuffle":
         # Two input paths cross and terminate in their own arrow heads.  This
         # deliberately avoids the single-turn arrow silhouette of a jump icon.
@@ -826,10 +979,14 @@ def _paint_shape(painter: QPainter, name: IconName, rect: QRectF, color: QColor)
             painter.drawLine(one_x, rect.top() + rect.height() * 0.39, one_x, rect.top() + rect.height() * 0.61)
             painter.drawLine(one_x, rect.top() + rect.height() * 0.39, one_x - rect.width() * 0.06, rect.top() + rect.height() * 0.45)
     elif name == "queue":
-        for row, width in enumerate((0.68, 0.5, 0.62)):
-            y = rect.top() + rect.height() * (0.24 + row * 0.26)
+        for row, width in enumerate((0.68, 0.52, 0.60)):
+            y = rect.top() + rect.height() * (0.22 + row * 0.25)
             painter.drawLine(rect.left() + rect.width() * 0.12, y, rect.left() + rect.width() * (0.12 + width), y)
-            painter.drawPoint(rect.right() - rect.width() * 0.1, y)
+        cue = QPainterPath()
+        cue.moveTo(rect.left() + rect.width() * 0.67, rect.bottom() - rect.height() * 0.25)
+        cue.lineTo(rect.left() + rect.width() * 0.87, rect.bottom() - rect.height() * 0.13)
+        cue.lineTo(rect.left() + rect.width() * 0.67, rect.bottom() - rect.height() * 0.01)
+        painter.drawPath(cue)
     elif name in ("volume", "volume_mute"):
         speaker = QPainterPath()
         speaker.moveTo(rect.left() + rect.width() * 0.14, rect.top() + rect.height() * 0.42)
@@ -877,6 +1034,16 @@ def paint_icon(painter: QPainter, name: IconName, rect: QRectF, theme: Theme, st
     """Paint an icon directly, selecting the color from its semantic state."""
     colors = palette_for(theme)
     color = getattr(colors, state)
+    if name in ("translate", "fullscreen", "exit_fullscreen"):
+        pixmap = _fluent_immersive_pixmap(name, max(1, round(max(rect.width(), rect.height()))), color)
+        painter.drawPixmap(rect.toRect(), pixmap)
+        return
+    if name in FLUENT_PLAYER_ASSETS:
+        size = max(1, round(max(rect.width(), rect.height())))
+        pixmap = _fluent_player_pixmap(name, size, color)
+        if not pixmap.isNull():
+            painter.drawPixmap(rect.toRect(), pixmap)
+            return
     if name in _SVG_ASSET_NAMES:
         size = max(1, round(max(rect.width(), rect.height())))
         pixmap = _svg_pixmap(name, size, color)
@@ -889,6 +1056,16 @@ def paint_icon(painter: QPainter, name: IconName, rect: QRectF, theme: Theme, st
 def icon(name: IconName, theme: Theme, state: IconState = "normal") -> QIcon:
     """Build a multi-size QIcon so toolbar controls remain crisp on high DPI."""
     result = QIcon()
+    if name in ("translate", "fullscreen", "exit_fullscreen"):
+        color = getattr(palette_for(theme), state)
+        for size in (16, 18, 20, 24, 32, 48):
+            result.addPixmap(_fluent_immersive_pixmap(name, size, color))
+        return result
+    if name in FLUENT_PLAYER_ASSETS:
+        color = getattr(palette_for(theme), state)
+        for size in (16, 18, 20, 24):
+            result.addPixmap(_fluent_player_pixmap(name, size, color))
+        return result
     if name in _SVG_ASSET_NAMES:
         color = getattr(palette_for(theme), state)
         for size in (15, 16, 17, 18, 19, 20, 24, 32, 48):

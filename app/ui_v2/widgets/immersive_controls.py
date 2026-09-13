@@ -161,9 +161,9 @@ class ImmersiveControls(QWidget):
         self.play_button.setStyleSheet(
             "QToolButton#immersivePlayButton { min-width: 54px; min-height: 54px; "
             "max-width: 54px; max-height: 54px; border: 2px solid transparent; border-radius: 29px; padding: 0; "
-            "background: #F4F4F6; }"
-            "QToolButton#immersivePlayButton:hover { background: #FFFFFF; }"
-            "QToolButton#immersivePlayButton:pressed { background: #E7E7EB; }"
+            "background: #505050; }"
+            "QToolButton#immersivePlayButton:hover { background: #606060; }"
+            "QToolButton#immersivePlayButton:pressed { background: #404040; }"
             f"QToolButton#immersivePlayButton:disabled {{ background: {colors.surface_pressed}; }}"
             + focus_qss(theme, "QToolButton#immersivePlayButton")
         )
@@ -260,7 +260,13 @@ class ImmersiveControls(QWidget):
         else:
             state = "normal"
         self.play_button.setIcon(
-            fluent_icon("pause" if playing else "play", self._theme, state, size=24)
+            fluent_icon(
+                "pause" if playing else "play",
+                self._theme,
+                state,
+                size=24,
+                solid=True,
+            )
         )
 
     def _on_position_changed(self, position: int) -> None:

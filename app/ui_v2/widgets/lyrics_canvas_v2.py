@@ -19,7 +19,7 @@ from PySide6.QtCore import (
     QVariantAnimation,
     Signal,
 )
-from PySide6.QtGui import QColor, QFont, QFontMetrics, QPainter, QPen
+from PySide6.QtGui import QColor, QFont, QFontMetrics, QImage, QPainter, QPen
 from PySide6.QtWidgets import QSizePolicy, QToolButton, QWidget
 
 from app.ui_v2.models.lyric_line import LyricLine
@@ -1015,58 +1015,80 @@ class LyricsCanvasV2(QWidget):
         return QRect(x, y, width, height)
 
     def _draw_active_line(self, painter: QPainter, rect: QRect, line: LyricLine, font: QFont, lines: list[str]) -> int:
-        base = _with_alpha(self._theme.colors.primary_text, 255)
-        self._draw_text(
-            painter,
-            rect,
-            line.text,
-            font,
-            base,
-            shadow=self._mode == "immersive" and self._text_protection != "无",
-            lines=lines,
-        )
+        shadow = self._mode == "immersive" and self._text_protection != "无"
+        if shadow:
+            # Keep the readability shadow behind the glyph mask.  The actual
+            # fill below is rendered once per glyph, so no dark base glyph is
+            # left underneath the anti-aliased active edge.
+            self._draw_text(
+                painter,
+                rect,
+                line.text,
+                font,
+                QColor(0, 0, 0, 0),
+                shadow=True,
+                lines=lines,
+                draw_fill=False,
+            )
         highlight_position = self._highlight_character_progress(line)
-        if highlight_position <= 0:
-            return 0
         drawn = 0
         metrics = QFontMetrics(font)
         line_height = metrics.height()
         start_y = rect.y() + max(0, (rect.height() - line_height * len(lines)) // 2)
         ranges = self._wrapped_line_ranges(font, line.text, rect.width())
-        painter.setFont(font)
-        painter.setPen(_with_alpha(self._theme.colors.accent, 255))
         for index, wrapped in enumerate(lines):
             if index >= len(ranges) or not wrapped:
                 break
             _source_text, source_start, _source_end = ranges[index]
             local_progress = max(0.0, min(float(len(wrapped)), highlight_position - source_start))
-            if local_progress <= 0:
-                continue
             whole_count = min(len(wrapped), int(local_progress))
             fractional = local_progress - whole_count
             highlight_width = metrics.horizontalAdvance(wrapped[:whole_count])
             if fractional > 0 and whole_count < len(wrapped):
                 highlight_width += metrics.horizontalAdvance(wrapped[whole_count]) * fractional
-            if highlight_width <= 0:
-                continue
-            painter.save()
-            painter.setClipRect(
-                QRectF(
-                    rect.x(),
-                    start_y + index * line_height,
-                    max(0.5, highlight_width),
-                    line_height,
-                ),
-                Qt.ClipOperation.IntersectClip,
-            )
-            painter.drawText(
-                QRect(rect.x(), start_y + index * line_height, rect.width(), line_height),
-                int(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter),
-                wrapped,
-            )
-            painter.restore()
-            drawn += 1
+            # Render this glyph mask once, then replace the inactive pixels
+            # inside the progress clip with the same mask tinted accent.
+            mask = self._glyph_mask(font, wrapped, rect.width(), line_height)
+            inactive = self._tint_glyph_mask(mask, _with_alpha(self._theme.colors.primary_text, 255))
+            active = self._tint_glyph_mask(mask, _with_alpha(self._theme.colors.accent, 255))
+            composed = inactive
+            if highlight_width > 0:
+                overlay = QPainter(composed)
+                overlay.setCompositionMode(QPainter.CompositionMode.CompositionMode_Source)
+                overlay.setClipRect(QRectF(0, 0, max(0.5, highlight_width), line_height))
+                overlay.drawImage(0, 0, active)
+                overlay.end()
+                drawn += 1
+            painter.drawImage(rect.x(), start_y + index * line_height, composed)
         return drawn
+
+    @staticmethod
+    def _glyph_mask(font: QFont, text: str, width: int, height: int) -> QImage:
+        """Rasterize one glyph run into a reusable anti-aliased alpha mask."""
+
+        mask = QImage(max(1, int(width)), max(1, int(height)), QImage.Format.Format_ARGB32_Premultiplied)
+        mask.fill(Qt.GlobalColor.transparent)
+        renderer = QPainter(mask)
+        renderer.setRenderHint(QPainter.RenderHint.TextAntialiasing, True)
+        renderer.setFont(font)
+        renderer.setPen(QColor(255, 255, 255, 255))
+        renderer.drawText(
+            QRect(0, 0, mask.width(), mask.height()),
+            int(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter),
+            text,
+        )
+        renderer.end()
+        return mask
+
+    @staticmethod
+    def _tint_glyph_mask(mask: QImage, color: QColor) -> QImage:
+        tinted = QImage(mask.size(), QImage.Format.Format_ARGB32_Premultiplied)
+        tinted.fill(color)
+        painter = QPainter(tinted)
+        painter.setCompositionMode(QPainter.CompositionMode.CompositionMode_DestinationIn)
+        painter.drawImage(0, 0, mask)
+        painter.end()
+        return tinted
 
     def _highlight_character_progress(self, line: LyricLine) -> float:
         """Return a fractional source-text offset for the active segment."""
@@ -1113,6 +1135,7 @@ class LyricsCanvasV2(QWidget):
         *,
         shadow: bool,
         lines: list[str] | None = None,
+        draw_fill: bool = True,
     ) -> None:
         painter.setFont(font)
         wrapped = lines if lines is not None else self._wrapped_lines(font, text, rect.width())
@@ -1125,6 +1148,7 @@ class LyricsCanvasV2(QWidget):
             painter.setPen(QPen(shadow_color, 1.0))
             for index, value in enumerate(wrapped):
                 painter.drawText(QRect(rect.x(), start_y + index * line_height + 1, rect.width(), line_height), flags, value)
-        painter.setPen(color)
-        for index, value in enumerate(wrapped):
-            painter.drawText(QRect(rect.x(), start_y + index * line_height, rect.width(), line_height), flags, value)
+        if draw_fill:
+            painter.setPen(color)
+            for index, value in enumerate(wrapped):
+                painter.drawText(QRect(rect.x(), start_y + index * line_height, rect.width(), line_height), flags, value)

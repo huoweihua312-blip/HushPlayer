@@ -1,0 +1,5 @@
+Phosphor Icons
+
+This directory contains the icon assets selected for HushPlayer's unified icon entry point.
+Phosphor Icons are available under the MIT License.
+Source: https://github.com/phosphor-icons/core

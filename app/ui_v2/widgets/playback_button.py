@@ -59,9 +59,9 @@ class PlayerIconButton(QToolButton):
         colors = theme.colors
         if self._primary:
             self.setStyleSheet(
-                f"QToolButton {{ border: 0; border-radius: {self._button_size // 2}px; background: {colors.text_primary}; }}"
-                f"QToolButton:hover {{ background: {colors.accent_hover}; }}"
-                f"QToolButton:pressed {{ background: {colors.accent_pressed}; }}"
+                f"QToolButton {{ border: 0; border-radius: {self._button_size // 2}px; background: #505050; }}"
+                "QToolButton:hover { background: #606060; }"
+                "QToolButton:pressed { background: #404040; }"
                 f"QToolButton[hushKeyboardFocus=\"true\"]:focus {{ border: 1px solid {colors.text_primary}; }}"
                 f"QToolButton:disabled {{ background: {_rgba(colors.text_primary, 0.16)}; }}"
             )
@@ -109,7 +109,15 @@ class PlayerIconButton(QToolButton):
         if not self.isEnabled():
             state = "disabled"
         if self._asset_family == "fluent_player":
-            self.setIcon(fluent_icon(self._icon_name, self._theme, state, self._icon_canvas_size))
+            self.setIcon(
+                fluent_icon(
+                    self._icon_name,
+                    self._theme,
+                    state,
+                    self._icon_canvas_size,
+                    solid=self._primary,
+                )
+            )
         else:
             self.setIcon(icon(self._icon_name, self._theme, state))
         self.setIconSize(QSize(self._icon_canvas_size, self._icon_canvas_size))
