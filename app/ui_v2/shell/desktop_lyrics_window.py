@@ -182,6 +182,7 @@ class DesktopLyricsWindow(QWidget):
         self._secondary_label.setTextInteractionFlags(Qt.TextInteractionFlag.NoTextInteraction)
         for label in (self._main_label, self._secondary_label):
             label.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
+            label.installEventFilter(self)
 
         surface_layout.addStretch(1)
         surface_layout.addWidget(self._main_label)

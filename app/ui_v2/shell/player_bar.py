@@ -70,9 +70,20 @@ class _PlayerSlider(QSlider):
         painter.setBrush(self._handle_color if self.isEnabled() else self._disabled_color)
         painter.drawEllipse(QRectF(handle_x - handle_radius, center_y - handle_radius, handle_radius * 2, handle_radius * 2))
         if self.hasFocus() and self.isEnabled():
+            # Keep keyboard focus visible without the native full-widget focus
+            # rectangle.  A small ring around the thumb stays within the
+            # slider's visual language and does not frame the whole control.
             painter.setBrush(Qt.BrushStyle.NoBrush)
             painter.setPen(self._handle_color)
-            painter.drawRoundedRect(QRectF(self.rect()).adjusted(0.5, 0.5, -0.5, -0.5), 3, 3)
+            focus_radius = handle_radius + 2.0
+            painter.drawEllipse(
+                QRectF(
+                    handle_x - focus_radius,
+                    center_y - focus_radius,
+                    focus_radius * 2,
+                    focus_radius * 2,
+                )
+            )
         painter.end()
 
 
