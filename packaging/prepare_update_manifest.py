@@ -429,13 +429,20 @@ def validate_published_manifest_for_source(document: dict[str, Any]) -> None:
 def validate_prebuild_manifest(
     document: dict[str, Any],
     releases: tuple[ChangelogRelease, ...],
+    *,
+    allow_version_bootstrap: bool = False,
 ) -> None:
     """Validate the published manifest without requiring the next installer."""
 
     validate_current_application_changelog(releases)
     validate_manifest_document(document, releases)
     _validate_manifest_transport_fields(document)
-    validate_published_manifest_for_source(document)
+    if allow_version_bootstrap:
+        numeric_version, _ = _validate_manifest_platform(document)
+        if numeric_version > APP_NUMERIC_VERSION:
+            raise ChangelogValidationError("更新清单版本不得高于当前源码版本。")
+    else:
+        validate_published_manifest_for_source(document)
 
 
 def validate_manifest_matches_application(document: dict[str, Any]) -> None:
@@ -470,7 +477,11 @@ def build_staged_manifest(
 ) -> dict[str, Any]:
     """Build an untracked final manifest from a verified installer artifact."""
 
-    validate_prebuild_manifest(published_document, releases)
+    validate_prebuild_manifest(
+        published_document,
+        releases,
+        allow_version_bootstrap=True,
+    )
     installer = Path(installer_path)
     if not installer.is_file():
         raise ChangelogValidationError(f"安装包不存在：{installer}")
@@ -622,6 +633,11 @@ def main() -> None:
         help="校验构建前允许落后一个 beta 的已发布清单。",
     )
     parser.add_argument(
+        "--prebuild-bootstrap",
+        action="store_true",
+        help="校验正式版本升级时的旧 beta 清单，不要求与当前版本同组三段版本。",
+    )
+    parser.add_argument(
         "--stage-installer",
         type=Path,
         help="根据安装包生成并校验未发布的暂存清单。",
@@ -658,13 +674,15 @@ def main() -> None:
         for mode in (
             arguments.write,
             arguments.prebuild,
+            arguments.prebuild_bootstrap,
             arguments.stage_installer,
             arguments.final_installer,
         )
     )
     if selected_modes > 1:
         parser.error(
-            "--write、--prebuild、--stage-installer 与 --final-installer "
+            "--write、--prebuild、--prebuild-bootstrap、--stage-installer 与 "
+            "--final-installer "
             "只能选择一种。"
         )
     if arguments.write:
@@ -682,6 +700,17 @@ def main() -> None:
         validate_prebuild_manifest(document, releases)
         print(
             "prebuild update manifest validation: OK "
+            f"({arguments.manifest}, published={document['version']})"
+        )
+        return
+    if arguments.prebuild_bootstrap:
+        validate_prebuild_manifest(
+            document,
+            releases,
+            allow_version_bootstrap=True,
+        )
+        print(
+            "prebuild bootstrap validation: OK "
             f"({arguments.manifest}, published={document['version']})"
         )
         return

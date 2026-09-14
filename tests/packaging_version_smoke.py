@@ -99,8 +99,8 @@ def check_sources() -> None:
     installer_build_source = (
         PROJECT_ROOT / "packaging" / "build_windows_installer.ps1"
     ).read_text(encoding="utf-8")
-    assert "--manifest $UpdateManifest --prebuild" in release_source
-    assert "--manifest $UpdateManifest --prebuild" in installer_build_source
+    assert "--manifest $UpdateManifest --prebuild-bootstrap" in release_source
+    assert "--manifest $UpdateManifest --prebuild-bootstrap" in installer_build_source
     assert "--stage-installer $InstallerPath" in installer_build_source
     assert "--final-installer $InstallerPath" in installer_build_source
     assert "build\\release-manifest\\win-x64.json" in installer_build_source

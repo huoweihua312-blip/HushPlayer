@@ -15,7 +15,12 @@ if (-not (Test-Path -LiteralPath (Join-Path $ProjectRoot "main.py") -PathType Le
 $Python = if ($PythonPath) {
     [System.IO.Path]::GetFullPath($PythonPath)
 } else {
-    Join-Path $ProjectRoot ".venv\Scripts\python.exe"
+    @(
+        (Join-Path $ProjectRoot ".venv313\Scripts\python.exe")
+        (Join-Path $ProjectRoot ".venv\Scripts\python.exe")
+    ) | Where-Object {
+        Test-Path -LiteralPath $_ -PathType Leaf
+    } | Select-Object -First 1
 }
 if (-not (Test-Path -LiteralPath $Python -PathType Leaf)) {
     throw "Project virtual environment Python was not found: $Python. Rebuild .venv with Python 3.13 x64 and requirements-lock.txt."
@@ -69,7 +74,7 @@ if ($DiagnosticOnly) {
     Write-Host "DiagnosticOnly=OK"
     return
 }
-& $Python $UpdateManifestHelper --manifest $UpdateManifest --prebuild
+& $Python $UpdateManifestHelper --manifest $UpdateManifest --prebuild-bootstrap
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 . $NodeRuntimeHelper
 $NodeRuntime = Prepare-HushPlayerNodeRuntime -ProjectRoot $ProjectRoot

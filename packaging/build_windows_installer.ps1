@@ -12,7 +12,12 @@ $ProjectRoot = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot ".."))
 $Python = if ($PythonPath) {
     [System.IO.Path]::GetFullPath($PythonPath)
 } else {
-    Join-Path $ProjectRoot ".venv\Scripts\python.exe"
+    @(
+        (Join-Path $ProjectRoot ".venv313\Scripts\python.exe")
+        (Join-Path $ProjectRoot ".venv\Scripts\python.exe")
+    ) | Where-Object {
+        Test-Path -LiteralPath $_ -PathType Leaf
+    } | Select-Object -First 1
 }
 if (-not (Test-Path -LiteralPath $Python -PathType Leaf)) {
     throw "Project Python was not found: $Python"
@@ -56,7 +61,7 @@ if ($DiagnosticOnly) {
     return
 }
 
-& $Python $UpdateManifestHelper --manifest $UpdateManifest --prebuild
+& $Python $UpdateManifestHelper --manifest $UpdateManifest --prebuild-bootstrap
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
 $ReleaseExe = Join-Path $ProjectRoot "dist\HushPlayer\HushPlayer.exe"

@@ -11,7 +11,13 @@ if (-not (Test-Path -LiteralPath (Join-Path $ProjectRoot "main.py") -PathType Le
     throw "main.py was not found in the project root."
 }
 
-$Python = Join-Path $ProjectRoot ".venv\Scripts\python.exe"
+$PythonCandidates = @(
+    (Join-Path $ProjectRoot ".venv313\Scripts\python.exe")
+    (Join-Path $ProjectRoot ".venv\Scripts\python.exe")
+)
+$Python = $PythonCandidates | Where-Object {
+    Test-Path -LiteralPath $_ -PathType Leaf
+} | Select-Object -First 1
 $VenvRebuildHelp = @(
     "Preserve the existing .venv under a unique backup name, then rebuild it from the project root:"
     "  & <path-to-python-3.13-x64> -m venv .venv"
