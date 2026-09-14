@@ -1,15 +1,18 @@
 {
     "schema_version": 1,
     "channel": "beta",
-    "version": "0.6.0-beta.13",
-    "numeric_version": "0.6.0.13",
+    "version": "1.0.0-beta.0",
+    "numeric_version": "1.0.0.0",
     "architecture": "win-x64",
     "mandatory": false,
-    "setup_url": "https://api.gitcode.com/api/v5/repos/gcw_iPVB8B5g/HushPlayer-updates/releases/v0.6.0-beta.13/attach_files/HushPlayer-0.6.0-beta.13-win-x64-setup.exe/download",
-    "setup_size": 116078295,
-    "sha256": "f2643897c97f9b1f03e21c76d1a68d5af81b388904cdab43ad28a74c57b64f69",
+    "setup_url": "https://api.gitcode.com/api/v5/repos/gcw_iPVB8B5g/HushPlayer-updates/releases/v1.0.0/attach_files/HushPlayer-1.0.0-win-x64-setup.exe/download",
+    "setup_size": 130834676,
+    "sha256": "11d7a0838a2db22bcdf05736d7b1751cfee757438e79a8e458a04fc649d457ff",
     "release_notes": [
-        "增加单实例启动保护：重复启动时复用已运行的 HushPlayer 窗口，不再创建多个播放进程。"
+        "发布 HushPlayer 1.0.0 Stable，继续保留本地音乐库、播放、歌词、沉浸歌词、桌面歌词、在线来源和歌单功能。",
+        "beta 通道继续提供 HushPlayer 1.0.0 更新，安装后仍使用 beta 通道接收后续更新。",
+        "更新流程继续提供应用内 portable 更新、完整安装包回退、SHA-256 校验和更新助手重启。",
+        "1.0.0-beta.0 仅为旧 updater 兼容 alias，安装后的真实应用版本仍为 1.0.0。"
     ],
     "release_history": [
         {
@@ -246,10 +249,20 @@
             "notes": [
                 "增加单实例启动保护：重复启动时复用已运行的 HushPlayer 窗口，不再创建多个播放进程。"
             ]
+        },
+        {
+            "version": "1.0.0",
+            "numeric_version": "1.0.0.0",
+            "release_date": "2026-09-13",
+            "notes": [
+                "发布 HushPlayer 1.0.0 Stable，继续保留本地音乐库、播放、歌词、沉浸歌词、桌面歌词、在线来源和歌单功能。",
+                "beta 通道继续提供 HushPlayer 1.0.0 更新，安装后仍使用 beta 通道接收后续更新。",
+                "更新流程继续提供应用内 portable 更新、完整安装包回退、SHA-256 校验和更新助手重启。"
+            ]
         }
     ],
-    "package_url": "https://api.gitcode.com/api/v5/repos/gcw_iPVB8B5g/HushPlayer-updates/releases/v0.6.0-beta.13/attach_files/HushPlayer-0.6.0-beta.13-win-x64-update.zip/download",
-    "package_size": 158654436,
-    "package_sha256": "745aab1e49df0357671f3a1c627cc78043131f692babde660fc2dc425fc0e053",
-    "package_filename": "HushPlayer-0.6.0-beta.13-win-x64-update.zip"
+    "package_url": "https://api.gitcode.com/api/v5/repos/gcw_iPVB8B5g/HushPlayer-updates/releases/v1.0.0/attach_files/HushPlayer-1.0.0-win-x64-update.zip/download",
+    "package_size": 176026747,
+    "package_sha256": "1c2a9a15fcf29280463bdc7a7d0a8b6453a31c821ab93ce131ce6f3018bbcbc5",
+    "package_filename": "HushPlayer-1.0.0-beta.0-win-x64-update.zip"
 }
