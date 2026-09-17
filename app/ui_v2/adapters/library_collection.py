@@ -182,6 +182,28 @@ class LibraryCollectionAdapter(QObject):
         self.track_updated.emit(track)
         return track
 
+    def remove_track(self, track_id: str) -> bool:
+        """Remove one in-memory preview track without touching persistent data."""
+
+        if self._read_only:
+            return False
+        track = self._track_by_id.get(str(track_id or ""))
+        if track is None:
+            return False
+        index = self._row_by_id[track.id]
+        del self._tracks[index]
+        self._track_by_id.pop(track.id, None)
+        self._row_by_id = {
+            item.id: row for row, item in enumerate(self._tracks)
+        }
+        self._search_text_by_id.pop(track.id, None)
+        self._favorite_at.pop(track.id, None)
+        self._recent.pop(track.id, None)
+        if self._playing_track_id == track.id:
+            self._playing_track_id = ""
+        self.tracks_changed.emit()
+        return True
+
     def favorite_at(self, track_id: str) -> datetime | None:
         return self._favorite_at.get(track_id)
 

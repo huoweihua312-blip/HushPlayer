@@ -110,6 +110,8 @@ class PlaylistConfirmDialog(QDialog):
         message: str,
         *,
         parent: QWidget | None = None,
+        confirm_text: str = "删除歌单",
+        confirm_accessible_name: str = "",
     ) -> None:
         super().__init__(parent)
         self._theme = theme
@@ -127,9 +129,11 @@ class PlaylistConfirmDialog(QDialog):
         self.cancel_button = QPushButton("取消", self)
         self.cancel_button.setObjectName("playlistDialogCancel")
         self.cancel_button.setAccessibleName("取消")
-        self.confirm_button = QPushButton("删除歌单", self)
+        self.confirm_button = QPushButton(str(confirm_text or "删除歌单"), self)
         self.confirm_button.setObjectName("playlistDialogDelete")
-        self.confirm_button.setAccessibleName("删除歌单")
+        self.confirm_button.setAccessibleName(
+            str(confirm_accessible_name or confirm_text or "删除歌单")
+        )
         self.cancel_button.clicked.connect(self.reject)
         self.confirm_button.clicked.connect(self.accept)
 

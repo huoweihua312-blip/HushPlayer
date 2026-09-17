@@ -20,6 +20,7 @@ MODULES = (
     "tests.test_ui_v2_real_playback",
     "tests.test_ui_v2_real_actions",
     "tests.test_playback_session_store",
+    "tests.test_library_removal_service",
 )
 
 

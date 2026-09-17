@@ -428,6 +428,11 @@ class TrackTable(QTableView):
             remove_action.triggered.connect(
                 lambda: self._playlist_remove_callback(track.id)
             )
+        delete_action = menu.addAction("删除歌曲")
+        delete_action.setToolTip("从音乐库删除，并将本地文件移入回收站")
+        delete_action.triggered.connect(
+            lambda: self.mock_action_requested.emit("delete_from_library", track.id)
+        )
         info_action = menu.addAction("查看歌曲信息")
         info_action.triggered.connect(lambda: self.mock_action_requested.emit("show_info", track.id))
         if self._artist_navigation_enabled and track.artist.strip():

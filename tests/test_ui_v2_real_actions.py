@@ -110,6 +110,32 @@ class QuietOrbitActionSurfaceTests(unittest.TestCase):
             "正在检查更新…",
         )
 
+    def test_mock_track_delete_uses_confirmation_and_removes_track(self) -> None:
+        track = self.window.library_collection.tracks()[0]
+        with patch(
+            "app.ui_v2.shell.main_window.PlaylistConfirmDialog.exec",
+            return_value=QDialog.DialogCode.Accepted,
+        ):
+            self.window._on_track_action("delete_from_library", track.id)
+
+        self.assertIsNone(self.window.library_collection.track_for_id(track.id))
+
+    def test_currently_playing_track_cannot_be_deleted(self) -> None:
+        track = next(
+            item
+            for item in self.window.library_collection.tracks()
+            if not item.is_missing
+        )
+        self.window.playback_adapter.play_track(track.id)
+        self.app.processEvents()
+        with patch(
+            "app.ui_v2.shell.main_window.PlaylistConfirmDialog.exec"
+        ) as confirm:
+            self.window._on_track_action("delete_from_library", track.id)
+
+        confirm.assert_not_called()
+        self.assertIsNotNone(self.window.library_collection.track_for_id(track.id))
+
 
 class PlaylistDialogTests(unittest.TestCase):
     @classmethod
@@ -135,6 +161,17 @@ class PlaylistDialogTests(unittest.TestCase):
         )
         self.assertEqual(dialog.message_label.text(), "删除歌单不会删除音乐库中的歌曲。")
         self.assertEqual(dialog.confirm_button.accessibleName(), "删除歌单")
+
+    def test_delete_confirmation_accepts_custom_destructive_action(self) -> None:
+        dialog = PlaylistConfirmDialog(
+            get_theme("dark"),
+            "删除歌曲",
+            "本地文件将移入回收站。",
+            confirm_text="删除歌曲",
+            confirm_accessible_name="确认删除歌曲",
+        )
+        self.assertEqual(dialog.confirm_button.text(), "删除歌曲")
+        self.assertEqual(dialog.confirm_button.accessibleName(), "确认删除歌曲")
 
 
 class RealPlaylistPersistenceTests(unittest.TestCase):

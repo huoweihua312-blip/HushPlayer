@@ -57,6 +57,7 @@ from app.core.app_paths import AppPaths
 from app.core.version import APP_VERSION
 from app.services.app_update_service import AppUpdateService, UpdateManifest
 from app.services.cache_maintenance import clear_missing_cache_files
+from app.services.library_removal_service import LibraryRemovalService
 from app.services.library_repository import LibraryRepository
 from app.services.music_folder_scan import MusicFolderImportService
 from app.services.online_discovery_runtime import OnlineDiscoveryRuntime
@@ -96,6 +97,7 @@ from app.ui_v2.dialogs.update_dialog import UpdateDialog
 from app.ui_v2.widgets.custom_title_bar import CustomTitleBar
 from app.ui_v2.widgets.desktop_lyrics_quick_settings import DesktopLyricsQuickSettingsPopover
 from app.ui_v2.widgets.online_recovery_dialog import OnlineRecoveryCandidateDialog
+from app.ui_v2.widgets.playlist_dialogs import PlaylistConfirmDialog
 from app.ui_v2.widgets.settings_overlay import SettingsOverlay
 from app.ui_v2.widgets.track_action_dialogs import (
     PlaylistSelectionDialog,
@@ -476,6 +478,19 @@ class MainWindow(QMainWindow):
         else:
             self.online_discovery = None
             self.music_import_service = None
+        self.library_removal_service = (
+            LibraryRemovalService(
+                repository,
+                remote_tracks,
+                online_audio_cache=(
+                    self.online_discovery.online_audio_cache
+                    if self.online_discovery is not None
+                    else None
+                ),
+            )
+            if is_real_library and repository is not None and remote_tracks is not None
+            else None
+        )
         if self._startup_diagnostics is not None:
             self._startup_diagnostics.mark("main_window.service_graph")
         self.library_collection = LibraryCollectionAdapter(
@@ -1928,6 +1943,9 @@ class MainWindow(QMainWindow):
             dialog.raise_()
             dialog.activateWindow()
             return
+        if action == "delete_from_library":
+            self._delete_track(track)
+            return
         if action != "add_to_playlist":
             return
         if not self.playlist_adapter.can_mutate:
@@ -1946,6 +1964,62 @@ class MainWindow(QMainWindow):
             self._show_action_message(f"已添加到歌单：{playlist_name}")
         else:
             self._show_action_message("歌曲已经在该歌单中，未重复添加。")
+
+    def _delete_track(self, track: Track) -> None:
+        current = self.playback_adapter.state.current_track
+        if (
+            current is not None
+            and current.stable_identity
+            and current.stable_identity == track.stable_identity
+        ):
+            self._show_action_message("当前歌曲不能删除，请先切换到其他歌曲。")
+            return
+        if not self._confirm_track_deletion(track):
+            return
+        if self.library_removal_service is None:
+            if self.library_collection.remove_track(track.id):
+                self._show_action_message("歌曲已从音乐库删除。")
+            return
+        result = self.library_removal_service.remove_track(track)
+        if not result.success:
+            self._show_action_message(result.message or "删除歌曲失败。")
+            return
+        remaining = tuple(
+            item
+            for item in self.playback_adapter.queue_tracks
+            if item.stable_identity != track.stable_identity
+        )
+        if len(remaining) != len(self.playback_adapter.queue_tracks):
+            self.playback_adapter.set_queue(
+                remaining,
+                preserve_current_context=True,
+            )
+        if self.real_library_adapter is not None:
+            self.real_library_adapter.refresh()
+        self._show_action_message(result.message or "歌曲已删除。")
+
+    def _confirm_track_deletion(self, track: Track) -> bool:
+        if track.is_online:
+            consequence = "在线歌曲记录和本地音频缓存将被删除。"
+        elif track.local_path and Path(track.local_path).is_file():
+            consequence = "本地音频文件将移入 Windows 回收站。"
+        else:
+            consequence = "本地文件当前不存在，只会清理音乐库记录。"
+        message = (
+            f"即将删除“{track.title}”。\n\n"
+            f"歌曲会从音乐库、我喜欢和所有歌单中移除。\n"
+            f"{consequence}\n\n"
+            "请确认是否继续。"
+        )
+        dialog = PlaylistConfirmDialog(
+            self._theme,
+            "删除歌曲",
+            message,
+            parent=self,
+            confirm_text="删除歌曲",
+            confirm_accessible_name="确认删除歌曲",
+        )
+        return dialog.exec() == QDialog.DialogCode.Accepted
 
     @property
     def recovery_status_message(self) -> str:

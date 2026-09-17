@@ -60,7 +60,9 @@ class UiV2LibraryPageTests(unittest.TestCase):
         expected_actions = ["播放"]
         if track.is_online:
             expected_actions.append("更换播放来源")
-        expected_actions.extend(["添加到我喜欢", "添加到歌单", "查看歌曲信息"])
+        expected_actions.extend(
+            ["添加到我喜欢", "添加到歌单", "删除歌曲", "查看歌曲信息"]
+        )
         self.assertEqual([action.text() for action in menu.actions()], expected_actions)
         menu.deleteLater()
 
@@ -177,6 +179,24 @@ class UiV2LibraryPageTests(unittest.TestCase):
         self.assertTrue(replace_source.isEnabled())
         replace_source.trigger()
         self.assertEqual(requested, [track])
+        menu.deleteLater()
+
+    def test_delete_action_requests_library_removal(self) -> None:
+        model = self.page.track_table.model
+        row = self._available_index().row()
+        track = model.track_at(row)
+        requested: list[tuple[str, str]] = []
+        self.page.track_table.mock_action_requested.connect(
+            lambda action, track_id: requested.append((action, track_id))
+        )
+        menu = self.page.track_table.build_context_menu(
+            model.index(row, int(TrackColumn.MORE))
+        )
+        delete_action = next(
+            action for action in menu.actions() if action.text() == "删除歌曲"
+        )
+        delete_action.trigger()
+        self.assertEqual(requested, [("delete_from_library", track.id)])
         menu.deleteLater()
 
     def test_empty_loading_error_and_content_states(self) -> None:
