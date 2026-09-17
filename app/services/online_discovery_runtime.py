@@ -103,6 +103,11 @@ class OnlineDiscoveryRuntime(QObject):
         )
         if self.artwork_service.parent() is None:
             self.artwork_service.setParent(self)
+        # Library warm-up must not cancel the user's active search artwork.
+        self.library_artwork_service = OnlineArtworkService(
+            effective_cache_dir / "covers",
+            self,
+        )
         self.source_registry = SourceRegistryManager(
             paths.bundled_resource_dir,
             runtime_dir=paths.source_runtime_data_dir,
@@ -152,5 +157,6 @@ class OnlineDiscoveryRuntime(QObject):
         self.track_recovery.shutdown()
         self.search_service.shutdown()
         self.artwork_service.cancel()
+        self.library_artwork_service.cancel()
         self.online_audio_cache.shutdown()
         self.client.stop()

@@ -213,6 +213,8 @@ class OnlineAdapter(QObject):
 
     def cancel_search(self) -> None:
         if self.is_formal:
+            self.discovery.artwork_service.cancel()
+            self._artwork_generation = -1
             self.discovery.search_service.schedule_search("")
             self._set_state("idle", "搜索已取消。")
             return
@@ -291,6 +293,8 @@ class OnlineAdapter(QObject):
 
     def clear_results(self) -> None:
         if self.is_formal:
+            self.discovery.artwork_service.cancel()
+            self._artwork_generation = -1
             self.discovery.search_service.schedule_search("")
             self._results = ()
             self.search_results_changed.emit(self._results)
@@ -730,6 +734,8 @@ class OnlineAdapter(QObject):
         self._recommendation_results.clear()
         if self.discovery is not None:
             self._metadata_requests.clear()
+            self.discovery.artwork_service.cancel()
+            self._artwork_generation = -1
 
     def _connect_formal_services(self) -> None:
         search = self.discovery.search_service
@@ -745,6 +751,8 @@ class OnlineAdapter(QObject):
         search.ensure_source_catalog()
 
     def _schedule_formal_search(self, query: str) -> int:
+        self.discovery.artwork_service.cancel()
+        self._artwork_generation = -1
         service = self.discovery.search_service
         expected = int(getattr(service, "generation", self._formal_generation) or 0) + 1
         self._formal_generation = expected
@@ -849,8 +857,13 @@ class OnlineAdapter(QObject):
         merged = dict(track.raw)
         if isinstance(metadata, dict):
             merged.update(metadata)
+            metadata_artwork = artwork_url_from_payload(metadata)
+            if metadata_artwork:
+                merged["artwork_url"] = metadata_artwork
         updated = self._map_formal_track(merged, track.result_rank, existing=track)
         self._replace_result(updated)
+        if updated.artwork_url and updated.artwork_url != track.artwork_url:
+            self._request_artwork((*self._results, *self._recommendation_results.values()))
         self.track_info_changed.emit(updated)
         self.notification_changed.emit("在线歌曲信息已更新。")
 
@@ -859,10 +872,13 @@ class OnlineAdapter(QObject):
             (track.id, track.artwork_url)
             for track in tracks
             if track.artwork_url
-        ][:32]
+        ]
         if not requests:
             return
-        self._artwork_generation = self.discovery.artwork_service.request_many(requests)
+        service = self.discovery.artwork_service
+        # Cache hits can be emitted before request_many returns.
+        self._artwork_generation = service.generation + 1
+        self._artwork_generation = service.request_many(requests)
 
     def _on_artwork_ready(self, generation: int, track_key: str, data: bytes) -> None:
         if self._closed:
@@ -1013,7 +1029,7 @@ class OnlineAdapter(QObject):
             raw=artwork_payload,
             artwork_data=bytes(
                 getattr(artwork_source, "artwork_data", b"") or b""
-            ),
+            ) if artwork_url == getattr(artwork_source, "artwork_url", "") else b"",
             availability_detail=(
                 str(raw.get("availabilityDetail") or raw.get("availability_detail") or "").strip()
                 or (existing.availability_detail if existing is not None else "")

@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 from pathlib import Path
+import os
+import re
+from datetime import datetime
 from urllib.parse import urlsplit
 
 from PySide6.QtCore import QObject, QUrl, Signal
@@ -209,10 +212,33 @@ class OnlineSourceImporter(QObject):
         if self._failed_messages:
             parts.append(f"失败 {len(self._failed_messages)} 个")
         message = "来源处理完成：" + "，".join(parts) + "。"
+        if self._failed_messages:
+            details = [self._redact(item) for item in self._failed_messages[:4]]
+            detail_text = "\n".join(f"- {item}" for item in details)
+            message += "\n失败详情：\n" + detail_text
+            self._write_diagnostic(details)
         if self._completed_count:
             self.completed.emit(message)
         else:
             self.failed.emit(message)
+
+    @staticmethod
+    def _redact(message: str) -> str:
+        return re.sub(r"([?&](?:key|apiKey|token|sign|mask|MUSIC_U)=)[^&\\s]+", r"\1<redacted>", str(message or ""))
+
+    @classmethod
+    def _write_diagnostic(cls, details: list[str]) -> None:
+        root = str(os.environ.get("LOCALAPPDATA") or "").strip()
+        if not root:
+            return
+        path = Path(root) / "HushPlayer" / "logs" / "source-import.log"
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            with path.open("a", encoding="utf-8") as handle:
+                handle.write(f"[{datetime.now().isoformat(timespec='seconds')}]\n")
+                handle.write("\n".join(details) + "\n")
+        except OSError:
+            return
 
     def _reload_sources(self) -> None:
         self.client.reload_sources(timeout_ms=10000)

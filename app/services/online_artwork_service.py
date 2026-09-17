@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 import hashlib
+from collections import deque
 from pathlib import Path
 
-from PySide6.QtCore import QObject, QUrl, Signal
+from PySide6.QtCore import QObject, QTimer, QUrl, Signal
 from PySide6.QtGui import QImage
 from PySide6.QtNetwork import QNetworkAccessManager, QNetworkReply, QNetworkRequest
 
@@ -22,6 +23,10 @@ class OnlineArtworkService(QObject):
         self.network = QNetworkAccessManager(self)
         self._generation = 0
         self._replies: dict[QNetworkReply, tuple[int, str, Path]] = {}
+        self._pending = deque()
+        self._pump_timer = QTimer(self)
+        self._pump_timer.setSingleShot(True)
+        self._pump_timer.timeout.connect(self._pump)
 
     @property
     def generation(self) -> int:
@@ -36,7 +41,19 @@ class OnlineArtworkService(QObject):
         self.cancel()
         self._generation += 1
         generation = self._generation
-        for raw in requests or ():
+        self._pending.extend(requests or ())
+        self._pump()
+        return generation
+
+    def _pump(self) -> None:
+        generation = self._generation
+        processed = 0
+        # Limit both active downloads and synchronous cache work per event turn.
+        while self._pending and len(self._replies) < 4 and processed < 8:
+            if generation != self._generation:
+                return
+            raw = self._pending.popleft()
+            processed += 1
             try:
                 track_key, url_text = raw
             except (TypeError, ValueError):
@@ -65,6 +82,7 @@ class OnlineArtworkService(QObject):
             if cache_hit:
                 continue
             request = QNetworkRequest(url)
+            request.setTransferTimeout(15_000)
             request.setRawHeader(
                 b"User-Agent",
                 f"{APP_USER_AGENT} (artwork client)".encode("ascii"),
@@ -72,9 +90,12 @@ class OnlineArtworkService(QObject):
             reply = self.network.get(request)
             reply.finished.connect(lambda current=reply: self._finish(current))
             self._replies[reply] = (generation, track_key, cache_path)
-        return generation
+        if self._pending and len(self._replies) < 4:
+            self._pump_timer.start(0)
 
     def cancel(self) -> None:
+        self._pump_timer.stop()
+        self._pending.clear()
         replies = list(self._replies)
         self._replies.clear()
         for reply in replies:
@@ -87,6 +108,7 @@ class OnlineArtworkService(QObject):
             reply.deleteLater()
             return
         generation, track_key, cache_path = context
+        self._pump_timer.start(0)
         if reply.error() != QNetworkReply.NetworkError.NoError:
             message = reply.errorString() or "在线封面加载失败"
             reply.deleteLater()

@@ -1,7 +1,7 @@
 # Real Track Artwork
 
 Date: 2026-09-15
-Status: Scope approved; written specification awaiting review.
+Status: Written specification approved; implementation awaiting manual acceptance.
 
 ## Scope
 
@@ -119,6 +119,49 @@ The user is responsible for manual backup before important-file edits.
 No automatic backup is authorized. Keep the implementation in a focused
 local commit so it can be reverted explicitly without changing user data.
 Do not push remotely.
+
+The implemented local reader supports ID3/APIC, FLAC pictures, MP4 covr,
+and Vorbis metadata_block_picture. It caches images at up to 768 pixels
+per side and rejects artwork over 12 MiB or 32 megapixels. A read-only
+cache retains a valid sidecar path; embedded artwork requires a writable
+cache. Online requests run at most four downloads per service, with
+eight cached requests per event turn and a 15-second transfer timeout.
+
+## Implementation Verification
+
+Verified on 2026-09-15 using the existing Python 3.12.14 environment.
+No dependency installation, version change, or packaging run was performed.
+
+- All 18 new artwork tests pass, including embedded MP3 data, mocked FLAC
+  and MP4 metadata, sidecar priority, corrupt-image fallback, actual
+  snapshot-thread extraction, visible player/detail pixels, 40 online
+  results, stale-result rejection, and metadata artwork replacement.
+- A temporary loopback HTTP server verified the real Qt network path
+  and the subsequent disk-cache hit. No external music provider was
+  used in that test.
+- The combined artwork/library/online/UI regression run completed
+  69 tests: 67 passed and two failed.
+- The two failures were independently reproduced using the pre-change
+  HEAD modules loaded in memory, without restoring or overwriting files:
+  test_ui_v2_real_library_pages.py:271 expects a visible favorite column;
+  test_ui_v2_q5b1_real_interactions.py:593 expects an artwork color at a
+  fixed online-table pixel coordinate. Neither test was altered.
+- A separate run of real playback, playback adapter, online playback,
+  and lyrics tests passed all 53 tests.
+- media_worker_lifecycle_smoke.py passed.
+- Syntax checks passed for all seven changed Python files plus main.py.
+  All nine task files decode as UTF-8 without a BOM. Diff checks passed.
+
+The loopback test initially left deferred Qt cleanup pending between test
+suites. Explicit teardown of its temporary network service fixed the
+minimal reproduction and the combined run; no production shutdown
+architecture was changed.
+
+Because the broader regression run is not completely green, no completion
+commit is created. The existing unrelated edits remain unstaged and
+untouched. Manual playback/UI acceptance and a future explicitly requested
+build are still outstanding. The installed application is not updated by
+these source edits.
 
 ## Existing User Changes
 
