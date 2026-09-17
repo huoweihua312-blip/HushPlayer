@@ -1232,7 +1232,22 @@ class OnlineAdapter(QObject):
         for track in (*self._results, *self._recommendation_results.values()):
             source = self._source_for_id(track.source_id)
             source_blocked = self._source_is_blocked(source)
-            if source_blocked and track.availability not in {
+            cached = self._track_has_valid_cache(track.as_track())
+            if source_blocked and cached:
+                if (
+                    track.availability != "playable"
+                    or track.availability_detail != "正在使用本地缓存。"
+                    or not track.is_cached
+                ):
+                    self._replace_result(
+                        replace(
+                            track,
+                            availability="playable",
+                            availability_detail="正在使用本地缓存。",
+                            is_cached=True,
+                        )
+                    )
+            elif source_blocked and track.availability not in {
                 "resolve_failed",
                 "resolve-failed",
                 "permission_denied",
@@ -1262,7 +1277,23 @@ class OnlineAdapter(QObject):
             if not track.is_online:
                 continue
             source = self._source_for_id(self._playback_source_id(track))
-            if self._source_is_blocked(source) and track.availability not in {
+            source_blocked = self._source_is_blocked(source)
+            cached = self._track_has_valid_cache(track)
+            if source_blocked and cached:
+                if (
+                    track.availability != "playable"
+                    or track.is_missing
+                    or track.availability_detail != "正在使用本地缓存。"
+                ):
+                    self.collection.update_runtime_track(
+                        replace(
+                            track,
+                            availability="playable",
+                            availability_detail="正在使用本地缓存。",
+                            is_missing=False,
+                        )
+                    )
+            elif source_blocked and track.availability not in {
                 "resolve_failed",
                 "resolve-failed",
                 "permission_denied",
@@ -1294,6 +1325,57 @@ class OnlineAdapter(QObject):
                         is_missing=False,
                     )
                 )
+
+    def _track_has_valid_cache(self, track: Track) -> bool:
+        if self.discovery is None or not isinstance(track, Track):
+            return False
+        cache = getattr(self.discovery, "online_audio_cache", None)
+        if cache is None:
+            return False
+        payload = (
+            dict(track.remote_payload)
+            if isinstance(track.remote_payload, dict)
+            else {}
+        )
+        playback_source = payload.get("playback_source")
+        playback_source = (
+            playback_source if isinstance(playback_source, dict) else {}
+        )
+        source_id = str(
+            playback_source.get("source_id")
+            or playback_source.get("sourceId")
+            or track.source_id
+            or ""
+        ).strip()
+        track_id = str(
+            playback_source.get("remote_id")
+            or playback_source.get("remoteId")
+            or playback_source.get("id")
+            or track.remote_track_id
+            or track.remote_identity
+            or track.id
+            or ""
+        ).strip()
+        payload.update(
+            {
+                "media_type": "online",
+                "source_id": source_id,
+                "sourceId": source_id,
+                "id": track_id,
+                "remote_id": track_id,
+                "remote_stable_id": track.stable_identity,
+                "quality": str(
+                    playback_source.get("quality")
+                    or payload.get("quality")
+                    or "default"
+                ).strip()
+                or "default",
+            }
+        )
+        try:
+            return bool(cache.valid_cache(payload, touch=False))
+        except Exception:
+            return False
 
     @staticmethod
     def _source_is_blocked(source: OnlineSource | None) -> bool:

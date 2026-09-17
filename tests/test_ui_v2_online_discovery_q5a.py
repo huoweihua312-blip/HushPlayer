@@ -5,6 +5,7 @@ import sys
 import json
 import tempfile
 import unittest
+from datetime import datetime
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -20,6 +21,7 @@ from app.ui_v2.adapters.library_collection import LibraryCollectionAdapter
 from app.ui_v2.adapters.online_adapter import OnlineAdapter
 from app.ui_v2.adapters.playlist_adapter import PlaylistAdapter
 from app.ui_v2.adapters.real_library_adapter import RealLibraryAdapter
+from app.ui_v2.models.track import Track
 
 
 class FakeSourceClient(QObject):
@@ -145,6 +147,18 @@ class FakeBridge:
         return True
 
 
+class FakeAudioCache:
+    def __init__(self) -> None:
+        self.records: dict[str, dict] = {}
+
+    def valid_cache(self, value, *, touch: bool = True) -> dict | None:
+        if not isinstance(value, dict):
+            raise TypeError("MediaItem 只能由字典或 MediaItem 创建")
+        identity = str(value.get("remote_stable_id") or "")
+        record = self.records.get(identity)
+        return dict(record) if isinstance(record, dict) else None
+
+
 class OnlineDiscoveryQ5ATests(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
@@ -155,11 +169,13 @@ class OnlineDiscoveryQ5ATests(unittest.TestCase):
         self.search = FakeSearchService()
         self.artwork = FakeArtworkService()
         self.bridge = FakeBridge()
+        self.audio_cache = FakeAudioCache()
         self.discovery = SimpleNamespace(
             client=self.client,
             search_service=self.search,
             artwork_service=self.artwork,
             bridge=self.bridge,
+            online_audio_cache=self.audio_cache,
         )
         collection = LibraryCollectionAdapter((), read_only=True)
         playlists = PlaylistAdapter(collection, seed_mock=False, read_only=True)
@@ -226,6 +242,98 @@ class OnlineDiscoveryQ5ATests(unittest.TestCase):
         self.search.emit_results(self._results(), generation=first)
         self.assertEqual(self.adapter.state.generation, second)
         self.assertFalse(self.adapter.results())
+
+    def test_disabled_source_uses_valid_cache_instead_of_online_recovery(self) -> None:
+        stable_id = "remote_cached"
+        track = Track(
+            id=stable_id,
+            title="缓存歌曲",
+            artist="测试歌手",
+            album="测试专辑",
+            duration_ms=180_000,
+            source_id="north",
+            source_name="North Source",
+            source_type="online",
+            added_at=datetime(2026, 1, 1, 12, 0),
+            is_favorite=False,
+            is_missing=True,
+            is_loading=False,
+            artwork_path=None,
+            stable_identity=stable_id,
+            availability="source_unavailable",
+            availability_detail="当前在线来源不可用。",
+            remote_identity=stable_id,
+            remote_track_id="cached-track",
+            remote_payload={"id": "cached-track", "sourceId": "north"},
+        )
+        self.audio_cache.records[stable_id] = {
+            "cache_key": "cached-key",
+            "local_path": str(Path(tempfile.gettempdir()) / "hushplayer-cached.mp3"),
+            "status": "complete",
+        }
+        self.adapter.collection.set_tracks((track,))
+
+        self.adapter._on_formal_catalog(
+            [
+                {
+                    "id": "north",
+                    "name": "North Source",
+                    "selectable": True,
+                    "capabilities": {"playback": True},
+                }
+            ],
+            [],
+        )
+
+        updated = self.adapter.collection.track_for_id(stable_id)
+        self.assertIsNotNone(updated)
+        assert updated is not None
+        self.assertEqual(updated.availability, "playable")
+        self.assertFalse(updated.is_missing)
+        self.assertFalse(updated.needs_online_recovery)
+
+    def test_disabled_source_without_cache_still_requires_online_recovery(self) -> None:
+        stable_id = "remote_uncached"
+        track = Track(
+            id=stable_id,
+            title="未缓存歌曲",
+            artist="测试歌手",
+            album="测试专辑",
+            duration_ms=180_000,
+            source_id="north",
+            source_name="North Source",
+            source_type="online",
+            added_at=datetime(2026, 1, 1, 12, 0),
+            is_favorite=False,
+            is_missing=False,
+            is_loading=False,
+            artwork_path=None,
+            stable_identity=stable_id,
+            availability="not_resolved",
+            remote_identity=stable_id,
+            remote_track_id="uncached-track",
+            remote_payload={"id": "uncached-track", "sourceId": "north"},
+        )
+        self.adapter.collection.set_tracks((track,))
+
+        self.adapter._on_formal_catalog(
+            [
+                {
+                    "id": "north",
+                    "name": "North Source",
+                    "selectable": True,
+                    "capabilities": {"playback": True},
+                }
+            ],
+            [],
+        )
+
+        updated = self.adapter.collection.track_for_id(stable_id)
+        self.assertIsNotNone(updated)
+        assert updated is not None
+        self.assertEqual(updated.availability, "source_unavailable")
+        self.assertTrue(updated.is_missing)
+        self.assertTrue(updated.needs_online_recovery)
 
     def test_keyed_artwork_metadata_and_remote_actions(self) -> None:
         generation = self._search()

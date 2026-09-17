@@ -283,6 +283,7 @@ class RealLibraryAdapter(QObject):
             favorite_at = favorite_members.get(("remote", track_id))
             local_path = str(record.get("local_path") or "")
             source_id = str(record.get("source_id") or "remote")
+            source_name = source_id
             stored_state = str(
                 record.get("runtime_availability")
                 or record.get("availability")
@@ -314,6 +315,11 @@ class RealLibraryAdapter(QObject):
                 # normal queue path; a later resolver failure can still open
                 # the explicit recovery action.
                 availability = "playable"
+                source_name = str(
+                    playback_source.get("source_name")
+                    or playback_source.get("sourceName")
+                    or source_id
+                ).strip() or source_id
             artwork_url = artwork_url_from_payload(remote_payload) or artwork_url_from_payload(record)
             track = Track(
                 id=track_id,
@@ -322,7 +328,7 @@ class RealLibraryAdapter(QObject):
                 album=str(record.get("album") or "未知专辑"),
                 duration_ms=_duration_ms(record.get("duration")),
                 source_id=source_id,
-                source_name=source_id,
+                source_name=source_name,
                 source_type="online",
                 added_at=_timestamp(record.get("added_at")),
                 is_favorite=favorite_at is not None,

@@ -351,6 +351,7 @@ class RealLibraryAdapterTests(unittest.TestCase):
             remote.remote_payload["playback_source"]["remote_id"],
             "new-remote-id",
         )
+        self.assertEqual(remote.source_name, "新来源")
         self.assertIn("remote_fixture_001", projected.playlist_track_ids["commute"])
 
     def test_load_runs_repository_and_mapping_off_the_ui_thread(self) -> None:
