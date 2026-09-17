@@ -46,12 +46,13 @@ class OnlineTrackRecoveryService(QObject):
         self._generation = 0
         self._search_generation = 0
         self._track: Track | None = None
+        self._manual_choice = False
 
     @property
     def generation(self) -> int:
         return self._generation
 
-    def request(self, track: Track) -> int:
+    def request(self, track: Track, *, manual: bool = False) -> int:
         self.cancel()
         self._generation += 1
         generation = self._generation
@@ -68,6 +69,7 @@ class OnlineTrackRecoveryService(QObject):
             self.failed.emit(generation, "在线来源服务当前不可用。")
             return generation
         self._track = track
+        self._manual_choice = bool(manual)
         self.status_changed.emit(generation, "正在查找在线版本…")
         self._search_generation = self._search_service.schedule_search(query)
         return generation
@@ -75,6 +77,7 @@ class OnlineTrackRecoveryService(QObject):
     def cancel(self) -> None:
         self._track = None
         self._search_generation = 0
+        self._manual_choice = False
         if self._search_service is not None and self._search_service.keyword:
             self._search_service.schedule_search("")
 
@@ -162,9 +165,17 @@ class OnlineTrackRecoveryService(QObject):
             return
         track = self._track
         candidates = self._rank_candidates(track, results)
+        manual_choice = self._manual_choice
         self._track = None
+        self._manual_choice = False
         if not candidates:
             self.failed.emit(self._generation, "没有找到可靠的在线版本。")
+            return
+        if manual_choice:
+            self.candidates_found.emit(
+                self._generation,
+                tuple(item.track for item in candidates[:8]),
+            )
             return
         top = candidates[0]
         second_score = candidates[1].score if len(candidates) > 1 else 0

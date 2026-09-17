@@ -87,7 +87,6 @@ class ContentRouter(QStackedWidget):
 
     track_play_requested = Signal(object, str)
     track_action_requested = Signal(str, str)
-    track_browse_requested = Signal(str)
     queue_requested = Signal(object, bool)
     online_play_requested = Signal(object)
     online_recovery_requested = Signal(object)
@@ -174,7 +173,6 @@ class ContentRouter(QStackedWidget):
         library_page.track_table.mock_action_requested.connect(
             self.track_action_requested
         )
-        library_page.track_table.browse_requested.connect(self.track_browse_requested)
         if hasattr(library_page, "play_requested"):
             library_page.play_requested.connect(
                 lambda: self.queue_requested.emit(library_page.adapter.tracks(), False)
@@ -317,7 +315,6 @@ class ContentRouter(QStackedWidget):
         page.track_play_requested.connect(self.track_play_requested)
         page.queue_requested.connect(self.queue_requested)
         page.track_table.mock_action_requested.connect(self.track_action_requested)
-        page.track_table.browse_requested.connect(self.track_browse_requested)
         if hasattr(page, "track_recovery_requested"):
             page.track_recovery_requested.connect(self.online_recovery_requested)
         page.browse_library_requested.connect(lambda: self._navigation.set_route("library"))

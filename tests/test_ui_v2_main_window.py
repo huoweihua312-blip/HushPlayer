@@ -7,7 +7,7 @@ import unittest
 from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
@@ -115,6 +115,20 @@ class UiV2MainWindowTests(unittest.TestCase):
             format_duration(self.window.playback_adapter.state.position_ms),
         )
 
+    def test_single_click_does_not_open_track_information(self) -> None:
+        page = self.window.library_page
+        model = page.track_table.model
+        index = model.index(0, int(TrackColumn.TITLE))
+
+        with patch.object(self.window, "_on_track_action") as action:
+            page.track_table.clicked.emit(index)
+            QTest.qWait(
+                QApplication.instance().doubleClickInterval() + 20
+            )
+            self.app.processEvents()
+
+        action.assert_not_called()
+
     def test_favorite_syncs_between_player_and_library(self) -> None:
         index = self._available_index()
         table = self.window.library_page.track_table
@@ -166,7 +180,7 @@ class UiV2MainWindowTests(unittest.TestCase):
             )
 
             self.assertEqual(apply_remote_state.call_count, 2)
-            request_recovery.assert_called_once_with(failed)
+            request_recovery.assert_called_once_with(failed, manual=False)
         finally:
             self.window.online_adapter = original_online_adapter
 

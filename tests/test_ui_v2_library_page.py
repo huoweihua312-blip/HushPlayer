@@ -66,29 +66,16 @@ class UiV2LibraryPageTests(unittest.TestCase):
         self.assertEqual([action.text() for action in menu.actions()], expected_actions)
         menu.deleteLater()
 
-    def test_single_click_browses_after_delay_but_double_click_only_plays(self) -> None:
+    def test_single_click_does_not_request_playback(self) -> None:
         table = self.page.track_table
-        table._browse_timer.setInterval(5)
         index = self._available_index()
-        track_id = table.model.track_at(index.row()).id
-        browsed: list[str] = []
         played: list[str] = []
-        table.browse_requested.connect(browsed.append)
         table.play_requested.connect(played.append)
 
         table.clicked.emit(index)
         QTest.qWait(15)
         self.app.processEvents()
-        self.assertEqual(browsed, [track_id])
         self.assertEqual(played, [])
-
-        browsed.clear()
-        table.clicked.emit(index)
-        table.doubleClicked.emit(index)
-        QTest.qWait(15)
-        self.app.processEvents()
-        self.assertEqual(browsed, [])
-        self.assertEqual(played, [track_id])
 
     def test_missing_favorite_can_be_removed_but_not_added(self) -> None:
         model = self.page.track_table.model

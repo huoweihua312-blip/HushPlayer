@@ -426,6 +426,51 @@ class DesktopLyricsWindowTests(unittest.TestCase):
         self.assertFalse(self.window._drag_move_timer.isActive())
         self.assertTrue(self.window._cursor_timer.isActive())
 
+    def test_unlocked_mode_exposes_drag_handle_and_move_cursor(self) -> None:
+        track = next(track for track in create_mock_tracks(80) if not track.is_missing)
+        self.lyrics.set_track(track)
+        self.window.apply_settings({"floating_lyrics_passthrough": False})
+        self.window.show_for_current_screen()
+        self.app.processEvents()
+
+        self.assertTrue(self.window._drag_handle.isVisible())
+        self.assertEqual(
+            self.window._drag_handle.cursor().shape(),
+            Qt.CursorShape.SizeAllCursor,
+        )
+        self.assertEqual(
+            self.window.cursor().shape(),
+            Qt.CursorShape.SizeAllCursor,
+        )
+
+        self.window.apply_settings({"floating_lyrics_passthrough": True})
+        self.app.processEvents()
+        self.assertFalse(self.window._drag_handle.isVisible())
+
+    def test_drag_handle_press_starts_window_drag(self) -> None:
+        track = next(track for track in create_mock_tracks(80) if not track.is_missing)
+        self.lyrics.set_track(track)
+        self.window.apply_settings({"floating_lyrics_passthrough": False})
+        self.window.show_for_current_screen()
+        self.app.processEvents()
+        handle = self.window._drag_handle
+        local_position = handle.rect().center()
+        press = QMouseEvent(
+            QEvent.Type.MouseButtonPress,
+            QPointF(local_position),
+            QPointF(handle.mapToGlobal(local_position)),
+            Qt.MouseButton.LeftButton,
+            Qt.MouseButton.LeftButton,
+            Qt.KeyboardModifier.NoModifier,
+        )
+
+        QApplication.sendEvent(handle, press)
+
+        self.assertTrue(
+            self.window._drag_offset is not None or self.window._system_drag_active
+        )
+        self.window._finish_drag(persist_position=False)
+
     def test_unlocked_right_release_requests_settings_once_without_starting_drag(self) -> None:
         requests: list[QPoint] = []
         self.window.settings_requested.connect(requests.append)

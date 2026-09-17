@@ -1340,9 +1340,6 @@ class MainWindow(QMainWindow):
         )
         self.router.track_play_requested.connect(self._play_tracks)
         self.router.track_action_requested.connect(self._on_track_action)
-        self.router.track_browse_requested.connect(
-            lambda track_id: self._on_track_action("show_info", track_id)
-        )
         self.router.queue_requested.connect(self._play_queue)
         self.router.online_play_requested.connect(self._play_online_track)
         self.router.online_recovery_requested.connect(self._request_online_recovery)
@@ -2025,7 +2022,7 @@ class MainWindow(QMainWindow):
     def recovery_status_message(self) -> str:
         return getattr(self, "_recovery_status_message", "")
 
-    def _request_online_recovery(self, track) -> None:
+    def _request_online_recovery(self, track, *, manual: bool = True) -> None:
         recovery = getattr(self.online_discovery, "track_recovery", None)
         if recovery is None:
             self._show_recovery_message("当前运行模式没有可用的在线恢复服务。")
@@ -2035,7 +2032,7 @@ class MainWindow(QMainWindow):
             # this playback context, preventing a failed replacement from
             # starting an endless recovery loop.
             self._automatic_recovery_identities.add(track.stable_identity)
-        generation = recovery.request(track)
+        generation = recovery.request(track, manual=manual)
         if isinstance(track, Track):
             self._pending_recovery_tracks[int(generation)] = track
 
@@ -2148,7 +2145,7 @@ class MainWindow(QMainWindow):
         if not recovery_identity or recovery_identity in self._automatic_recovery_identities:
             return
         self._automatic_recovery_identities.add(recovery_identity)
-        self._request_online_recovery(library_track)
+        self._request_online_recovery(library_track, manual=False)
 
     def _on_playback_duration_changed(self, duration_ms: int | None) -> None:
         if duration_ms is None or int(duration_ms) <= 0:

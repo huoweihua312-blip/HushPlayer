@@ -196,6 +196,16 @@ class DesktopLyricsWindow(QWidget):
         self._lock_button = DesktopLyricsLockButton()
         self._lock_button.clicked.connect(self._request_lock_toggle)
         self._lock_button.hide()
+        self._drag_handle = QToolButton(self)
+        self._drag_handle.setObjectName("desktopLyricsDragHandle")
+        self._drag_handle.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self._drag_handle.setFixedSize(30, 30)
+        self._drag_handle.setIconSize(QSize(18, 18))
+        self._drag_handle.setCursor(Qt.CursorShape.SizeAllCursor)
+        self._drag_handle.setToolTip("拖动桌面歌词")
+        self._drag_handle.setAccessibleName("拖动桌面歌词")
+        self._drag_handle.installEventFilter(self)
+        self._drag_handle.hide()
 
     def set_theme(self, theme: Theme) -> None:
         self._theme = theme
@@ -307,9 +317,7 @@ class DesktopLyricsWindow(QWidget):
 
     def _apply_visuals(self) -> None:
         self.setWindowOpacity(int(self._settings.get("floating_lyrics_opacity", 100)) / 100.0)
-        self._surface.setStyleSheet(
-            "QFrame#desktopLyricsSurface { background: transparent; border: 0; }"
-        )
+        self._apply_surface_interaction_style()
         colors = self._theme.colors
         self._lock_button.setStyleSheet(
             "QToolButton#desktopLyricsLockButton { background: transparent; border: 0; "
@@ -318,10 +326,34 @@ class DesktopLyricsWindow(QWidget):
             f"QToolButton#desktopLyricsLockButton:pressed {{ background: {colors.surface_pressed}; }}"
             "QToolButton#desktopLyricsLockButton:focus { background: transparent; border: 0; }"
         )
+        self._drag_handle.setIcon(icon("more", self._theme))
+        self._drag_handle.setStyleSheet(
+            "QToolButton#desktopLyricsDragHandle { background: transparent; border: 0; "
+            "border-radius: 7px; padding: 0; }"
+            f"QToolButton#desktopLyricsDragHandle:hover {{ background: {colors.hover_background}; }}"
+            f"QToolButton#desktopLyricsDragHandle:pressed {{ background: {colors.surface_pressed}; }}"
+        )
         self._update_lock_button()
         self._apply_lyrics_fonts()
         self._apply_content_height_floor()
         self._update_lock_button_geometry()
+
+    def _apply_surface_interaction_style(self) -> None:
+        if self._locked:
+            self._surface.setStyleSheet(
+                "QFrame#desktopLyricsSurface { background: transparent; border: 0; }"
+            )
+            return
+        border = QColor(self._theme.colors.border_strong)
+        border.setAlpha(150)
+        background = QColor(self._theme.colors.surface_primary)
+        background.setAlpha(18)
+        self._surface.setStyleSheet(
+            "QFrame#desktopLyricsSurface { "
+            f"background: rgba({background.red()}, {background.green()}, {background.blue()}, {background.alpha()}); "
+            f"border: 1px solid rgba({border.red()}, {border.green()}, {border.blue()}, {border.alpha()}); "
+            "border-radius: 9px; }"
+        )
 
     def _apply_live_preview_visuals(self, *, typography_changed: bool) -> None:
         """Update only typography and geometry during continuous slider drags."""
@@ -629,26 +661,55 @@ class DesktopLyricsWindow(QWidget):
         self._lock_button.move(position)
         if self._lock_button.isVisible():
             self._lock_button.raise_()
+        self._update_drag_handle_geometry()
+
+    def _update_drag_handle_geometry(self) -> None:
+        if not hasattr(self, "_drag_handle"):
+            return
+        frame = self.frameGeometry()
+        position = QPoint(
+            frame.left() + 8,
+            frame.top() + max(8, (frame.height() - self._drag_handle.height()) // 2),
+        )
+        self._drag_handle.move(position)
+        if self._drag_handle.isVisible():
+            self._drag_handle.raise_()
 
     def _apply_lock_preference(self, locked: bool) -> None:
         locked = bool(locked)
         changed = locked != self._locked
         self._locked = locked
+        self._apply_surface_interaction_style()
+        cursor = (
+            Qt.CursorShape.ArrowCursor
+            if locked
+            else Qt.CursorShape.SizeAllCursor
+        )
+        self.setCursor(cursor)
+        self._surface.setCursor(cursor)
         if changed and locked:
             self._finish_drag(persist_position=True)
             self._right_button_pressed = False
             self._suppress_unlock_until_exit = self._pointer_in_lyrics_or_button(QCursor.pos())
             self._lock_button.hide()
+            self._drag_handle.hide()
             self._set_input_passthrough(True)
         elif changed:
             self._suppress_unlock_until_exit = False
             self._set_input_passthrough(False)
             if self.frameGeometry().contains(QCursor.pos()) and not self._settings_popover_visible:
                 self._show_lock_affordance()
+            self._update_drag_handle_geometry()
+            self._drag_handle.show()
+            self._drag_handle.raise_()
         elif not locked:
             self._set_input_passthrough(False)
+            self._update_drag_handle_geometry()
+            self._drag_handle.show()
+            self._drag_handle.raise_()
         else:
             self._set_input_passthrough(True)
+            self._drag_handle.hide()
         self._update_lock_button()
 
     def _set_input_passthrough(self, enabled: bool) -> None:
@@ -742,7 +803,12 @@ class DesktopLyricsWindow(QWidget):
             self._finish_drag(persist_position=True)
             self._interaction_timer.stop()
             self._lock_button.hide()
+            self._drag_handle.hide()
         elif self.isVisible():
+            if not self._locked:
+                self._update_drag_handle_geometry()
+                self._drag_handle.show()
+                self._drag_handle.raise_()
             self._poll_cursor()
 
     def _emit_position(self) -> None:
@@ -759,6 +825,9 @@ class DesktopLyricsWindow(QWidget):
             return False
         self._right_button_pressed = False
         self._lock_button.hide()
+        self._drag_handle.hide()
+        self.setCursor(Qt.CursorShape.ClosedHandCursor)
+        self._surface.setCursor(Qt.CursorShape.ClosedHandCursor)
         self._cursor_timer.stop()
         self._interaction_timer.stop()
         self._pending_drag_position = None
@@ -806,6 +875,12 @@ class DesktopLyricsWindow(QWidget):
             self._schedule_deferred_geometry()
         if was_dragging and self.isVisible():
             self._cursor_timer.start()
+            if not self._locked:
+                self.setCursor(Qt.CursorShape.SizeAllCursor)
+                self._surface.setCursor(Qt.CursorShape.SizeAllCursor)
+                self._update_drag_handle_geometry()
+                self._drag_handle.show()
+                self._drag_handle.raise_()
             if not self._locked and not self._settings_popover_visible:
                 self._poll_cursor()
 
@@ -884,6 +959,21 @@ class DesktopLyricsWindow(QWidget):
         super().mouseReleaseEvent(event)
 
     def eventFilter(self, watched, event) -> bool:  # noqa: N802
+        drag_handle = getattr(self, "_drag_handle", None)
+        if watched is drag_handle and isinstance(event, QMouseEvent):
+            if event.type() == QEvent.Type.MouseButtonPress:
+                return self._begin_drag(event)
+            if event.type() == QEvent.Type.MouseMove and self._drag_offset is not None:
+                self.mouseMoveEvent(event)
+                return event.isAccepted()
+            if (
+                event.type() == QEvent.Type.MouseButtonRelease
+                and self._drag_offset is not None
+                and event.button() == Qt.MouseButton.LeftButton
+            ):
+                self._finish_drag(persist_position=True)
+                event.accept()
+                return True
         if watched is self._surface and isinstance(event, QContextMenuEvent):
             event.accept()
             return True
@@ -940,6 +1030,10 @@ class DesktopLyricsWindow(QWidget):
             if not self._runtime_position_initialized:
                 self._place_on_screen()
             self._cursor_timer.start()
+            if not self._locked:
+                self._update_drag_handle_geometry()
+                self._drag_handle.show()
+                self._drag_handle.raise_()
             self.visible_changed.emit(True)
 
     def hideEvent(self, event) -> None:  # noqa: N802

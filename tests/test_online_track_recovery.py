@@ -186,6 +186,64 @@ class OnlineTrackRecoveryTests(unittest.TestCase):
 
         self.assertEqual(search.keyword, "123木头人 黑Girl")
 
+    def test_manual_recovery_always_offers_candidate_choices(self) -> None:
+        class FakeSearchService(QObject):
+            resultsChanged = Signal(int, str, list, dict)
+
+            def __init__(self) -> None:
+                super().__init__()
+                self.generation = 0
+                self.keyword = ""
+
+            def schedule_search(self, keyword: str) -> int:
+                self.generation += 1
+                self.keyword = keyword
+                return self.generation
+
+            def shutdown(self) -> None:
+                return None
+
+        search = FakeSearchService()
+        service = OnlineTrackRecoveryService(search_service=search)
+        source = _missing_track(
+            id="remote:playable",
+            source_id="catalog",
+            source_name="开放目录",
+            source_type="online",
+            is_missing=False,
+            availability="playable",
+            stable_identity="remote:playable",
+        )
+        matched: list[OnlineTrack] = []
+        candidates: list[tuple[OnlineTrack, ...]] = []
+        service.match_found.connect(lambda _generation, track: matched.append(track))
+        service.candidates_found.connect(
+            lambda _generation, values: candidates.append(tuple(values))
+        )
+
+        service.request(source, manual=True)
+        search.resultsChanged.emit(
+            search.generation,
+            search.keyword,
+            [
+                {
+                    "id": "remote:replacement",
+                    "sourceId": "catalog",
+                    "sourceName": "开放目录",
+                    "title": source.title,
+                    "artist": source.artist,
+                    "album": source.album,
+                    "duration": 216,
+                    "capabilities": {"playback": True},
+                }
+            ],
+            {"final": True},
+        )
+
+        self.assertEqual(matched, [])
+        self.assertEqual(len(candidates), 1)
+        self.assertEqual(candidates[0][0].remote_id, "remote:replacement")
+
 
 if __name__ == "__main__":
     unittest.main()
