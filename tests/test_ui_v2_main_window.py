@@ -129,6 +129,34 @@ class UiV2MainWindowTests(unittest.TestCase):
 
         action.assert_not_called()
 
+    def test_library_replace_source_action_reaches_recovery_service(self) -> None:
+        page = self.window.library_page
+        model = page.track_table.model
+        row = next(
+            row
+            for row, track in enumerate(model.tracks())
+            if track.is_online and not track.needs_online_recovery
+        )
+        track = model.track_at(row)
+        menu = page.track_table.build_context_menu(
+            model.index(row, int(TrackColumn.MORE))
+        )
+        replace_source = next(
+            action for action in menu.actions() if action.text() == "更换播放来源"
+        )
+        recovery = Mock()
+        recovery.request.return_value = 1
+        original_discovery = self.window.online_discovery
+        self.window.online_discovery = SimpleNamespace(track_recovery=recovery)
+
+        try:
+            replace_source.trigger()
+        finally:
+            self.window.online_discovery = original_discovery
+
+        recovery.request.assert_called_once_with(track, manual=True)
+        menu.deleteLater()
+
     def test_favorite_syncs_between_player_and_library(self) -> None:
         index = self._available_index()
         table = self.window.library_page.track_table

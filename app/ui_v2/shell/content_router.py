@@ -173,6 +173,9 @@ class ContentRouter(QStackedWidget):
         library_page.track_table.mock_action_requested.connect(
             self.track_action_requested
         )
+        library_page.track_table.online_recovery_requested.connect(
+            self.online_recovery_requested
+        )
         if hasattr(library_page, "play_requested"):
             library_page.play_requested.connect(
                 lambda: self.queue_requested.emit(library_page.adapter.tracks(), False)
