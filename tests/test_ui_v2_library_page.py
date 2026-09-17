@@ -56,7 +56,12 @@ class UiV2LibraryPageTests(unittest.TestCase):
         self.app.processEvents()
         self.assertEqual(requested, [self.page.track_table.model.track_at(index.row()).id])
         menu = self.page.track_table.build_context_menu(index)
-        self.assertEqual([action.text() for action in menu.actions()], ["播放", "添加到我喜欢", "添加到歌单", "查看歌曲信息"])
+        track = self.page.track_table.model.track_at(index.row())
+        expected_actions = ["播放"]
+        if track.is_online:
+            expected_actions.append("更换播放来源")
+        expected_actions.extend(["添加到我喜欢", "添加到歌单", "查看歌曲信息"])
+        self.assertEqual([action.text() for action in menu.actions()], expected_actions)
         menu.deleteLater()
 
     def test_single_click_browses_after_delay_but_double_click_only_plays(self) -> None:
@@ -150,6 +155,27 @@ class UiV2LibraryPageTests(unittest.TestCase):
         recovery = next(action for action in menu.actions() if action.text() == "在线寻找并播放")
         self.assertTrue(recovery.isEnabled())
         recovery.trigger()
+        self.assertEqual(requested, [track])
+        menu.deleteLater()
+
+    def test_playable_online_track_exposes_replace_source_action(self) -> None:
+        model = self.page.track_table.model
+        row = next(
+            row
+            for row, track in enumerate(model.tracks())
+            if track.is_online and not track.needs_online_recovery
+        )
+        track = model.track_at(row)
+        requested = []
+        self.page.track_table.online_recovery_requested.connect(requested.append)
+        menu = self.page.track_table.build_context_menu(
+            model.index(row, int(TrackColumn.MORE))
+        )
+        replace_source = next(
+            action for action in menu.actions() if action.text() == "更换播放来源"
+        )
+        self.assertTrue(replace_source.isEnabled())
+        replace_source.trigger()
         self.assertEqual(requested, [track])
         menu.deleteLater()
 

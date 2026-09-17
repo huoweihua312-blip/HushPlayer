@@ -407,6 +407,14 @@ class TrackTable(QTableView):
             recover_action.setToolTip("保留当前歌单位置和收藏关系，只更换播放来源")
             recover_action.setStatusTip("只更换播放来源，不替换歌曲成员")
             recover_action.triggered.connect(lambda: self.online_recovery_requested.emit(track))
+        elif track.is_online:
+            replace_source = menu.addAction("更换播放来源")
+            replace_source.setEnabled(self._playback_enabled)
+            replace_source.setToolTip("重新选择这首歌使用的在线播放来源")
+            replace_source.setStatusTip("保留歌曲、收藏和歌单位置")
+            replace_source.triggered.connect(
+                lambda: self.online_recovery_requested.emit(track)
+            )
         if self.adapter.collection.can_mutate_favorites:
             favorite_action = menu.addAction("取消收藏" if track.is_favorite else "添加到我喜欢")
             favorite_action.setEnabled(self._can_change_favorite(track))

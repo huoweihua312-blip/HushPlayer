@@ -153,6 +153,39 @@ class OnlineTrackRecoveryTests(unittest.TestCase):
         self.assertTrue(source.needs_online_recovery)
         self.assertEqual(service.build_query(source), "123木头人 黑Girl")
 
+    def test_playable_online_track_can_start_manual_recovery_search(self) -> None:
+        class FakeSearchService(QObject):
+            resultsChanged = Signal(int, str, list, dict)
+
+            def __init__(self) -> None:
+                super().__init__()
+                self.generation = 0
+                self.keyword = ""
+
+            def schedule_search(self, keyword: str) -> int:
+                self.generation += 1
+                self.keyword = keyword
+                return self.generation
+
+            def shutdown(self) -> None:
+                return None
+
+        source = _missing_track(
+            id="remote:playable",
+            source_id="catalog",
+            source_name="开放目录",
+            source_type="online",
+            is_missing=False,
+            availability="playable",
+            stable_identity="remote:playable",
+        )
+        search = FakeSearchService()
+        service = OnlineTrackRecoveryService(search_service=search)
+
+        service.request(source)
+
+        self.assertEqual(search.keyword, "123木头人 黑Girl")
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -55,7 +55,9 @@ class OnlineTrackRecoveryService(QObject):
         self.cancel()
         self._generation += 1
         generation = self._generation
-        if not isinstance(track, Track) or not track.needs_online_recovery:
+        if not isinstance(track, Track) or (
+            not track.needs_online_recovery and not track.is_online
+        ):
             self.failed.emit(generation, "这首歌曲当前不需要在线恢复。")
             return generation
         query = self.build_query(track)
