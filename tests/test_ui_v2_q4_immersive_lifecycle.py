@@ -78,12 +78,12 @@ class UiV2Q4ImmersiveLifecycleTests(unittest.TestCase):
             shell.hide_queue_panel()
         self.assertFalse(shell.queue_panel.isVisible())
 
-    def test_quick_settings_open_cancel_100_cycles(self) -> None:
+    def test_quick_settings_open_close_100_cycles(self) -> None:
         shell = self._shell()
         for _ in range(100):
             shell.show_settings_panel()
             self.app.processEvents()
-            shell.settings_panel.cancel_button.click()
+            shell.settings_panel.close_button.click()
             self.app.processEvents()
         self.assertFalse(shell.settings_panel.isVisible())
 

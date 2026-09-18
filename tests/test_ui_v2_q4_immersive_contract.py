@@ -114,7 +114,7 @@ class UiV2Q4ImmersiveContractTests(unittest.TestCase):
             self.assertFalse(shell.queue_panel.isVisible())
             shell.hide_settings_panel()
 
-    def test_quick_settings_preview_cancel_and_save_use_existing_settings_path(self) -> None:
+    def test_quick_settings_autosave_and_close_use_existing_settings_path(self) -> None:
         shell = self._shell("immersive_lyrics")
         shell.show_settings_panel()
         self.app.processEvents()
@@ -122,28 +122,29 @@ class UiV2Q4ImmersiveContractTests(unittest.TestCase):
         self.assertIsInstance(panel, LyricsQuickSettingsFloatingPanel)
         self.assertIsNotNone(panel.session)
         original = panel.global_lyric_scale_slider.value()
-        panel.global_lyric_scale_slider.setValue(original + 1)
+        panel.global_lyric_scale_slider.setValue(original + 5)
         self.app.processEvents()
-        self.assertTrue(panel.is_dirty)
-        self.assertIn("未保存", panel.status_label.text())
+        self.assertFalse(panel.is_dirty)
+        self.assertEqual(panel.status_label.text(), "已保存")
         self.assertEqual(
             self.window.immersive_lyrics_options.global_font_scale,
-            original + 1,
+            original + 5,
         )
-        panel.cancel_button.click()
+        panel.close_button.click()
         self.app.processEvents()
         self.assertFalse(panel.isVisible())
-        self.assertFalse(self.settings_path.exists())
+        document = json.loads(self.settings_path.read_text(encoding="utf-8"))
+        self.assertEqual(document["immersive_lyrics_font_scale"], original + 5)
         shell.show_settings_panel()
         self.app.processEvents()
-        panel.global_lyric_scale_slider.setValue(original + 2)
-        panel.save_button.click()
+        self.assertEqual(panel.global_lyric_scale_slider.value(), original + 5)
+        panel.global_lyric_scale_slider.setValue(original + 10)
         self.app.processEvents()
         self.assertTrue(panel.isVisible())
         self.assertFalse(panel.is_dirty)
         self.assertEqual(panel.status_label.text(), "已保存")
         document = json.loads(self.settings_path.read_text(encoding="utf-8"))
-        self.assertEqual(document["immersive_lyrics_font_scale"], original + 2)
+        self.assertEqual(document["immersive_lyrics_font_scale"], original + 10)
 
     def test_queue_projection_excludes_current_duplicate_and_plays_next_item(self) -> None:
         self._play_track()
@@ -186,7 +187,7 @@ class UiV2Q4ImmersiveContractTests(unittest.TestCase):
         self.assertFalse(shell.queue_panel.isVisible())
         shell.show_settings_panel()
         self.app.processEvents()
-        QTest.mouseClick(shell.settings_panel.cancel_button, Qt.MouseButton.LeftButton)
+        QTest.mouseClick(shell.settings_panel.close_button, Qt.MouseButton.LeftButton)
         self.app.processEvents()
         self.assertFalse(shell.settings_panel.isVisible())
 

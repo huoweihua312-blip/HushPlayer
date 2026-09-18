@@ -97,21 +97,17 @@ class LyricsQuickSettingsFloatingPanel(ImmersiveSettingsPanel):
         self.exit_immersive_button.setVisible(False)
         self.status_label = QLabel("未修改", self.footer_widget)
         self.status_label.setObjectName("immersiveQuickSettingsStatus")
-        self.cancel_button = QToolButton(self.footer_widget)
-        self.cancel_button.setText("关闭")
-        self.cancel_button.setAccessibleName("关闭沉浸设置")
-        self.save_button = QToolButton(self.footer_widget)
-        self.save_button.setText("保存")
-        self.cancel_button.clicked.connect(self.cancel_requested)
-        self.save_button.clicked.connect(self.save_requested)
+        self.retry_button = QToolButton(self.footer_widget)
+        self.retry_button.setText("重试")
+        self.retry_button.setAccessibleName("重试保存沉浸设置")
+        self.retry_button.clicked.connect(self.save_requested)
         # Preview status occupies its own line; actions stay reachable at 1080.
         self.status_label.setContentsMargins(14, 6, 14, 0)
         self.status_label.setWordWrap(True)
         self.layout().insertWidget(self.layout().count() - 1, self.status_label)
         footer.addStretch(1)
-        footer.addWidget(self.cancel_button)
-        footer.addWidget(self.save_button)
-        self.save_button.setEnabled(False)
+        footer.addWidget(self.retry_button)
+        self.retry_button.hide()
 
     @property
     def session(self) -> SettingsEditSession | None:
@@ -276,7 +272,8 @@ class LyricsQuickSettingsFloatingPanel(ImmersiveSettingsPanel):
             "failed": detail or "保存失败",
         }.get(state, state)
         self.status_label.setText(text)
-        self.save_button.setEnabled(state == "dirty" and self.is_dirty)
+        self.retry_button.setVisible(state == "failed")
+        self.retry_button.setEnabled(state == "failed" and self.is_dirty)
         self.status_label.setProperty("status", state)
         self.status_label.style().unpolish(self.status_label)
         self.status_label.style().polish(self.status_label)
@@ -294,6 +291,5 @@ class LyricsQuickSettingsFloatingPanel(ImmersiveSettingsPanel):
             self.status_label.setStyleSheet(
                 f"font-size: {theme.fonts.caption}px; color: {theme.colors.text_secondary};"
             )
-            self.save_button.setStyleSheet(button_qss(theme, role="primary"))
-            for button in (self.cancel_button, self.reset_button):
-                button.setStyleSheet(button_qss(theme, role="ghost"))
+            self.retry_button.setStyleSheet(button_qss(theme, role="primary"))
+            self.reset_button.setStyleSheet(button_qss(theme, role="ghost"))

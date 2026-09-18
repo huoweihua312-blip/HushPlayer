@@ -3,10 +3,12 @@ import os
 import tempfile
 import unittest
 from dataclasses import replace
+from unittest.mock import patch
 os.environ.setdefault('QT_QPA_PLATFORM', 'offscreen')
 from PySide6.QtCore import QPoint, Qt
 from PySide6.QtTest import QTest
-from PySide6.QtWidgets import QApplication
+from PySide6.QtWidgets import QApplication, QToolButton
+from app.ui_v2.adapters.legacy_settings_bridge import SettingsBridgeError
 from app.ui_v2.shell.main_window import MainWindow
 from app.ui_v2.theme.tokens import get_theme
 
@@ -58,7 +60,7 @@ class B2ImmersiveTests(unittest.TestCase):
             self.app.processEvents()
             self.assertTrue(p.rect().contains(panel.geometry()))
             self.assertLess(panel.geometry().bottom(), p.controls.geometry().top())
-            for button in (panel.reset_button, panel.cancel_button, panel.save_button):
+            for button in (panel.reset_button,):
                 self.assertTrue(panel.footer_widget.rect().contains(button.geometry()))
             p.hide_settings_panel()
 
@@ -81,7 +83,49 @@ class B2ImmersiveTests(unittest.TestCase):
         self.assertEqual(panel.is_dirty, dirty)
         self.assertLess(panel.status_label.geometry().bottom(), panel.footer_widget.geometry().bottom())
 
-    def test_reset_auto_saves_and_cancel_only_closes_settings(self):
+    def test_settings_footer_has_no_save_or_close_buttons(self):
+        self.page.show_settings_panel()
+        panel = self.page.settings_panel
+        for mode in ('dark', 'light'):
+            self.page.set_theme_mode(mode)
+            self.app.processEvents()
+            buttons = panel.footer_widget.findChildren(QToolButton)
+            self.assertFalse(any(button.text() in ('保存', '关闭') for button in buttons))
+            self.assertEqual([button.text() for button in buttons if button.isVisible()], ['恢复默认'])
+            self.assertTrue(panel.close_button.isVisible())
+        panel.close_button.click()
+        self.assertFalse(panel.isVisible())
+
+    def test_settings_failed_autosave_can_retry_without_losing_draft(self):
+        self.page.show_settings_panel()
+        panel = self.page.settings_panel
+        original = panel.global_lyric_scale_slider.value()
+        with patch.object(self.page.settings_bridge, 'save_snapshot',
+                          side_effect=SettingsBridgeError('Cannot save settings')):
+            panel.global_lyric_scale_slider.setValue(original + 10)
+            self.app.processEvents()
+            self.assertTrue(panel.is_dirty)
+            self.assertEqual(panel.status_label.property('status'), 'failed')
+            retries = [button for button in panel.footer_widget.findChildren(QToolButton)
+                       if button.text() == '重试' and button.isVisible()]
+            self.assertEqual(len(retries), 1)
+            self.assertTrue(retries[0].isEnabled())
+            panel.close_button.click()
+            self.assertTrue(panel.isVisible())
+            self.page.hide_settings_panel()
+            self.assertTrue(panel.isVisible())
+            self.assertEqual(panel.global_lyric_scale_slider.value(), original + 10)
+        retries[0].click()
+        self.app.processEvents()
+        self.assertFalse(panel.is_dirty)
+        self.assertEqual(panel.status_label.text(), '已保存')
+        self.assertFalse(retries[0].isVisible())
+        saved = self.page.settings_bridge.read_snapshot().to_dict()
+        self.assertEqual(saved['immersive_lyrics_font_scale'], original + 10)
+        panel.close_button.click()
+        self.assertFalse(panel.isVisible())
+
+    def test_reset_auto_saves_and_header_close_only_closes_settings(self):
         from pathlib import Path
         p = self.page
         p.show_settings_panel()
@@ -94,7 +138,7 @@ class B2ImmersiveTests(unittest.TestCase):
         self.app.processEvents()
         self.assertEqual(panel.global_lyric_scale_slider.value(), 100)
         self.assertNotEqual(settings.read_bytes() if settings.exists() else None, before)
-        panel.cancel_button.click()
+        panel.close_button.click()
         self.assertFalse(panel.isVisible())
         self.assertNotEqual(settings.read_bytes() if settings.exists() else None, before)
 
