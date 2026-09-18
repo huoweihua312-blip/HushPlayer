@@ -979,6 +979,9 @@ class ImmersiveLyricsPage(QWidget):
         # A centered reading stage, rather than a full-height lyric column.
         # The canvas owns all anchoring/scrolling inside its allocated viewport.
         reading_height = min(content_height, max(260, round(height * 0.48)))
+        if not compact and height > 900:
+            # Use more of a tall window while retaining breathing room at both edges.
+            reading_height = min(content_height - 64, reading_height + round((height - 900) * 1.5))
         self.canvas.setFixedHeight(reading_height if not compact else max(160, content_height - 170))
         self._content_layout.setDirection(direction)
         self._content_layout.setSpacing(spacing)

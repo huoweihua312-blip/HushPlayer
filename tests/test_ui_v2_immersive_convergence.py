@@ -53,7 +53,7 @@ class ImmersiveConvergenceTests(unittest.TestCase):
         for width, height in ((1080, 900), (1450, 900), (1920, 1080)):
             self.window.resize(width, height)
             self.app.processEvents()
-            self.assertLess(p.canvas.height(), p.content.height() * 0.8)
+            self.assertLessEqual(p.canvas.height(), p.content.height() - 64)
             self.assertGreater(p.canvas.y(), 30)
             self.assertGreater(p.canvas.width(), 480)
             self.assertGreaterEqual(p.controls.y(), p.content_stack.geometry().bottom())
@@ -79,6 +79,52 @@ class ImmersiveConvergenceTests(unittest.TestCase):
         self.assertEqual(slider._track_height, 2.0)
         self.assertEqual(asdict(p.options), options)
         self.assertEqual(self.window.playback_adapter.queue_tracks, queue)
+
+    def test_tall_window_expands_reading_area_without_covering_controls(self):
+        p = self.page
+        for mode in ("dark", "light"):
+            self.window.set_theme(mode)
+            for width, height in ((1450, 1080), (1920, 1080), (2560, 1440)):
+                with self.subTest(theme=mode, size=(width, height)):
+                    self.window.resize(width, height)
+                    self.app.processEvents()
+                    self.assertGreaterEqual(p.canvas.height(), p.content.height() * 0.9)
+                    self.assertGreaterEqual(p.canvas.y(), 32)
+                    self.assertLessEqual(p.canvas.geometry().bottom(), p.content.height() - 32)
+                    bottom = p.canvas.mapTo(p, QPoint(0, p.canvas.height())).y()
+                    self.assertLess(bottom, p.controls.y())
+                    if height == 1440:
+                        p.canvas.repaint()
+                        complete_rows = sum(p.canvas.rect().contains(rect)
+                                            for rect in p.canvas._line_rects.values())
+                        self.assertEqual(complete_rows, 9)
+
+    def test_resize_shows_more_rows_and_restores_small_window(self):
+        p = self.page
+        playback = self.window.playback_adapter
+        state = (playback.state.current_track.id, playback.state.position_ms,
+                 playback.state.is_playing, tuple(playback.queue_tracks), asdict(p.options))
+        self.window.resize(1200, 800)
+        self.app.processEvents()
+        p.canvas.repaint()
+        small_height = p.canvas.height()
+        self.assertEqual(small_height, 384)
+        small_rows = sum(p.canvas.rect().contains(rect)
+                         for rect in p.canvas._line_rects.values())
+        small_geometry = (p.canvas.y(), p.controls.geometry())
+        self.window.resize(1920, 1080)
+        self.app.processEvents()
+        p.canvas.repaint()
+        large_rows = sum(p.canvas.rect().contains(rect)
+                         for rect in p.canvas._line_rects.values())
+        self.assertGreater(large_rows, small_rows)
+        self.window.resize(1200, 800)
+        self.app.processEvents()
+        self.assertEqual(p.canvas.height(), small_height)
+        self.assertEqual((p.canvas.y(), p.controls.geometry()), small_geometry)
+        self.assertEqual((playback.state.current_track.id, playback.state.position_ms,
+                          playback.state.is_playing, tuple(playback.queue_tracks),
+                          asdict(p.options)), state)
 
     def test_paint_profile_preserves_manual_browsing_and_seek_state(self):
         c = self.page.canvas
