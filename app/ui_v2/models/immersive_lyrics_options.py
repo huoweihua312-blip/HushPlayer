@@ -11,6 +11,7 @@ class ImmersiveLyricsOptions:
 
     theme: str = "dark"
     background_mode: str = "artwork"
+    transparent_lyrics_color: str = "theme"
     background_opacity: int = 55
     background_blur: int = 40
     background_darkness: int = 68

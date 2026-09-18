@@ -79,6 +79,7 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "close_behavior": "ask",
     "immersive_background_mode": "cover",
     "immersive_background_visual_mode": "artwork",
+    "immersive_transparent_lyrics_color": "theme",
     "immersive_background_custom_path": "",
     "immersive_background_blur": 40,
     "immersive_background_darkness": 68,
@@ -171,6 +172,8 @@ def load_settings_document(path: Path) -> dict[str, Any]:
     result["floating_lyrics_font_family"] = (
         font_family if font_family in OPEN_FONT_FAMILIES else DEFAULT_SETTINGS["floating_lyrics_font_family"]
     )
+    if result.get("immersive_transparent_lyrics_color") not in ("theme", "light", "dark"):
+        result["immersive_transparent_lyrics_color"] = "theme"
     if "floating_lyrics_passthrough" in result and not isinstance(
         result["floating_lyrics_passthrough"], bool
     ):
@@ -260,6 +263,8 @@ class LegacySettingsBridge(QObject):
         visual_mode = document.get("immersive_background_visual_mode")
         if visual_mode is not None and str(visual_mode).strip().casefold() not in IMMERSIVE_BACKGROUND_VISUAL_MODES:
             errors["immersive_background_visual_mode"] = "沉浸背景显示模式无效。"
+        if document.get("immersive_transparent_lyrics_color", "theme") not in ("theme", "light", "dark"):
+            errors["immersive_transparent_lyrics_color"] = "透明歌词配色无效。"
         close_behavior = str(document.get("close_behavior", "ask")).strip().casefold()
         if close_behavior not in {"ask", "exit", "tray"}:
             errors["close_behavior"] = "关闭窗口行为无效。"

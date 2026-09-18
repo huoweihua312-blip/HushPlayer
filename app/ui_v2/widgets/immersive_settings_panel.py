@@ -51,6 +51,7 @@ class ImmersiveSettingsPanel(QFrame):
         form.setVerticalSpacing(10)
         self.theme_combo = self._combo((("跟随窗口", ""), ("深色", "dark"), ("浅色", "light")))
         self.background_combo = self._combo((("封面背景", "artwork"), ("渐变背景", "gradient"), ("纯色背景", "solid"), ("透明背景", "transparent"), ("自定义图片", "custom")))
+        self.transparent_lyrics_color_combo = self._combo((("跟随主题", "theme"), ("浅色文字", "light"), ("深色文字", "dark")))
         self.background_opacity_slider = self._slider(0, 100)
         self.overlay_strength_slider = self._slider(15, 85)
         self.control_surface_opacity_slider = self._slider(20, 80)
@@ -75,6 +76,7 @@ class ImmersiveSettingsPanel(QFrame):
             form.addRow(label, control)
         self._add_section(form, "歌词")
         for label, control in (
+            ("透明歌词配色", self.transparent_lyrics_color_combo),
             ("整体歌词大小", self._slider_row(self.global_lyric_scale_slider, "%")),
             ("非当前歌词", self._slider_row(self.inactive_opacity_slider, "%")),
             ("字重", self.weight_combo),
@@ -120,7 +122,7 @@ class ImmersiveSettingsPanel(QFrame):
         self.close_button.clicked.connect(self.request_close)
         self.exit_immersive_button.clicked.connect(self.exit_requested)
         self.reset_button.clicked.connect(self.reset_requested)
-        for combo in (self.theme_combo, self.background_combo, self.weight_combo, self.text_protection_combo):
+        for combo in (self.theme_combo, self.background_combo, self.transparent_lyrics_color_combo, self.weight_combo, self.text_protection_combo):
             combo.currentIndexChanged.connect(self.changed)
         for slider in (
             self.background_opacity_slider,
@@ -242,7 +244,7 @@ class ImmersiveSettingsPanel(QFrame):
                 disabled_color=c.disabled_text,
                 focus_color=c.focus_ring,
             )
-        for combo in (self.theme_combo, self.background_combo, self.weight_combo, self.text_protection_combo):
+        for combo in (self.theme_combo, self.background_combo, self.transparent_lyrics_color_combo, self.weight_combo, self.text_protection_combo):
             SettingsControlFactory.style_combo(combo, theme)
             view = combo.view()
             popup_palette = QPalette(palette)
@@ -272,10 +274,10 @@ class ImmersiveSettingsPanel(QFrame):
         self.closed.emit()
 
     def any_popup_open(self) -> bool:
-        return any(combo.view().isVisible() for combo in (self.theme_combo, self.background_combo, self.weight_combo, self.text_protection_combo))
+        return any(combo.view().isVisible() for combo in (self.theme_combo, self.background_combo, self.transparent_lyrics_color_combo, self.weight_combo, self.text_protection_combo))
 
     def close_popup(self) -> bool:
-        for combo in (self.theme_combo, self.background_combo, self.weight_combo, self.text_protection_combo):
+        for combo in (self.theme_combo, self.background_combo, self.transparent_lyrics_color_combo, self.weight_combo, self.text_protection_combo):
             if combo.view().isVisible():
                 combo.hidePopup()
                 return True

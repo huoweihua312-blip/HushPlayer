@@ -20,13 +20,15 @@ _ARTWORK_CACHE = PixmapCache(64 * 1024 * 1024, 512)
 _ARTWORK_SOURCE_CACHE = PixmapCache(32 * 1024 * 1024, 128)
 
 
-def artwork_pixmap_for_track(track: Track | None, width: int, height: int) -> QPixmap:
-    """Return real track artwork when available, otherwise the one formal fallback."""
+def artwork_pixmap_for_track(
+    track: Track | None, width: int, height: int, *, fallback: bool = True
+) -> QPixmap:
+    """Return cached artwork, optionally leaving fallback rendering to the caller."""
 
     width = max(1, int(width))
     height = max(1, int(height))
     if track is None:
-        return cover_pixmap("hushplayer", width, height)
+        return cover_pixmap("hushplayer", width, height) if fallback else QPixmap()
 
     data = bytes(track.artwork_data or b"")
     source_key = ""
@@ -59,7 +61,7 @@ def artwork_pixmap_for_track(track: Track | None, width: int, height: int) -> QP
         except OSError:
             pass
     if source.isNull():
-        return cover_pixmap(track.stable_id, width, height)
+        return cover_pixmap(track.stable_id, width, height) if fallback else QPixmap()
 
     cache_key = (source_key, width, height)
     scaled = source.scaled(

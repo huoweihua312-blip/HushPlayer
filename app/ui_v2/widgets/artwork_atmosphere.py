@@ -134,6 +134,8 @@ class ArtworkAtmosphere(QWidget):
         self._transparency = 38
         self._custom_path = ""
         self._custom_image = QImage()
+        self._artwork_image = QImage()
+        self._soft_artwork_image = QImage()
         self.setObjectName("immersiveArtworkAtmosphere")
         self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
 
@@ -151,8 +153,25 @@ class ArtworkAtmosphere(QWidget):
     def set_track(self, track: Track | None) -> None:
         key = track.stable_identity if track is not None else "hushplayer"
         self._palette = ArtworkPalette(key)
+        self._artwork_image = (
+            artwork_pixmap_for_track(track, 640, 640, fallback=False).toImage()
+            if track is not None and (track.artwork_data or track.artwork_path)
+            else QImage()
+        )
+        self._refresh_soft_artwork()
         self._generation += 1
         self.update()
+
+    def _refresh_soft_artwork(self) -> None:
+        # Downsample once per cover/blur change, not on every lyric repaint.
+        if self._artwork_image.isNull() or not self._blur_radius:
+            self._soft_artwork_image = self._artwork_image
+            return
+        size = max(16, round(256 / (1 + self._blur_radius / 6)))
+        self._soft_artwork_image = self._artwork_image.scaled(
+            size, size, Qt.AspectRatioMode.KeepAspectRatio,
+            Qt.TransformationMode.SmoothTransformation,
+        )
 
     def set_theme(self, theme: Theme) -> None:
         self._theme = theme
@@ -199,6 +218,7 @@ class ArtworkAtmosphere(QWidget):
 
     def set_blur(self, value: int) -> None:
         self._blur_radius = max(0, min(100, int(value)))
+        self._refresh_soft_artwork()
         self.update()
 
     def set_transparency(self, value: int) -> None:
@@ -209,8 +229,12 @@ class ArtworkAtmosphere(QWidget):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         colors = self._palette.colors
+        if self._mode == "artwork" and not self._soft_artwork_image.isNull():
+            self._paint_image(painter, self._soft_artwork_image, artwork=True)
+            painter.end()
+            return
         if self._mode == "custom" and not self._custom_image.isNull():
-            self._paint_custom_image(painter)
+            self._paint_image(painter, self._custom_image)
         elif self._mode == "transparent":
             painter.fillRect(
                 self.rect(),
@@ -256,11 +280,11 @@ class ArtworkAtmosphere(QWidget):
             veil.setColorAt(1, _color("#081114" if dark else base, min(225, alpha + 65)))
             painter.fillRect(self.rect(), veil)
 
-    def _paint_custom_image(self, painter: QPainter) -> None:
+    def _paint_image(self, painter: QPainter, image: QImage, *, artwork: bool = False) -> None:
         rect = self.rect()
-        if rect.isEmpty() or self._custom_image.isNull():
+        if rect.isEmpty() or image.isNull():
             return
-        scaled = self._custom_image.scaled(
+        scaled = image.scaled(
             rect.size(),
             Qt.AspectRatioMode.KeepAspectRatioByExpanding,
             Qt.TransformationMode.SmoothTransformation,
@@ -279,6 +303,10 @@ class ArtworkAtmosphere(QWidget):
         darkness = max(0.0, min(1.0, self._overlay_strength / 100.0))
         transparency = max(0.15, 1.0 - self._transparency / 125.0)
         overlay_alpha = round(165 * darkness * transparency)
+        if artwork:
+            # Real covers can be fully black or white; retain a theme-colored
+            # base veil before applying the user's additional protection.
+            overlay_alpha = round(255 * (0.45 + 0.55 * darkness * transparency))
         if overlay_alpha:
             surface = "#081018" if self._theme.mode == "dark" else "#fffaf3"
             painter.fillRect(rect, _color(surface, overlay_alpha))

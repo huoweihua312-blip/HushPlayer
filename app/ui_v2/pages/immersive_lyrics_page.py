@@ -450,6 +450,7 @@ class ImmersiveLyricsPage(QWidget):
         self.addAction(self._fullscreen_action)
 
     def _connect_adapters(self) -> None:
+        self.playback_adapter.track_changed.connect(self.background.set_track)
         self.lyrics_adapter.document_changed.connect(self._on_document_changed)
         self.lyrics_adapter.state_changed.connect(self._on_state_changed)
         self.lyrics_adapter.active_line_changed.connect(self._on_active_line_changed)
@@ -467,7 +468,7 @@ class ImmersiveLyricsPage(QWidget):
         self.background.set_theme(theme)
         self.readability_overlay.set_theme(theme)
         self.identity.set_theme(theme)
-        self.canvas.set_theme(theme)
+        self._apply_lyrics_theme()
         self.lyrics_state_view.set_theme(theme)
         self.controls.set_theme(theme)
         self.now_playing_page.set_theme(theme)
@@ -478,6 +479,18 @@ class ImmersiveLyricsPage(QWidget):
 
     def set_theme_mode(self, mode: str) -> None:
         self.set_theme(get_theme("light" if mode == "light" else "dark"))
+
+    def _apply_lyrics_theme(self) -> None:
+        theme = self._theme
+        color = self.options.transparent_lyrics_color
+        if self.options.background_mode == "transparent" and color in ("light", "dark"):
+            theme = get_theme("dark" if color == "light" else "light", profile="b2")
+        self.canvas.set_theme(theme)
+
+    def set_transparent_lyrics_color(self, color: str) -> None:
+        self.options.transparent_lyrics_color = color if color in ("theme", "light", "dark") else "theme"
+        self._apply_lyrics_theme()
+        self._sync_options()
 
     def set_responsive_reference_width(self, width: int) -> None:
         self._apply_responsive_layout(width)
@@ -500,6 +513,8 @@ class ImmersiveLyricsPage(QWidget):
         normalized = mode if mode in {"artwork", "gradient", "solid", "transparent", "custom"} else "artwork"
         self.options.background_mode = normalized
         self.background.set_mode(normalized)
+        self._apply_lyrics_theme()
+        self.settings_panel.transparent_lyrics_color_combo.setEnabled(normalized == "transparent")
         self.transparency_mode_changed.emit(normalized == "transparent")
         self._sync_options()
 
@@ -611,6 +626,7 @@ class ImmersiveLyricsPage(QWidget):
         try:
             self.set_theme_mode(source.theme)
             self.set_background_mode(source.background_mode)
+            self.set_transparent_lyrics_color(source.transparent_lyrics_color)
             self.set_background_opacity(source.background_opacity)
             self.set_overlay_strength(source.overlay_strength)
             self.set_background_blur(source.background_blur)
@@ -865,6 +881,7 @@ class ImmersiveLyricsPage(QWidget):
         if mode:
             self.set_theme_mode(str(mode))
         self.set_background_mode(str(panel.background_combo.currentData()))
+        self.set_transparent_lyrics_color(str(panel.transparent_lyrics_color_combo.currentData()))
         self.set_background_opacity(panel.background_opacity_slider.value())
         self.set_overlay_strength(panel.overlay_strength_slider.value())
         self.set_control_surface_opacity(panel.control_surface_opacity_slider.value())
@@ -890,6 +907,7 @@ class ImmersiveLyricsPage(QWidget):
         controls = (
             (panel.theme_combo, self.options.theme),
             (panel.background_combo, self.options.background_mode),
+            (panel.transparent_lyrics_color_combo, self.options.transparent_lyrics_color),
             (panel.weight_combo, self.options.font_weight),
             (panel.text_protection_combo, self.options.text_protection_mode),
         )

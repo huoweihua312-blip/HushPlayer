@@ -157,6 +157,10 @@ class LyricsQuickSettingsFloatingPanel(ImmersiveSettingsPanel):
             mode_index = self.background_combo.findData(mode_value)
             if mode_index >= 0:
                 self.background_combo.setCurrentIndex(mode_index)
+            color_index = self.transparent_lyrics_color_combo.findData(
+                values.get("immersive_transparent_lyrics_color", "theme")
+            )
+            self.transparent_lyrics_color_combo.setCurrentIndex(max(0, color_index))
             self.auto_hide_check.setChecked(bool(values.get("immersive_auto_hide_ui", True)))
             for key, control, default in (
                 ("immersive_background_blur", self.background_blur_slider, 40),
@@ -183,6 +187,7 @@ class LyricsQuickSettingsFloatingPanel(ImmersiveSettingsPanel):
             "immersive_auto_hide_ui": self.auto_hide_check.isChecked(),
             "immersive_background_mode": "custom" if has_custom_background else formal_mode,
             "immersive_background_visual_mode": mode if has_custom_background or mode != "custom" else "artwork",
+            "immersive_transparent_lyrics_color": self.transparent_lyrics_color_combo.currentData() or "theme",
             "immersive_background_custom_path": path,
             "immersive_background_blur": self.background_blur_slider.value(),
             "immersive_background_darkness": self.background_darkness_slider.value(),

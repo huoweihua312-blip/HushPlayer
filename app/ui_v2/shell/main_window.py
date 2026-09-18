@@ -1690,6 +1690,10 @@ class MainWindow(QMainWindow):
             values.get("immersive_background_mode", "cover"),
         )
         self.immersive_lyrics_options.background_mode = background
+        color = values.get("immersive_transparent_lyrics_color", "theme")
+        self.immersive_lyrics_options.transparent_lyrics_color = (
+            color if color in ("theme", "light", "dark") else "theme"
+        )
         self.immersive_lyrics_options.controls_auto_hide = bool(
             values.get("immersive_auto_hide_ui", True)
         )
