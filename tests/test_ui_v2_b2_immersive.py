@@ -1,12 +1,14 @@
 """B2 immersive presentation contracts without replacing playback state."""
 import os
+import json
 import tempfile
 import unittest
 from dataclasses import replace
+from pathlib import Path
 from unittest.mock import patch
 os.environ.setdefault('QT_QPA_PLATFORM', 'offscreen')
 from PySide6.QtCore import QPoint, Qt
-from PySide6.QtTest import QTest
+from PySide6.QtTest import QTest, QSignalSpy
 from PySide6.QtWidgets import QApplication, QToolButton
 from app.ui_v2.adapters.legacy_settings_bridge import SettingsBridgeError
 from app.ui_v2.shell.main_window import MainWindow
@@ -96,6 +98,69 @@ class B2ImmersiveTests(unittest.TestCase):
         panel.close_button.click()
         self.assertFalse(panel.isVisible())
 
+    def test_local_edits_save_immediately_without_global_or_background_refresh(self):
+        self.page.show_settings_panel()
+        panel = self.page.settings_panel
+        state = (self.playback.state.current_track.id, self.playback.state.position_ms,
+                 self.playback.state.is_playing, tuple(self.playback.queue_tracks))
+        with patch.object(self.window, 'set_theme', wraps=self.window.set_theme) as global_theme, \
+             patch.object(self.page, 'set_theme', wraps=self.page.set_theme) as local_theme, \
+             patch.object(self.page.background, 'set_mode',
+                          wraps=self.page.background.set_mode) as background_mode:
+            for value in range(41, 46):
+                panel.background_blur_slider.setValue(value)
+                saved = json.loads(Path(self.tmp.name, 'settings.json').read_text(encoding='utf-8'))
+                self.assertEqual(saved['immersive_background_blur'], value)
+                self.assertEqual(self.page.background._blur_radius, value)
+                self.assertFalse(panel.is_dirty)
+            self.assertEqual(global_theme.call_count, 0)
+            self.assertEqual(local_theme.call_count, 0)
+            self.assertEqual(background_mode.call_count, 0)
+        self.assertEqual(state, (self.playback.state.current_track.id, self.playback.state.position_ms,
+                                 self.playback.state.is_playing, tuple(self.playback.queue_tracks)))
+
+    def test_real_theme_and_transparency_changes_still_apply(self):
+        self.page.show_settings_panel()
+        panel = self.page.settings_panel
+        panel.theme_combo.setCurrentIndex(panel.theme_combo.findData('light'))
+        self.assertEqual(self.window._theme.mode, 'light')
+        self.assertEqual(self.page._theme.mode, 'light')
+        self.assertEqual(self.page.settings_bridge.read_snapshot().get('appearance_mode'), 'light')
+        panel.background_combo.setCurrentIndex(panel.background_combo.findData('transparent'))
+        self.assertTrue(self.window._immersive_transparency_enabled)
+        panel.background_combo.setCurrentIndex(panel.background_combo.findData('artwork'))
+        self.assertFalse(self.window._immersive_transparency_enabled)
+        self.assertEqual(self.page.background_mode, 'artwork')
+
+    def test_wheel_over_immersive_combo_scrolls_without_saving(self):
+        self.page.show_settings_panel()
+        panel = self.page.settings_panel
+        combo = panel.background_combo
+        before = combo.currentData()
+        saved = QSignalSpy(self.page.settings_bridge.save_succeeded)
+        position = combo.mapTo(self.window, combo.rect().center())
+        QTest.wheelEvent(self.window.windowHandle(), position, QPoint(0, -120))
+        self.app.processEvents()
+        self.assertEqual(combo.currentData(), before)
+        self.assertEqual(saved.count(), 0)
+        self.assertGreater(panel.scroll_area.verticalScrollBar().value(), 0)
+
+    def test_failed_local_save_previews_without_global_theme_refresh(self):
+        self.page.show_settings_panel()
+        panel = self.page.settings_panel
+        with patch.object(self.page.settings_bridge, 'save_snapshot',
+                          side_effect=SettingsBridgeError('Cannot save settings')), \
+             patch.object(self.window, 'set_theme', wraps=self.window.set_theme) as global_theme, \
+             patch.object(self.page, 'set_theme', wraps=self.page.set_theme) as local_theme:
+            panel.background_blur_slider.setValue(25)
+            self.assertTrue(panel.is_dirty)
+            self.assertEqual(self.page.background._blur_radius, 25)
+            self.assertEqual(global_theme.call_count, 0)
+            self.assertEqual(local_theme.call_count, 0)
+        panel.retry_button.click()
+        self.assertFalse(panel.is_dirty)
+        self.assertEqual(self.page.settings_bridge.read_snapshot().get('immersive_background_blur'), 25)
+
     def test_settings_failed_autosave_can_retry_without_losing_draft(self):
         self.page.show_settings_panel()
         panel = self.page.settings_panel
@@ -137,6 +202,8 @@ class B2ImmersiveTests(unittest.TestCase):
         panel.reset_button.click()
         self.app.processEvents()
         self.assertEqual(panel.global_lyric_scale_slider.value(), 100)
+        self.assertIs(p.options, self.window.immersive_lyrics_options)
+        self.assertEqual(self.window.immersive_lyrics_options.global_font_scale, 100)
         self.assertNotEqual(settings.read_bytes() if settings.exists() else None, before)
         panel.close_button.click()
         self.assertFalse(panel.isVisible())

@@ -194,6 +194,13 @@ class ThemedComboBox(QComboBox):
         super().hidePopup()
         self._set_popup_open(False)
 
+    def wheelEvent(self, event) -> None:  # noqa: N802
+        if self._variant == "settings" and not self.view().isVisible():
+            # Let the surrounding settings scroll area handle closed-combo wheels.
+            event.ignore()
+            return
+        super().wheelEvent(event)
+
     def keyPressEvent(self, event) -> None:  # noqa: N802
         if (
             self._variant == "toolbar"

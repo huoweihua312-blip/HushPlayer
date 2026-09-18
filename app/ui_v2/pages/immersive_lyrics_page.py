@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, fields
 from collections.abc import Callable
 
 from PySide6.QtCore import QEvent, QPoint, QRect, QSize, Qt, QTimer, Signal
@@ -721,7 +721,15 @@ class ImmersiveLyricsPage(QWidget):
             panel.mark_saved(session.working_snapshot)
             return
         try:
-            saved = self.settings_bridge.save_snapshot(session.working_snapshot)
+            # Local options use the panel's changed signal for preview.
+            # Only an appearance change needs the full-window apply callback.
+            appearance_changed = (
+                session.get("appearance_mode", "dark")
+                != session.original_snapshot.get("appearance_mode", "dark")
+            )
+            saved = self.settings_bridge.save_snapshot(
+                session.working_snapshot, apply=appearance_changed
+            )
         except SettingsBridgeError as error:
             panel.mark_failed(str(error))
             return
@@ -738,9 +746,12 @@ class ImmersiveLyricsPage(QWidget):
         self.wake_controls()
 
     def _reset_quick_settings(self) -> None:
-        """Preview the documented immersive defaults without saving immediately."""
+        """Apply and save defaults without detaching the shell's shared options."""
 
-        self.apply_options(ImmersiveLyricsOptions(theme=self._theme.mode))
+        defaults = ImmersiveLyricsOptions(theme=self._theme.mode)
+        for field in fields(defaults):
+            setattr(self.options, field.name, getattr(defaults, field.name))
+        self.apply_options()
         sync_session = getattr(self.settings_panel, "_sync_session_from_controls", None)
         if callable(sync_session):
             sync_session()
@@ -752,7 +763,11 @@ class ImmersiveLyricsPage(QWidget):
 
     def _preview_formal_settings(self) -> None:
         panel = self.settings_panel
-        if panel.session is not None and panel.is_dirty:
+        if (
+            panel.session is not None
+            and panel.session.get("appearance_mode", "dark")
+            != panel.session.original_snapshot.get("appearance_mode", "dark")
+        ):
             self._apply_formal_settings(panel.session.working_snapshot.to_dict())
 
     def toggle_settings_panel(self) -> None:
@@ -882,9 +897,11 @@ class ImmersiveLyricsPage(QWidget):
             return
         panel = self.settings_panel
         mode = panel.theme_combo.currentData()
-        if mode:
+        if mode and mode != self._theme.mode:
             self.set_theme_mode(str(mode))
-        self.set_background_mode(str(panel.background_combo.currentData()))
+        background_mode = str(panel.background_combo.currentData())
+        if background_mode != self.options.background_mode:
+            self.set_background_mode(background_mode)
         self.set_transparent_lyrics_color(str(panel.transparent_lyrics_color_combo.currentData()))
         self.set_background_opacity(panel.background_opacity_slider.value())
         self.set_overlay_strength(panel.overlay_strength_slider.value())
