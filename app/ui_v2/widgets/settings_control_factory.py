@@ -27,8 +27,15 @@ from app.ui_v2.theme.tokens import Theme
 class FlatSlider(QSlider):
     """A native-interactive slider with a fully controlled, frameless surface."""
 
-    def __init__(self, orientation: Qt.Orientation, parent: QWidget | None = None) -> None:
+    def __init__(
+        self,
+        orientation: Qt.Orientation,
+        parent: QWidget | None = None,
+        *,
+        wheel_changes_value: bool = True,
+    ) -> None:
         super().__init__(orientation, parent)
+        self._wheel_changes_value = wheel_changes_value
         self._track_color = QColor("#505050")
         self._fill_color = QColor("#c9a86a")
         self._handle_color = QColor("#c9a86a")
@@ -40,6 +47,12 @@ class FlatSlider(QSlider):
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, False)
         self.setAutoFillBackground(False)
         self.setMouseTracking(True)
+
+    def wheelEvent(self, event) -> None:  # noqa: N802
+        if not self._wheel_changes_value:
+            event.ignore()
+            return
+        super().wheelEvent(event)
 
     def set_visual_colors(
         self,
@@ -427,7 +440,7 @@ class SliderSpinControl(QWidget):
         super().__init__(parent)
         self._theme = theme
         self.setObjectName("settingsSliderControl")
-        self.slider = FlatSlider(Qt.Orientation.Horizontal, self)
+        self.slider = FlatSlider(Qt.Orientation.Horizontal, self, wheel_changes_value=False)
         self.slider.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, False)
         self.slider.setRange(minimum, maximum)
         self.value_label = QLabel(self)

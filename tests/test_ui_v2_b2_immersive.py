@@ -13,6 +13,7 @@ from PySide6.QtWidgets import QApplication, QToolButton
 from app.ui_v2.adapters.legacy_settings_bridge import SettingsBridgeError
 from app.ui_v2.shell.main_window import MainWindow
 from app.ui_v2.theme.tokens import get_theme
+from app.ui_v2.widgets.settings_control_factory import FlatSlider
 
 
 class B2ImmersiveTests(unittest.TestCase):
@@ -144,6 +145,31 @@ class B2ImmersiveTests(unittest.TestCase):
         self.assertEqual(combo.currentData(), before)
         self.assertEqual(saved.count(), 0)
         self.assertGreater(panel.scroll_area.verticalScrollBar().value(), 0)
+
+    def test_wheel_over_every_settings_slider_does_not_edit_or_save(self):
+        self.page.show_settings_panel()
+        panel = self.page.settings_panel
+        panel.set_reduce_motion(True)
+        panel.advanced_disclosure.click()
+        self.app.processEvents()
+        sliders = panel.findChildren(FlatSlider)
+        self.assertGreaterEqual(len(sliders), 11)
+        for slider in sliders:
+            with self.subTest(label=panel._value_labels[slider].text()):
+                slider.setValue((slider.minimum() + slider.maximum()) // 2)
+                panel.scroll_area.ensureWidgetVisible(slider)
+                slider.setFocus()
+                self.app.processEvents()
+                self.assertTrue(slider.isVisible())
+                before = slider.value()
+                document = Path(self.tmp.name, 'settings.json').read_bytes()
+                saved = QSignalSpy(self.page.settings_bridge.save_succeeded)
+                position = slider.mapTo(self.window, slider.rect().center())
+                QTest.wheelEvent(self.window.windowHandle(), position, QPoint(0, -120))
+                self.app.processEvents()
+                self.assertEqual(slider.value(), before)
+                self.assertEqual(saved.count(), 0)
+                self.assertEqual(Path(self.tmp.name, 'settings.json').read_bytes(), document)
 
     def test_failed_local_save_previews_without_global_theme_refresh(self):
         self.page.show_settings_panel()

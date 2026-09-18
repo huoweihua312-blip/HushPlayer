@@ -10,7 +10,7 @@ from PySide6.QtTest import QTest, QSignalSpy
 from PySide6.QtWidgets import QApplication, QScrollArea, QVBoxLayout, QWidget
 
 from app.ui_v2.theme.tokens import get_theme
-from app.ui_v2.widgets.settings_control_factory import SettingsControlFactory, ThemedComboBox
+from app.ui_v2.widgets.settings_control_factory import FlatSlider, SettingsControlFactory, ThemedComboBox
 
 
 class SettingsInputTests(unittest.TestCase):
@@ -99,6 +99,52 @@ class SettingsInputTests(unittest.TestCase):
         self.app.processEvents()
         self.wheel_over(toolbar_combo)
         self.assertEqual(toolbar_combo.currentIndex(), 1)
+
+    def test_settings_slider_scrolls_page_without_editing_even_when_focused(self):
+        control = SettingsControlFactory.slider_spin(0, 100, 50, "%", get_theme("dark"), self.content)
+        self.layout.insertWidget(0, control)
+        self.app.processEvents()
+        changed = QSignalSpy(control.value_changed)
+        for focused in (False, True):
+            with self.subTest(focused=focused):
+                self.scroll.verticalScrollBar().setValue(0)
+                control.slider.setValue(50)
+                before = changed.count()
+                if focused:
+                    control.slider.setFocus()
+                else:
+                    control.slider.clearFocus()
+                self.app.processEvents()
+                self.wheel_over(control.slider)
+                self.assertEqual(control.value(), 50)
+                self.assertEqual(changed.count(), before)
+                self.assertGreater(self.scroll.verticalScrollBar().value(), 0)
+
+    def test_settings_slider_keeps_drag_and_keyboard_adjustment(self):
+        control = SettingsControlFactory.slider_spin(0, 100, 50, "%", get_theme("dark"), self.content)
+        self.layout.insertWidget(0, control)
+        self.app.processEvents()
+        slider = control.slider
+        slider.setFocus()
+        QTest.keyClick(slider, Qt.Key.Key_Right)
+        self.assertEqual(control.value(), 51)
+        slider.setValue(50)
+        start = slider.rect().center()
+        end = QPoint(slider.width() * 3 // 4, start.y())
+        QTest.mousePress(slider, Qt.MouseButton.LeftButton, pos=start)
+        QTest.mouseMove(slider, end)
+        QTest.mouseRelease(slider, Qt.MouseButton.LeftButton, pos=end)
+        self.assertGreater(control.value(), 50)
+        self.assertEqual(control.value_label.text(), f"{control.value()}%")
+
+    def test_non_settings_slider_keeps_existing_wheel_adjustment(self):
+        slider = FlatSlider(Qt.Orientation.Horizontal, self.content)
+        slider.setRange(0, 100)
+        slider.setValue(50)
+        self.layout.insertWidget(0, slider)
+        self.app.processEvents()
+        self.wheel_over(slider)
+        self.assertLess(slider.value(), 50)
 
 
 if __name__ == "__main__":

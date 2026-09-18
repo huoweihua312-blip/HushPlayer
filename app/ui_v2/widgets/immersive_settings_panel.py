@@ -157,7 +157,7 @@ class ImmersiveSettingsPanel(QFrame):
         return combo
 
     def _slider(self, low: int, high: int) -> FlatSlider:
-        slider = FlatSlider(Qt.Orientation.Horizontal, self)
+        slider = FlatSlider(Qt.Orientation.Horizontal, self, wheel_changes_value=False)
         slider.setRange(low, high)
         return slider
 
