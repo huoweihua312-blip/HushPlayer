@@ -98,7 +98,8 @@ class LyricsQuickSettingsFloatingPanel(ImmersiveSettingsPanel):
         self.status_label = QLabel("未修改", self.footer_widget)
         self.status_label.setObjectName("immersiveQuickSettingsStatus")
         self.cancel_button = QToolButton(self.footer_widget)
-        self.cancel_button.setText("取消")
+        self.cancel_button.setText("关闭")
+        self.cancel_button.setAccessibleName("关闭沉浸设置")
         self.save_button = QToolButton(self.footer_widget)
         self.save_button.setText("保存")
         self.cancel_button.clicked.connect(self.cancel_requested)
@@ -282,8 +283,9 @@ class LyricsQuickSettingsFloatingPanel(ImmersiveSettingsPanel):
 
     def request_close(self) -> None:
         if self.is_dirty:
-            self.cancel_requested.emit()
-            return
+            self.save_requested.emit()
+            if self.is_dirty:
+                return
         super().request_close()
 
     def set_theme(self, theme: Theme) -> None:

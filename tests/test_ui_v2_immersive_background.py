@@ -125,6 +125,12 @@ class ArtworkBackgroundTests(unittest.TestCase):
         self.background.set_overlay_strength(15)
         self.assertNotEqual(transparent, self.background.grab().toImage())
 
+    def test_light_artwork_keeps_cover_color_visible_under_protection_veil(self):
+        self.background.set_theme(get_theme("light"))
+        self.background.set_track(_remote_track("light-cover", QColor("#e82020")))
+        color = self.background.grab().toImage().pixelColor(320, 180)
+        self.assertGreater(color.red() - color.blue(), 120)
+
 
 class TransparentLyricsColorTests(unittest.TestCase):
     @classmethod
@@ -173,7 +179,7 @@ class TransparentLyricsColorTests(unittest.TestCase):
         self.assertEqual(state, (playback.state.current_track.id, playback.state.position_ms,
                                  playback.state.is_playing, tuple(playback.queue_tracks)))
 
-    def test_color_save_reload_and_cancel_preserve_unknown_settings(self):
+    def test_color_auto_save_and_close_preserve_unknown_settings(self):
         path = Path(self.case.tmp.name) / "settings.json"
         document = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
         document["unrelated_setting"] = {"keep": 17}
@@ -182,27 +188,28 @@ class TransparentLyricsColorTests(unittest.TestCase):
         self.page.show_settings_panel()
         self.choose(self.panel.background_combo, "transparent")
         self.choose(self.color_control(), "light")
-        self.panel.save_button.click()
         saved = json.loads(path.read_text(encoding="utf-8"))
         self.assertEqual(saved["immersive_transparent_lyrics_color"], "light")
         self.assertEqual(saved["unrelated_setting"], {"keep": 17})
         self.choose(self.color_control(), "dark")
-        self.panel.cancel_button.click()
-        self.assertEqual(self.page.canvas._theme.mode, "dark")
+        self.panel.close_button.click()
+        self.case.app.processEvents()
+        self.assertFalse(self.panel.isVisible())
         from app.ui_v2.shell.main_window import MainWindow
         reopened = MainWindow(data_mode="mock", settings_path=path)
         try:
-            self.assertEqual(reopened.immersive_lyrics_options.transparent_lyrics_color, "light")
+            self.assertEqual(reopened.immersive_lyrics_options.transparent_lyrics_color, "dark")
         finally:
             reopened.hide()
             reopened.deleteLater()
             self.case.app.processEvents()
-        self.assertEqual(json.loads(path.read_text(encoding="utf-8")), saved)
+        saved = json.loads(path.read_text(encoding="utf-8"))
+        self.assertEqual(saved["immersive_transparent_lyrics_color"], "dark")
+        self.assertEqual(saved["unrelated_setting"], {"keep": 17})
         self.case.window._apply_settings_values(load_settings_document(path))
         self.page.apply_options(self.case.window.immersive_lyrics_options)
         self.page.show_settings_panel()
-        self.assertEqual(self.color_control().currentData(), "light")
-        self.assertEqual(self.page.canvas._theme.mode, "dark")
+        self.assertEqual(self.color_control().currentData(), "dark")
 
     def test_current_cover_update_reaches_background_without_resetting_playback(self):
         playback = self.case.window.playback_adapter

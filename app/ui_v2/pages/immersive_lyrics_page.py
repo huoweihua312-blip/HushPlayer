@@ -429,6 +429,7 @@ class ImmersiveLyricsPage(QWidget):
         self.now_playing_page.lyrics_requested.connect(lambda: self.mode_changed.emit("lyrics"))
         self.now_playing_page.more_requested.connect(self.show_settings_panel)
         self.settings_panel.changed.connect(self._apply_panel_options)
+        self.settings_panel.draft_changed.connect(self._save_quick_settings)
         self.settings_panel.exit_requested.connect(self.immersive_exit_requested)
         self.settings_panel.closed.connect(self._on_settings_panel_closed)
         self.settings_panel.save_requested.connect(self._save_quick_settings)
@@ -699,8 +700,9 @@ class ImmersiveLyricsPage(QWidget):
 
     def hide_settings_panel(self) -> None:
         if self.settings_panel.is_dirty:
-            self._cancel_quick_settings()
-            return
+            self._save_quick_settings()
+            if self.settings_panel.is_dirty:
+                return
         self.settings_panel.hide()
         self._apply_responsive_layout()
         self._schedule_controls_hide()
@@ -726,9 +728,11 @@ class ImmersiveLyricsPage(QWidget):
         panel.mark_saved(saved)
 
     def _cancel_quick_settings(self) -> None:
-        snapshot = self.settings_panel.cancel_session()
-        if snapshot is not None:
-            self._apply_formal_settings(snapshot.to_dict())
+        if self.settings_panel.is_dirty:
+            self._save_quick_settings()
+            if self.settings_panel.is_dirty:
+                return
+        self.settings_panel.cancel_session()
         self.settings_panel.hide()
         self._apply_responsive_layout()
         self.wake_controls()

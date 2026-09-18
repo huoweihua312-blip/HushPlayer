@@ -254,7 +254,10 @@ class LyricsCanvasV2(QWidget):
         baseline = max(32, min(92, self._inactive_opacity)) / 100
         if self._mode == "immersive" and self._immersive_reading_style:
             # Context remains readable but no longer competes with the lyric.
-            attenuation = 0.68 if distance <= 1 else 0.50 if distance == 2 else 0.24
+            if self._theme.mode == "light":
+                attenuation = 0.86 if distance <= 1 else 0.64 if distance == 2 else 0.36
+            else:
+                attenuation = 0.68 if distance <= 1 else 0.50 if distance == 2 else 0.24
             return round(255 * baseline * attenuation)
         if distance <= 1:
             return round(255 * max(0.68, baseline))
@@ -718,7 +721,12 @@ class LyricsCanvasV2(QWidget):
             if active and self._translation_visible and line.translation:
                 sub_font = self._font(sizes[2], QFont.Weight.Medium)
                 sub_rect = self._text_rect(source_rect.x(), y, text_width, sub_font, line.translation, 3)
-                self._draw_text(painter, sub_rect, line.translation, sub_font, _with_alpha(self._theme.colors.secondary_text, 200 if self._mode == "immersive" and self._immersive_reading_style else 230), shadow=False)
+                translation_color = (
+                    self._theme.colors.primary_text
+                    if self._mode == "immersive" and self._theme.mode == "light"
+                    else self._theme.colors.secondary_text
+                )
+                self._draw_text(painter, sub_rect, line.translation, sub_font, _with_alpha(translation_color, 220 if self._mode == "immersive" and self._immersive_reading_style else 230), shadow=False)
                 y += sub_rect.height() + 2
         painter.end()
         self._last_metrics = {
@@ -842,7 +850,12 @@ class LyricsCanvasV2(QWidget):
             if is_active and self._translation_visible and line.translation:
                 sub_font = self._font(sizes[2], QFont.Weight.Medium)
                 sub_rect = self._text_rect(x, y, text_width, sub_font, line.translation, 3)
-                self._draw_text(painter, sub_rect, line.translation, sub_font, _with_alpha(self._theme.colors.secondary_text, 200 if self._mode == "immersive" and self._immersive_reading_style else 230), shadow=False)
+                translation_color = (
+                    self._theme.colors.primary_text
+                    if self._mode == "immersive" and self._theme.mode == "light"
+                    else self._theme.colors.secondary_text
+                )
+                self._draw_text(painter, sub_rect, line.translation, sub_font, _with_alpha(translation_color, 220 if self._mode == "immersive" and self._immersive_reading_style else 230), shadow=False)
                 y += sub_rect.height() + 2
             y += self._section_spacing()
         painter.end()

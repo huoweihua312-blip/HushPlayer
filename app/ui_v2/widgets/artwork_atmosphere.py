@@ -304,12 +304,35 @@ class ArtworkAtmosphere(QWidget):
         transparency = max(0.15, 1.0 - self._transparency / 125.0)
         overlay_alpha = round(165 * darkness * transparency)
         if artwork:
-            # Real covers can be fully black or white; retain a theme-colored
-            # base veil before applying the user's additional protection.
-            overlay_alpha = round(255 * (0.45 + 0.55 * darkness * transparency))
+            # Light mode needs less global white veil on bright covers, while
+            # dark covers still need enough lift for the default dark lyrics.
+            cover_luma = self._image_luminance(image)
+            dark_cover_need = (1.0 - cover_luma) ** 7
+            if self._theme.mode == "light":
+                overlay_alpha = round(
+                    35 + 200 * dark_cover_need + 45 * darkness * transparency
+                )
+            else:
+                overlay_alpha = round(255 * (0.4 + 0.6 * darkness))
         if overlay_alpha:
             surface = "#081018" if self._theme.mode == "dark" else "#fffaf3"
             painter.fillRect(rect, _color(surface, overlay_alpha))
+
+    @staticmethod
+    def _image_luminance(image: QImage) -> float:
+        if image.isNull():
+            return 0.5
+        sample = image.scaled(
+            1,
+            1,
+            Qt.AspectRatioMode.IgnoreAspectRatio,
+            Qt.TransformationMode.SmoothTransformation,
+        ).pixelColor(0, 0)
+        return (
+            0.2126 * sample.red()
+            + 0.7152 * sample.green()
+            + 0.0722 * sample.blue()
+        ) / 255.0
 
 
 class ReadabilityOverlay(QWidget):
@@ -357,8 +380,15 @@ class ReadabilityOverlay(QWidget):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         surface = "#09121c" if self._theme.mode == "dark" else "#fffaf3"
+        lyrics_surface = "#09121c" if self._theme.mode == "dark" else "#b0a79d"
         strength = self._strength / 100
-        self._paint_region(painter, self._lyrics_rect, surface, round(22 + 74 * strength), 1.22)
+        self._paint_region(
+            painter,
+            self._lyrics_rect,
+            lyrics_surface,
+            round(48 + 110 * strength),
+            1.22,
+        )
         self._paint_region(painter, self._identity_rect, surface, round(14 + 42 * strength), 1.12)
         if not self._controls_rect.isNull():
             # Controls can now sit in the left identity column rather than at

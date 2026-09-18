@@ -81,7 +81,7 @@ class B2ImmersiveTests(unittest.TestCase):
         self.assertEqual(panel.is_dirty, dirty)
         self.assertLess(panel.status_label.geometry().bottom(), panel.footer_widget.geometry().bottom())
 
-    def test_reset_is_preview_and_cancel_does_not_write_settings(self):
+    def test_reset_auto_saves_and_cancel_only_closes_settings(self):
         from pathlib import Path
         p = self.page
         p.show_settings_panel()
@@ -93,10 +93,10 @@ class B2ImmersiveTests(unittest.TestCase):
         panel.reset_button.click()
         self.app.processEvents()
         self.assertEqual(panel.global_lyric_scale_slider.value(), 100)
-        self.assertEqual(settings.read_bytes() if settings.exists() else None, before)
+        self.assertNotEqual(settings.read_bytes() if settings.exists() else None, before)
         panel.cancel_button.click()
         self.assertFalse(panel.isVisible())
-        self.assertEqual(settings.read_bytes() if settings.exists() else None, before)
+        self.assertNotEqual(settings.read_bytes() if settings.exists() else None, before)
 
     def test_queue_selection_does_not_play_and_enter_uses_existing_queue(self):
         p = self.page
