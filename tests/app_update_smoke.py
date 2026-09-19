@@ -141,7 +141,7 @@ def fixture_release(offset: int) -> tuple[str, str]:
         return "0.6.0-beta.13", "0.6.0.13"
     numeric_version = fixture_numeric_version(offset)
     if offset == 0:
-        return "1.0.0", numeric_version_text(numeric_version)
+        return APP_VERSION, numeric_version_text(numeric_version)
     version = (
         f"{numeric_version[0]}.{numeric_version[1]}.{numeric_version[2]}-"
         f"{UPDATE_CHANNEL}.{numeric_version[3]}"
