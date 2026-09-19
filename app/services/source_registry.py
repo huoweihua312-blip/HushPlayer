@@ -254,13 +254,28 @@ class SourceRegistryManager:
             "externalFilePreserved": bool(source_path and not managed_file),
         }
 
-    def record_test_result(self, source_id: str, status: str) -> None:
+    def record_test_result(
+        self,
+        source_id: str,
+        status: str,
+        *,
+        result_count: int = 0,
+        latency_ms: int = 0,
+        error: str = "",
+        playable_count: int = 0,
+        summary: str = "",
+    ) -> None:
         document = self.load_registry_document()
 
         for source in document["sources"]:
             if source.get("id") == source_id:
                 source["lastTestStatus"] = str(status or "unknown")
                 source["lastTestedAt"] = time.strftime("%Y-%m-%dT%H:%M:%S%z")
+                source["lastTestResultCount"] = max(0, int(result_count or 0))
+                source["lastTestLatencyMs"] = max(0, int(latency_ms or 0))
+                source["lastTestError"] = str(error or "")
+                source["lastTestPlayableCount"] = max(0, int(playable_count or 0))
+                source["lastTestSummary"] = str(summary or "")
                 self._save_registry_document(document)
                 return
 

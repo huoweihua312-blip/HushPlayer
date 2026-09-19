@@ -1407,6 +1407,9 @@ class MainWindow(QMainWindow):
             self.online_discovery.artwork_service.imageReady.connect(
                 self._on_online_artwork_ready
             )
+            self.online_discovery.library_artwork_service.imageReady.connect(
+                self._on_online_artwork_ready
+            )
             recovery = getattr(self.online_discovery, "track_recovery", None)
             if recovery is not None:
                 recovery.status_changed.connect(self._on_recovery_status)
@@ -1438,6 +1441,9 @@ class MainWindow(QMainWindow):
         previous_signal = getattr(previous, "query_changed", None)
         if previous_signal is not None:
             previous_signal.disconnect(self._sync_search_text)
+        if route_id == "online_search":
+            self._search_query_adapter = None
+            return
         adapter = getattr(self.router.currentWidget(), "adapter", None)
         self._search_query_adapter = adapter
         signal = getattr(adapter, "query_changed", None)
@@ -2402,7 +2408,7 @@ class MainWindow(QMainWindow):
             if artwork_url:
                 requests.append((track.stable_identity, artwork_url))
         if requests:
-            self.online_discovery.artwork_service.request_many(requests[:32])
+            self.online_discovery.library_artwork_service.request_many(requests)
 
     def _on_online_artwork_ready(self, _generation: int, track_key: str, data: bytes) -> None:
         """Apply one fetched cover to every existing projection of its stable track."""

@@ -3,7 +3,14 @@
 from __future__ import annotations
 
 from PySide6.QtCore import Qt, Signal
-from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QVBoxLayout, QWidget
+from PySide6.QtWidgets import (
+    QFrame,
+    QHBoxLayout,
+    QLabel,
+    QSizePolicy,
+    QVBoxLayout,
+    QWidget,
+)
 
 from app.ui_v2.adapters.online_adapter import OnlineAdapter
 from app.ui_v2.adapters.playlist_adapter import PlaylistAdapter
@@ -17,7 +24,7 @@ from app.ui_v2.widgets.search_history_view import SearchHistoryView
 from app.ui_v2.widgets.search_state_view import SearchStateView
 from app.ui_v2.widgets.source_selector import SourceSelector
 from app.ui_v2.widgets.elided_label import ElidedLabel
-from app.ui_v2.widgets.online_presentation import style_action, style_caption, OnlineCheckBox
+from app.ui_v2.widgets.online_presentation import style_action, style_caption
 
 
 class OnlineSearchPage(QWidget):
@@ -48,13 +55,15 @@ class OnlineSearchPage(QWidget):
         self.detail_label.setObjectName("onlineSearchDetail")
         self.query_context_label = ElidedLabel(self)
         self.query_context_label.setObjectName("onlineSearchQueryContext")
-        self.scope_label = QLabel("搜索范围：已启用的在线来源", self)
-        self.scope_label.setObjectName("onlineSearchScope")
         self.search_bar = OnlineSearchBar(theme, self)
         self.source_selector = SourceSelector(adapter, theme, self)
         self.source_summary_label = QLabel(self)
-        self.search_bar.setMaximumWidth(760)
-        self._scope_checks: dict[str, OnlineCheckBox] = {}
+        self.search_bar.setMinimumWidth(420)
+        self.search_bar.setMaximumWidth(16777215)
+        self.search_bar.setSizePolicy(
+            QSizePolicy.Policy.Expanding,
+            QSizePolicy.Policy.Fixed,
+        )
         self.result_toolbar = OnlineResultToolbar(theme, self.result_surface)
         self.result_table = OnlineResultTable(adapter, playlists, theme, self.result_surface)
         self.history_view = SearchHistoryView(theme, self.result_surface)
@@ -71,28 +80,24 @@ class OnlineSearchPage(QWidget):
         identity_heading.addWidget(self.eyebrow)
         identity_heading.addWidget(self.title_label)
         identity_heading.addWidget(self.detail_label)
-        identity_context = QHBoxLayout()
-        identity_context.setContentsMargins(0, 0, 0, 0)
-        identity_context.setSpacing(theme.metrics.spacing_sm)
-        self.scope_label.setText("搜索来源")
-        identity_context.addWidget(self.scope_label)
-        self.scope_options = QHBoxLayout()
-        self.scope_options.setSpacing(18)
-        identity_context.addLayout(self.scope_options)
-        identity_context.addStretch(1)
-        identity_context.addWidget(self.source_selector)
-        self.source_summary_label.hide()
+        self.source_summary_label.show()
         self.query_context_label.hide()
         identity_layout = QVBoxLayout(self.identity_surface)
         identity_layout.setContentsMargins(0, 0, 0, 14)
         identity_layout.setSpacing(18)
         top = QHBoxLayout()
-        top.addLayout(identity_heading, 1)
+        top.addLayout(identity_heading, 0)
+        top.addSpacing(42)
+        top.addWidget(self.search_bar, 1, Qt.AlignmentFlag.AlignVCenter)
         top.addWidget(self.result_toolbar.sources_button, 0, Qt.AlignmentFlag.AlignVCenter)
         identity_layout.addLayout(top)
-        identity_layout.addSpacing(6)
-        identity_layout.addWidget(self.search_bar)
-        identity_layout.addLayout(identity_context)
+        scope_row = QHBoxLayout()
+        scope_row.setContentsMargins(0, 0, 0, 0)
+        scope_row.setSpacing(theme.metrics.spacing_sm)
+        scope_row.addWidget(self.source_selector, 0, Qt.AlignmentFlag.AlignVCenter)
+        scope_row.addWidget(self.source_summary_label, 0, Qt.AlignmentFlag.AlignVCenter)
+        scope_row.addStretch(1)
+        identity_layout.addLayout(scope_row)
         self.feedback_label = ElidedLabel(self)
         identity_layout.addSpacing(12)
         identity_layout.addWidget(self.feedback_label)
@@ -110,7 +115,7 @@ class OnlineSearchPage(QWidget):
         layout.addWidget(self.identity_surface)
         layout.addWidget(self.result_surface, 1)
         self.result_table.setMinimumHeight(180)
-        self.search_bar.query_changed.connect(adapter.set_query)
+        self.search_bar.query_changed.connect(lambda _text: self._sync_query_context())
         self.search_bar.search_requested.connect(self._search)
         self.history_view.query_requested.connect(self._search_history)
         self.history_view.remove_requested.connect(adapter.remove_history_item)
@@ -131,7 +136,7 @@ class OnlineSearchPage(QWidget):
         adapter.state_changed.connect(self._sync_state)
         adapter.search_results_changed.connect(lambda _results: self._sync_state(adapter.state))
         adapter.notification_changed.connect(self._sync_notification)
-        self.search_bar.set_text(adapter.query)
+        self.search_bar.set_text("")
         self.history_view.set_history(adapter.history())
         self._sync_sources(adapter.sources())
         self.result_toolbar.set_sources(adapter.sources())
@@ -206,12 +211,10 @@ class OnlineSearchPage(QWidget):
         for button in (self.state_view.cancel_button, self.state_view.sources_button, self.state_view.history_button):
             style_action(button, theme)
         style_action(self.state_view.retry_button, theme, primary=True)
-        for label in (self.eyebrow, self.scope_label, self.feedback_label):
+        for label in (self.eyebrow, self.feedback_label):
             style_caption(label, theme, subtle=True)
         style_caption(self.detail_label, theme)
         style_action(self.result_toolbar.sources_button, theme)
-        for check in self._scope_checks.values():
-            check.set_theme(theme)
         self.source_selector.setStyleSheet(self.source_selector.styleSheet() +
             "QToolButton#onlineSourceSelector { border: 0; background: transparent; font-size: 13px; }")
 
@@ -224,14 +227,18 @@ class OnlineSearchPage(QWidget):
         self.result_table.set_responsive_reference_width(width)
         self.result_toolbar.set_compact(narrow)
         self.result_toolbar.sources_button.setText("来源" if narrow else "管理来源")
+        self.search_bar.setMinimumWidth(360 if narrow else 420)
+        self.search_bar.setMaximumWidth(16777215)
         self.identity_surface.setMinimumHeight(0)
         self._sync_header_visibility()
 
     def _search(self) -> None:
+        self.adapter.set_query(self.search_bar.line_edit.text())
         self.adapter.search()
 
     def _search_history(self, query: str) -> None:
         self.search_bar.set_text(query)
+        self.adapter.set_query(query)
         self.adapter.search()
 
     def _sync_state(self, state: OnlineSearchState) -> None:
@@ -245,8 +252,6 @@ class OnlineSearchPage(QWidget):
         self.state_view.progress.setToolTip(f"搜索进度：{state.progress}%")
         self.result_toolbar.set_summary(len(self.adapter.results()), state.message)
         self.feedback_label.set_full_text(state.message or ("聚合查询完成 · 来源信息仅供选择时参考" if has_results else ""))
-        for check in self._scope_checks.values():
-            check.setEnabled(state.phase != "searching")
         self._sync_query_context()
         self._sync_header_visibility()
 
@@ -255,33 +260,10 @@ class OnlineSearchPage(QWidget):
 
         narrow = (self._responsive_width or 1200) < 950
         self.detail_label.setVisible(True)
-        self.scope_label.setVisible(True)
-        self.source_summary_label.hide()
+        self.source_summary_label.show()
         self.identity_surface.setMinimumHeight(0)
-        for i, check in enumerate(self._scope_checks.values()):
-            check.setVisible(i < (2 if narrow else 3))
 
     def _sync_sources(self, sources) -> None:
-        ids = {source.id for source in sources}
-        for source_id in tuple(self._scope_checks):
-            if source_id not in ids:
-                check = self._scope_checks.pop(source_id)
-                self.scope_options.removeWidget(check)
-                check.deleteLater()
-        for source in sources:
-            check = self._scope_checks.get(source.id)
-            if check is None:
-                check = OnlineCheckBox(self)
-                check.setMaximumWidth(160)
-                check.clicked.connect(lambda checked, key=source.id: self.adapter.set_source_enabled(key, checked))
-                self._scope_checks[source.id] = check
-                self.scope_options.addWidget(check)
-            check.setText(source.name if len(source.name) <= 10 else source.name[:9] + "…")
-            check.setAccessibleName(source.name)
-            check.setToolTip(source.name)
-            check.setChecked(source.enabled)
-            check.setEnabled(self.adapter.state.phase != "searching")
-            check.set_theme(self._theme)
         self._sync_header_visibility()
         enabled = [source for source in sources if source.enabled]
         unavailable = [source for source in enabled if source.status in {"failed", "disabled"}]
@@ -291,12 +273,7 @@ class OnlineSearchPage(QWidget):
         self.source_summary_label.setText(summary)
 
     def _sync_query_context(self) -> None:
-        query = str(self.adapter.query or "").strip()
-        # Mirror shell/history edits without feeding a second edit into the adapter.
-        if self.search_bar.line_edit.text() != self.adapter.query:
-            blocked = self.search_bar.line_edit.blockSignals(True)
-            self.search_bar.set_text(self.adapter.query)
-            self.search_bar.line_edit.blockSignals(blocked)
+        query = str(self.search_bar.line_edit.text() or "").strip()
         self.query_context_label.set_full_text(
             f"当前搜索：{query}" if query else "尚未输入关键词"
         )

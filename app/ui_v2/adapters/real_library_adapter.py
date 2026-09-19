@@ -13,6 +13,7 @@ from PySide6.QtCore import QObject, QThread, Signal, Slot
 
 from app.core.app_paths import AppPaths
 from app.services.library_repository import LibraryRepository, LibrarySnapshot
+from app.services.local_artwork import LocalArtworkResolver
 from app.services.remote_track_store import RemoteTrackStore
 from app.ui_v2.adapters.artists_adapter import (
     album_identity,
@@ -68,6 +69,7 @@ class _SnapshotThread(QThread):
         self._generation = generation
         self._repository = repository
         self._remote_tracks = remote_tracks
+        self._artwork_cache_dir = AppPaths.resolve().cache_dir / "covers"
 
     def run(self) -> None:
         try:
@@ -79,6 +81,7 @@ class _SnapshotThread(QThread):
             data = RealLibraryAdapter.map_snapshot(
                 snapshot,
                 self._remote_tracks.load_tracks(),
+                artwork_resolver=LocalArtworkResolver(self._artwork_cache_dir),
             )
         except Exception as error:  # reported to the UI thread without fallback
             self.completed.emit(self._generation, None, str(error))
@@ -221,8 +224,10 @@ class RealLibraryAdapter(QObject):
     def map_snapshot(
         snapshot: LibrarySnapshot,
         remote_tracks: dict[str, dict],
+        *,
+        artwork_resolver: LocalArtworkResolver | None = None,
     ) -> RealLibraryData:
-        """Pure worker-side mapping with one-time membership and stats indexes."""
+        """Map records; optional artwork extraction runs in the snapshot worker."""
 
         legacy_aliases = _legacy_remote_aliases(remote_tracks)
         legacy_target_ids = set(legacy_aliases)
@@ -254,7 +259,16 @@ class RealLibraryAdapter(QObject):
                 is_favorite=favorite_at is not None,
                 is_missing=False,
                 is_loading=False,
-                artwork_path=None,
+                artwork_path=(
+                    artwork_resolver.resolve(record)
+                    if artwork_resolver is not None
+                    else str(
+                        record.get("artwork_path")
+                        or record.get("local_cover_path")
+                        or record.get("cover_path")
+                        or ""
+                    ) or None
+                ),
                 stable_identity=track_id,
                 favorite_added_at=_timestamp(favorite_at) if favorite_at else None,
                 play_count=_nonnegative_int(stats.get("play_count")),

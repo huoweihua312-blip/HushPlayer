@@ -18,3 +18,4 @@ class OnlineSource:
     supports_download: bool
     supports_lyrics: bool
     source_type: str
+    test_summary: str = ""

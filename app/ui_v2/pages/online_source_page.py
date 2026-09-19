@@ -87,6 +87,7 @@ class SourceRow(QFrame):
         self.name_label.set_full_text(source.name)
         self.detail_label.set_full_text(
             f"响应 {source.latency_ms} ms · 最近搜索 {source.result_count} 条结果"
+            + (f" · {source.test_summary}" if source.test_summary else "")
         )
         capabilities = []
         if source.supports_playback:
@@ -186,6 +187,11 @@ class OnlineSourcePage(QWidget):
         self.add_source_button.setIconSize(QSize(16, 16))
         self.add_source_button.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
         self.add_source_button.clicked.connect(self._open_import_dialog)
+        self.verify_button = QToolButton(self)
+        self.verify_button.setText("快速验证")
+        self.verify_button.setAccessibleName("快速验证在线来源")
+        self.verify_button.setToolTip("使用内置关键词逐个验证来源搜索能力")
+        self.verify_button.clicked.connect(self.adapter.verify_sources)
         self.select_all_button = QToolButton(self)
         self.select_all_button.setText("启用全部")
         self.select_all_button.setAccessibleName("启用全部在线来源")
@@ -213,11 +219,15 @@ class OnlineSourcePage(QWidget):
         heading.addWidget(self.detail_label)
         header_top.addLayout(heading, 1)
         header_top.addWidget(self.back_button)
+        header_top.addWidget(self.verify_button)
         header_top.addWidget(self.add_source_button)
 
         header_bottom = QHBoxLayout()
         header_bottom.setContentsMargins(0, 0, 0, 0)
-        self.hint_label = QLabel("来源状态会随搜索更新；停用来源不会移除已收藏的歌曲。", self)
+        self.hint_label = QLabel(
+            "快速验证会使用内置关键词“夜曲”逐个搜索；停用来源不会移除已收藏的歌曲。",
+            self,
+        )
         self.hint_label.setWordWrap(True)
         header_bottom.addWidget(self.hint_label, 1)
 
@@ -255,8 +265,13 @@ class OnlineSourcePage(QWidget):
         layout.addWidget(self.header_surface)
         layout.addWidget(self.list_surface, 1)
         adapter.sources_changed.connect(self.set_sources)
+        adapter.verify_status_changed.connect(self._show_verify_status)
+        adapter.verify_running_changed.connect(self.verify_button.setDisabled)
         self.set_sources(adapter.sources())
         self.set_theme(theme)
+
+    def _show_verify_status(self, message: str) -> None:
+        self.hint_label.setText(str(message or ""))
 
     def set_sources(self, sources) -> None:
         self.empty_label.setVisible(not sources)
@@ -337,6 +352,7 @@ class OnlineSourcePage(QWidget):
         )
         for button in (
             self.add_source_button,
+            self.verify_button,
             self.back_button,
             self.select_all_button,
             self.clear_button,
@@ -345,6 +361,7 @@ class OnlineSourcePage(QWidget):
         for button in (self.back_button, self.select_all_button, self.clear_button):
             style_action(button, theme)
         style_action(self.add_source_button, theme, primary=True)
+        style_action(self.verify_button, theme, primary=True)
         for label in (self.eyebrow, self.hint_label, self.empty_label):
             style_caption(label, theme, subtle=True)
         for label in (self.detail_label, self.summary_label):
@@ -379,5 +396,6 @@ class OnlineSourcePage(QWidget):
         self.detail_label.setVisible(True)
         self.summary_label.setVisible(True)
         self.add_source_button.setText("添加" if compact else "添加来源")
+        self.verify_button.setText("验证" if compact else "快速验证")
         self.select_all_button.setText("启用全部")
         self.clear_button.setText("停用全部")
