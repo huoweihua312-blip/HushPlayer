@@ -26,6 +26,8 @@ _CREATE_NEW_PROCESS_GROUP = 0x00000200
 _CREATE_NO_WINDOW = 0x08000000
 _MAX_PACKAGE_MEMBERS = 20_000
 _MAX_PACKAGE_UNCOMPRESSED_BYTES = 2 * 1024 * 1024 * 1024
+_PERMISSION_ERROR_CODES = {5, 1314}
+_ELEVATED_RETRY_FLAG = "--elevated-retry"
 
 
 class UpdateApplyError(RuntimeError):
@@ -49,6 +51,57 @@ def _set_safe_updater_working_directory() -> None:
         # The replace retry remains the final safety net if changing the CWD
         # is unavailable in an unusual launch environment.
         return
+
+
+def _is_elevated() -> bool:
+    if os.name != "nt":
+        return False
+    try:
+        return bool(ctypes.windll.shell32.IsUserAnAdmin())
+    except (AttributeError, OSError):
+        return False
+
+
+def _is_permission_error(error: BaseException) -> bool:
+    return isinstance(error, PermissionError) or getattr(error, "winerror", None) in _PERMISSION_ERROR_CODES
+
+
+def _update_arguments(arguments: argparse.Namespace) -> list[str]:
+    values = [
+        "--parent-pid",
+        str(arguments.parent_pid),
+        "--install-dir",
+        str(arguments.install_dir),
+        "--package",
+        str(arguments.package),
+        "--restart-exe",
+        str(arguments.restart_exe),
+        _ELEVATED_RETRY_FLAG,
+    ]
+    if arguments.cleanup_helper is not None:
+        values.extend(("--cleanup-helper", str(arguments.cleanup_helper)))
+    return values
+
+
+def _request_elevated_retry(arguments: argparse.Namespace) -> bool:
+    """Retry a protected install directory through one UAC prompt."""
+
+    if os.name != "nt" or getattr(arguments, "elevated_retry", False):
+        return False
+    executable = Path(sys.executable).resolve()
+    child_arguments = _update_arguments(arguments)
+    if not getattr(sys, "frozen", False):
+        child_arguments.insert(0, str(Path(__file__).resolve()))
+    parameters = subprocess.list2cmdline(child_arguments)
+    result = ctypes.windll.shell32.ShellExecuteW(
+        None,
+        "runas",
+        str(executable),
+        parameters,
+        str(_updater_process_directory()),
+        1,
+    )
+    return int(result) > 32
 
 
 def _safe_member_name(name: str) -> str:
@@ -162,6 +215,21 @@ def _start_application(executable: Path, working_dir: Path) -> None:
         raise UpdateApplyError("更新后的 HushPlayer.exe 不存在。")
     flags = _DETACHED_PROCESS | _CREATE_NEW_PROCESS_GROUP | _CREATE_NO_WINDOW
     try:
+        if _is_elevated():
+            # The elevated retry only needs admin rights for replacement. Ask
+            # the normal Windows shell to start the new app without carrying
+            # the updater's elevated token into the user's daily process.
+            explorer = Path(os.environ.get("WINDIR", r"C:\Windows")) / "explorer.exe"
+            subprocess.Popen(
+                [str(explorer), str(executable)],
+                cwd=str(_updater_process_directory()),
+                close_fds=True,
+                creationflags=flags,
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+            return
         subprocess.Popen(
             [str(executable)],
             cwd=str(working_dir),
@@ -238,6 +306,7 @@ def parse_arguments(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--package", required=True, type=Path)
     parser.add_argument("--restart-exe", required=True, type=Path)
     parser.add_argument("--cleanup-helper", type=Path)
+    parser.add_argument(_ELEVATED_RETRY_FLAG, action="store_true", help=argparse.SUPPRESS)
     return parser.parse_args(argv)
 
 
@@ -254,6 +323,12 @@ def main(argv: list[str] | None = None) -> int:
         )
         return 0
     except Exception as error:
+        if _is_permission_error(error) and not arguments.elevated_retry:
+            try:
+                if _request_elevated_retry(arguments):
+                    return 0
+            except Exception:
+                pass
         _write_failure_log(install_dir, str(error))
         try:
             _start_application(install_dir / "HushPlayer.exe", install_dir)

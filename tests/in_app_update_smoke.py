@@ -149,6 +149,34 @@ def updater_working_directory_check() -> None:
         assert updater._updater_process_directory() == expected_source_dir
 
 
+def updater_permission_retry_checks() -> None:
+    updater = _load_module(
+        "hushplayer_packaged_updater_permission_retry_smoke",
+        PROJECT_ROOT / "packaging" / "hushplayer_updater.py",
+    )
+    arguments = updater.parse_arguments(
+        [
+            "--parent-pid",
+            "12345",
+            "--install-dir",
+            str(PROJECT_ROOT),
+            "--package",
+            str(PROJECT_ROOT / "update.zip"),
+            "--restart-exe",
+            str(PROJECT_ROOT / "HushPlayer.exe"),
+            "--cleanup-helper",
+            str(PROJECT_ROOT / "HushPlayerUpdater-copy.exe"),
+        ]
+    )
+    assert not arguments.elevated_retry
+    retry_arguments = updater._update_arguments(arguments)
+    assert retry_arguments[-1].endswith("HushPlayerUpdater-copy.exe")
+    assert retry_arguments[-2] == "--cleanup-helper"
+    assert "--elevated-retry" in retry_arguments
+    assert updater._is_permission_error(PermissionError("access denied"))
+    assert not updater._is_permission_error(RuntimeError("access denied"))
+
+
 def updater_replace_retry_checks(root: Path) -> None:
     updater = _load_module(
         "hushplayer_packaged_updater_retry_smoke",
@@ -253,6 +281,7 @@ def main() -> None:
         package_manifest_checks(root)
         updater_swap_checks(root)
         updater_working_directory_check()
+        updater_permission_retry_checks()
         updater_replace_retry_checks(root)
         payload_builder_checks(root)
     print("in-app update smoke: OK")
