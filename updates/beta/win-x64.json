@@ -1,15 +1,15 @@
 {
     "schema_version": 1,
     "channel": "beta",
-    "version": "1.0.0-beta.2",
-    "numeric_version": "1.0.0.2",
+    "version": "1.0.0-beta.3",
+    "numeric_version": "1.0.0.3",
     "architecture": "win-x64",
     "mandatory": false,
-    "setup_url": "https://github.com/huoweihua312-blip/HushPlayer/releases/download/v1.0.0-beta.2/HushPlayer-1.0.0-beta.2-win-x64-setup.exe",
-    "setup_size": 130950074,
-    "sha256": "3f948ba23ab9f4aef3c9e5a364d72a3bd87a6ba96b5724f971db344c416018f3",
+    "setup_url": "https://github.com/huoweihua312-blip/HushPlayer/releases/download/v1.0.0-beta.3/HushPlayer-1.0.0-beta.3-win-x64-setup.exe",
+    "setup_size": 130952762,
+    "sha256": "fd0adcb2784a0a795eba9d1e7627271e339c7c6fefee5eb2de7f651bf482a77b",
     "release_notes": [
-        "修复 Windows 安装器每次升级回到默认目录的问题；现在会保留用户上次选择的安装目录，并在升级时主动处理占用安装文件的 HushPlayer 进程。"
+        "修复受保护安装目录导致应用内更新替换失败后仍启动旧版本的问题；更新助手现在会在需要时请求一次管理员权限完成替换，并以普通权限重新启动 HushPlayer。"
     ],
     "release_history": [
         {
@@ -310,10 +310,18 @@
             "notes": [
                 "修复 Windows 安装器每次升级回到默认目录的问题；现在会保留用户上次选择的安装目录，并在升级时主动处理占用安装文件的 HushPlayer 进程。"
             ]
+        },
+        {
+            "version": "1.0.0-beta.3",
+            "numeric_version": "1.0.0.3",
+            "release_date": "2026-09-20",
+            "notes": [
+                "修复受保护安装目录导致应用内更新替换失败后仍启动旧版本的问题；更新助手现在会在需要时请求一次管理员权限完成替换，并以普通权限重新启动 HushPlayer。"
+            ]
         }
     ],
-    "package_url": "https://github.com/huoweihua312-blip/HushPlayer/releases/download/v1.0.0-beta.2/HushPlayer-1.0.0-beta.2-win-x64-update.zip",
-    "package_size": 176203761,
-    "package_sha256": "cad3cc453234e3912830ac5cdafd51014d7a3aa2a735403b62bede8d5a012a5b",
-    "package_filename": "HushPlayer-1.0.0-beta.2-win-x64-update.zip"
+    "package_url": "https://github.com/huoweihua312-blip/HushPlayer/releases/download/v1.0.0-beta.3/HushPlayer-1.0.0-beta.3-win-x64-update.zip",
+    "package_size": 176204516,
+    "package_sha256": "655db0e563557cf67b01af0bb4b36b799e1a3bb4fc83293e7cbfd92db352821e",
+    "package_filename": "HushPlayer-1.0.0-beta.3-win-x64-update.zip"
 }
