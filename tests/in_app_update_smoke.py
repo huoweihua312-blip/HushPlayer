@@ -16,6 +16,7 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from app.services.app_update_service import (
     UpdateValidationError,
+    _copy_package_updater,
     parse_update_manifest,
     verify_update_package,
 )
@@ -107,6 +108,18 @@ def package_manifest_checks(root: Path) -> None:
         assert "HushPlayerUpdater.exe" in str(error)
     else:
         raise AssertionError("package without updater was accepted")
+
+
+def package_helper_copy_checks(root: Path) -> None:
+    package = root / "new-updater.zip"
+    destination = root / "updates" / "HushPlayerUpdater-copy.exe"
+    expected = b"new updater from the downloaded package"
+    with zipfile.ZipFile(package, "w", compression=zipfile.ZIP_STORED) as archive:
+        archive.writestr("HushPlayer.exe", b"new application")
+        archive.writestr("HushPlayerUpdater.exe", expected)
+
+    _copy_package_updater(package, destination)
+    assert destination.read_bytes() == expected
 
 
 def updater_swap_checks(root: Path) -> None:
@@ -279,6 +292,7 @@ def main() -> None:
     with tempfile.TemporaryDirectory(prefix="hushplayer_in_app_update_") as temporary:
         root = Path(temporary)
         package_manifest_checks(root)
+        package_helper_copy_checks(root)
         updater_swap_checks(root)
         updater_working_directory_check()
         updater_permission_retry_checks()

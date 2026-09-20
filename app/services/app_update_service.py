@@ -582,6 +582,35 @@ def verify_update_package(path: str | Path, manifest: UpdateManifest) -> None:
         raise UpdateValidationError(f"无法读取应用内更新包：{error}") from error
 
 
+def _copy_package_updater(path: str | Path, destination: str | Path) -> None:
+    """Stage the updater shipped by the already verified update package."""
+
+    package = Path(path)
+    target = Path(destination)
+    temporary = target.with_name(f"{target.name}.tmp")
+    try:
+        target.parent.mkdir(parents=True, exist_ok=True)
+        temporary.unlink(missing_ok=True)
+        with zipfile.ZipFile(package) as archive:
+            with archive.open("HushPlayerUpdater.exe", "r") as source:
+                with temporary.open("wb") as output:
+                    shutil.copyfileobj(source, output, length=1024 * 1024)
+        os.replace(temporary, target)
+    except KeyError as error:
+        raise UpdateValidationError(
+            "应用内更新包缺少 HushPlayerUpdater.exe。"
+        ) from error
+    except (OSError, zipfile.BadZipFile) as error:
+        raise UpdateValidationError(
+            f"无法准备应用内更新助手：{error}"
+        ) from error
+    finally:
+        try:
+            temporary.unlink(missing_ok=True)
+        except OSError:
+            pass
+
+
 def _detached_working_directory(path: str) -> str:
     """Return a safe working directory for a detached updater process.
 
@@ -1321,16 +1350,11 @@ class AppUpdateService(QObject):
         try:
             verify_update_package(path, manifest)
             install_dir = self._application_install_dir()
-            helper_source = install_dir / "HushPlayerUpdater.exe"
-            if not helper_source.is_file():
-                raise UpdateValidationError(
-                    "当前程序缺少应用内更新助手，请改用安装包方式更新。"
-                )
             self.updates_dir.mkdir(parents=True, exist_ok=True)
             helper_copy = self.updates_dir / (
                 f"HushPlayerUpdater-{os.getpid()}-{time.time_ns()}.exe"
             )
-            shutil.copy2(helper_source, helper_copy)
+            _copy_package_updater(path, helper_copy)
             arguments = [
                 "--parent-pid",
                 str(os.getpid()),

@@ -28,12 +28,13 @@ VersionInfoProductName={#MyAppName}
 VersionInfoProductVersion={#MyAppNumericVersion}
 VersionInfoProductTextVersion={#MyAppVersion}
 
-; 当前用户安装，不弹管理员权限确认
+; 默认仍使用当前用户目录；遇到历史安装目录权限不足时请求一次管理员权限，
+; 避免安装器替换文件失败后重新启动旧版本。
 ; 使用 Inno Setup 的当前用户 Program Files 目录，避免旧环境变量或路径重定向
 ; 生成带非法字符的目标目录。
 DefaultDirName={userpf}\{#MyAppName}
 DefaultGroupName={#MyAppName}
-PrivilegesRequired=lowest
+PrivilegesRequired=admin
 ; 升级时保留用户上次选择的目录，避免每次回到默认目录。
 UsePreviousAppDir=yes
 UsePreviousGroup=yes
