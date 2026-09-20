@@ -34,9 +34,9 @@ VersionInfoProductTextVersion={#MyAppVersion}
 DefaultDirName={userpf}\{#MyAppName}
 DefaultGroupName={#MyAppName}
 PrivilegesRequired=lowest
-; 不复用旧安装器记忆的目录，避免历史测试目录或损坏路径阻塞安装。
-UsePreviousAppDir=no
-UsePreviousGroup=no
+; 升级时保留用户上次选择的目录，避免每次回到默认目录。
+UsePreviousAppDir=yes
+UsePreviousGroup=yes
 
 ; HushPlayer 当前只发布 Windows x64
 ArchitecturesAllowed=x64compatible
@@ -59,6 +59,7 @@ AllowNoIcons=yes
 
 ; 更新时检测正在运行的 HushPlayer
 CloseApplications=yes
+CloseApplicationsFilter=HushPlayer.exe
 RestartApplications=no
 
 [Languages]
