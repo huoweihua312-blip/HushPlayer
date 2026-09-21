@@ -47,6 +47,7 @@ class PlaybackAdapter(QObject):
         super().__init__(parent)
         self._controller = controller
         self._queue: list[Track] = []
+        self._queue_tracks_cache: tuple[Track, ...] | None = None
         self._tracks_by_identity: dict[str, Track] = {}
         self._requested_tracks_by_id: dict[str, Track] = {}
         self._state = PlaybackState()
@@ -85,13 +86,17 @@ class PlaybackAdapter(QObject):
 
     @property
     def queue_tracks(self) -> tuple[Track, ...]:
+        if self._queue_tracks_cache is not None:
+            return self._queue_tracks_cache
         if self._controller is None:
-            return tuple(self._queue)
-        return tuple(
+            self._queue_tracks_cache = tuple(self._queue)
+            return self._queue_tracks_cache
+        self._queue_tracks_cache = tuple(
             track
             for item in self._controller.queue.items
             if (track := self._tracks_by_identity.get(item.stable_identity)) is not None
         )
+        return self._queue_tracks_cache
 
     @property
     def display_queue_tracks(self) -> tuple[Track, ...]:
@@ -132,6 +137,7 @@ class PlaybackAdapter(QObject):
             self._set_mock_queue(tracks)
             return
         values = tuple(tracks)
+        self._queue_tracks_cache = None
         self._requested_tracks_by_id = {track.id: track for track in values}
         playable = tuple(track for track in values if self._is_queue_playable_track(track))
         self._tracks_by_identity = {
@@ -161,6 +167,7 @@ class PlaybackAdapter(QObject):
                 else track
                 for track in self._queue
             ]
+            self._queue_tracks_cache = tuple(self._queue)
             current = self._state.current_track
             if current is not None and current.id == updated.id:
                 old_duration = current.duration_ms
@@ -178,6 +185,11 @@ class PlaybackAdapter(QObject):
                     self.duration_changed.emit(duration)
             return
         if updated.stable_identity in self._tracks_by_identity:
+            if self._queue_tracks_cache is not None:
+                self._queue_tracks_cache = tuple(
+                    updated if track.id == updated.id else track
+                    for track in self._queue_tracks_cache
+                )
             current = self._state.current_track
             was_current = current is not None and current.stable_identity == updated.stable_identity
             old_duration = current.duration_ms if was_current else None
@@ -490,6 +502,7 @@ class PlaybackAdapter(QObject):
     def _set_mock_queue(self, tracks: Iterable[Track]) -> None:
         current_id = self._state.current_track.id if self._state.current_track else ""
         self._queue = list(tracks)
+        self._queue_tracks_cache = None
         self.queue_changed.emit(self.queue_tracks)
         if current_id and not any(track.id == current_id for track in self._queue):
             self.clear()

@@ -2252,22 +2252,31 @@ class MainWindow(QMainWindow):
             return
         self._real_library_projection_generation += 1
         generation = self._real_library_projection_generation
+        tracks_snapshot = self.library_collection.tracks()
         if not self._playback_session_restore_attempted:
             self._playback_session_restore_attempted = True
             self._restoring_playback_session = True
             try:
-                restored = self._restore_playback_session()
+                restored = self._restore_playback_session(tracks_snapshot)
             finally:
                 self._restoring_playback_session = False
+            if self._startup_diagnostics is not None:
+                self._startup_diagnostics.mark("real_library.session_restore")
             if not restored:
-                self.playback_adapter.set_queue(self.library_collection.tracks())
+                self.playback_adapter.set_queue(tracks_snapshot)
             self._pending_playback_session = None
             self._playback_session_ready = True
         else:
-            self.playback_adapter.set_queue(self.library_collection.tracks())
+            self.playback_adapter.set_queue(tracks_snapshot)
+        if self._startup_diagnostics is not None:
+            self._startup_diagnostics.mark("real_library.queue_write")
+        if self._startup_diagnostics is not None:
+            self._startup_diagnostics.mark("real_library.queue_projection")
         self.library_page.set_playback_enabled(
             self.playback_adapter.has_real_backend
         )
+        if self._startup_diagnostics is not None:
+            self._startup_diagnostics.mark("real_library.page_state")
         if self._startup_diagnostics is not None:
             self._startup_diagnostics.mark("real_library.ui_state")
         # Let the shell paint the loaded state before building or replacing
@@ -2287,11 +2296,11 @@ class MainWindow(QMainWindow):
             ),
         )
 
-    def _restore_playback_session(self) -> bool:
+    def _restore_playback_session(self, tracks: tuple[Track, ...] | None = None) -> bool:
         session = self._pending_playback_session
         if session is None or not session.current_identity:
             return False
-        all_tracks = self.library_collection.tracks()
+        all_tracks = tracks if tracks is not None else self.library_collection.tracks()
         by_identity = {
             track.stable_identity: track
             for track in all_tracks

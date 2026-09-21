@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import hashlib
 
-from PySide6.QtCore import QAbstractListModel, QModelIndex, QSize, QSortFilterProxyModel, Qt, Signal
+from PySide6.QtCore import QAbstractListModel, QModelIndex, QTimer, QSize, QSortFilterProxyModel, Qt, Signal
 from PySide6.QtGui import QFont, QFontMetrics, QPainter, QPixmap
 from PySide6.QtWidgets import (
     QAbstractItemView,
@@ -181,6 +181,10 @@ class ImmersiveQueuePanel(QFrame):
         self.playback = playback
         self._theme = theme
         self._selected_track_id = ""
+        self._refresh_scheduled = False
+        self._refresh_timer = QTimer(self)
+        self._refresh_timer.setSingleShot(True)
+        self._refresh_timer.timeout.connect(self._flush_refresh)
         self.setObjectName("immersiveQueuePanel")
         self.setMinimumWidth(310)
         self.setMaximumWidth(410)
@@ -258,11 +262,11 @@ class ImmersiveQueuePanel(QFrame):
         layout.addWidget(self.empty_label, 1)
         layout.addWidget(self.footer_label)
 
-        playback.track_changed.connect(self.refresh)
-        playback.queue_changed.connect(lambda _queue: self.refresh())
-        playback.shuffle_changed.connect(lambda _enabled: self.refresh())
-        playback.repeat_mode_changed.connect(lambda _mode: self.refresh())
-        playback.playback_status_changed.connect(lambda _status, _detail: self.refresh())
+        playback.track_changed.connect(self.schedule_refresh)
+        playback.queue_changed.connect(lambda _queue: self.schedule_refresh())
+        playback.shuffle_changed.connect(lambda _enabled: self.schedule_refresh())
+        playback.repeat_mode_changed.connect(lambda _mode: self.schedule_refresh())
+        playback.playback_status_changed.connect(lambda _status, _detail: self.schedule_refresh())
         self.refresh()
         self.set_theme(theme)
 
@@ -308,7 +312,20 @@ class ImmersiveQueuePanel(QFrame):
         self.close_button.setToolTip("关闭队列")
         self.current_artwork.set_theme(theme)
 
+    def schedule_refresh(self, *_args) -> None:
+        """Coalesce playback signals emitted together into one queue rebuild."""
+
+        if self._refresh_scheduled:
+            return
+        self._refresh_scheduled = True
+        self._refresh_timer.start(0)
+
+    def _flush_refresh(self) -> None:
+        self._refresh_scheduled = False
+        self.refresh()
+
     def refresh(self, *_args) -> None:
+        self._refresh_scheduled = False
         tracks = tuple(self.playback.display_queue_tracks)
         current = self.playback.state.current_track
         current_id = current.id if current is not None else ""

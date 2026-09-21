@@ -18,6 +18,7 @@ class PlaybackQueue:
         self._shuffle_history: list[str] = []
         self._shuffle_cursor = -1
         self._shuffle_remaining: list[str] = []
+        self._shuffle_prepared = False
 
     @property
     def current_item(self) -> PlaybackQueueItem | None:
@@ -95,7 +96,10 @@ class PlaybackQueue:
             seen.add(identity)
             unique.append(item)
         self.items = unique
-        self.current_index = self.index_for_identity(current_identity)
+        index_by_identity = {
+            item.stable_identity: index for index, item in enumerate(unique)
+        }
+        self.current_index = index_by_identity.get(str(current_identity or ""), -1)
         if self.current_index < 0 and self.items:
             self.current_index = 0
         self._reset_shuffle(self.current_identity)
@@ -146,12 +150,22 @@ class PlaybackQueue:
     def _reset_shuffle(self, current_identity: str) -> None:
         self._shuffle_history = [current_identity] if current_identity else []
         self._shuffle_cursor = 0 if current_identity else -1
+        # Do not build and shuffle the entire queue during ordinary startup.
+        # Shuffle order is prepared lazily when shuffle playback is first used.
+        self._shuffle_remaining = []
+        self._shuffle_prepared = False
+
+    def _ensure_shuffle_remaining(self) -> None:
+        if self._shuffle_prepared:
+            return
+        current_identity = self.current_identity
         self._shuffle_remaining = [
             item.stable_identity
             for item in self.items
             if item.stable_identity != current_identity
         ]
         self._random.shuffle(self._shuffle_remaining)
+        self._shuffle_prepared = True
 
     def _sync_shuffle_identity(self, identity: str) -> None:
         if not identity:
@@ -190,6 +204,7 @@ class PlaybackQueue:
             self._shuffle_cursor += 1
             identity = self._shuffle_history[self._shuffle_cursor]
         else:
+            self._ensure_shuffle_remaining()
             if not self._shuffle_remaining:
                 if len(self.items) <= 1:
                     return self.current_index

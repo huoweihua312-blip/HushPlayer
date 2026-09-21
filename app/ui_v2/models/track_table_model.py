@@ -4,11 +4,15 @@ from __future__ import annotations
 
 from enum import IntEnum
 from collections.abc import Callable, Iterable
+from typing import TYPE_CHECKING
 from weakref import WeakMethod
 
 from PySide6.QtCore import QAbstractTableModel, QModelIndex, Qt
 
 from app.ui_v2.models.track import Track, format_duration
+
+if TYPE_CHECKING:
+    from app.ui_v2.widgets.track_display import TrackIdentityPresentation
 
 
 class TrackColumn(IntEnum):
@@ -28,6 +32,7 @@ class TrackColumn(IntEnum):
 TRACK_ROLE = int(Qt.ItemDataRole.UserRole) + 1
 PLAYING_ROLE = TRACK_ROLE + 1
 PLAYBACK_ACTIVE_ROLE = TRACK_ROLE + 2
+IDENTITY_ROLE = TRACK_ROLE + 3
 
 
 class TrackTableModel(QAbstractTableModel):
@@ -50,6 +55,7 @@ class TrackTableModel(QAbstractTableModel):
         self._meta_provider: Callable[[Track], str] | None = None
         self._meta_provider_ref = None
         self._header_overrides: dict[TrackColumn, str] = {}
+        self._identity_cache: dict[str, TrackIdentityPresentation] = {}
 
     def rowCount(self, parent: QModelIndex = QModelIndex()) -> int:  # noqa: N802
         return 0 if parent.isValid() else len(self._tracks)
@@ -64,6 +70,8 @@ class TrackTableModel(QAbstractTableModel):
         column = TrackColumn(index.column())
         if role == TRACK_ROLE:
             return track
+        if role == IDENTITY_ROLE:
+            return self._identity_for(track)
         if role == PLAYING_ROLE:
             return track.id == self._playing_track_id
         if role == PLAYBACK_ACTIVE_ROLE:
@@ -71,7 +79,7 @@ class TrackTableModel(QAbstractTableModel):
         if role == Qt.ItemDataRole.DisplayRole:
             if column == TrackColumn.SOURCE and self._has_meta_provider:
                 return self._meta_text(track)
-            return self._display_value(track, column)
+            return self._display_value_for_track(track, column)
         if role == Qt.ItemDataRole.ToolTipRole:
             return self._tooltip_value(track, column)
         if role == Qt.ItemDataRole.TextAlignmentRole and column == TrackColumn.DURATION:
@@ -108,6 +116,7 @@ class TrackTableModel(QAbstractTableModel):
         self.beginResetModel()
         self._tracks = list(tracks)
         self._row_by_id = {track.id: row for row, track in enumerate(self._tracks)}
+        self._identity_cache.clear()
         self.endResetModel()
 
     def set_meta_provider(self, provider: Callable[[Track], str] | None) -> None:
@@ -132,6 +141,7 @@ class TrackTableModel(QAbstractTableModel):
         if row is None:
             return
         self._tracks[row] = updated
+        self._identity_cache.pop(updated.id, None)
         top_left = self.index(row, 0)
         bottom_right = self.index(row, self.columnCount() - 1)
         self.dataChanged.emit(
@@ -204,10 +214,31 @@ class TrackTableModel(QAbstractTableModel):
         }
         return values[column]
 
-    def _tooltip_value(self, track: Track, column: TrackColumn) -> str:
-        from app.ui_v2.widgets.track_display import present_track_identity
+    def _display_value_for_track(self, track: Track, column: TrackColumn) -> str:
+        identity = self._identity_for(track)
+        if column == TrackColumn.TITLE:
+            return identity.title
+        if column == TrackColumn.ARTIST:
+            return identity.artist
+        if column == TrackColumn.ALBUM:
+            return identity.album
+        if column == TrackColumn.DURATION:
+            return format_duration(track.duration_ms)
+        if column == TrackColumn.SOURCE:
+            return track.source_name
+        return ""
 
-        identity = present_track_identity(track)
+    def _identity_for(self, track: Track) -> TrackIdentityPresentation:
+        cached = self._identity_cache.get(track.id)
+        if cached is None:
+            from app.ui_v2.widgets.track_display import present_track_identity
+
+            cached = present_track_identity(track)
+            self._identity_cache[track.id] = cached
+        return cached
+
+    def _tooltip_value(self, track: Track, column: TrackColumn) -> str:
+        identity = self._identity_for(track)
         title, artist, album = identity.title, identity.artist, identity.album
         if column == TrackColumn.STATUS:
             return identity.availability.tooltip if identity.availability.is_visible else ""
@@ -235,8 +266,8 @@ class TrackTableModel(QAbstractTableModel):
         if column == TrackColumn.DURATION:
             return format_duration(track.duration_ms)
         if track.is_missing:
-            return f"文件不可用: {TrackTableModel._display_value(track, column)}"
-        return TrackTableModel._display_value(track, column)
+            return f"文件不可用: {self._display_value_for_track(track, column)}"
+        return self._display_value_for_track(track, column)
 
     @staticmethod
     def _safe_date(value, pattern: str) -> str:

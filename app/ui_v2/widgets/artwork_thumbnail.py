@@ -167,10 +167,16 @@ class ArtworkThumbnail(QLabel):
         pixmap = self._artwork_pixmap
         if not pixmap.isNull():
             target_size = self.size()
-            scaled = pixmap.scaled(
-                target_size,
-                Qt.AspectRatioMode.KeepAspectRatioByExpanding,
-                Qt.TransformationMode.SmoothTransformation,
+            # artwork_pixmap_for_track normally returns an exact square for
+            # this widget. Avoid a second smooth rescale on every repaint.
+            scaled = (
+                pixmap
+                if pixmap.size() == target_size
+                else pixmap.scaled(
+                    target_size,
+                    Qt.AspectRatioMode.KeepAspectRatioByExpanding,
+                    Qt.TransformationMode.SmoothTransformation,
+                )
             )
             source_x = max(0, (scaled.width() - target_size.width()) // 2)
             source_y = max(0, (scaled.height() - target_size.height()) // 2)

@@ -11,6 +11,7 @@ from PySide6.QtWidgets import QStyle, QStyledItemDelegate
 from app.ui_v2.models.track import Track
 from app.ui_v2.models.track_table_model import (
     PLAYBACK_ACTIVE_ROLE,
+    IDENTITY_ROLE,
     PLAYING_ROLE,
     TRACK_ROLE,
     TrackColumn,
@@ -18,7 +19,6 @@ from app.ui_v2.models.track_table_model import (
 from app.ui_v2.theme.icons import fluent_icon, paint_icon
 from app.ui_v2.theme.tokens import Theme
 from app.ui_v2.widgets.artwork_thumbnail import artwork_pixmap_for_track
-from app.ui_v2.widgets.track_display import present_track_identity
 
 
 class RowVisualState(str, Enum):
@@ -70,7 +70,12 @@ class TrackDelegate(QStyledItemDelegate):
         painter.fillRect(rect, self.background_color(state))
 
         column = TrackColumn(index.column())
-        identity = present_track_identity(track)
+        identity = index.data(IDENTITY_ROLE)
+        if identity is None:
+            # Keep the delegate safe for compatible external models.
+            from app.ui_v2.widgets.track_display import present_track_identity
+
+            identity = present_track_identity(track)
         disabled = state in {
             RowVisualState.DISABLED,
             RowVisualState.SELECTED_DISABLED,
