@@ -1,16 +1,18 @@
 {
     "schema_version": 1,
     "channel": "beta",
-    "version": "1.0.0-beta.4",
-    "numeric_version": "1.0.0.4",
+    "version": "1.0.0-beta.5",
+    "numeric_version": "1.0.0.5",
     "architecture": "win-x64",
     "mandatory": false,
-    "setup_url": "https://github.com/huoweihua312-blip/HushPlayer/releases/download/v1.0.0-beta.4/HushPlayer-1.0.0-beta.4-win-x64-setup.exe",
-    "setup_size": 130956749,
-    "sha256": "6924d1f625636df7ee10d7e50f1d0811969db136027bff7f3cf34ecf91eeceb4",
+    "setup_url": "https://api.gitcode.com/api/v5/repos/gcw_iPVB8B5g/HushPlayer-updates/releases/v1.0.0-beta.5/attach_files/HushPlayer-1.0.0-beta.5-win-x64-setup.exe/download",
+    "setup_size": 130947093,
+    "sha256": "40cfdfc2dca61c55be2d493541e9891b964fa311adb9855b82fb440f8305a057",
     "release_notes": [
-        "修复旧版更新助手无法自举到修复版的问题；过渡更新会使用完整安装包完成一次升级，后续版本改用已校验更新包内的新助手。",
-        "修复历史安装目录权限不足导致安装替换失败的问题；需要时安装器会请求一次管理员权限，并继续保留用户上次选择的安装目录。"
+        "优化大曲库启动、队列构建和播放状态恢复，减少低配电脑上的启动卡顿。",
+        "合并连续队列刷新并缓存稳定队列投影，降低播放过程中重复重绘造成的短暂停顿。",
+        "延后随机播放队列初始化，顺序播放和普通启动不再提前处理整份随机队列。",
+        "优化歌曲列表身份信息、提示文本和封面缩放计算，减少滚动与窗口调整时的界面开销。"
     ],
     "release_history": [
         {
@@ -328,6 +330,21 @@
                 "修复旧版更新助手无法自举到修复版的问题；过渡更新会使用完整安装包完成一次升级，后续版本改用已校验更新包内的新助手。",
                 "修复历史安装目录权限不足导致安装替换失败的问题；需要时安装器会请求一次管理员权限，并继续保留用户上次选择的安装目录。"
             ]
+        },
+        {
+            "version": "1.0.0-beta.5",
+            "numeric_version": "1.0.0.5",
+            "release_date": "2026-09-22",
+            "notes": [
+                "优化大曲库启动、队列构建和播放状态恢复，减少低配电脑上的启动卡顿。",
+                "合并连续队列刷新并缓存稳定队列投影，降低播放过程中重复重绘造成的短暂停顿。",
+                "延后随机播放队列初始化，顺序播放和普通启动不再提前处理整份随机队列。",
+                "优化歌曲列表身份信息、提示文本和封面缩放计算，减少滚动与窗口调整时的界面开销。"
+            ]
         }
-    ]
+    ],
+    "package_url": "https://api.gitcode.com/api/v5/repos/gcw_iPVB8B5g/HushPlayer-updates/releases/v1.0.0-beta.5/attach_files/HushPlayer-1.0.0-beta.5-win-x64-update.zip/download",
+    "package_size": 176209251,
+    "package_sha256": "beebf026ce963a07e53bd956ad4abf18395dcfd5a71bc5d5faad1cc94b9c2bb4",
+    "package_filename": "HushPlayer-1.0.0-beta.5-win-x64-update.zip"
 }
