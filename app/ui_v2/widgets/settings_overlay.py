@@ -893,7 +893,10 @@ class SettingsOverlay(QWidget):
             != str(self._session.working_snapshot.get("cache_directory", "") or "")
         )
         try:
-            saved = self.bridge.save_snapshot(self._session.working_snapshot)
+            saved = self.bridge.save_snapshot(
+                self._session.working_snapshot,
+                apply=self._preview_callback is None,
+            )
         except SettingsBridgeError as error:
             self._save_state = "failed"
             self.footer.set_state(dirty=True, valid=True, state="failed")

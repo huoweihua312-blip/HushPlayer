@@ -599,6 +599,45 @@ class DesktopLyricsMainWindowIntegrationTests(unittest.TestCase):
     def setUpClass(cls) -> None:
         cls.app = QApplication.instance() or QApplication([])
 
+    def test_desktop_lyrics_changes_preserve_runtime_volume(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            window = MainWindow(settings_path=Path(directory) / "settings.json")
+            try:
+                for volume in (0, 23):
+                    window.playback_adapter.set_volume(volume)
+                    window._on_desktop_lyrics_setting_changed(
+                        "floating_lyrics_color", "gold"
+                    )
+                    window._desktop_lyrics_settings_save_timer.stop()
+                    self.assertTrue(window._save_pending_desktop_lyrics_settings())
+                    self.assertEqual(window.playback_adapter.state.volume, volume)
+                    window._reset_desktop_lyrics_position_from_quick_settings()
+                    self.assertEqual(window.playback_adapter.state.volume, volume)
+                    window._persist_desktop_lyrics_position(120, 160)
+                    self.assertEqual(window.playback_adapter.state.volume, volume)
+            finally:
+                window.close()
+                self.app.processEvents()
+
+    def test_desktop_lyrics_settings_preview_preserves_runtime_volume(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            settings_path = Path(directory) / "settings.json"
+            settings_path.write_text('{"volume": 0}', encoding="utf-8")
+            window = MainWindow(settings_path=settings_path)
+            try:
+                self.assertEqual(window.playback_adapter.state.volume, 0)
+                window.playback_adapter.set_volume(29)
+                values = window._settings_snapshot.with_updates(
+                    {"floating_lyrics_color": "gold"}
+                ).to_dict()
+                window._apply_settings_snapshot(values)
+                self.assertEqual(window.playback_adapter.state.volume, 29)
+                window._apply_settings_snapshot({**values, "volume": 41})
+                self.assertEqual(window.playback_adapter.state.volume, 41)
+            finally:
+                window.close()
+                self.app.processEvents()
+
     def test_player_bar_exposes_desktop_lyrics_without_changing_route(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             window = MainWindow(settings_path=Path(directory) / "settings.json")
@@ -758,7 +797,7 @@ class DesktopLyricsMainWindowIntegrationTests(unittest.TestCase):
                 self.app.processEvents()
                 self.assertEqual(desktop._main_label.font().pixelSize(), 72)
 
-                def fail_save(_snapshot):
+                def fail_save(_snapshot, *, apply=True):
                     raise SettingsBridgeError("无法保存桌面歌词设置")
 
                 window.settings_bridge.save_snapshot = fail_save

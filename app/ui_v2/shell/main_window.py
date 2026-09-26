@@ -561,7 +561,7 @@ class MainWindow(QMainWindow):
         self.immersive_lyrics_options = ImmersiveLyricsOptions(theme=self._theme.mode)
         self._apply_settings_values(self._settings_snapshot.to_dict())
         self.playback_adapter.set_volume(
-            int(self.settings_bridge.value(self._settings_snapshot, "volume") or 65)
+            int(self.settings_bridge.value(self._settings_snapshot, "volume"))
         )
         self.playback_adapter.set_queue(self.library_collection.tracks())
         self.library_page = AllSongsPage(self.library_adapter, self._theme, self)
@@ -1737,10 +1737,11 @@ class MainWindow(QMainWindow):
         """Preview or apply a Settings snapshot without creating another shell."""
 
         self._apply_settings_values(values)
-        try:
-            self.playback_adapter.set_volume(int(values.get("volume", 65) or 65))
-        except (TypeError, ValueError):
-            self.playback_adapter.set_volume(65)
+        if values.get("volume", 65) != self._settings_snapshot.get("volume", 65):
+            try:
+                self.playback_adapter.set_volume(int(values.get("volume", 65)))
+            except (TypeError, ValueError):
+                self.playback_adapter.set_volume(65)
         mode = str(values.get("appearance_mode", "dark"))
         self.set_theme(
             "dark" if self._force_dark_theme or mode != "light" else "light",
@@ -2593,7 +2594,7 @@ class MainWindow(QMainWindow):
             return True
         previous = self._settings_snapshot
         try:
-            saved = self.settings_bridge.save_snapshot(candidate)
+            saved = self.settings_bridge.save_snapshot(candidate, apply=False)
         except SettingsBridgeError as error:
             self._desktop_lyrics_settings_pending_snapshot = None
             if self.desktop_lyrics_window is not None:
@@ -2644,7 +2645,8 @@ class MainWindow(QMainWindow):
             self._settings_snapshot = self.settings_bridge.save_snapshot(
                 self._settings_snapshot.with_updates(
                     {"floating_lyrics_x": int(x), "floating_lyrics_y": int(y)}
-                )
+                ),
+                apply=False,
             )
             if self.settings_overlay is not None and self.settings_overlay.isVisible():
                 self.settings_overlay.merge_external_snapshot(

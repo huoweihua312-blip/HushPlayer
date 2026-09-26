@@ -53,11 +53,21 @@ class B2SettingsTests(unittest.TestCase):
         self.assertEqual(self.overlay._theme.mode, "light")
         self.assertTrue(self.overlay.is_dirty)
         self.assertEqual(self.path.read_bytes(), self.original)
+
         self.overlay.request_close()
         self.assertTrue(self.overlay.confirm_dialog.isVisible())
         self.overlay.confirm_dialog.discard_button.click()
         self.assertEqual(self.preview[-1]["appearance_mode"], "dark")
         self.assertEqual(self.path.read_bytes(), self.original)
+
+    def test_save_applies_runtime_settings_once(self):
+        applied = []
+        self.bridge._apply_callback = applied.append
+        self.overlay._preview_callback = applied.append
+        self.overlay.session.set("floating_lyrics_font_size", 50)
+        self.assertTrue(self.overlay.save())
+        self.assertEqual(len(applied), 1)
+        self.assertEqual(applied[0]["floating_lyrics_font_size"], 50)
 
     def test_failed_save_keeps_draft_and_retry_preserves_unknown_fields(self):
         self.overlay._controls["reduce_motion"].click()
