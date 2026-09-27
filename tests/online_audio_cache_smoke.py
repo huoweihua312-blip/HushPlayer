@@ -189,6 +189,44 @@ def test_source_cache_permissions() -> None:
         assert OnlineDiscoveryRuntime.online_source_allows_audio_cache(runtime, media_item) is expected
 
 
+def test_active_cache_survives_delayed_startup_cleanup() -> None:
+    with tempfile.TemporaryDirectory(prefix="hushplayer_active_cache_cleanup_") as temp_dir:
+        service = OnlineAudioCacheService(Path(temp_dir) / "cache")
+        value = track("active")
+        try:
+            assert service.start_cache(
+                value,
+                {"url": "http://127.0.0.1:9/slow", "headers": {}, "quality": "standard"},
+            )
+            assert service.active_count() == 1
+            service._cleanup_startup_artifacts()
+            assert service.active_count() == 1
+            assert service.cache_record(value)["status"] == "downloading"
+        finally:
+            service.shutdown()
+
+
+def test_corrupt_cache_index_is_quarantined_without_deleting_audio() -> None:
+    with tempfile.TemporaryDirectory(prefix="hushplayer_corrupt_cache_index_") as temp_dir:
+        root = Path(temp_dir) / "cache"
+        root.mkdir(parents=True)
+        index = root / "cache_index.sqlite3"
+        index.write_bytes(b"not sqlite")
+        audio = root / "audio"
+        audio.mkdir()
+        sentinel = audio / ("a" * 64 + ".wav")
+        sentinel.write_bytes(b"keep")
+        service = OnlineAudioCacheService(root)
+        try:
+            assert service.cache_record(track("damaged-index")) is None
+            assert index.is_file()
+            assert list(root.glob("cache_index.sqlite3.corrupt-*"))
+            service._cleanup_startup_artifacts()
+            assert sentinel.is_file()
+        finally:
+            service.shutdown()
+
+
 def test_failed_metadata_cache_cleanup() -> None:
     with tempfile.TemporaryDirectory(prefix="hushplayer_cache_cleanup_") as temp_dir:
         root = Path(temp_dir)
@@ -214,6 +252,8 @@ def main() -> int:
     with FixtureServer() as server:
         test_cache_service(app, server)
     test_source_cache_permissions()
+    test_active_cache_survives_delayed_startup_cleanup()
+    test_corrupt_cache_index_is_quarantined_without_deleting_audio()
     test_failed_metadata_cache_cleanup()
     print("online audio cache smoke: OK")
     return 0

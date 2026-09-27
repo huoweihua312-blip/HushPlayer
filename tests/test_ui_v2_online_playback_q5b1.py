@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import sqlite3
 import sys
 import tempfile
 import time
@@ -154,8 +155,11 @@ class _FakeAudioCache:
     def __init__(self) -> None:
         self.record: dict | None = None
         self.started: list[tuple[object, dict]] = []
+        self.raise_database_error = False
 
     def valid_cache(self, _value, *, touch: bool = True) -> dict | None:
+        if self.raise_database_error:
+            raise sqlite3.DatabaseError("fixture cache index is damaged")
         return dict(self.record) if isinstance(self.record, dict) else None
 
     def start_cache(self, value, resolution: dict) -> bool:
@@ -346,6 +350,16 @@ class OnlinePlaybackQ5B1Tests(unittest.TestCase):
         self.assertEqual(Path(self.player.source().toLocalFile()), self.local_path)
         self.assertTrue(self.controller.is_playing)
         self.assertEqual(self.controller._online_cache_key, "cache-hit")
+
+    def test_damaged_cache_index_falls_back_to_online_resolution(self) -> None:
+        remote = _remote_track("damaged-cache")
+        self.cache.raise_database_error = True
+        self.adapter.set_queue((remote,))
+
+        self.adapter.play_track(remote.id)
+
+        self.assertEqual(len(self.client.requests), 1)
+        self.assertEqual(self.controller.playback_status, "resolving")
 
     def test_resolved_remote_starts_policy_allowed_cache(self) -> None:
         remote = _remote_track("cache-after-resolve")

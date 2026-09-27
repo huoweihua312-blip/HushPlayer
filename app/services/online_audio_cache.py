@@ -92,6 +92,24 @@ class OnlineAudioCacheService(QObject):
         "aac": ".aac",
     }
     _STARTUP_CLEANUP_DELAY_MS = 10_000
+    _SCHEMA_COLUMNS = {
+        "cache_key",
+        "stable_identity",
+        "source_id",
+        "track_id",
+        "quality",
+        "local_path",
+        "temporary_path",
+        "status",
+        "mime_type",
+        "file_extension",
+        "file_size",
+        "expected_size",
+        "created_at",
+        "completed_at",
+        "last_accessed_at",
+        "last_error",
+    }
 
     def __init__(self, cache_root: Path, parent: QObject | None = None) -> None:
         super().__init__(parent)
@@ -104,6 +122,7 @@ class OnlineAudioCacheService(QObject):
         self.network = QNetworkAccessManager(self)
         self._jobs: dict[str, _CacheJob] = {}
         self._closed = False
+        self._index_recovered = False
         # Creating the SQLite schema can be surprisingly expensive on some
         # Windows disks. Database methods initialize it lazily, while stale
         # startup cleanup waits until the first interaction burst has settled.
@@ -117,15 +136,8 @@ class OnlineAudioCacheService(QObject):
     def _database_connection(self):
         self.files_dir.mkdir(parents=True, exist_ok=True)
         self.temp_dir.mkdir(parents=True, exist_ok=True)
-        initialize_schema = not self.index_path.is_file()
-        database = sqlite3.connect(str(self.index_path), timeout=5.0)
-        database.row_factory = sqlite3.Row
-        database.execute("PRAGMA busy_timeout=5000")
-        database.execute("PRAGMA synchronous=NORMAL")
+        database = self._open_database()
         try:
-            if initialize_schema:
-                database.execute("PRAGMA journal_mode=WAL")
-                self._create_schema(database)
             yield database
             database.commit()
         except Exception:
@@ -133,6 +145,76 @@ class OnlineAudioCacheService(QObject):
             raise
         finally:
             database.close()
+
+    def _open_database(self) -> sqlite3.Connection:
+        """Open the disposable cache index, rebuilding only corrupt indexes.
+
+        Cache metadata is recoverable state.  A malformed index is quarantined
+        beside the cache directory so audio files and user data are never
+        deleted merely because SQLite cannot read its catalog.
+        """
+
+        database: sqlite3.Connection | None = None
+        for attempt in range(2):
+            was_existing = self.index_path.is_file()
+            try:
+                database = sqlite3.connect(str(self.index_path), timeout=5.0)
+                database.row_factory = sqlite3.Row
+                database.execute("PRAGMA busy_timeout=5000")
+                database.execute("PRAGMA synchronous=NORMAL")
+                if not was_existing:
+                    database.execute("PRAGMA journal_mode=WAL")
+                    self._create_schema(database)
+                else:
+                    columns = {
+                        str(row[1])
+                        for row in database.execute("PRAGMA table_info(cache_entries)")
+                    }
+                    if not self._SCHEMA_COLUMNS.issubset(columns):
+                        database.close()
+                        if attempt == 0 and self._quarantine_index():
+                            continue
+                        raise sqlite3.DatabaseError("缓存索引结构不完整。")
+                return database
+            except sqlite3.DatabaseError as error:
+                if database is not None:
+                    database.close()
+                    database = None
+                if (
+                    attempt == 0
+                    and self._is_corrupt_index_error(error)
+                    and self._quarantine_index()
+                ):
+                    continue
+                raise
+        raise sqlite3.DatabaseError("无法打开缓存索引。")
+
+    @staticmethod
+    def _is_corrupt_index_error(error: sqlite3.DatabaseError) -> bool:
+        message = str(error).casefold()
+        return any(
+            marker in message
+            for marker in (
+                "file is not a database",
+                "malformed",
+                "not a database",
+                "no such table",
+                "no such column",
+            )
+        )
+
+    def _quarantine_index(self) -> bool:
+        if not self.index_path.is_file():
+            return False
+        quarantine = self.index_path.with_name(
+            f"{self.index_path.name}.corrupt-{time.time_ns()}"
+        )
+        try:
+            os.replace(self.index_path, quarantine)
+        except OSError:
+            return False
+        self._index_recovered = True
+        return True
 
     @staticmethod
     def _normalized_identity(value: MediaItem | dict) -> tuple[MediaItem, str, str, str]:
@@ -469,14 +551,25 @@ class OnlineAudioCacheService(QObject):
         if self._closed:
             return
         try:
+            active_cache_keys = set(self._jobs)
             for path in self.temp_dir.glob("*.part"):
-                self._unlink_if_safe(path, self.temp_dir)
+                if path.stem not in active_cache_keys:
+                    self._unlink_if_safe(path, self.temp_dir)
             with self._database_connection() as database:
-                database.execute(
-                    "UPDATE cache_entries SET status = 'failed', temporary_path = '', "
-                    "file_size = 0, last_error = ? WHERE status = 'downloading'",
-                    ("上次运行结束前缓存未完成。",),
-                )
+                if active_cache_keys:
+                    placeholders = ",".join("?" for _ in active_cache_keys)
+                    database.execute(
+                        "UPDATE cache_entries SET status = 'failed', temporary_path = '', "
+                        "file_size = 0, last_error = ? WHERE status = 'downloading' "
+                        f"AND cache_key NOT IN ({placeholders})",
+                        ("上次运行结束前缓存未完成。", *active_cache_keys),
+                    )
+                else:
+                    database.execute(
+                        "UPDATE cache_entries SET status = 'failed', temporary_path = '', "
+                        "file_size = 0, last_error = ? WHERE status = 'downloading'",
+                        ("上次运行结束前缓存未完成。",),
+                    )
                 referenced = {
                     Path(str(row[0])).name
                     for row in database.execute(
@@ -484,6 +577,11 @@ class OnlineAudioCacheService(QObject):
                     ).fetchall()
                     if str(row[0] or "")
                 }
+            # After rebuilding a corrupt index there is no safe identity map
+            # for existing audio files. Keep them until a later explicit
+            # cache operation can validate or replace them.
+            if self._index_recovered:
+                return
             for path in self.files_dir.iterdir():
                 if (
                     path.is_file()

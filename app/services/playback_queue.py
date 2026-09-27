@@ -51,6 +51,11 @@ class PlaybackQueue:
         current = self.current_item
         current_identity = current.stable_identity
         if mode == "shuffle":
+            # The UI projection and next_index() must consume the same lazy
+            # shuffle order.  Without preparing here, the first projection
+            # falls back to membership order while playback prepares a random
+            # order a moment later.
+            self._ensure_shuffle_remaining()
             history = list(self._shuffle_history)
             cursor = self._shuffle_cursor
             if not (0 <= cursor < len(history)) or history[cursor] != current_identity:

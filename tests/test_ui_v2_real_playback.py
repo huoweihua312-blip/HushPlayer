@@ -252,12 +252,26 @@ class UiV2RealPlaybackTests(unittest.TestCase):
     def test_display_queue_tracks_match_the_next_shuffle_item(self) -> None:
         self.adapter.set_queue((self.first, self.second, self.third))
         self.adapter.play_track("first")
+        self.controller.queue._random.seed(0)
         self.adapter.toggle_shuffle()
 
         displayed_next = self.adapter.display_queue_tracks[1].id
         self.adapter.play_next()
         self.assertEqual(self.adapter.state.current_track.id, displayed_next)
         self.assertEqual(self.adapter.display_queue_tracks[0].id, displayed_next)
+
+    def test_shuffle_projection_keeps_history_after_next_and_previous(self) -> None:
+        self.adapter.set_queue((self.first, self.second, self.third))
+        self.adapter.play_track("first")
+        self.controller.queue._random.seed(0)
+        self.adapter.toggle_shuffle()
+
+        first_next = self.adapter.display_queue_tracks[1].id
+        self.adapter.play_next()
+        self.assertEqual(self.adapter.state.current_track.id, first_next)
+        self.adapter.play_previous()
+        self.assertEqual(self.adapter.state.current_track.id, "first")
+        self.assertEqual(self.adapter.display_queue_tracks[1].id, first_next)
 
     def test_track_changed_is_published_after_the_new_media_source_is_selected(self) -> None:
         self.adapter.set_queue((self.first, self.second))

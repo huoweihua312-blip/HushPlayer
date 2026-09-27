@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import sqlite3
 import time
 from collections.abc import Callable, Iterable
 from pathlib import Path
@@ -603,7 +604,7 @@ class ProductionPlaybackController(QObject):
             return None
         try:
             record = cache.valid_cache(media_item)
-        except (OSError, RuntimeError, TypeError, ValueError):
+        except (OSError, RuntimeError, TypeError, ValueError, sqlite3.Error):
             return None
         return dict(record) if isinstance(record, dict) else None
 
@@ -676,7 +677,7 @@ class ProductionPlaybackController(QObject):
             return
         try:
             self._online_audio_cache.start_cache(media_item, resolution)
-        except (OSError, RuntimeError, TypeError, ValueError):
+        except (OSError, RuntimeError, TypeError, ValueError, sqlite3.Error):
             return
 
     def _try_recover_online_playback(self, reason: str) -> bool:
