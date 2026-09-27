@@ -227,6 +227,26 @@ def test_corrupt_cache_index_is_quarantined_without_deleting_audio() -> None:
             service.shutdown()
 
 
+def test_failed_cache_index_write_does_not_leave_active_task() -> None:
+    with tempfile.TemporaryDirectory(prefix="hushplayer_cache_write_failure_") as temp_dir:
+        service = OnlineAudioCacheService(Path(temp_dir) / "cache")
+        value = track("write-failure")
+        original_record = service._record_downloading
+        service._record_downloading = lambda _job: (_ for _ in ()).throw(
+            OSError("fixture index write failure")
+        )
+        try:
+            assert not service.start_cache(
+                value,
+                {"url": "http://127.0.0.1:9/failure", "headers": {}, "quality": "standard"},
+            )
+            assert service.active_count() == 0
+            assert not list(service.temp_dir.glob("*.part"))
+        finally:
+            service._record_downloading = original_record
+            service.shutdown()
+
+
 def test_failed_metadata_cache_cleanup() -> None:
     with tempfile.TemporaryDirectory(prefix="hushplayer_cache_cleanup_") as temp_dir:
         root = Path(temp_dir)
@@ -254,6 +274,7 @@ def main() -> int:
     test_source_cache_permissions()
     test_active_cache_survives_delayed_startup_cleanup()
     test_corrupt_cache_index_is_quarantined_without_deleting_audio()
+    test_failed_cache_index_write_does_not_leave_active_task()
     test_failed_metadata_cache_cleanup()
     print("online audio cache smoke: OK")
     return 0

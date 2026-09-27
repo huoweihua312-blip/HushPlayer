@@ -359,7 +359,22 @@ class OnlineAudioCacheService(QObject):
             file_extension=self._extension_from_hints(media_item, resolution),
         )
         self._jobs[cache_key] = job
-        self._record_downloading(job)
+        try:
+            self._record_downloading(job)
+        except (OSError, RuntimeError, sqlite3.Error) as error:
+            # Do not leave a task registered when its initial index write
+            # fails.  The network reply and .part file must be released before
+            # the caller is allowed to retry the same track.
+            self._jobs.pop(cache_key, None)
+            reply.blockSignals(True)
+            reply.abort()
+            reply.deleteLater()
+            if output.isOpen():
+                output.close()
+            output.deleteLater()
+            self._unlink_if_safe(temporary_path, self.temp_dir)
+            self.cacheFailed.emit(cache_key, f"无法登记音频缓存任务：{error}")
+            return False
         reply.metaDataChanged.connect(lambda key=cache_key: self._validate_response(key))
         reply.readyRead.connect(lambda key=cache_key: self._read_available(key))
         reply.downloadProgress.connect(
