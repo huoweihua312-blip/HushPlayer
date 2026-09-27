@@ -5,7 +5,6 @@ from __future__ import annotations
 import ctypes
 from dataclasses import replace
 from enum import Enum
-import math
 import os
 from pathlib import Path
 import tempfile
@@ -15,7 +14,6 @@ from PySide6.QtCore import (
     QEasingCurve,
     QEvent,
     QPoint,
-    QPointF,
     QRect,
     QRectF,
     QUrl,
@@ -30,13 +28,10 @@ from PySide6.QtGui import (
     QGuiApplication,
     QKeySequence,
     QMouseEvent,
-    QBrush,
-    QImage,
     QPainter,
     QPainterPath,
     QPalette,
     QPixmap,
-    QRadialGradient,
     QRegion,
     QShortcut,
 )
@@ -158,16 +153,14 @@ def _resolve_data_mode(value: str | None) -> str:
 
 
 class ThemeRevealOverlay(QWidget):
-    """Radial old-theme layer with a reusable off-screen render buffer."""
+    """Cached old-theme layer that fades out after the new theme is applied."""
 
     finished = Signal()
-    _DURATION_MS = 1200
-    _FEATHER_PX = 110
+    _DURATION_MS = 360
 
     def __init__(
         self,
         snapshot: QPixmap,
-        origin_widget: QWidget,
         parent: QWidget,
     ) -> None:
         super().__init__(parent)
@@ -179,24 +172,13 @@ class ThemeRevealOverlay(QWidget):
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
         self.setGeometry(parent.rect())
         self._snapshot = snapshot
-        self._snapshot_image = snapshot.toImage().convertToFormat(
-            QImage.Format.Format_ARGB32_Premultiplied
-        )
-        self._render_image = QImage(
-            self.size(),
-            QImage.Format.Format_ARGB32_Premultiplied,
-        )
-        self._origin_widget = origin_widget
-        self._update_origin()
-        self._radius = 0.0
+        self._opacity = 1.0
         self._animation = QVariantAnimation(self)
-        self._animation.setStartValue(0.0)
-        self._animation.setEndValue(
-            math.hypot(float(self.width()), float(self.height())) + self._FEATHER_PX
-        )
+        self._animation.setStartValue(1.0)
+        self._animation.setEndValue(0.0)
         self._animation.setDuration(self._DURATION_MS)
         self._animation.setEasingCurve(QEasingCurve.Type.OutCubic)
-        self._animation.valueChanged.connect(self._set_radius)
+        self._animation.valueChanged.connect(self._set_opacity)
         self._animation.finished.connect(self._finish)
 
     def start(self) -> None:
@@ -206,9 +188,7 @@ class ThemeRevealOverlay(QWidget):
     def show_ready(self) -> None:
         self.raise_()
         self.show()
-        # Paint the initial snapshot before theme polishing starts.  Only this
-        # first frame is synchronous; animation frames still use the reused
-        # off-screen buffer and normal queued updates.
+        # Paint the cached old theme before the new theme is revealed.
         self.repaint()
 
     def start_animation(self) -> None:
@@ -219,20 +199,8 @@ class ThemeRevealOverlay(QWidget):
             return
         self._animation.start()
 
-    def pause_for_theme_refresh(self) -> bool:
-        """Freeze the radius while synchronous theme work uses the UI thread."""
-
-        if self._animation.state() != QAbstractAnimation.State.Running:
-            return False
-        self._animation.setPaused(True)
-        return True
-
-    def resume_after_theme_refresh(self, was_running: bool) -> None:
-        if was_running and self._animation.state() == QAbstractAnimation.State.Paused:
-            self._animation.setPaused(False)
-
-    def _set_radius(self, value) -> None:
-        self._radius = max(0.0, float(value or 0.0))
+    def _set_opacity(self, value) -> None:
+        self._opacity = max(0.0, min(1.0, float(value or 0.0)))
         self.update()
 
     def _finish(self) -> None:
@@ -241,50 +209,14 @@ class ThemeRevealOverlay(QWidget):
         self.deleteLater()
 
     def resizeEvent(self, event) -> None:  # noqa: N802
-        self._render_image = QImage(
-            self.size(),
-            QImage.Format.Format_ARGB32_Premultiplied,
-        )
-        self._update_origin()
         super().resizeEvent(event)
 
-    def _update_origin(self) -> None:
-        """Keep the reveal center on the button's actual screen position."""
-
-        button_top_left = self._origin_widget.mapToGlobal(QPoint(0, 0))
-        overlay_top_left = self.mapToGlobal(QPoint(0, 0))
-        self._origin = QPointF(
-            button_top_left.x() - overlay_top_left.x()
-            + (self._origin_widget.width() - 1) / 2.0,
-            button_top_left.y() - overlay_top_left.y()
-            + (self._origin_widget.height() - 1) / 2.0,
-        )
-
     def paintEvent(self, event) -> None:  # noqa: N802
-        if self._snapshot_image.isNull() or self._render_image.isNull():
+        if self._snapshot.isNull() or self._opacity <= 0.0:
             return
-        self._render_image.fill(Qt.GlobalColor.transparent)
-        image_painter = QPainter(self._render_image)
-        image_painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform, True)
-        image_painter.drawImage(self._render_image.rect(), self._snapshot_image)
-        if self._radius > 0.0:
-            feather = min(self._FEATHER_PX, max(24.0, self._radius * 0.24))
-            inner_ratio = max(0.0, (self._radius - feather) / self._radius)
-            inverse_gradient = QRadialGradient(
-                QPointF(float(self._origin.x()), float(self._origin.y())),
-                self._radius,
-            )
-            inverse_gradient.setColorAt(0.0, QColor(0, 0, 0, 0))
-            inverse_gradient.setColorAt(inner_ratio, QColor(0, 0, 0, 0))
-            inverse_gradient.setColorAt(1.0, QColor(0, 0, 0, 255))
-            image_painter.setCompositionMode(
-                QPainter.CompositionMode.CompositionMode_DestinationIn
-            )
-            image_painter.fillRect(self._render_image.rect(), QBrush(inverse_gradient))
-        image_painter.end()
         painter = QPainter(self)
-        painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform, True)
-        painter.drawImage(self.rect(), self._render_image)
+        painter.setOpacity(self._opacity)
+        painter.drawPixmap(self.rect(), self._snapshot)
         painter.end()
 
 
@@ -433,9 +365,6 @@ class MainWindow(QMainWindow):
         self._theme_reveal_enabled = True
         self._animate_next_theme_change = False
         self._theme_reveal_overlay: ThemeRevealOverlay | None = None
-        self._theme_apply_generation = 0
-        self._theme_apply_phase = 0
-        self._theme_apply_in_progress = False
         self._immersive_shell_active = False
         self._immersive_normal_geometry: QRect | None = None
         self._immersive_transparency_enabled = False
@@ -712,9 +641,6 @@ class MainWindow(QMainWindow):
         if animate and reveal_overlay is None:
             reveal_overlay = self._prepare_theme_reveal()
         self._animate_next_theme_change = False
-        self._theme_apply_generation += 1
-        generation = self._theme_apply_generation
-        self._theme_apply_in_progress = False
         if reveal_overlay is None and self._theme_reveal_overlay is not None:
             self._cancel_theme_reveal()
 
@@ -722,24 +648,19 @@ class MainWindow(QMainWindow):
         stylesheet = build_stylesheet(self._theme)
         if reveal_overlay is not None:
             try:
-                self._apply_theme_global_styles_synchronously(
+                # Keep the cached old frame on top while the complete theme
+                # is applied once.  Splitting this work across animation
+                # frames caused visible stalls on slower machines.
+                if self._theme_reveal_overlay is not reveal_overlay:
+                    self._show_theme_reveal(reveal_overlay)
+                self._apply_theme_synchronously(
                     stylesheet,
-                    application_scope=False,
+                    application_scope=not self.isVisible(),
                 )
             except Exception:
                 self._cancel_theme_reveal()
                 raise
-            if self._theme_reveal_overlay is not reveal_overlay:
-                self._show_theme_reveal(reveal_overlay)
-            self._theme_apply_in_progress = True
-            self._theme_apply_phase = 0
             reveal_overlay.start_animation()
-            QTimer.singleShot(
-                0,
-                lambda generation=generation, theme=self._theme: self._run_theme_apply_phase(
-                    generation, theme
-                ),
-            )
             return
         self._apply_theme_synchronously(
             stylesheet,
@@ -765,29 +686,6 @@ class MainWindow(QMainWindow):
         app.setProperty("hushUiFlavor", "ui-v2")
         app.setProperty("hushUiV2ThemeMode", self._theme.mode)
         self._apply_root_stylesheet()
-
-    def _apply_theme_global_styles_synchronously(
-        self,
-        stylesheet: str,
-        *,
-        application_scope: bool,
-    ) -> None:
-        """Apply global rules while suppressing the intermediate repaint."""
-
-        was_enabled = self.updatesEnabled()
-        root_was_enabled = self.root.updatesEnabled()
-        self.setUpdatesEnabled(False)
-        self.root.setUpdatesEnabled(False)
-        try:
-            self._apply_theme_global_styles(
-                stylesheet,
-                application_scope=application_scope,
-            )
-        finally:
-            self.root.setUpdatesEnabled(root_was_enabled)
-            self.setUpdatesEnabled(was_enabled)
-            self.update()
-            self.root.update()
 
     def _apply_theme_component_phase(self, phase: int, theme: Theme) -> None:
         """Apply one small UI group so animation frames can be processed between groups."""
@@ -847,53 +745,6 @@ class MainWindow(QMainWindow):
             self.update()
             self.root.update()
 
-    def _run_theme_apply_phase(self, generation: int, theme: Theme) -> None:
-        if (
-            generation != self._theme_apply_generation
-            or not self._theme_apply_in_progress
-            or self._close_finalized
-        ):
-            return
-        phase = self._theme_apply_phase
-        overlay = self._theme_reveal_overlay
-        animation_was_running = (
-            overlay.pause_for_theme_refresh() if overlay is not None else False
-        )
-        was_enabled = self.updatesEnabled()
-        root_was_enabled = self.root.updatesEnabled()
-        self.setUpdatesEnabled(False)
-        self.root.setUpdatesEnabled(False)
-        try:
-            self._apply_theme_component_phase(phase, theme)
-        except Exception as error:
-            self._theme_apply_in_progress = False
-            self._cancel_theme_reveal()
-            QToolTip.showText(
-                self.title_bar.theme_button.mapToGlobal(
-                    self.title_bar.theme_button.rect().bottomLeft()
-                ),
-                f"主题切换失败：{error}",
-                self.title_bar.theme_button,
-            )
-            return
-        finally:
-            self.root.setUpdatesEnabled(root_was_enabled)
-            self.setUpdatesEnabled(was_enabled)
-            self.update()
-            self.root.update()
-            if overlay is not None:
-                overlay.resume_after_theme_refresh(animation_was_running)
-        self._theme_apply_phase += 1
-        if self._theme_apply_phase < 6:
-            QTimer.singleShot(
-                0,
-                lambda generation=generation, theme=theme: self._run_theme_apply_phase(
-                    generation, theme
-                ),
-            )
-        else:
-            self._theme_apply_in_progress = False
-
     def toggle_theme(self) -> None:
         """Persist an explicit Light/Dark choice through the existing bridge."""
 
@@ -917,7 +768,7 @@ class MainWindow(QMainWindow):
         self._settings_snapshot = saved
 
     def _queue_theme_reveal_apply(self, snapshot: SettingsSnapshot) -> bool:
-        """Start the reveal before synchronous theme persistence runs."""
+        """Persist and apply a theme change through the lightweight fade."""
 
         if not (
             self._theme_reveal_enabled
@@ -926,33 +777,10 @@ class MainWindow(QMainWindow):
             and self._theme_reveal_overlay is None
         ):
             return False
-        overlay = self._prepare_theme_reveal()
-        if overlay is None:
-            return False
-        self._animate_next_theme_change = False
-        self._show_theme_reveal(overlay)
-        # Start the animation before the queued settings write and theme
-        # polish. The first event-loop turn can now observe a running
-        # transition instead of waiting for the synchronous style refresh.
-        overlay.start_animation()
-        QTimer.singleShot(
-            self._THEME_REVEAL_APPLY_DELAY_MS,
-            lambda snapshot=snapshot: self._apply_queued_theme_snapshot(snapshot),
-        )
-        return True
-
-    def _apply_queued_theme_snapshot(self, snapshot: SettingsSnapshot) -> None:
-        overlay = self._theme_reveal_overlay
-        if overlay is None:
-            return
-        animation_was_running = overlay.pause_for_theme_refresh()
         try:
             saved = self.settings_bridge.save_snapshot(snapshot, apply=False)
             self._settings_snapshot = saved
-            self._apply_settings_snapshot(
-                saved.to_dict(),
-                theme_reveal_overlay=overlay,
-            )
+            self._apply_settings_snapshot(saved.to_dict())
         except Exception as error:
             self._animate_next_theme_change = False
             self._cancel_theme_reveal()
@@ -963,12 +791,9 @@ class MainWindow(QMainWindow):
                 f"主题切换失败：{error}",
                 self.title_bar.theme_button,
             )
-        finally:
-            overlay.resume_after_theme_refresh(animation_was_running)
+        return True
 
     def _cancel_theme_reveal(self) -> None:
-        self._theme_apply_generation += 1
-        self._theme_apply_in_progress = False
         overlay = self._theme_reveal_overlay
         self._theme_reveal_overlay = None
         if overlay is not None:
@@ -984,7 +809,7 @@ class MainWindow(QMainWindow):
         snapshot = self.grab()
         if snapshot.isNull():
             return None
-        return ThemeRevealOverlay(snapshot, self.title_bar.theme_button, self)
+        return ThemeRevealOverlay(snapshot, self)
 
     def _show_theme_reveal(self, overlay: ThemeRevealOverlay) -> None:
         self._attach_theme_reveal(overlay)

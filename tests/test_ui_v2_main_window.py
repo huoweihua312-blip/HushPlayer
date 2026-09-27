@@ -358,38 +358,40 @@ class UiV2MainWindowTests(unittest.TestCase):
         self.app.processEvents()
         self.assertIsNotNone(self.window._theme_reveal_overlay)
         overlay = self.window._theme_reveal_overlay
-        button = self.window.title_bar.theme_button
-        button_top_left = button.mapToGlobal(button.rect().topLeft())
-        overlay_top_left = overlay.mapToGlobal(overlay.rect().topLeft())
-        expected_origin = (
-            button_top_left.x() - overlay_top_left.x() + (button.width() - 1) / 2.0,
-            button_top_left.y() - overlay_top_left.y() + (button.height() - 1) / 2.0,
-        )
-        self.assertAlmostEqual(overlay._origin.x(), expected_origin[0])
-        self.assertAlmostEqual(overlay._origin.y(), expected_origin[1])
-        # Theme polishing can pause the animation while native fonts load.
+        self.assertEqual(overlay._opacity, 1.0)
         deadline = QElapsedTimer()
         deadline.start()
         while self.window._theme_reveal_overlay is not None and deadline.elapsed() < overlay._DURATION_MS + 1500:
             QTest.qWait(20)
         self.assertIsNone(self.window._theme_reveal_overlay)
 
-    def test_theme_reveal_starts_before_theme_persistence(self) -> None:
+    def test_theme_reveal_uses_a_lightweight_fade_buffer(self) -> None:
+        self.window._animate_next_theme_change = True
+        target = "light" if self.window.theme.mode == "dark" else "dark"
+
+        self.window.set_theme(target)
+        overlay = self.window._theme_reveal_overlay
+        self.assertIsNotNone(overlay)
+        self.assertTrue(hasattr(overlay, "_opacity"))
+        self.assertFalse(hasattr(overlay, "_render_image"))
+        self.assertEqual(self.window.theme.mode, target)
+
+    def test_theme_reveal_starts_after_atomic_theme_apply(self) -> None:
         original_mode = self.window.theme.mode
 
         self.window.toggle_theme()
         overlay = self.window._theme_reveal_overlay
         self.assertIsNotNone(overlay)
-        self.assertEqual(self.window.theme.mode, original_mode)
-        self.assertEqual(overlay._radius, 0.0)
+        self.assertNotEqual(self.window.theme.mode, original_mode)
+        self.assertEqual(overlay._opacity, 1.0)
         self.assertEqual(overlay._animation.state(), QAbstractAnimation.State.Running)
 
-        QTest.qWait(self.window._THEME_REVEAL_APPLY_DELAY_MS + 20)
+        QTest.qWait(40)
         self.app.processEvents()
         self.assertNotEqual(self.window.theme.mode, original_mode)
         QTest.qWait(40)
         self.app.processEvents()
-        self.assertGreater(overlay._radius, 0.0)
+        self.assertLess(overlay._opacity, 1.0)
 
         QTest.qWait(overlay._DURATION_MS + 80)
         self.app.processEvents()
