@@ -304,17 +304,6 @@ class RealLibraryAdapter(QObject):
                 or ""
             ).strip()
             availability = stored_state or ("playable" if local_path else "not_resolved")
-            confirmed_error = {
-                "unavailable",
-                "source_unavailable",
-                "source-unavailable",
-                "resolve_failed",
-                "resolve-failed",
-                "permission_denied",
-                "permission-denied",
-                "playback_error",
-                "playback-error",
-            }
             remote_payload = RemoteTrackStore.to_online_track(track_id, record)
             playback_source = record.get("playback_source")
             legacy_target = str(record.get("replaced_by") or "").strip()
@@ -346,10 +335,10 @@ class RealLibraryAdapter(QObject):
                 source_type="online",
                 added_at=_timestamp(record.get("added_at")),
                 is_favorite=favorite_at is not None,
-                # A persisted remote membership is not proof that its source
-                # is unavailable. Runtime failures are transient and normally
-                # do not live in the remote-track record.
-                is_missing=availability in confirmed_error,
+                # A persisted remote record is still a library member even
+                # when its last source attempt failed. The availability field
+                # keeps the error and recovery state for presentation.
+                is_missing=False,
                 is_loading=False,
                 artwork_path=None,
                 stable_identity=track_id,

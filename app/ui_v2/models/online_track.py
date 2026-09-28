@@ -37,17 +37,6 @@ class OnlineTrack:
         return True
 
     def as_track(self) -> Track:
-        confirmed_error = {
-            "unavailable",
-            "source_unavailable",
-            "source-unavailable",
-            "resolve_failed",
-            "resolve-failed",
-            "permission_denied",
-            "permission-denied",
-            "playback_error",
-            "playback-error",
-        }
         remote_payload = dict(self.raw)
         if self.artwork_url:
             remote_payload.setdefault("artwork", self.artwork_url)
@@ -64,9 +53,10 @@ class OnlineTrack:
             source_type="online",
             added_at=datetime(2026, 3, 1, 9, 0),
             is_favorite=self.is_favorite,
-            # Unresolved remote tracks are still valid rows.  Only a confirmed
-            # runtime failure should enter the disabled/error presentation.
-            is_missing=self.availability in confirmed_error,
+            # An online source can fail independently of library membership.
+            # Keep the saved remote track visible so another source can be
+            # selected or retried without losing the song from the library.
+            is_missing=False,
             is_loading=False,
             artwork_path=None,
             stable_identity=self.stable_identity,

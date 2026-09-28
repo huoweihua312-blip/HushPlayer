@@ -208,14 +208,32 @@ class OnlineTrackStateTests(unittest.TestCase):
         self.assertEqual(result.duration_ms, 180_000)
 
     def test_one_track_failure_does_not_pollute_other_track(self) -> None:
-        self.adapter.apply_remote_state(
+        updated = self.adapter.apply_remote_state(
             self.first.stable_identity,
             "resolve_failed",
             "当前歌曲没有可播放媒体。",
         )
+        self.assertIsNotNone(updated)
+        assert updated is not None
+        self.assertFalse(updated.is_missing)
+        self.assertTrue(updated.needs_online_recovery)
         self.assertEqual(self.adapter.results()[0].availability, "resolve_failed")
         self.assertEqual(self.adapter.results()[1].availability, "not_resolved")
         self.assertFalse(self.adapter.results()[1].as_track().is_missing)
+
+    def test_source_failure_keeps_saved_online_track_visible(self) -> None:
+        self.assertTrue(self.adapter.request_play(self.first.id))
+        self.adapter.apply_remote_state(
+            self.first.stable_identity,
+            "source_unavailable",
+            "当前电脑未启用该在线来源。",
+        )
+        saved = self.collection.track_for_id(self.first.id)
+        self.assertIsNotNone(saved)
+        assert saved is not None
+        self.assertFalse(saved.is_missing)
+        self.assertEqual(saved.availability, "source_unavailable")
+        self.assertTrue(saved.needs_online_recovery)
 
     def test_stable_identity_round_trip_has_no_old_state_residue(self) -> None:
         self.adapter.apply_remote_state(self.first.stable_identity, "resolving")
@@ -310,6 +328,31 @@ class OnlineTrackStateTests(unittest.TestCase):
         track = data.tracks[0]
         self.assertEqual(track.availability, "not_resolved")
         self.assertFalse(track.is_missing)
+
+    def test_persisted_remote_source_failure_stays_visible(self) -> None:
+        snapshot = LibrarySnapshot(
+            LibraryRecords((), "loaded", "", True),
+            PlaylistRecords(LibraryRepository.default_playlists(), "", False),
+            {},
+        )
+        data = RealLibraryAdapter.map_snapshot(
+            snapshot,
+            {
+                "remote_failed": {
+                    "source_id": "fixture",
+                    "remote_id": "failed",
+                    "title": "来源暂不可用",
+                    "artist": "艺人",
+                    "album": "专辑",
+                    "runtime_availability": "source_unavailable",
+                    "local_path": "",
+                }
+            },
+        )
+        track = data.tracks[0]
+        self.assertEqual(track.availability, "source_unavailable")
+        self.assertFalse(track.is_missing)
+        self.assertTrue(track.needs_online_recovery)
 
 
 if __name__ == "__main__":

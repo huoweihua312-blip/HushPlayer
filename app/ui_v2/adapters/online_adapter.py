@@ -650,7 +650,11 @@ class OnlineAdapter(QObject):
             artwork_url=artwork_url,
             availability=availability,
             availability_detail=str(detail or track.availability_detail or "").strip(),
-            is_missing=identity.availability.is_confirmed_error,
+            # A runtime failure belongs to the online source, not to the
+            # saved library membership.  Keeping this false prevents source
+            # differences between computers from hiding the song while the
+            # recovery path remains available through ``availability``.
+            is_missing=False,
             is_loading=identity.availability.is_resolving,
             remote_payload=remote_payload,
         )
@@ -1355,7 +1359,9 @@ class OnlineAdapter(QObject):
                             if source is not None and source.last_error
                             else "当前在线来源不可用。"
                         ),
-                        is_missing=True,
+                        # The remote record remains a valid library member;
+                        # only its current source is unavailable.
+                        is_missing=False,
                     )
                 )
             elif not self._source_is_blocked(source) and track.availability in {

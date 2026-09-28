@@ -332,7 +332,7 @@ class OnlineDiscoveryQ5ATests(unittest.TestCase):
         self.assertIsNotNone(updated)
         assert updated is not None
         self.assertEqual(updated.availability, "source_unavailable")
-        self.assertTrue(updated.is_missing)
+        self.assertFalse(updated.is_missing)
         self.assertTrue(updated.needs_online_recovery)
 
     def test_keyed_artwork_metadata_and_remote_actions(self) -> None:
