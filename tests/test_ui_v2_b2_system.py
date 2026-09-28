@@ -129,7 +129,8 @@ class B2SystemSurfacesTests(unittest.TestCase):
             d.on_download_verified(manifest,'absent.zip')
             self.assertFalse(d.install_button.isEnabled())
             for button in (d.download_button,d.cancel_button,d.install_button,d.fallback_install_button):
-                self.assertTrue(d.rect().contains(button.geometry()))
+                if button is not None:
+                    self.assertTrue(d.rect().contains(button.geometry()))
             d.hide(); service.shutdown()
 
 

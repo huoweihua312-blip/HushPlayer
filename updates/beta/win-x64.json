@@ -1,15 +1,16 @@
 {
     "schema_version": 1,
     "channel": "beta",
-    "version": "1.0.0-beta.7",
-    "numeric_version": "1.0.0.7",
+    "version": "1.0.0-beta.8",
+    "numeric_version": "1.0.0.8",
     "architecture": "win-x64",
     "mandatory": false,
-    "setup_url": "https://raw.gitcode.com/gcw_iPVB8B5g/HushPlayer-updates/blobs/906b749f1fcfcd6ecac857998aa8e75248c945f0/installers/HushPlayer-1.0.0-beta.7-win-x64-setup.exe",
-    "setup_size": 130958598,
-    "sha256": "09958eb4abf2e7a28ca87aea8415f6751263cc0cff5485afb653f1f8663824b3",
+    "setup_url": "https://raw.gitcode.com/gcw_iPVB8B5g/HushPlayer-updates/blobs/22d6a52a8d9e2c388581724b95cdfef4c3c08fe3/installers/HushPlayer-1.0.0-beta.8-win-x64-setup.exe",
+    "setup_size": 130953729,
+    "sha256": "d43e1189e2b8d72458c569c86126a8deb380778d4fdb02c6e01c3f723e64e1bc",
     "release_notes": [
-        "修复应用内更新重启后偶发弹出 PyInstaller 临时目录清理警告的问题，更新助手改用独立的 Windows Shell 启动已替换的应用。"
+        "将更新对话框默认改为下载并启动完整安装包，由安装器负责权限、文件替换和重启，减少应用自行替换文件导致的失败。",
+        "修复完整安装包更新传入 `/DIR` 路径时多余引号导致安装器拒绝目录的问题。"
     ],
     "release_history": [
         {
@@ -369,10 +370,15 @@
             "notes": [
                 "修复应用内更新重启后偶发弹出 PyInstaller 临时目录清理警告的问题，更新助手改用独立的 Windows Shell 启动已替换的应用。"
             ]
+        },
+        {
+            "version": "1.0.0-beta.8",
+            "numeric_version": "1.0.0.8",
+            "release_date": "2026-09-28",
+            "notes": [
+                "将更新对话框默认改为下载并启动完整安装包，由安装器负责权限、文件替换和重启，减少应用自行替换文件导致的失败。",
+                "修复完整安装包更新传入 `/DIR` 路径时多余引号导致安装器拒绝目录的问题。"
+            ]
         }
-    ],
-    "package_url": "https://raw.gitcode.com/gcw_iPVB8B5g/HushPlayer-updates/blobs/e1458844b3460196f9d59cc4fbbf5261fe497510/packages/HushPlayer-1.0.0-beta.7-win-x64-update.zip",
-    "package_size": 176209638,
-    "package_sha256": "c7c1246efe311f57eac5b6b59eff874c713b25dc1c66a522198bea35508ad8e0",
-    "package_filename": "HushPlayer-1.0.0-beta.7-win-x64-update.zip"
+    ]
 }

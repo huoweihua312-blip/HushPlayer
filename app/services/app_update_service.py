@@ -1426,7 +1426,11 @@ class AppUpdateService(QObject):
                 or self._application_dir_override is not None
             ):
                 install_dir = self._application_install_dir()
-                installer_arguments.append(f'/DIR="{install_dir}"')
+                # QProcess receives one argument per list item and performs
+                # the Windows argument quoting itself.  Embedding literal
+                # quotes here makes Inno Setup treat `"` as part of the
+                # directory value, which is rejected as an invalid path.
+                installer_arguments.append(f"/DIR={install_dir}")
             result = self._installer_launcher(
                 str(path),
                 installer_arguments,

@@ -975,9 +975,7 @@ def service_checks(root: Path, server: FixtureServer, setup: bytes) -> None:
     expected_playback_state = dict(fake_playback_state)
     assert not service.launch_verified_installer()
     expected_installer_arguments = list(service.INSTALLER_ARGUMENTS)
-    expected_installer_arguments.append(
-        f'/DIR="{running_install_dir.resolve()}"'
-    )
+    expected_installer_arguments.append(f"/DIR={running_install_dir.resolve()}")
     assert launcher_calls and launcher_calls[-1][1] == expected_installer_arguments
     assert not launched
     assert fake_playback_state == expected_playback_state
@@ -1102,13 +1100,12 @@ def package_fallback_checks(root: Path, server: FixtureServer, setup: bytes) -> 
     assert service.launch_verified_installer()
     assert launcher_calls
     assert launcher_calls[-1][0].endswith(manifest.installer_filename)
-    assert f'/DIR="{(root / "running-install").resolve()}"' in launcher_calls[-1][1]
+    assert f"/DIR={(root / 'running-install').resolve()}" in launcher_calls[-1][1]
 
     dialog = UpdateDialog(service, manifest)
     try:
         assert dialog.install_button.isEnabled()
-        assert dialog.fallback_install_button is not None
-        assert dialog.fallback_install_button.isEnabled()
+        assert dialog.fallback_install_button is None
     finally:
         dialog.close()
         dialog.deleteLater()
