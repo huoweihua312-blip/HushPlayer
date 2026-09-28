@@ -7,7 +7,7 @@ import sys
 import subprocess
 import tempfile
 import zipfile
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -162,6 +162,35 @@ def updater_working_directory_check() -> None:
         assert updater._updater_process_directory() == expected_source_dir
 
 
+def updater_shell_launch_checks(root: Path) -> None:
+    updater = _load_module(
+        "hushplayer_packaged_updater_shell_launch_smoke",
+        PROJECT_ROOT / "packaging" / "hushplayer_updater.py",
+    )
+    executable = root / "HushPlayer.exe"
+    executable.write_bytes(b"placeholder")
+    working_dir = root / "working"
+    working_dir.mkdir()
+    windll = MagicMock()
+    windll.shell32.ShellExecuteW.return_value = 33
+    with (
+        patch.object(updater.os, "name", "nt"),
+        patch.object(updater, "_is_elevated", return_value=False),
+        patch.object(updater.ctypes, "windll", windll, create=True),
+        patch.object(updater.subprocess, "Popen") as popen,
+    ):
+        updater._start_application(executable, working_dir)
+    windll.shell32.ShellExecuteW.assert_called_once_with(
+        None,
+        "open",
+        str(executable),
+        None,
+        str(working_dir),
+        1,
+    )
+    popen.assert_not_called()
+
+
 def updater_permission_retry_checks() -> None:
     updater = _load_module(
         "hushplayer_packaged_updater_permission_retry_smoke",
@@ -295,6 +324,7 @@ def main() -> None:
         package_helper_copy_checks(root)
         updater_swap_checks(root)
         updater_working_directory_check()
+        updater_shell_launch_checks(root)
         updater_permission_retry_checks()
         updater_replace_retry_checks(root)
         payload_builder_checks(root)

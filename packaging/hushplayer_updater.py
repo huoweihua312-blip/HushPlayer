@@ -230,6 +230,22 @@ def _start_application(executable: Path, working_dir: Path) -> None:
                 stderr=subprocess.DEVNULL,
             )
             return
+        if os.name == "nt":
+            # ShellExecute starts the replacement as an independent shell
+            # launch.  Using subprocess.Popen here can leave a Windows handle
+            # inherited from the one-file updater, which prevents PyInstaller
+            # from removing its temporary _MEI directory on exit.
+            result = ctypes.windll.shell32.ShellExecuteW(
+                None,
+                "open",
+                str(executable),
+                None,
+                str(working_dir),
+                1,
+            )
+            if int(result) <= 32:
+                raise OSError(f"ShellExecuteW failed with code {int(result)}")
+            return
         subprocess.Popen(
             [str(executable)],
             cwd=str(working_dir),
