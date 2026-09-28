@@ -985,6 +985,27 @@ def service_checks(root: Path, server: FixtureServer, setup: bytes) -> None:
     assert launched
     assert fake_playback_state == expected_playback_state
 
+    # A packaged install ships the updater helper. The helper must be launched
+    # instead of Inno Setup directly so it can wait for HushPlayer to release
+    # every file in the install directory first.
+    running_install_dir.mkdir(parents=True, exist_ok=True)
+    (running_install_dir / "HushPlayerUpdater.exe").write_bytes(b"updater")
+    updater_calls: list[tuple[str, list[str]]] = []
+
+    def updater_launcher(path: str, arguments: list[str]):
+        updater_calls.append((path, list(arguments)))
+        return True, 12345
+
+    service._updater_launcher = updater_launcher
+    assert service.launch_verified_installer()
+    assert updater_calls
+    helper_path, helper_arguments = updater_calls[-1]
+    assert Path(helper_path).is_file()
+    assert "--parent-pid" in helper_arguments
+    assert "--installer" in helper_arguments
+    assert str(verified_path) in helper_arguments
+    assert not launcher_calls[-1][0].endswith("HushPlayerUpdater.exe")
+
     dialog = UpdateDialog(service, manifest)
     assert dialog.install_button.isEnabled()
     assert not dialog.download_button.isEnabled()
@@ -1081,7 +1102,7 @@ def package_fallback_checks(root: Path, server: FixtureServer, setup: bytes) -> 
         updates_dir=root / "fallback-updates",
         allow_insecure_localhost=True,
         installer_launcher=launcher,
-        application_dir=root / "running-install",
+        application_dir=root / "fallback-install",
     )
     verified: list[tuple[UpdateManifest, str]] = []
     service.downloadVerified.connect(
@@ -1100,7 +1121,7 @@ def package_fallback_checks(root: Path, server: FixtureServer, setup: bytes) -> 
     assert service.launch_verified_installer()
     assert launcher_calls
     assert launcher_calls[-1][0].endswith(manifest.installer_filename)
-    assert f"/DIR={(root / 'running-install').resolve()}" in launcher_calls[-1][1]
+    assert f"/DIR={(root / 'fallback-install').resolve()}" in launcher_calls[-1][1]
 
     dialog = UpdateDialog(service, manifest)
     try:

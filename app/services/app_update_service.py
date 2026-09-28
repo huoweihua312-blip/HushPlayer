@@ -611,6 +611,30 @@ def _copy_package_updater(path: str | Path, destination: str | Path) -> None:
             pass
 
 
+def _copy_local_updater(source: str | Path, destination: str | Path) -> None:
+    """Copy the bundled updater before the app releases its install files."""
+
+    source_path = Path(source).expanduser().resolve()
+    target = Path(destination).expanduser().resolve()
+    temporary = target.with_name(f"{target.name}.tmp")
+    try:
+        if not source_path.is_file():
+            raise UpdateValidationError("当前安装目录缺少应用内更新助手。")
+        target.parent.mkdir(parents=True, exist_ok=True)
+        temporary.unlink(missing_ok=True)
+        shutil.copy2(source_path, temporary)
+        os.replace(temporary, target)
+    except UpdateValidationError:
+        raise
+    except OSError as error:
+        raise UpdateValidationError(f"无法准备应用内更新助手：{error}") from error
+    finally:
+        try:
+            temporary.unlink(missing_ok=True)
+        except OSError:
+            pass
+
+
 def _detached_working_directory(path: str) -> str:
     """Return a safe working directory for a detached updater process.
 
@@ -1414,6 +1438,8 @@ class AppUpdateService(QObject):
             self._delete_update_file(path)
             self.installerLaunchFailed.emit(str(error))
             return False
+        helper_copy: Path | None = None
+        use_waiting_helper = False
         try:
             installer_arguments = list(self.INSTALLER_ARGUMENTS)
             # An older packaged build may not contain the in-app updater and
@@ -1421,28 +1447,53 @@ class AppUpdateService(QObject):
             # reuses the last AppId directory from the registry, which can be
             # a stale test installation.  Pin the fallback installer to the
             # directory of the running packaged application instead.
+            install_dir = self._application_install_dir()
             if (
                 getattr(sys, "frozen", False)
                 or self._application_dir_override is not None
             ):
-                install_dir = self._application_install_dir()
                 # QProcess receives one argument per list item and performs
                 # the Windows argument quoting itself.  Embedding literal
                 # quotes here makes Inno Setup treat `"` as part of the
                 # directory value, which is rejected as an invalid path.
                 installer_arguments.append(f"/DIR={install_dir}")
-            result = self._installer_launcher(
-                str(path),
-                installer_arguments,
-            )
+            helper_source = install_dir / "HushPlayerUpdater.exe"
+            if helper_source.is_file():
+                helper_copy = self.updates_dir / (
+                    f"HushPlayerUpdater-{os.getpid()}-{time.time_ns()}.exe"
+                )
+                _copy_local_updater(helper_source, helper_copy)
+                helper_arguments = [
+                    "--parent-pid",
+                    str(os.getpid()),
+                    "--install-dir",
+                    str(install_dir),
+                    "--installer",
+                    str(path),
+                    "--restart-exe",
+                    str(install_dir / "HushPlayer.exe"),
+                ]
+                for installer_argument in installer_arguments:
+                    helper_arguments.extend(("--installer-arg", installer_argument))
+                result = self._updater_launcher(str(helper_copy), helper_arguments)
+                use_waiting_helper = True
+            else:
+                result = self._installer_launcher(str(path), installer_arguments)
             started = bool(result[0]) if isinstance(result, tuple) else bool(result)
         except Exception as error:
+            if helper_copy is not None:
+                self._delete_update_file(helper_copy)
             self.installerLaunchFailed.emit(f"无法启动安装程序：{error}")
             return False
         if not started:
+            if helper_copy is not None:
+                self._delete_update_file(helper_copy)
             self.installerLaunchFailed.emit("Windows 未能启动安装程序，HushPlayer 将继续运行。")
             return False
-        self.installerLaunched.emit(str(path))
+        if use_waiting_helper:
+            self.updaterLaunched.emit(str(helper_copy))
+        else:
+            self.installerLaunched.emit(str(path))
         return True
 
     def shutdown(self) -> None:

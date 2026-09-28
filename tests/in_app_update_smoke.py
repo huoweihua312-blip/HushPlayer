@@ -191,6 +191,43 @@ def updater_shell_launch_checks(root: Path) -> None:
     popen.assert_not_called()
 
 
+def updater_installer_wait_checks(root: Path) -> None:
+    updater = _load_module(
+        "hushplayer_packaged_updater_installer_wait_smoke",
+        PROJECT_ROOT / "packaging" / "hushplayer_updater.py",
+    )
+    install_dir = root / "HushPlayer-installer-wait"
+    install_dir.mkdir()
+    installer = root / "HushPlayer-setup.exe"
+    installer.write_bytes(b"MZ installer")
+    restart_exe = install_dir / "HushPlayer.exe"
+    restart_exe.write_bytes(b"old executable")
+    waited: list[int] = []
+    started: list[tuple[Path, list[str], Path]] = []
+    updater._wait_for_parent = lambda pid: waited.append(pid)
+    updater._start_installer = (
+        lambda path, arguments, working_dir: started.append(
+            (path, list(arguments), working_dir)
+        )
+    )
+
+    updater.launch_installer_after_parent(
+        parent_pid=12345,
+        install_dir=install_dir,
+        installer=installer,
+        restart_exe=restart_exe,
+        arguments=["/SP-", "/DIR=" + str(install_dir)],
+    )
+    assert waited == [12345]
+    assert started == [
+        (
+            installer.resolve(),
+            ["/SP-", "/DIR=" + str(install_dir)],
+            updater._updater_process_directory(),
+        )
+    ]
+
+
 def updater_permission_retry_checks() -> None:
     updater = _load_module(
         "hushplayer_packaged_updater_permission_retry_smoke",
@@ -325,6 +362,7 @@ def main() -> None:
         updater_swap_checks(root)
         updater_working_directory_check()
         updater_shell_launch_checks(root)
+        updater_installer_wait_checks(root)
         updater_permission_retry_checks()
         updater_replace_retry_checks(root)
         payload_builder_checks(root)

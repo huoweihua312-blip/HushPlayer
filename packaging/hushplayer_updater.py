@@ -72,12 +72,16 @@ def _update_arguments(arguments: argparse.Namespace) -> list[str]:
         str(arguments.parent_pid),
         "--install-dir",
         str(arguments.install_dir),
-        "--package",
-        str(arguments.package),
         "--restart-exe",
         str(arguments.restart_exe),
         _ELEVATED_RETRY_FLAG,
     ]
+    if arguments.installer is not None:
+        values.extend(("--installer", str(arguments.installer)))
+        for installer_argument in arguments.installer_args:
+            values.extend(("--installer-arg", installer_argument))
+    else:
+        values.extend(("--package", str(arguments.package)))
     if arguments.cleanup_helper is not None:
         values.extend(("--cleanup-helper", str(arguments.cleanup_helper)))
     return values
@@ -259,6 +263,63 @@ def _start_application(executable: Path, working_dir: Path) -> None:
         raise UpdateApplyError(f"更新后无法重新启动 HushPlayer：{error}") from error
 
 
+def _start_installer(
+    executable: Path,
+    arguments: list[str],
+    working_dir: Path,
+) -> None:
+    """Start the full installer without inheriting HushPlayer handles."""
+
+    parameters = subprocess.list2cmdline(arguments)
+    try:
+        if os.name == "nt":
+            result = ctypes.windll.shell32.ShellExecuteW(
+                None,
+                "open",
+                str(executable),
+                parameters,
+                str(working_dir),
+                1,
+            )
+            if int(result) <= 32:
+                raise OSError(f"ShellExecuteW failed with code {int(result)}")
+            return
+        subprocess.Popen(
+            [str(executable), *arguments],
+            cwd=str(working_dir),
+            close_fds=True,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+    except OSError as error:
+        raise UpdateApplyError(f"无法启动 HushPlayer 安装程序：{error}") from error
+
+
+def launch_installer_after_parent(
+    *,
+    parent_pid: int,
+    install_dir: Path,
+    installer: Path,
+    restart_exe: Path,
+    arguments: list[str],
+) -> None:
+    """Wait for HushPlayer to release all files before starting Inno Setup."""
+
+    install_dir = install_dir.expanduser().resolve()
+    installer = installer.expanduser().resolve()
+    restart_exe = restart_exe.expanduser().resolve()
+    if not install_dir.is_dir():
+        raise UpdateApplyError("HushPlayer 安装目录不存在。")
+    if not installer.is_file():
+        raise UpdateApplyError("HushPlayer 安装程序不存在。")
+    if restart_exe.parent != install_dir or restart_exe.name != "HushPlayer.exe":
+        raise UpdateApplyError("重启程序路径不在 HushPlayer 安装目录中。")
+
+    _wait_for_parent(parent_pid)
+    _start_installer(installer, arguments, _updater_process_directory())
+
+
 def apply_update(
     *,
     parent_pid: int,
@@ -319,7 +380,14 @@ def parse_arguments(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(prog="HushPlayerUpdater")
     parser.add_argument("--parent-pid", required=True, type=int)
     parser.add_argument("--install-dir", required=True, type=Path)
-    parser.add_argument("--package", required=True, type=Path)
+    parser.add_argument("--package", type=Path)
+    parser.add_argument("--installer", type=Path)
+    parser.add_argument(
+        "--installer-arg",
+        dest="installer_args",
+        action="append",
+        default=[],
+    )
     parser.add_argument("--restart-exe", required=True, type=Path)
     parser.add_argument("--cleanup-helper", type=Path)
     parser.add_argument(_ELEVATED_RETRY_FLAG, action="store_true", help=argparse.SUPPRESS)
@@ -331,12 +399,23 @@ def main(argv: list[str] | None = None) -> int:
     arguments = parse_arguments(argv)
     install_dir = arguments.install_dir.expanduser().resolve()
     try:
-        apply_update(
-            parent_pid=arguments.parent_pid,
-            install_dir=install_dir,
-            package=arguments.package,
-            restart_exe=arguments.restart_exe,
-        )
+        if (arguments.package is None) == (arguments.installer is None):
+            raise UpdateApplyError("更新助手必须收到应用内更新包或完整安装程序。")
+        if arguments.installer is not None:
+            launch_installer_after_parent(
+                parent_pid=arguments.parent_pid,
+                install_dir=install_dir,
+                installer=arguments.installer,
+                restart_exe=arguments.restart_exe,
+                arguments=list(arguments.installer_args),
+            )
+        else:
+            apply_update(
+                parent_pid=arguments.parent_pid,
+                install_dir=install_dir,
+                package=arguments.package,
+                restart_exe=arguments.restart_exe,
+            )
         return 0
     except Exception as error:
         if _is_permission_error(error) and not arguments.elevated_retry:
