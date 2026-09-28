@@ -141,6 +141,8 @@ def check_sources() -> None:
     assert "CloseApplications=yes" in installer_source
     assert "CloseApplicationsFilter=HushPlayer.exe" in installer_source
     assert "RestartApplications=no" in installer_source
+    assert "Flags: nowait postinstall skipifsilent runasoriginaluser" in installer_source
+    assert "Permissions: users-readexec" in installer_source
     assert "[UninstallDelete]" not in installer_source
     assert "#ifndef MyAppVersion" in installer_source
     assert "#ifndef MyAppNumericVersion" in installer_source

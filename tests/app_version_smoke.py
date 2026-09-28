@@ -46,7 +46,7 @@ def main() -> None:
         str(part) for part in APP_NUMERIC_VERSION
     )
     assert parse_numeric_version(APP_NUMERIC_VERSION_TEXT) == APP_NUMERIC_VERSION
-    assert APP_VERSION == "1.0.0-beta.8"
+    assert APP_VERSION == "1.0.0-beta.9"
     assert APP_VERSION in APP_USER_AGENT
     assert UPDATE_CHANNEL == "beta"
     assert UPDATE_ARCHITECTURE == "win-x64"
@@ -67,8 +67,8 @@ def main() -> None:
         ),
     )
 
-    assert APP_NUMERIC_VERSION == (1, 0, 0, 8)
-    assert parse_numeric_version("1.0.0.8") == (1, 0, 0, 8)
+    assert APP_NUMERIC_VERSION == (1, 0, 0, 9)
+    assert parse_numeric_version("1.0.0.9") == (1, 0, 0, 9)
     assert is_newer_numeric_version("1.0.0.7", "0.6.0.13")
     assert is_newer_numeric_version("0.5.0.2", "0.5.0.1")
     assert is_newer_numeric_version("0.5.0.10", "0.5.0.2")

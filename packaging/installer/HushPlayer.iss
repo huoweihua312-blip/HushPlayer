@@ -75,7 +75,11 @@ Name: "desktopicon"; \
 [Files]
 Source: "..\..\dist\HushPlayer\*"; \
     DestDir: "{app}"; \
-    Flags: ignoreversion recursesubdirs createallsubdirs
+    Flags: ignoreversion recursesubdirs createallsubdirs; \
+    Permissions: users-readexec
+
+[Dirs]
+Name: "{app}"; Permissions: users-readexec
 
 [Icons]
 Name: "{userprograms}\HushPlayer"; \
@@ -91,4 +95,4 @@ Name: "{userdesktop}\HushPlayer"; \
 Filename: "{app}\{#MyAppExeName}"; \
     Description: "启动 HushPlayer"; \
     WorkingDir: "{app}"; \
-    Flags: nowait postinstall skipifsilent
+    Flags: nowait postinstall skipifsilent runasoriginaluser
