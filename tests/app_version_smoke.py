@@ -24,7 +24,8 @@ from app.core.version import (
 
 def main() -> None:
     match = re.fullmatch(
-        r"(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)",
+        r"(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)"
+        r"(?:-(?:alpha|beta|rc)\.(0|[1-9]\d*))?",
         APP_VERSION,
     )
     assert match is not None
@@ -33,12 +34,19 @@ def main() -> None:
         isinstance(part, int) and not isinstance(part, bool) and part >= 0
         for part in APP_NUMERIC_VERSION
     )
-    assert APP_NUMERIC_VERSION == tuple(int(part) for part in match.groups()) + (0,)
+    major, minor, patch, prerelease = match.groups()
+    expected_revision = int(prerelease or 0)
+    assert APP_NUMERIC_VERSION == (
+        int(major),
+        int(minor),
+        int(patch),
+        expected_revision,
+    )
     assert APP_NUMERIC_VERSION_TEXT == ".".join(
         str(part) for part in APP_NUMERIC_VERSION
     )
     assert parse_numeric_version(APP_NUMERIC_VERSION_TEXT) == APP_NUMERIC_VERSION
-    assert APP_VERSION == "1.0.0"
+    assert APP_VERSION == "1.0.0-beta.6"
     assert APP_VERSION in APP_USER_AGENT
     assert UPDATE_CHANNEL == "beta"
     assert UPDATE_ARCHITECTURE == "win-x64"
@@ -59,9 +67,9 @@ def main() -> None:
         ),
     )
 
-    assert APP_NUMERIC_VERSION == (1, 0, 0, 0)
-    assert parse_numeric_version("1.0.0.0") == (1, 0, 0, 0)
-    assert is_newer_numeric_version("1.0.0.0", "0.6.0.13")
+    assert APP_NUMERIC_VERSION == (1, 0, 0, 6)
+    assert parse_numeric_version("1.0.0.6") == (1, 0, 0, 6)
+    assert is_newer_numeric_version("1.0.0.6", "0.6.0.13")
     assert is_newer_numeric_version("0.5.0.2", "0.5.0.1")
     assert is_newer_numeric_version("0.5.0.10", "0.5.0.2")
     assert not is_newer_numeric_version("0.5.0.2", "0.5.0.2")
