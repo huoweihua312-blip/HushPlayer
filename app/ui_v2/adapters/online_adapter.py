@@ -481,8 +481,14 @@ class OnlineAdapter(QObject):
             ("remote", old_identifier),
             self._payload_for_track(replacement),
         )
-        if result == "source_updated":
-            self.remote_collection_changed.emit()
+        # This only changes the resolver payload for an existing remote
+        # membership.  Emitting ``remote_collection_changed`` here would
+        # start a full read-only library projection while the current track
+        # is being recovered.  On machines with a different source catalog
+        # that refresh can briefly project an incomplete remote set and make
+        # the playing row disappear until the next application restart.
+        # The caller updates the one in-memory track after playback is ready;
+        # the persisted override will be picked up on the next normal load.
         return result
 
     def build_playback_source_track(

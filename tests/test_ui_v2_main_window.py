@@ -115,6 +115,28 @@ class UiV2MainWindowTests(unittest.TestCase):
             format_duration(self.window.playback_adapter.state.position_ms),
         )
 
+    def test_source_recovery_updates_only_the_existing_library_row(self) -> None:
+        source = next(
+            track for track in self.window.library_collection.tracks() if track.is_online
+        )
+        updated = replace(source, availability="playable", availability_detail="")
+        replacement = SimpleNamespace(source_name="另一来源")
+        original_adapter = self.window.online_adapter
+        self.window.online_adapter = SimpleNamespace(
+            set_playback_source=Mock(return_value="source_updated"),
+            build_playback_source_track=Mock(return_value=updated),
+        )
+        try:
+            with patch.object(self.window, "_play_online_track") as play:
+                self.window._play_recovery_candidate(source, replacement)
+            play.assert_called_once_with(updated)
+            self.assertEqual(
+                self.window.library_collection.track_for_id(source.id),
+                updated,
+            )
+        finally:
+            self.window.online_adapter = original_adapter
+
     def test_single_click_does_not_open_track_information(self) -> None:
         page = self.window.library_page
         model = page.track_table.model

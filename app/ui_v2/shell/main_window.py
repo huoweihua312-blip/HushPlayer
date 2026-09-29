@@ -1902,6 +1902,11 @@ class MainWindow(QMainWindow):
             return
         self._play_online_track(playback_track)
         if source_update == "source_updated":
+            # A source override keeps the original stable identity and
+            # playlist/favorite membership.  Update only that in-memory row
+            # instead of forcing a full library projection during recovery.
+            self.library_collection.update_runtime_track(playback_track)
+        if source_update == "source_updated":
             message = f"已更换为 {track.source_name} 的播放来源，正在播放。"
         else:
             message = f"已找到 {track.source_name} 的在线版本，正在播放。"

@@ -137,6 +137,7 @@ class FakeBridge:
     def __init__(self) -> None:
         self.favorites: list[tuple[str, bool]] = []
         self.playlists: list[tuple[str, str]] = []
+        self.playback_sources: list[tuple[str, str]] = []
 
     def set_favorite(self, track: dict, liked: bool) -> bool:
         self.favorites.append((str(track.get("remote_id") or ""), bool(liked)))
@@ -145,6 +146,15 @@ class FakeBridge:
     def add_to_playlist(self, track: dict, playlist_id: str) -> bool:
         self.playlists.append((str(track.get("remote_id") or ""), str(playlist_id)))
         return True
+
+    def set_playback_source(self, old_member, replacement_track: dict) -> str:
+        self.playback_sources.append(
+            (
+                str(old_member[1] if isinstance(old_member, (tuple, list)) else ""),
+                str(replacement_track.get("remote_id") or ""),
+            )
+        )
+        return "source_updated"
 
 
 class FakeAudioCache:
@@ -242,6 +252,27 @@ class OnlineDiscoveryQ5ATests(unittest.TestCase):
         self.search.emit_results(self._results(), generation=first)
         self.assertEqual(self.adapter.state.generation, second)
         self.assertFalse(self.adapter.results())
+
+    def test_playback_source_change_does_not_reset_remote_collection(self) -> None:
+        generation = self._search()
+        self.search.emit_results(self._results(), generation=generation)
+        result = self.adapter.results()[0]
+        saved = result.as_track()
+        self.adapter.collection.set_tracks((saved,))
+        changed: list[bool] = []
+        self.adapter.remote_collection_changed.connect(
+            lambda: changed.append(True)
+        )
+
+        replacement = self.adapter.results()[1]
+        self.assertEqual(
+            self.adapter.set_playback_source(saved, replacement),
+            "source_updated",
+        )
+
+        self.assertEqual(changed, [])
+        self.assertEqual(self.adapter.collection.track_for_id(saved.id), saved)
+        self.assertEqual(self.bridge.playback_sources, [(saved.id, replacement.remote_id)])
 
     def test_disabled_source_uses_valid_cache_instead_of_online_recovery(self) -> None:
         stable_id = "remote_cached"
