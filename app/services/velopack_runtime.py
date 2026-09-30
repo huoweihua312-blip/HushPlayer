@@ -33,7 +33,10 @@ def is_velopack_install(executable: str | Path | None = None) -> bool:
         root = candidate.resolve().parent
     except OSError:
         root = candidate.parent
-    return (root / "Update.exe").is_file() and (root / "sq.version").is_file()
+    updater = root / "Update.exe"
+    if root.name.casefold() == "current":
+        updater = root.parent / "Update.exe"
+    return updater.is_file() and (root / "sq.version").is_file()
 
 
 def is_velopack_enabled(executable: str | Path | None = None) -> bool:
@@ -72,7 +75,8 @@ def bootstrap_velopack() -> bool:
         return False
 
     try:
-        velopack.App().run()
+        # Updates are applied only after the app has saved state and closed Qt.
+        velopack.App().set_auto_apply_on_startup(False).run()
     except Exception:
         _LOGGER.exception("Velopack bootstrap failed; using the existing startup path.")
         return False
@@ -86,4 +90,9 @@ def create_update_manager(update_source: str) -> Any | None:
         import velopack  # type: ignore[import-not-found]
     except ImportError:
         return None
-    return velopack.UpdateManager(str(update_source))
+    source: Any = str(update_source)
+    if source.casefold().startswith(("http://", "https://")):
+        source = velopack.HttpSource(
+            source, velopack.HttpOptions(Headers=[], TimeoutMilliseconds=120_000)
+        )
+    return velopack.UpdateManager(source)

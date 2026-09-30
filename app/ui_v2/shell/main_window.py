@@ -297,6 +297,10 @@ class MainWindow(QMainWindow):
             self._velopack_update_service.applying.connect(
                 self._on_velopack_applying
             )
+            self._velopack_update_service.shutdownFinished.connect(
+                self._on_velopack_shutdown_finished
+            )
+        self._velopack_close_pending = False
         settings_actions = {
             "check_updates": self._check_for_updates,
             "open_settings_path": self._open_settings_path,
@@ -974,6 +978,12 @@ class MainWindow(QMainWindow):
             self._user_close_requested = False
             if not self.close_behavior_controller.handle_close(self, event):
                 return
+        if self._velopack_update_service is not None:
+            if not self._velopack_update_service.shutdown():
+                self._velopack_close_pending = True
+                self._set_update_status("正在结束更新任务，完成后将自动退出…")
+                event.ignore()
+                return
         self._finalize_close()
         super().closeEvent(event)
 
@@ -1463,6 +1473,11 @@ class MainWindow(QMainWindow):
         application = QApplication.instance()
         if application is not None:
             application.quit()
+
+    def _on_velopack_shutdown_finished(self) -> None:
+        if self._velopack_close_pending:
+            self._velopack_close_pending = False
+            self.close()
 
     def _on_update_available(self, manifest: object, _manual: bool) -> None:
         if not isinstance(manifest, UpdateManifest):

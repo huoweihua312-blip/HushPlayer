@@ -12,6 +12,17 @@ from app.services.velopack_runtime import (
 
 
 class VelopackRuntimeTests(unittest.TestCase):
+    def test_detects_current_directory_with_updater_in_parent(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            current = root / "current"
+            current.mkdir()
+            executable = current / "HushPlayer.exe"
+            executable.touch()
+            (root / "Update.exe").touch()
+            (current / "sq.version").write_text("1", encoding="utf-8")
+            self.assertTrue(is_velopack_install(executable))
+
     def test_detects_velopack_layout(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

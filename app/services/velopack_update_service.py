@@ -23,6 +23,8 @@ def _progress_values(args: tuple[object, ...]) -> tuple[int, int]:
             pass
     if len(args) == 1:
         value = args[0]
+        if isinstance(value, (int, float)) and not isinstance(value, bool):
+            return min(100, max(0, int(value))), 100
         for names in (
             ("downloaded_bytes", "total_bytes"),
             ("DownloadedBytes", "TotalBytes"),
@@ -97,8 +99,9 @@ class _VelopackWorker(QObject):
         try:
             if self.manager is None:
                 raise RuntimeError("更新管理器尚未初始化。")
+            # Schedule the helper first; let Qt perform normal application cleanup.
+            self.manager.wait_exit_then_apply_updates(update, silent=True, restart=True)
             self.applying.emit()
-            self.manager.apply_updates_and_restart(update)
         except Exception as error:  # pragma: no cover - native wrapper errors vary
             _LOGGER.exception("Velopack update apply failed.")
             self.failed.emit(str(error))
@@ -115,6 +118,7 @@ class VelopackUpdateService(QObject):
     downloadProgress = Signal(int, int)
     updateReady = Signal(object)
     applying = Signal()
+    shutdownFinished = Signal()
 
     def __init__(self, source: str, parent: QObject | None = None) -> None:
         super().__init__(parent)
@@ -128,6 +132,7 @@ class VelopackUpdateService(QObject):
         self._worker = _VelopackWorker(self.source)
         self._worker.moveToThread(self._thread)
         self._thread.finished.connect(self._worker.deleteLater)
+        self._thread.finished.connect(self.shutdownFinished)
         self._worker.update_available.connect(self._on_update_available)
         self._worker.no_update.connect(self._on_no_update)
         self._worker.failed.connect(self._on_failed)
@@ -167,35 +172,46 @@ class VelopackUpdateService(QObject):
     @Slot(object)
     def _on_update_available(self, update: object) -> None:
         self._active = False
+        if self._closed:
+            return
         self.updateAvailable.emit(update)
 
     @Slot()
     def _on_no_update(self) -> None:
         self._active = False
+        if self._closed:
+            return
         self.noUpdate.emit()
 
     @Slot(str)
     def _on_failed(self, message: str) -> None:
         self._active = False
         self._applying = False
+        if self._closed:
+            return
         self.failed.emit(str(message or "Velopack 更新失败。"))
 
     @Slot()
     def _on_download_started(self) -> None:
-        self.downloadStarted.emit()
+        if not self._closed:
+            self.downloadStarted.emit()
 
     @Slot(object)
     def _on_ready(self, update: object) -> None:
         self._active = False
+        if self._closed:
+            return
         self.updateReady.emit(update)
 
     @Slot()
     def _on_applying(self) -> None:
+        self._thread.quit()
+        self._thread.wait()
         self.applying.emit()
 
-    def shutdown(self) -> None:
-        if self._closed or self._applying:
-            return
+    def shutdown(self) -> bool:
+        """Request shutdown; the window must defer closing until the worker ends."""
+
         self._closed = True
         self._thread.quit()
-        self._thread.wait(2_000)
+        return self._thread.wait(100)
