@@ -171,14 +171,14 @@ class ImmersiveControls(QWidget):
             f"QToolButton#immersivePlayButton:disabled {{ background: {colors.surface_pressed}; }}"
             + focus_qss(theme, "QToolButton#immersivePlayButton")
         )
-        self.previous_button.setIcon(icon("previous", theme))
-        self.next_button.setIcon(icon("next", theme))
+        self.previous_button.setIcon(icon("previous", theme, "hover"))
+        self.next_button.setIcon(icon("next", theme, "hover"))
         self._on_muted_changed(self._adapter.state.is_muted if self._adapter else False)
-        self.more_button.setIcon(fluent_icon("more", theme, size=18))
-        self.shuffle_button.setIcon(fluent_icon("shuffle", theme, "selected" if self._adapter and self._adapter.state.shuffle_enabled else "normal", size=18))
-        self.repeat_button.setIcon(fluent_icon("repeat", theme, "selected" if self._adapter and self._adapter.state.repeat_mode != RepeatMode.OFF else "normal", size=18))
-        self.queue_button.setIcon(fluent_icon("queue", theme, size=18))
-        self.lyrics_button.setIcon(fluent_icon("lyrics", theme, size=18))
+        self.more_button.setIcon(fluent_icon("more", theme, "hover", size=18))
+        self.shuffle_button.setIcon(fluent_icon("shuffle", theme, "selected" if self._adapter and self._adapter.state.shuffle_enabled else "hover", size=18))
+        self.repeat_button.setIcon(fluent_icon("repeat", theme, "selected" if self._adapter and self._adapter.state.repeat_mode != RepeatMode.OFF else "hover", size=18))
+        self.queue_button.setIcon(fluent_icon("queue", theme, "hover", size=18))
+        self.lyrics_button.setIcon(fluent_icon("lyrics", theme, "hover", size=18))
         self._on_playing_changed(self._adapter.state.is_playing if self._adapter else False)
         for label in (self.elapsed_label, self.duration_label):
             label.setStyleSheet(f"background: transparent; color: {_rgba(colors.secondary_text, 224)}; font-size: {theme.fonts.caption}px;")
@@ -304,7 +304,7 @@ class ImmersiveControls(QWidget):
             muted = self._adapter.state.is_muted if self._adapter is not None else False
         is_muted = bool(muted) or self.volume_slider.value() == 0
         self.volume_button.setIcon(
-            fluent_icon("volume_mute" if is_muted else "volume", self._theme, size=18)
+            fluent_icon("volume_mute" if is_muted else "volume", self._theme, "hover", size=18)
         )
         action = "取消静音" if is_muted else "静音"
         self.volume_button.setToolTip(action)
@@ -317,12 +317,12 @@ class ImmersiveControls(QWidget):
 
     def _on_shuffle_changed(self, enabled: bool) -> None:
         if self._adapter is not None:
-            self.shuffle_button.setIcon(fluent_icon("shuffle", self._theme, "selected" if enabled else "normal", size=18))
+            self.shuffle_button.setIcon(fluent_icon("shuffle", self._theme, "selected" if enabled else "hover", size=18))
 
     def _on_repeat_changed(self, mode: RepeatMode) -> None:
         if self._adapter is not None:
             name = "repeat_one" if mode == RepeatMode.ONE else "repeat"
-            self.repeat_button.setIcon(fluent_icon(name, self._theme, "selected" if mode != RepeatMode.OFF else "normal", size=18))
+            self.repeat_button.setIcon(fluent_icon(name, self._theme, "selected" if mode != RepeatMode.OFF else "hover", size=18))
 
     def _begin_progress(self) -> None:
         self._dragging_progress = True

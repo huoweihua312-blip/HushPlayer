@@ -255,9 +255,9 @@ class LyricsCanvasV2(QWidget):
         if self._mode == "immersive" and self._immersive_reading_style:
             # Context remains readable but no longer competes with the lyric.
             if self._theme.mode == "light":
-                attenuation = 0.86 if distance <= 1 else 0.64 if distance == 2 else 0.36
+                attenuation = 0.92 if distance <= 1 else 0.72 if distance == 2 else 0.46
             else:
-                attenuation = 0.68 if distance <= 1 else 0.50 if distance == 2 else 0.24
+                attenuation = 0.76 if distance <= 1 else 0.60 if distance == 2 else 0.36
             return round(255 * baseline * attenuation)
         if distance <= 1:
             return round(255 * max(0.68, baseline))

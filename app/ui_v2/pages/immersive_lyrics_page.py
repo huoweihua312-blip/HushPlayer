@@ -284,11 +284,11 @@ class ImmersiveLyricsPage(QWidget):
             f"QToolButton#immersiveModeButton[hushKeyboardFocus=\"true\"]:focus {{ background: transparent; border-bottom: 2px solid {colors.focus_ring}; }}"
         )
         for name, button in (("back", self.header_back_button), ("window_minimize", self._window_buttons[0]), ("window_maximize", self._window_buttons[1]), ("window_close", self._window_buttons[2])):
-            button.setIcon(icon(name, theme, "normal"))
+            button.setIcon(icon(name, theme, "hover"))
         self.header_now_playing.setIcon(fluent_immersive_interactive_icon("now_playing", theme, 18))
         self.header_lyrics.setIcon(fluent_immersive_interactive_icon("lyrics", theme, 18))
-        self.header_translation_button.setIcon(icon("translate", theme))
-        self.header_fullscreen_button.setIcon(icon("exit_fullscreen" if self._host_fullscreen else "fullscreen", theme))
+        self.header_translation_button.setIcon(icon("translate", theme, "hover"))
+        self.header_fullscreen_button.setIcon(icon("exit_fullscreen" if self._host_fullscreen else "fullscreen", theme, "hover"))
         self._sync_mode_buttons()
         self._sync_fullscreen_button()
 
@@ -678,7 +678,7 @@ class ImmersiveLyricsPage(QWidget):
         self.header_fullscreen_button.setText(text)
         self.header_fullscreen_button.setToolTip(tooltip)
         self.header_fullscreen_button.setAccessibleName(tooltip)
-        self.header_fullscreen_button.setIcon(icon("exit_fullscreen" if self._host_fullscreen else "fullscreen", self._theme))
+        self.header_fullscreen_button.setIcon(icon("exit_fullscreen" if self._host_fullscreen else "fullscreen", self._theme, "hover"))
 
     def set_active(self, active: bool) -> None:
         self._active = bool(active)

@@ -596,7 +596,7 @@ def fluent_immersive_interactive_icon(
     palette = palette_for(theme)
     result = QIcon()
     result.addPixmap(
-        _fluent_immersive_pixmap(name, size, palette.normal),
+        _fluent_immersive_pixmap(name, size, palette.hover),
         QIcon.Mode.Normal,
         QIcon.State.Off,
     )

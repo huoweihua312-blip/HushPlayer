@@ -438,7 +438,7 @@ class ReadabilityOverlay(QWidget):
             # The gradient fades before the lyric stage, so the artwork still
             # reads as a single continuous background.
             header_gradient = QLinearGradient(0, self._header_rect.top(), 0, self._header_rect.bottom() + 34)
-            header_alpha = round(48 + 40 * strength)
+            header_alpha = round(72 + 56 * strength)
             header_gradient.setColorAt(0.0, _color(surface, header_alpha))
             header_gradient.setColorAt(1.0, _color(surface, 0))
             painter.setPen(Qt.PenStyle.NoPen)
@@ -448,7 +448,7 @@ class ReadabilityOverlay(QWidget):
             painter,
             self._lyrics_rect,
             lyrics_surface,
-            min(230, round(48 + 110 * strength + 90 * self._contrast_need)),
+            min(245, round(72 + 125 * strength + 105 * self._contrast_need)),
             1.22,
         )
         self._paint_region(painter, self._identity_rect, surface, round(28 + 54 * strength), 1.12)
@@ -460,7 +460,7 @@ class ReadabilityOverlay(QWidget):
                 painter,
                 self._controls_rect,
                 surface,
-                round(10 + 42 * (self._control_opacity / 100)),
+                round(18 + 80 * (self._control_opacity / 100)),
                 1.04,
             )
 
