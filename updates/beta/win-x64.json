@@ -1,27 +1,18 @@
 {
     "schema_version": 1,
     "channel": "beta",
-    "version": "1.0.0-beta.13",
-    "numeric_version": "1.0.0.13",
+    "version": "1.0.0-beta.14",
+    "numeric_version": "1.0.0.14",
     "architecture": "win-x64",
     "mandatory": false,
-    "setup_url": "https://api.gitcode.com/api/v5/repos/gcw_iPVB8B5g/HushPlayer-updates/releases/v1.0.0-beta.13/attach_files/HushPlayer-1.0.0-beta.13-win-x64-setup.exe/download",
-    "setup_size": 130962217,
-    "sha256": "2c9d48daf14a8fbf35cf8474d0b4c6b44a2cbc2c9db42aa09761e53c793c54f3",
+    "setup_url": "https://api.gitcode.com/api/v5/repos/gcw_iPVB8B5g/HushPlayer-updates/releases/v1.0.0-beta.14/attach_files/HushPlayer-1.0.0-beta.14-win-x64-setup.exe/download",
+    "setup_size": 132012110,
+    "sha256": "2018731e248668945d58380e3d86f7076c0ed931c1fa2342b86a752810bed30b",
     "release_notes": [
-        "提升沉浸歌词在明亮、复杂封面上的文字与控件可读性，并让控制层透明度设置实际生效。",
-        "修复在不同电脑使用不同在线搜索源时，播放恢复触发音乐库刷新导致当前歌曲从音乐库、我喜欢或歌单视图暂时消失的问题。",
-        "修复设置面板中减弱动画、音量等非主题设置触发全局主题重刷造成的点击卡顿。",
-        "减少设置面板首次打开时重复初始化控件样式的开销。",
-        "延后创建设置中的缓存、更新、关于、在线来源和待导入页面，减少首次打开设置时的界面阻塞。",
-        "减少歌手和专辑列表首次打开时卡片内容、封面与样式的重复刷新。",
-        "延后歌手和专辑卡片首次封面绘制到最终布局尺寸确定后，减少首次进入专辑页时的重复图片处理。",
-        "避免在线搜索结果更新时重复刷新整页状态，减少点击搜索和结果加载时的界面抖动。",
-        "将主题切换时隐藏页面的样式更新延后处理，避免专辑和歌手卡片较多时切换主题短暂卡顿。",
-        "主题切换时保留专辑和歌手卡片的封面像素，避免为不变的图片重复缩放和绘制。",
-        "将大量专辑和歌手卡片的主题样式分批应用，减少主题切换时主线程一次性处理过多控件。",
-        "避免主题切换时重复设置专辑和歌手页面的整页基础样式，减少 Qt 对整张卡片网格的同步重算。",
-        "使用页面调色板更新专辑和歌手页面的背景，避免通过整页样式表触发所有卡片同步重算。"
+        "新增基于 Velopack 的后台更新链路，由独立更新助手负责等待退出、替换和重启，减少文件占用与权限错误。",
+        "修复已安装程序位于 `current` 子目录时无法识别更新环境的问题。",
+        "修复更新检查、下载或应用阶段退出时的线程残留、延迟回调和提前关闭问题。",
+        "将更新检查与下载放到后台线程，减少更新操作对播放器界面的阻塞。"
     ],
     "release_history": [
         {
@@ -442,10 +433,21 @@
                 "避免主题切换时重复设置专辑和歌手页面的整页基础样式，减少 Qt 对整张卡片网格的同步重算。",
                 "使用页面调色板更新专辑和歌手页面的背景，避免通过整页样式表触发所有卡片同步重算。"
             ]
+        },
+        {
+            "version": "1.0.0-beta.14",
+            "numeric_version": "1.0.0.14",
+            "release_date": "2026-10-01",
+            "notes": [
+                "新增基于 Velopack 的后台更新链路，由独立更新助手负责等待退出、替换和重启，减少文件占用与权限错误。",
+                "修复已安装程序位于 `current` 子目录时无法识别更新环境的问题。",
+                "修复更新检查、下载或应用阶段退出时的线程残留、延迟回调和提前关闭问题。",
+                "将更新检查与下载放到后台线程，减少更新操作对播放器界面的阻塞。"
+            ]
         }
     ],
-    "package_url": "https://api.gitcode.com/api/v5/repos/gcw_iPVB8B5g/HushPlayer-updates/releases/v1.0.0-beta.13/attach_files/HushPlayer-1.0.0-beta.13-win-x64-update.zip/download",
-    "package_size": 176220667,
-    "package_sha256": "214e4bb5ae0ecb98fb88f205e1dc11ecb0c21e5f776909dd2f98d4d8cb575685",
-    "package_filename": "HushPlayer-1.0.0-beta.13-win-x64-update.zip"
+    "package_url": "https://api.gitcode.com/api/v5/repos/gcw_iPVB8B5g/HushPlayer-updates/releases/v1.0.0-beta.14/attach_files/HushPlayer-1.0.0-beta.14-win-x64-update.zip/download",
+    "package_size": 177527816,
+    "package_sha256": "c657a7ea7617adc58e4062346c091022d4cc4a0df6401786306c3acf85f0774b",
+    "package_filename": "HushPlayer-1.0.0-beta.14-win-x64-update.zip"
 }
