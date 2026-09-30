@@ -41,6 +41,11 @@ class EntityGridPage(QWidget):
         self._reference_width = 1200
         self._reflowing = False
         self._reflow_pending = False
+        self._base_stylesheet_initialized = False
+        self._card_theme_queue: list[QWidget] = []
+        self._card_theme_timer = QTimer(self)
+        self._card_theme_timer.setSingleShot(True)
+        self._card_theme_timer.timeout.connect(self._apply_card_theme_batch)
         self.header = PageHeader(title, self)
         self.search_box = SearchField(self)
         self.search_box.setMinimumWidth(220)
@@ -92,11 +97,14 @@ class EntityGridPage(QWidget):
             entity_id = getattr(entity, "id")
             card = self._cards.get(entity_id)
             if card is None:
+                # Card factories receive the entity and theme and fully
+                # initialize new cards.  Updating them again here used to
+                # redraw artwork and styles twice during the first route open.
                 card = self._card_factory(entity)
-                card.set_theme(self._theme)
                 card.activated.connect(self.entity_requested)
                 self._cards[entity_id] = card
-            self._card_updater(card, entity)
+            else:
+                self._card_updater(card, entity)
         self.header.count_label.setText(f"{len(self._entities)} {self._count_label}")
         self.scroll_area.setVisible(bool(self._entities))
         self.empty_state.setVisible(not self._entities)
@@ -105,14 +113,41 @@ class EntityGridPage(QWidget):
     def set_theme(self, theme: Theme) -> None:
         theme = get_theme(theme.mode, profile="b2")
         self._theme = theme
-        self.setStyleSheet(build_stylesheet(theme))
+        # The shell applies the same base stylesheet at application scope.
+        # Reapplying it on this page would force Qt to restyle every card in
+        # the grid synchronously during a theme switch.
+        if not self._base_stylesheet_initialized:
+            self.setStyleSheet(build_stylesheet(theme))
+            self._base_stylesheet_initialized = True
         self.header.set_theme(theme)
         style_entity_header(self, theme)
         self.search_box.set_theme(theme)
         self.view_toggle.set_theme(theme)
         self.empty_state.set_theme(theme)
-        for card in self._cards.values():
-            card.set_theme(theme)
+        self._card_theme_timer.stop()
+        self._card_theme_queue = list(self._cards.values())
+        if self._card_theme_queue:
+            # Let the shell return to the event loop before touching the
+            # individual cards.  The queue is then drained in small batches.
+            self._card_theme_timer.start(0)
+
+    def _apply_card_theme_batch(self) -> None:
+        """Update grid card chrome in small batches so theme switches stay responsive."""
+
+        if not self._card_theme_queue:
+            return
+        active_cards = {id(card): card for card in self._cards.values()}
+        batch = self._card_theme_queue[:24]
+        del self._card_theme_queue[: len(batch)]
+        for card in batch:
+            current = active_cards.get(id(card))
+            if current is None:
+                continue
+            # Artwork pixels are theme-independent.  Repainting every cover
+            # during a theme switch is expensive on large artist/album grids.
+            current.set_theme(self._theme, refresh_artwork=False)
+        if self._card_theme_queue:
+            self._card_theme_timer.start(0)
 
     def set_responsive_reference_width(self, width: int) -> None:
         self._reference_width = max(1, int(width))

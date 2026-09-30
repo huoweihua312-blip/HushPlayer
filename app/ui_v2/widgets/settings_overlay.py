@@ -207,10 +207,16 @@ class SettingsOverlay(QWidget):
         self._aux_controls: list[QWidget] = []
         self._category_pages: dict[str, QWidget] = {}
         self._category_scrolls: dict[str, QScrollArea] = {}
+        self._category_builders: dict[str, Callable[[QVBoxLayout], None]] = {}
+        self._built_categories: set[str] = set()
+        self.pending_imports_page: PendingImportsPage | None = None
         self._current_category = "general"
         self._feedback = ""
         self._save_state = "clean"
         self._pending_action = ""
+        self._pending_import_status = ""
+        self._theme_presentation_applied = False
+        self._components_built = False
         self.setObjectName("settingsOverlay")
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         self.setAutoFillBackground(True)
@@ -218,6 +224,7 @@ class SettingsOverlay(QWidget):
         self._build_shell()
         self._build_categories()
         self._wire_state()
+        self._components_built = True
         self.set_theme(theme)
         self.hide()
 
@@ -304,7 +311,7 @@ class SettingsOverlay(QWidget):
         self.confirm_dialog.hide()
 
     def _build_categories(self) -> None:
-        builders = {
+        self._category_builders = {
             "general": self._build_general,
             "appearance": self._build_appearance,
             "playback": self._build_playback,
@@ -315,23 +322,34 @@ class SettingsOverlay(QWidget):
             "about": self._build_about,
         }
         for category in SETTINGS_CATEGORIES:
-            if category.key == "online_sources":
-                page = self._build_online_sources_page()
-                self._category_pages[category.key] = page
-                self.content_stack.addWidget(page)
-                continue
-            if category.key == "pending_imports":
-                page = self._build_pending_imports_page()
-                self._category_pages[category.key] = page
-                self.content_stack.addWidget(page)
-                continue
             page = QWidget(self.content_stack)
             page.setObjectName(f"settingsCategory_{category.key}")
-            outer = QVBoxLayout(page)
+            self._category_pages[category.key] = page
+            self.content_stack.addWidget(page)
+
+    def _ensure_category_built(self, key: str, *, refresh_style: bool = True) -> None:
+        if key in self._built_categories:
+            return
+        if key not in self._category_pages:
+            return
+        placeholder = self._category_pages[key]
+        if key in {"online_sources", "pending_imports"}:
+            page = (
+                self._build_online_sources_page()
+                if key == "online_sources"
+                else self._build_pending_imports_page()
+            )
+            index = self.content_stack.indexOf(placeholder)
+            self.content_stack.removeWidget(placeholder)
+            placeholder.deleteLater()
+            self.content_stack.insertWidget(index, page)
+            self._category_pages[key] = page
+        else:
+            outer = QVBoxLayout(placeholder)
             outer.setContentsMargins(32, 18, 32, 30)
             outer.setSpacing(0)
-            scroll = QScrollArea(page)
-            scroll.setObjectName(f"settingsScroll_{category.key}")
+            scroll = QScrollArea(placeholder)
+            scroll.setObjectName(f"settingsScroll_{key}")
             scroll.setWidgetResizable(True)
             scroll.setFrameShape(QFrame.Shape.NoFrame)
             scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
@@ -339,13 +357,14 @@ class SettingsOverlay(QWidget):
             content_layout = QVBoxLayout(content)
             content_layout.setContentsMargins(0, 0, 0, 0)
             content_layout.setSpacing(24)
-            builders[category.key](content_layout)
+            self._category_builders[key](content_layout)
             content_layout.addStretch(1)
             scroll.setWidget(content)
             outer.addWidget(scroll)
-            self._category_pages[category.key] = page
-            self._category_scrolls[category.key] = scroll
-            self.content_stack.addWidget(page)
+            self._category_scrolls[key] = scroll
+        self._built_categories.add(key)
+        if refresh_style:
+            style_overlay(self, self._theme)
 
     def _build_online_sources_page(self) -> QWidget:
         """Embed the production source manager as one settings category."""
@@ -383,6 +402,8 @@ class SettingsOverlay(QWidget):
         else:
             self._sync_pending_records(service.pending_records(), page=page)
             service.pending_changed.connect(self._sync_pending_records)
+        if self._pending_import_status:
+            page.set_status(self._pending_import_status)
         self.pending_imports_page = page
         return page
 
@@ -785,6 +806,14 @@ class SettingsOverlay(QWidget):
             self.update_status.setText(str(text or ""))
         self._set_feedback(str(text or ""), state=state)
 
+    def set_pending_import_status(self, text: str) -> None:
+        """Keep pending-import feedback until its lazy page is created."""
+
+        self._pending_import_status = str(text or "")
+        page = self.pending_imports_page
+        if page is not None:
+            page.set_status(self._pending_import_status)
+
     def _refresh_state(self) -> None:
         if self._session is None:
             self.footer.set_state(dirty=False, valid=False)
@@ -800,14 +829,23 @@ class SettingsOverlay(QWidget):
         if state is None:
             self.footer.set_status(self._feedback or ("有未保存修改" if self._session.is_dirty else "没有未保存的更改"))
 
-    def open(self) -> None:  # noqa: A003
+    def open(self, category: str | None = None) -> None:  # noqa: A003
         self._session = SettingsEditSession.open(self.bridge.read_snapshot())
         self._feedback = ""
         self._save_state = "clean"
         self._pending_action = ""
         self.confirmation_bar.hide()
         self._hide_confirmation()
-        self.set_category("general")
+        target_category = str(category or "general")
+        if target_category not in self._category_pages:
+            target_category = "general"
+        self.set_category(target_category)
+        # These categories contain the controls used most often and were
+        # historically available immediately after opening Settings.  Keep
+        # that interaction contract while deferring the heavier pages.
+        for eager_category in ("general", "appearance", "playback", "lyrics", "updates"):
+            self._ensure_category_built(eager_category, refresh_style=False)
+        style_overlay(self, self._theme)
         self._sync_controls()
         self._refresh_state()
         parent = self.parentWidget()
@@ -835,8 +873,7 @@ class SettingsOverlay(QWidget):
     def open_category(self, category: str) -> None:
         """Open this cached overlay and select one existing settings category."""
 
-        self.open()
-        self.set_category(category)
+        self.open(category)
 
     def request_close(self) -> None:
         if self.is_dirty:
@@ -945,6 +982,7 @@ class SettingsOverlay(QWidget):
         key = str(category)
         if key not in self._category_pages:
             return
+        self._ensure_category_built(key)
         self._current_category = key
         self.sidebar.set_current(key)
         self.content_stack.setCurrentWidget(self._category_pages[key])
@@ -1022,7 +1060,52 @@ class SettingsOverlay(QWidget):
 
     def set_theme(self, theme: Theme) -> None:
         theme = get_theme(theme.mode, profile="b2")
+        same_mode = self._theme.mode == theme.mode
+        if same_mode and self._theme_presentation_applied:
+            return
         self._theme = theme
+        if same_mode and self._components_built:
+            # All child controls were created with this theme already.  The
+            # presentation pass is the only missing work for the initial
+            # overlay; repeating every child set_theme here blocks the GUI
+            # thread for no visual change.
+            c = theme.colors
+            overlay_color = "rgba(31, 48, 41, 62)" if theme.mode == "light" else "rgba(0, 0, 0, 110)"
+            self.setStyleSheet(
+                f"QWidget#settingsOverlay {{ background: transparent; }} "
+                f"QFrame#settingsDimLayer {{ background: {overlay_color}; }} "
+                "QFrame#settingsConfirmScrim { background: rgba(0, 0, 0, 78); }"
+            )
+            self.title_label.setStyleSheet(
+                f"font-size: {theme.fonts.page_title}px; font-weight: 600; color: {c.primary_text};"
+            )
+            self.subtitle_label.setStyleSheet(
+                f"font-size: {theme.fonts.caption}px; font-weight: 400; color: {c.secondary_text};"
+            )
+            self.header_icon.setIcon(fluent_settings_icon("general", theme, "selected", 20))
+            self.header_icon.setIconSize(QSize(20, 20))
+            self.header_icon.setStyleSheet(
+                "QToolButton#settingsHeaderIcon { border: 0; background: transparent; padding: 0; }"
+            )
+            self.close_button.setIcon(fluent_settings_interactive_icon("dismiss", theme, 18))
+            self.close_button.setIconSize(QSize(18, 18))
+            self.close_button.setStyleSheet(
+                f"QToolButton#settingsCloseButton {{ min-width: 32px; max-width: 32px; min-height: 32px; max-height: 32px; border: 0; border-radius: 9px; background: transparent; }} "
+                f"QToolButton#settingsCloseButton:hover {{ background: rgba(255,255,255,18); }} "
+                f"QToolButton#settingsCloseButton:pressed {{ background: rgba(255,255,255,28); }} "
+                f"QToolButton#settingsCloseButton[hushKeyboardFocus=\"true\"]:focus {{ border: 1px solid {c.focus_ring}; background: transparent; }}"
+            )
+            if hasattr(self, "update_status"):
+                self.update_status.setStyleSheet(
+                    f"font-size: {theme.fonts.caption}px; font-weight: 400; color: {c.secondary_text};"
+                )
+            if hasattr(self, "cache_status"):
+                self.cache_status.setStyleSheet(
+                    f"font-size: {theme.fonts.caption}px; font-weight: 400; color: {c.secondary_text};"
+                )
+            style_overlay(self, theme)
+            self._theme_presentation_applied = True
+            return
         c = theme.colors
         overlay_color = "rgba(31, 48, 41, 62)" if theme.mode == "light" else "rgba(0, 0, 0, 110)"
         self.setStyleSheet(
@@ -1087,3 +1170,4 @@ class SettingsOverlay(QWidget):
             scroll.setStyleSheet(f"QScrollArea {{ border: 0; background: {c.content_background}; }} QAbstractScrollArea::viewport {{ background: {c.content_background}; }} QScrollBar:vertical {{ width: 9px; background: transparent; }} QScrollBar::handle:vertical {{ min-height: 32px; border-radius: 4px; background: {c.border_strong}; }} QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{ height: 0; }}")
 
         style_overlay(self, theme)
+        self._theme_presentation_applied = True

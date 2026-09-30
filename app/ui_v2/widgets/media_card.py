@@ -49,7 +49,7 @@ class MediaCard(QFrame):
         layout.setSpacing(10)
         layout.addWidget(self.cover_label)
         layout.addLayout(text_layout, 1)
-        self.set_theme(theme)
+        self.set_theme(theme, refresh_artwork=False)
 
     def set_content(self, title: str, subtitle: str, detail: str) -> None:
         self.title_label.set_full_text(title)
@@ -67,14 +67,22 @@ class MediaCard(QFrame):
             label.setFixedHeight(22)
         self._refresh_artwork()
 
-    def set_artwork(self, track: Track | None, *, circular: bool = False) -> None:
+    def set_artwork(
+        self,
+        track: Track | None,
+        *,
+        circular: bool = False,
+        refresh: bool = True,
+    ) -> None:
         self._representative = track
         self._circular_artwork = bool(circular)
-        self._refresh_artwork()
+        if refresh:
+            self._refresh_artwork()
 
-    def set_theme(self, theme: Theme) -> None:
+    def set_theme(self, theme: Theme, *, refresh_artwork: bool = True) -> None:
         self._theme = theme
-        self._refresh_artwork()
+        if refresh_artwork:
+            self._refresh_artwork()
         b2 = theme is get_theme(theme.mode, profile="b2")
         hover_border = "transparent" if b2 else theme.colors.border_strong
         self.setStyleSheet(

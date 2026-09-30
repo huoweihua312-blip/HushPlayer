@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import QTimer, Qt, Signal
 from PySide6.QtWidgets import QLabel, QStackedWidget, QVBoxLayout, QWidget
 
 from app.ui_v2.adapters.albums_adapter import AlbumsAdapter
@@ -137,6 +137,11 @@ class ContentRouter(QStackedWidget):
         self._playing_track_id = ""
         self._is_playing = True
         self._reduce_motion = False
+        self._deferred_theme_pages: list[QWidget] = []
+        self._deferred_theme_timer = QTimer(self)
+        self._deferred_theme_timer.setSingleShot(True)
+        self._deferred_theme_timer.setInterval(80)
+        self._deferred_theme_timer.timeout.connect(self._apply_deferred_theme)
         self._online_sources = OnlineSourceAdapter(online, self)
         self._playback_enabled = (
             not collection.read_only or playback.has_real_backend
@@ -236,18 +241,60 @@ class ContentRouter(QStackedWidget):
             if not self._last_normal_route.startswith("immersive"):
                 self._immersive_return_route = self._last_normal_route
             page = self.page_for_route(route_id)
+            self._remove_deferred_theme_page(page)
+            self._apply_theme_to_page(page)
             if hasattr(page, "set_mode"):
                 page.set_mode("now_playing" if route_id == "immersive_now_playing" else "lyrics")
             self.setCurrentWidget(page)
             return
         self._last_normal_route = route_id
-        self.setCurrentWidget(self.page_for_route(route_id))
+        page = self.page_for_route(route_id)
+        self._remove_deferred_theme_page(page)
+        self._apply_theme_to_page(page)
+        self.setCurrentWidget(page)
 
     def set_theme(self, theme: Theme) -> None:
         self._theme = theme
-        for page in dict.fromkeys(self._pages.values()):
-            if hasattr(page, "set_theme"):
-                page.set_theme(theme)
+        self._deferred_theme_timer.stop()
+        pages = list(dict.fromkeys(self._pages.values()))
+        current = self.currentWidget()
+        self._deferred_theme_pages = [
+            page
+            for page in pages
+            if page is not current and callable(getattr(page, "set_theme", None))
+        ]
+        if current is not None:
+            self._apply_theme_to_page(current)
+        if self._deferred_theme_pages:
+            # Let the visible shell finish its theme transition before doing
+            # expensive work for pages that are currently hidden.
+            self._deferred_theme_timer.start(360)
+
+    def _apply_theme_to_page(self, page: QWidget) -> None:
+        setter = getattr(page, "set_theme", None)
+        if not callable(setter):
+            return
+        page_theme = getattr(page, "_theme", None)
+        if getattr(page_theme, "mode", None) != self._theme.mode:
+            setter(self._theme)
+
+    def _remove_deferred_theme_page(self, page: QWidget) -> None:
+        if self._deferred_theme_pages:
+            self._deferred_theme_pages = [
+                candidate
+                for candidate in self._deferred_theme_pages
+                if candidate is not page
+            ]
+        if not self._deferred_theme_pages:
+            self._deferred_theme_timer.stop()
+
+    def _apply_deferred_theme(self) -> None:
+        if not self._deferred_theme_pages:
+            return
+        page = self._deferred_theme_pages.pop(0)
+        self._apply_theme_to_page(page)
+        if self._deferred_theme_pages:
+            self._deferred_theme_timer.start()
 
     def set_responsive_reference_width(self, width: int) -> None:
         for page in dict.fromkeys(self._pages.values()):

@@ -268,6 +268,86 @@ class OnlineTrackStateTests(unittest.TestCase):
         self.assertEqual(updated.availability, "resolving")
         self.assertTrue(updated.is_loading)
 
+    def test_remote_state_keeps_persisted_membership_when_result_is_stale(self) -> None:
+        added_at = datetime(2026, 8, 9, 14, 30)
+        favorite_at = datetime(2026, 8, 10, 9, 15)
+        saved = replace(
+            self.first.as_track(),
+            added_at=added_at,
+            favorite_added_at=favorite_at,
+            is_favorite=True,
+        )
+        collection = LibraryCollectionAdapter((saved,), read_only=True)
+        playlists = PlaylistAdapter(collection, seed_mock=False, read_only=True)
+        adapter = OnlineAdapter(collection, playlists, timer_enabled=False)
+        # The search catalog can contain an older copy of the same identity
+        # whose favorite flag and persistence timestamps are not authoritative.
+        adapter._results = (replace(self.first, is_favorite=False),)
+
+        updated = adapter.apply_remote_state(
+            saved.stable_identity,
+            "playable",
+            "在线播放地址已准备。",
+        )
+
+        persisted = collection.track_for_id(saved.id)
+        self.assertIsNotNone(updated)
+        self.assertIsNotNone(persisted)
+        self.assertTrue(updated.is_favorite)
+        self.assertTrue(persisted.is_favorite)
+        self.assertEqual(persisted.added_at, added_at)
+        self.assertEqual(persisted.favorite_added_at, favorite_at)
+        self.assertTrue(adapter.results()[0].is_favorite)
+
+    def test_result_refresh_does_not_clear_saved_favorite(self) -> None:
+        saved = replace(
+            self.first.as_track(),
+            added_at=datetime(2026, 8, 9),
+            is_favorite=True,
+            favorite_added_at=datetime(2026, 8, 10),
+        )
+        collection = LibraryCollectionAdapter((saved,), read_only=True)
+        adapter = OnlineAdapter(
+            collection,
+            PlaylistAdapter(collection, seed_mock=False, read_only=True),
+            timer_enabled=False,
+        )
+        adapter._results = (replace(self.first, is_favorite=False),)
+
+        adapter._replace_result(replace(adapter.results()[0], availability="resolving"))
+
+        current = collection.track_for_id(saved.id)
+        self.assertTrue(current.is_favorite)
+        self.assertEqual(current.added_at, saved.added_at)
+        self.assertEqual(current.favorite_added_at, saved.favorite_added_at)
+        self.assertTrue(adapter.results()[0].is_favorite)
+
+    def test_search_play_does_not_replace_existing_saved_membership(self) -> None:
+        saved = replace(
+            self.first.as_track(),
+            added_at=datetime(2026, 8, 9),
+            is_favorite=True,
+            favorite_added_at=datetime(2026, 8, 10),
+            remote_payload={"playback_source": {"source_id": "alternate"}},
+        )
+        collection = LibraryCollectionAdapter((saved,), read_only=False)
+        adapter = OnlineAdapter(
+            collection,
+            PlaylistAdapter(collection, seed_mock=False),
+            timer_enabled=False,
+        )
+        adapter._results = (replace(self.first, is_favorite=False),)
+        requested = []
+        adapter.play_requested.connect(requested.append)
+
+        self.assertTrue(adapter.request_play(self.first.id))
+
+        current = collection.track_for_id(saved.id)
+        self.assertTrue(current.is_favorite)
+        self.assertEqual(current.added_at, saved.added_at)
+        self.assertTrue(requested[0].is_favorite)
+        self.assertEqual(requested[0].remote_payload, saved.remote_payload)
+
     def test_local_track_is_not_touched_by_remote_state(self) -> None:
         local = Track(
             id="local",

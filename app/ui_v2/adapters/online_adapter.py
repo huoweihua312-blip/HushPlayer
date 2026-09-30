@@ -349,10 +349,11 @@ class OnlineAdapter(QObject):
                 self.playback_unavailable.emit(track.id, message)
                 self.notification_changed.emit(message)
                 return False
+            unified = self._collection_track_for_identity(track.stable_identity)
             track = replace(track, availability="resolving", availability_detail="")
-            self._replace_result(track)
-            unified = track.as_track()
-            self.collection.upsert_track(unified)
+            self._replace_result(track, publish=unified is None)
+            if unified is None:
+                unified = self.collection.upsert_track(track.as_track())
             self.set_playing_track(track.id)
             self.play_requested.emit(unified)
             return True
@@ -365,9 +366,11 @@ class OnlineAdapter(QObject):
                 self.playback_unavailable.emit(track.id, message)
                 self.notification_changed.emit(message)
             return False
+        unified = self._collection_track_for_identity(track.stable_identity)
         track = replace(track, availability="resolving", availability_detail="")
-        self._replace_result(track)
-        unified = self.collection.upsert_track(track.as_track())
+        self._replace_result(track, publish=unified is None)
+        if unified is None:
+            unified = self.collection.upsert_track(track.as_track())
         self.set_playing_track(track.id)
         self.play_requested.emit(unified)
         return True
@@ -380,6 +383,9 @@ class OnlineAdapter(QObject):
             desired = not track.is_favorite
             if not self.discovery.bridge.set_favorite(self._payload_for_track(track), desired):
                 return
+            current = self._collection_track_for_identity(track.stable_identity)
+            if current is not None:
+                self.collection.update_runtime_track(replace(current, is_favorite=desired))
             self._replace_result(replace(track, is_favorite=desired))
             self.favorite_changed.emit(track.id, desired)
             self.remote_collection_changed.emit()
@@ -551,6 +557,32 @@ class OnlineAdapter(QObject):
         identity = str(stable_identity or "").strip()
         if self._closed or not identity:
             return None
+        current = self._collection_track_for_identity(identity)
+        if current is not None:
+            # A persisted library track owns membership fields such as
+            # favorite state and added_at.  A search result is only a
+            # temporary playback projection and may carry stale values when
+            # the source catalog differs between computers.
+            updated = self._enrich_track(
+                current,
+                state=state,
+                detail=detail,
+                payload=payload,
+                duration_ms=duration_ms,
+            )
+            self.collection.update_runtime_track(updated)
+            online = self._online_result_for_identity(identity)
+            if online is not None:
+                result = self._enrich_online_track(
+                    replace(online, is_favorite=updated.is_favorite),
+                    state=state,
+                    detail=detail,
+                    payload=payload,
+                    duration_ms=duration_ms,
+                )
+                self._replace_result(result, publish=False)
+            self.track_updated.emit(updated)
+            return updated
         online = self._online_result_for_identity(identity)
         if online is not None:
             updated = self._enrich_online_track(
@@ -666,9 +698,30 @@ class OnlineAdapter(QObject):
         )
 
     def _publish_track(self, track: Track) -> None:
-        if self.collection.track_for_id(track.id) is not None:
-            self.collection.update_runtime_track(track)
-        self.track_updated.emit(track)
+        current = self._collection_track_for_identity(track.stable_identity or track.id)
+        if current is None:
+            self.track_updated.emit(track)
+            return
+        updated = self._enrich_track(
+            current,
+            state=track.availability,
+            detail=track.availability_detail,
+            payload={
+                "title": track.title,
+                "artist": track.artist,
+                "album": track.album,
+                "artworkUrl": track.artwork_url,
+                "artworkKey": track.artwork_key,
+            },
+            duration_ms=track.duration_ms,
+        )
+        updated = replace(
+            updated,
+            availability_detail=track.availability_detail,
+            artwork_data=bytes(track.artwork_data) or current.artwork_data,
+        )
+        self.collection.update_runtime_track(updated)
+        self.track_updated.emit(updated)
 
     def _online_result_for_identity(self, identity: str) -> OnlineTrack | None:
         return next(
@@ -1260,7 +1313,10 @@ class OnlineAdapter(QObject):
             self._replace_result(replace(track, is_favorite=favorite))
         self.favorite_changed.emit(track_id, favorite)
 
-    def _replace_result(self, updated: OnlineTrack) -> None:
+    def _replace_result(self, updated: OnlineTrack, *, publish: bool = True) -> None:
+        current = self._collection_track_for_identity(updated.stable_identity)
+        if current is not None and updated.is_favorite != current.is_favorite:
+            updated = replace(updated, is_favorite=current.is_favorite)
         for index, track in enumerate(self._results):
             if not ({track.id, track.stable_identity} & {updated.id, updated.stable_identity}):
                 continue
@@ -1268,7 +1324,8 @@ class OnlineAdapter(QObject):
             values[index] = updated
             self._results = tuple(values)
             self.result_updated.emit(updated)
-            self._publish_track(updated.as_track())
+            if publish:
+                self._publish_track(updated.as_track())
             return
         for key, track in tuple(self._recommendation_results.items()):
             if not ({track.id, track.stable_identity, track.remote_id} & {
@@ -1280,7 +1337,8 @@ class OnlineAdapter(QObject):
             self._recommendation_results.pop(key, None)
             self._recommendation_results[updated.id] = updated
             self.result_updated.emit(updated)
-            self._publish_track(updated.as_track())
+            if publish:
+                self._publish_track(updated.as_track())
             return
 
     def _sync_result_availability(self) -> None:

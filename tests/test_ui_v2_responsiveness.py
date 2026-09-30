@@ -192,6 +192,30 @@ class ShellResponsivenessTests(unittest.TestCase):
         self.assertTrue(overlay.save())
         self.assertTrue(window.settings_bridge.read_snapshot().get("reduce_motion"))
 
+    def test_non_theme_settings_preview_does_not_reapply_global_theme(self):
+        window = self.window
+        values = window._settings_snapshot.to_dict()
+        values["reduce_motion"] = not bool(values.get("reduce_motion", False))
+
+        with patch.object(window, "set_theme") as apply_theme:
+            window._apply_settings_snapshot(values)
+
+        apply_theme.assert_not_called()
+
+    def test_heavy_settings_categories_are_created_on_first_visit(self):
+        window = self.window
+        window.open_settings_overlay("appearance")
+        overlay = window.settings_overlay
+
+        self.assertIn("appearance", overlay._built_categories)
+        self.assertIn("lyrics", overlay._built_categories)
+        self.assertNotIn("online_sources", overlay._built_categories)
+        self.assertNotIn("about", overlay._built_categories)
+
+        overlay.set_category("about")
+        self.assertIn("about", overlay._built_categories)
+        self.assertTrue(overlay.about_changelog.isReadOnly())
+
 
 if __name__ == "__main__":
     unittest.main()

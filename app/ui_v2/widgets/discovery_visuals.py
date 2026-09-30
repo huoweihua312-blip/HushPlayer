@@ -1,5 +1,7 @@
 """B2 presentation helpers for collection/discovery pages; no data ownership."""
 from PySide6.QtCore import Qt
+from PySide6.QtGui import QColor, QPalette
+from PySide6.QtWidgets import QFrame
 from app.ui_v2.theme.tokens import get_theme
 from app.ui_v2.widgets.collection_visuals import apply_collection_actions
 
@@ -27,10 +29,19 @@ def style_entity_header(page, theme):
     page.setObjectName('entityGridPage')
     page.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
     page.scroll_area.setObjectName('entityScrollArea')
+    page.scroll_area.setFrameShape(QFrame.Shape.NoFrame)
     page.content.setObjectName('entityGridContent')
-    page.setStyleSheet(page.styleSheet() +
-        f'QWidget#entityGridPage, QWidget#entityGridContent, QScrollArea#entityScrollArea '
-        f'{{ background: {theme.colors.content_background}; border: 0; }}')
+    # A page-level stylesheet is inherited by every card.  Replacing it on
+    # every theme change makes Qt restyle the entire grid synchronously.  The
+    # same opaque surface can be expressed with palettes without touching
+    # the cards or the existing global stylesheet.
+    surface = QColor(theme.colors.content_background)
+    for widget in (page, page.content, page.scroll_area, page.scroll_area.viewport()):
+        palette = widget.palette()
+        palette.setColor(QPalette.ColorRole.Window, surface)
+        palette.setColor(QPalette.ColorRole.Base, surface)
+        widget.setPalette(palette)
+        widget.setAutoFillBackground(True)
     page.grid.setHorizontalSpacing(24)
     page.grid.setVerticalSpacing(24)
     header = page.header

@@ -15,6 +15,7 @@ from app.core.app_paths import AppPaths
 from app.services.library_repository import LibraryRepository, LibrarySnapshot
 from app.services.local_artwork import LocalArtworkResolver
 from app.services.remote_track_store import RemoteTrackStore
+from app.services.playback_diagnostics import PlaybackDiagnostics
 from app.ui_v2.adapters.artists_adapter import (
     album_identity,
     artist_identity,
@@ -108,6 +109,7 @@ class RealLibraryAdapter(QObject):
         *,
         repository: LibraryRepository | None = None,
         remote_tracks: RemoteTrackStore | None = None,
+        diagnostics: PlaybackDiagnostics | None = None,
     ) -> None:
         super().__init__(parent)
         self.collection = collection
@@ -122,6 +124,7 @@ class RealLibraryAdapter(QObject):
         self._remote_tracks = remote_tracks or RemoteTrackStore(
             data_dir / "remote_tracks.json"
         )
+        self._diagnostics = diagnostics
         self._thread: _SnapshotThread | None = None
         self._retired_threads: list[_SnapshotThread] = []
         self._generation = 0
@@ -148,14 +151,28 @@ class RealLibraryAdapter(QObject):
         if self._closed or self._state == "loading":
             return False
         self._generation += 1
+        if self._diagnostics is not None:
+            self._diagnostics.record(
+                "library_load_requested",
+                generation=self._generation,
+                current_tracks=len(self.collection.tracks()),
+            )
         self._start(self._generation)
         return True
 
-    def refresh(self) -> bool:
+    def refresh(self, *, reason: str = "external") -> bool:
         if self._closed:
             return False
         self._generation += 1
         generation = self._generation
+        if self._diagnostics is not None:
+            self._diagnostics.record(
+                "library_refresh_requested",
+                generation=generation,
+                reason=reason,
+                current_tracks=len(self.collection.tracks()),
+                state=self._state,
+            )
         if self._thread is not None:
             self._pending_generation = generation
             self._set_state("loading", "正在刷新音乐库。")
@@ -421,9 +438,29 @@ class RealLibraryAdapter(QObject):
         if self._closed or generation != self._generation:
             return
         if error or data is None:
+            if self._diagnostics is not None:
+                self._diagnostics.record(
+                    "library_projection_failed",
+                    generation=generation,
+                    error=error or "no projection data",
+                    current_tracks=len(self.collection.tracks()),
+                )
             self._last_error = error or "读取音乐库失败"
             self._set_state("error", self._last_error)
             return
+        previous_ids = set(self.collection.track_ids())
+        next_ids = {track.id for track in data.tracks}
+        if self._diagnostics is not None:
+            self._diagnostics.record(
+                "library_projection_applied",
+                generation=generation,
+                tracks_before=len(previous_ids),
+                tracks_after=len(next_ids),
+                removed_ids=sorted(previous_ids - next_ids),
+                added_ids=sorted(next_ids - previous_ids),
+                favorites_after=len(data.favorites),
+                custom_playlists_after=len(data.playlists),
+            )
         self._data = data
         self._last_error = ""
         self.collection.set_tracks(data.tracks)

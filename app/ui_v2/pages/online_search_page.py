@@ -134,7 +134,6 @@ class OnlineSearchPage(QWidget):
         adapter.source_state_changed.connect(self._sync_sources)
         adapter.source_state_changed.connect(self.result_toolbar.set_sources)
         adapter.state_changed.connect(self._sync_state)
-        adapter.search_results_changed.connect(lambda _results: self._sync_state(adapter.state))
         adapter.notification_changed.connect(self._sync_notification)
         self.search_bar.set_text("")
         self.history_view.set_history(adapter.history())

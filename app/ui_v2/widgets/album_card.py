@@ -12,12 +12,18 @@ from app.ui_v2.widgets.media_card import MediaCard
 class AlbumCard(MediaCard):
     def __init__(self, album: Album, theme: Theme, parent=None, representative: Track | None = None) -> None:
         super().__init__(album.id, "album", theme, parent)
-        self.set_album(album, representative)
+        self.set_album(album, representative, refresh_artwork=False)
 
-    def set_album(self, album: Album, representative: Track | None = None) -> None:
+    def set_album(
+        self,
+        album: Album,
+        representative: Track | None = None,
+        *,
+        refresh_artwork: bool = True,
+    ) -> None:
         self.entity_id = album.id
         if representative is not None:
-            self.set_artwork(representative)
+            self.set_artwork(representative, refresh=refresh_artwork)
         self.set_content(
             album.title,
             album.artist,

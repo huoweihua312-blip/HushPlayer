@@ -56,6 +56,7 @@ from app.services.library_removal_service import LibraryRemovalService
 from app.services.library_repository import LibraryRepository
 from app.services.music_folder_scan import MusicFolderImportService
 from app.services.online_discovery_runtime import OnlineDiscoveryRuntime
+from app.services.playback_diagnostics import PlaybackDiagnostics
 from app.services.playback_session_store import PlaybackSession, PlaybackSessionStore
 from app.services.remote_track_store import RemoteTrackStore
 from app.startup_diagnostics import StartupDiagnostics
@@ -382,6 +383,7 @@ class MainWindow(QMainWindow):
         is_real_library = self.data_mode == "real"
         if is_real_library:
             resolved_paths = AppPaths.resolve()
+            self._playback_diagnostics = PlaybackDiagnostics(resolved_paths.log_dir)
             repository = repository or LibraryRepository(
                 resolved_paths.data_dir / "library.json",
                 resolved_paths.data_dir / "playlists.json",
@@ -405,6 +407,7 @@ class MainWindow(QMainWindow):
             )
             self.music_import_service.completed.connect(self._on_music_import_completed)
         else:
+            self._playback_diagnostics = PlaybackDiagnostics(None)
             self.online_discovery = None
             self.music_import_service = None
         self.library_removal_service = (
@@ -529,6 +532,7 @@ class MainWindow(QMainWindow):
                 self,
                 repository=repository,
                 remote_tracks=remote_tracks,
+                diagnostics=self._playback_diagnostics,
             )
             if is_real_library
             else None
@@ -567,7 +571,7 @@ class MainWindow(QMainWindow):
             if self._startup_diagnostics is not None:
                 self._startup_diagnostics.mark("main_window.library_load_queued")
             self.online_adapter.remote_collection_changed.connect(
-                self.real_library_adapter.refresh
+                self._on_remote_collection_changed
             )
             if bool(
                 self.settings_bridge.value(
@@ -589,6 +593,39 @@ class MainWindow(QMainWindow):
         if self._close_finalized or self.real_library_adapter is None:
             return
         self.real_library_adapter.load()
+
+    def _on_remote_collection_changed(self) -> None:
+        """Record and route a membership refresh without changing its behavior."""
+
+        self._playback_diagnostics.record(
+            "remote_collection_changed",
+            **self._playback_projection_counts(),
+            current_route=self.navigation_adapter.route,
+        )
+        if self.real_library_adapter is not None:
+            self.real_library_adapter.refresh(reason="remote_collection_changed")
+
+    def _playback_projection_counts(self) -> dict[str, int]:
+        """Return small view/projection counts for playback diagnostics."""
+
+        router = getattr(self, "router", None)
+        favorites_adapter = getattr(router, "_favorites_adapter", None)
+        playlist_tracks = getattr(router, "_playlist_tracks", None)
+        return {
+            "collection_size": len(self.library_collection.tracks()),
+            "library_view_size": len(self.library_adapter.tracks()),
+            "favorites_view_size": (
+                len(favorites_adapter.tracks())
+                if favorites_adapter is not None
+                else 0
+            ),
+            "playlist_view_size": (
+                len(playlist_tracks.tracks())
+                if playlist_tracks is not None
+                else 0
+            ),
+            "playlist_count": len(self.playlist_adapter.playlists()),
+        }
 
     @property
     def theme(self) -> Theme:
@@ -1311,18 +1348,13 @@ class MainWindow(QMainWindow):
             self.settings_overlay.pending_open_folder_requested.connect(
                 self._open_pending_folder
             )
-            if self._pending_import_status:
-                self.settings_overlay.pending_imports_page.set_status(
-                    self._pending_import_status
-                )
+            self.settings_overlay.set_pending_import_status(self._pending_import_status)
         elif self.settings_overlay.isVisible():
             if category:
                 self.settings_overlay.set_category(category)
             self.settings_overlay.raise_()
             return
-        self.settings_overlay.open()
-        if category:
-            self.settings_overlay.set_category(category)
+        self.settings_overlay.open(category)
         self.settings_overlay.raise_()
 
     def _set_update_status(self, message: str, *, state: str = "success") -> None:
@@ -1422,6 +1454,8 @@ class MainWindow(QMainWindow):
 
     def _show_pending_status(self, text: str) -> None:
         self._pending_import_status = str(text or "")
+        if self.settings_overlay is not None:
+            self.settings_overlay.set_pending_import_status(self._pending_import_status)
         page = self._pending_page()
         if page is not None and hasattr(page, "set_status"):
             page.set_status(self._pending_import_status)
@@ -1568,10 +1602,15 @@ class MainWindow(QMainWindow):
             except (TypeError, ValueError):
                 self.playback_adapter.set_volume(65)
         mode = str(values.get("appearance_mode", "dark"))
-        self.set_theme(
-            "dark" if self._force_dark_theme or mode != "light" else "light",
-            reveal_overlay=theme_reveal_overlay,
+        target_theme_mode = (
+            "dark" if self._force_dark_theme or mode != "light" else "light"
         )
+        # Settings previews can update volume, motion, or immersive options
+        # without changing the appearance mode.  Reapplying the complete
+        # application theme for those controls rebuilds hundreds of stylesheets
+        # on the GUI thread and makes an otherwise light-weight click stall.
+        if target_theme_mode != self._theme.mode:
+            self.set_theme(target_theme_mode, reveal_overlay=theme_reveal_overlay)
         page = self.router._pages.get("immersive_lyrics")
         if page is not None and hasattr(page, "apply_options"):
             page.apply_options(self.immersive_lyrics_options)
@@ -1720,6 +1759,14 @@ class MainWindow(QMainWindow):
         self.root.setStyleSheet(stylesheet)
 
     def _play_tracks(self, tracks, track_id: str) -> None:
+        self._playback_diagnostics.record(
+            "play_requested",
+            mode="library",
+            track_id=str(track_id or ""),
+            queue_size=len(tracks) if hasattr(tracks, "__len__") else None,
+            **self._playback_projection_counts(),
+            route=self.navigation_adapter.route,
+        )
         allow_remote = self.playback_adapter.has_real_backend
         available = tuple(
             track
@@ -1732,6 +1779,13 @@ class MainWindow(QMainWindow):
         self.playback_adapter.play_track(track_id)
 
     def _play_queue(self, tracks, shuffle: bool) -> None:
+        self._playback_diagnostics.record(
+            "queue_play_requested",
+            queue_size=len(tracks) if hasattr(tracks, "__len__") else None,
+            shuffle=bool(shuffle),
+            **self._playback_projection_counts(),
+            route=self.navigation_adapter.route,
+        )
         allow_remote = self.playback_adapter.has_real_backend
         available = tuple(
             track
@@ -1746,6 +1800,13 @@ class MainWindow(QMainWindow):
         self.playback_adapter.play_track(available[0].id)
 
     def _play_online_track(self, track) -> None:
+        self._playback_diagnostics.record(
+            "online_play_requested",
+            track_id=str(getattr(track, "id", "") or ""),
+            stable_identity=str(getattr(track, "stable_identity", "") or ""),
+            **self._playback_projection_counts(),
+            route=self.navigation_adapter.route,
+        )
         # The next play_item call replaces the old media synchronously. Keep
         # the new queue alive long enough for that call to reach the controller.
         self.playback_adapter.set_queue(
@@ -1944,6 +2005,14 @@ class MainWindow(QMainWindow):
         )
 
     def _on_playback_track_changed(self, track) -> None:
+        self._playback_diagnostics.record(
+            "playback_track_changed",
+            track_id=str(getattr(track, "id", "") or "") if track is not None else "",
+            stable_identity=str(getattr(track, "stable_identity", "") or "") if track is not None else "",
+            **self._playback_projection_counts(),
+            favorites_size=len(self.real_library_adapter.favorites()) if self.real_library_adapter is not None else 0,
+            route=self.navigation_adapter.route,
+        )
         track_id = track.id if track is not None else ""
         self.library_collection.set_playing_track(track_id)
         self.router.set_playing_track(track_id)
@@ -1962,6 +2031,21 @@ class MainWindow(QMainWindow):
         detail: str,
         payload: object,
     ) -> None:
+        self._playback_diagnostics.record(
+            "remote_track_state_received",
+            identity=str(identity or ""),
+            state=str(state or ""),
+            detail=str(detail or ""),
+            before_projection=self._playback_projection_counts(),
+            identity_present=any(
+                str(identity or "") in {
+                    track.id,
+                    track.stable_identity,
+                    track.remote_identity,
+                }
+                for track in self.library_collection.tracks()
+            ),
+        )
         updated = self.online_adapter.apply_remote_state(
             identity,
             state,
@@ -1969,7 +2053,22 @@ class MainWindow(QMainWindow):
             payload if isinstance(payload, dict) else {},
         )
         if not self.online_adapter.is_formal or not isinstance(updated, Track):
+            self._playback_diagnostics.record(
+                "remote_track_state_applied",
+                identity=str(identity or ""),
+                updated=False,
+                after_projection=self._playback_projection_counts(),
+            )
             return
+        self._playback_diagnostics.record(
+            "remote_track_state_applied",
+            identity=str(identity or ""),
+            updated=True,
+            updated_track_id=updated.id,
+            updated_missing=bool(updated.is_missing),
+            updated_loading=bool(updated.is_loading),
+            after_projection=self._playback_projection_counts(),
+        )
         normalized_state = str(state or "").strip().casefold().replace("-", "_")
         if normalized_state not in _AUTO_RECOVERY_FAILURE_STATES:
             return
@@ -2047,6 +2146,12 @@ class MainWindow(QMainWindow):
             self.library_collection.set_favorite(current.id, favorite)
 
     def _on_real_library_state(self, state: str, detail: str) -> None:
+        self._playback_diagnostics.record(
+            "library_state_changed",
+            state=str(state or ""),
+            detail=str(detail or ""),
+            **self._playback_projection_counts(),
+        )
         self.library_page.header.count_label.setToolTip(detail)
         if state == "loading":
             self.library_page.empty_state.set_action("")

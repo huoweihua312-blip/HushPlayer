@@ -38,7 +38,7 @@ def arrange_rows(overlay, window_width: int) -> None:
         overlay._category_pages[page].layout().setContentsMargins(inset, 18, inset, 30)
     for key in ("online_sources", "pending_imports"):
         page = overlay._category_pages.get(key)
-        if page is not None:
+        if page is not None and page.layout() is not None:
             page.layout().setContentsMargins(24 if window_width <= 1080 else 32, 18, 24 if window_width <= 1080 else 32, 24)
     for row in overlay._rows:
         control = row.control
@@ -137,17 +137,23 @@ def style_overlay(overlay, theme: Theme) -> None:
     footer.status_label.setStyleSheet(f"background: transparent; font-size: 12px; color: {c.secondary_text};")
     _action(footer.cancel_button, theme)
     _action(footer.save_button, theme, primary=True)
-    overlay.folder_list.setStyleSheet(
-        f"QListWidget {{ background: transparent; border: 0; color: {c.primary_text}; font-size: 13px; }}"
-        f"QListWidget::item {{ padding: 14px 0; border-bottom: 1px solid {c.divider}; }}"
-        f"QListWidget::item:selected {{ background: {c.selected_background}; }}"
-    )
-    overlay.about_changelog.setStyleSheet(f"QPlainTextEdit {{ background: transparent; border: 0; color: {c.secondary_text}; font-size: 12px; selection-background-color: {c.selected_background}; }}")
-    overlay._category_pages["about"].setStyleSheet(
-        f"QWidget {{ background: {background}; color: {c.secondary_text}; font-size: 13px; }}"
-        + f"QLabel#settingsAboutAppName {{ font-size: 24px; font-weight: 600; color: {c.primary_text}; }}"
-        + f"QLabel#settingsAboutVersion {{ font-size: 12px; color: {c.secondary_text}; }}"
-    )
+    folder_list = getattr(overlay, "folder_list", None)
+    if folder_list is not None:
+        folder_list.setStyleSheet(
+            f"QListWidget {{ background: transparent; border: 0; color: {c.primary_text}; font-size: 13px; }}"
+            f"QListWidget::item {{ padding: 14px 0; border-bottom: 1px solid {c.divider}; }}"
+            f"QListWidget::item:selected {{ background: {c.selected_background}; }}"
+        )
+    about_changelog = getattr(overlay, "about_changelog", None)
+    if about_changelog is not None:
+        about_changelog.setStyleSheet(f"QPlainTextEdit {{ background: transparent; border: 0; color: {c.secondary_text}; font-size: 12px; selection-background-color: {c.selected_background}; }}")
+    about_page = overlay._category_pages.get("about")
+    if about_page is not None and "about" in overlay._built_categories:
+        about_page.setStyleSheet(
+            f"QWidget {{ background: {background}; color: {c.secondary_text}; font-size: 13px; }}"
+            + f"QLabel#settingsAboutAppName {{ font-size: 24px; font-weight: 600; color: {c.primary_text}; }}"
+            + f"QLabel#settingsAboutVersion {{ font-size: 12px; color: {c.secondary_text}; }}"
+        )
     for key in ("online_sources", "pending_imports"):
         page = overlay._category_pages.get(key)
         if page is None:
