@@ -90,7 +90,7 @@ class ImmersiveControls(QWidget):
         utility_layout.addWidget(self.volume_slider)
         utility_layout.addWidget(self.more_button)
         self._layout = QVBoxLayout(self)
-        self._layout.setContentsMargins(12, 8, 12, 8)
+        self._layout.setContentsMargins(0, 0, 0, 0)
         self._layout.setSpacing(10)
         self._layout.addWidget(self.transport_row)
         self._layout.addWidget(self.time_row)
@@ -100,7 +100,6 @@ class ImmersiveControls(QWidget):
         self.setMinimumHeight(126)
         self._reading_scene = False
         self.setAutoFillBackground(False)
-        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground)
         for widget in (self.progress_slider, self.volume_slider):
             widget.installEventFilter(self)
         self.set_theme(theme)
@@ -152,11 +151,8 @@ class ImmersiveControls(QWidget):
         reading = self._reading_scene
         self._theme = theme
         colors = theme.colors
-        surface_alpha = round(255 * self._surface_opacity / 100)
-        surface = _rgba(colors.surface_primary, surface_alpha)
-        border = _rgba(colors.primary_text, 36)
         self.setStyleSheet(
-            f"QWidget#immersiveControls {{ background: {surface}; border: 1px solid {border}; border-radius: 14px; }}"
+            "QWidget#immersiveControls { background: transparent; border: 0; }"
         )
         subtle = (
             "QToolButton { min-width: 34px; min-height: 34px; border: 2px solid transparent; border-radius: 6px; padding: 0; "

@@ -6,7 +6,7 @@ from dataclasses import dataclass, fields
 from collections.abc import Callable
 
 from PySide6.QtCore import QEvent, QPoint, QRect, QSize, Qt, QTimer, Signal
-from PySide6.QtGui import QAction, QColor, QCursor
+from PySide6.QtGui import QAction, QCursor
 from PySide6.QtWidgets import QBoxLayout, QFrame, QHBoxLayout, QSlider, QSizePolicy, QStackedWidget, QToolButton, QVBoxLayout, QWidget
 
 from app.ui_v2.adapters.lyrics_adapter import LyricsAdapter
@@ -261,10 +261,8 @@ class ImmersiveLyricsPage(QWidget):
 
     def _style_header(self, theme: Theme) -> None:
         colors = theme.colors
-        header_surface = QColor(colors.surface_primary)
-        header_surface.setAlpha(112)
         self.header.setStyleSheet(
-            f"QFrame#immersiveHeader {{ background: rgba({header_surface.red()}, {header_surface.green()}, {header_surface.blue()}, {header_surface.alpha()}); }}"
+            "QFrame#immersiveHeader { background: transparent; }"
             f"QToolButton {{ border: 1px solid transparent; border-radius: 6px; background: transparent; font-weight: 400; font-size: 13px; }}"
             f'QToolButton[hushKeyboardFocus="true"]:focus {{ border-color: {colors.focus_ring}; }}'
             f"QToolButton:hover {{ background: {colors.surface_hover}; }}"
@@ -555,6 +553,7 @@ class ImmersiveLyricsPage(QWidget):
         self._control_surface_opacity = max(20, min(80, int(value)))
         self.options.control_surface_opacity = self._control_surface_opacity
         self.controls.set_surface_opacity(self._control_surface_opacity)
+        self.readability_overlay.set_control_opacity(self._control_surface_opacity)
         self._sync_options()
 
     def set_lyric_protection_enabled(self, enabled: bool) -> None:

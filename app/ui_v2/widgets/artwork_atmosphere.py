@@ -371,6 +371,7 @@ class ReadabilityOverlay(QWidget):
         self._theme = theme
         self._strength = 45
         self._contrast_need = 0.0
+        self._control_opacity = 35
         self._identity_rect = QRect()
         self._lyrics_rect = QRect()
         self._controls_rect = QRect()
@@ -395,6 +396,12 @@ class ReadabilityOverlay(QWidget):
         value = max(0.0, min(1.0, float(value)))
         if self._contrast_need != value:
             self._contrast_need = value
+            self.update()
+
+    def set_control_opacity(self, value: int) -> None:
+        value = max(20, min(80, int(value)))
+        if self._control_opacity != value:
+            self._control_opacity = value
             self.update()
 
     def set_regions(
@@ -431,7 +438,7 @@ class ReadabilityOverlay(QWidget):
             # The gradient fades before the lyric stage, so the artwork still
             # reads as a single continuous background.
             header_gradient = QLinearGradient(0, self._header_rect.top(), 0, self._header_rect.bottom() + 34)
-            header_alpha = round(76 + 64 * strength)
+            header_alpha = round(48 + 40 * strength)
             header_gradient.setColorAt(0.0, _color(surface, header_alpha))
             header_gradient.setColorAt(1.0, _color(surface, 0))
             painter.setPen(Qt.PenStyle.NoPen)
@@ -453,7 +460,7 @@ class ReadabilityOverlay(QWidget):
                 painter,
                 self._controls_rect,
                 surface,
-                round(30 + 48 * strength),
+                round(10 + 42 * (self._control_opacity / 100)),
                 1.04,
             )
 

@@ -163,9 +163,10 @@ class ImmersiveConvergenceTests(unittest.TestCase):
         self.app.processEvents()
 
         self.assertEqual(p.controls.surface_opacity, 62)
-        self.assertIn("background: rgba", p.controls.styleSheet())
-        self.assertIn("rgba", p.header.styleSheet())
+        self.assertIn("background: transparent", p.controls.styleSheet())
+        self.assertIn("background: transparent", p.header.styleSheet())
         self.assertAlmostEqual(p.readability_overlay._contrast_need, 0.9)
+        self.assertEqual(p.readability_overlay._control_opacity, 62)
         self.assertFalse(p.readability_overlay._header_rect.isNull())
         self.assertEqual((playback.state.current_track.id, playback.state.position_ms, playback.state.is_playing), state)
 
