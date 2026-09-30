@@ -33,6 +33,8 @@ VersionInfoProductTextVersion={#MyAppVersion}
 ; 使用 Inno Setup 的当前用户 Program Files 目录，避免旧环境变量或路径重定向
 ; 生成带非法字符的目标目录。
 DefaultDirName={userpf}\{#MyAppName}
+; 正式安装器必须显示目录选择页，允许用户选择 D/F 等本地磁盘。
+DisableDirPage=no
 DefaultGroupName={#MyAppName}
 PrivilegesRequired=admin
 ; 升级时保留用户上次选择的目录，避免每次回到默认目录。
