@@ -56,6 +56,23 @@
 
 源代码运行、现有 PyInstaller 目录运行和当前 Inno Setup 安装默认保持原行为。若需要强制关闭原型桥接，可设置 `HUSHPLAYER_DISABLE_VELOPACK=1`。
 
+## 本机更新链路测试
+
+更新源通过 `HUSHPLAYER_VELOPACK_UPDATE_SOURCE` 临时注入，避免在原型验收前改变正式更新源。可以把 `dist\velopack` 目录作为本机静态更新源：
+
+```powershell
+python -m http.server 8765 --directory F:\Projects\HushPlayer\dist\velopack
+```
+
+然后在另一个 PowerShell 窗口中启动已安装的 Velopack 版本：
+
+```powershell
+$env:HUSHPLAYER_VELOPACK_UPDATE_SOURCE = "http://127.0.0.1:8765"
+Start-Process "F:\HushPlayer Application\HushPlayer\HushPlayer.exe"
+```
+
+如果当前包与更新源版本相同，设置中的“检查更新”应显示已是最新版本。要测试真正的下载、重启和回滚流程，需要准备一个版本号更高的测试包，并将其与现有包分开保存；不能用相同版本覆盖测试。
+
 ## 验收顺序
 
 1. 在测试电脑上全新安装原型包。

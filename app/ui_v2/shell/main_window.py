@@ -59,6 +59,8 @@ from app.services.online_discovery_runtime import OnlineDiscoveryRuntime
 from app.services.playback_diagnostics import PlaybackDiagnostics
 from app.services.playback_session_store import PlaybackSession, PlaybackSessionStore
 from app.services.remote_track_store import RemoteTrackStore
+from app.services.velopack_runtime import is_velopack_install, velopack_update_source
+from app.services.velopack_update_service import VelopackUpdateService
 from app.startup_diagnostics import StartupDiagnostics
 from app.ui_v2.adapters.library_adapter import LibraryAdapter
 from app.ui_v2.adapters.library_collection import LibraryCollectionAdapter
@@ -270,6 +272,31 @@ class MainWindow(QMainWindow):
         self.update_service.updaterLaunched.connect(
             self._on_update_installer_launched
         )
+        self._velopack_update_service: VelopackUpdateService | None = None
+        velopack_source = velopack_update_source()
+        if is_velopack_install() and velopack_source:
+            self._velopack_update_service = VelopackUpdateService(
+                velopack_source,
+                self,
+            )
+            self._velopack_update_service.updateAvailable.connect(
+                self._on_velopack_update_available
+            )
+            self._velopack_update_service.noUpdate.connect(
+                self._on_velopack_no_update
+            )
+            self._velopack_update_service.failed.connect(
+                self._on_velopack_update_failed
+            )
+            self._velopack_update_service.downloadStarted.connect(
+                self._on_velopack_download_started
+            )
+            self._velopack_update_service.updateReady.connect(
+                self._on_velopack_update_ready
+            )
+            self._velopack_update_service.applying.connect(
+                self._on_velopack_applying
+            )
         settings_actions = {
             "check_updates": self._check_for_updates,
             "open_settings_path": self._open_settings_path,
@@ -979,6 +1006,8 @@ class MainWindow(QMainWindow):
         self.online_adapter.shutdown()
         if self.online_discovery is not None:
             self.online_discovery.shutdown()
+        if self._velopack_update_service is not None:
+            self._velopack_update_service.shutdown()
         self.update_service.shutdown()
         immersive_page = self.router._pages.get("immersive_lyrics")
         if immersive_page is not None and hasattr(immersive_page, "shutdown"):
@@ -1366,9 +1395,74 @@ class MainWindow(QMainWindow):
     def _check_for_updates(self) -> str:
         """Start a manual update check from the Quiet Orbit settings surface."""
 
+        if self._velopack_update_service is not None:
+            if not self._velopack_update_service.check_for_updates():
+                return "当前已有更新检查或下载正在进行。"
+            return "正在检查 Velopack 更新…"
         if not self.update_service.check_for_updates(manual=True):
             return "当前已有更新检查或下载正在进行。"
         return "正在检查更新…"
+
+    @staticmethod
+    def _velopack_update_label(update: object) -> tuple[str, str]:
+        target = getattr(update, "TargetFullRelease", None)
+        version = str(getattr(target, "Version", "") or "未知版本")
+        notes = str(getattr(target, "NotesMarkdown", "") or "")
+        return version, notes
+
+    def _on_velopack_update_available(self, update: object) -> None:
+        service = self._velopack_update_service
+        if service is None:
+            return
+        version, notes = self._velopack_update_label(update)
+        details = f"发现 Velopack 新版本 {version}。"
+        if notes:
+            details += f"\n\n{notes}"
+        answer = QMessageBox.question(
+            self,
+            "发现更新",
+            details + "\n\n是否下载并准备更新？",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.Yes,
+        )
+        if answer != QMessageBox.StandardButton.Yes:
+            self._set_update_status("已跳过本次更新。")
+            return
+        if service.download_update(update):
+            self._set_update_status(f"正在下载 Velopack 更新 {version}…")
+
+    def _on_velopack_no_update(self) -> None:
+        self._set_update_status(f"当前已是最新版本（{APP_VERSION}）。")
+
+    def _on_velopack_update_failed(self, message: str) -> None:
+        self._set_update_status(f"Velopack 更新失败：{message}", state="failed")
+        QMessageBox.warning(self, "更新失败", message)
+
+    def _on_velopack_download_started(self) -> None:
+        self._set_update_status("正在下载 Velopack 更新…")
+
+    def _on_velopack_update_ready(self, update: object) -> None:
+        service = self._velopack_update_service
+        if service is None:
+            return
+        version, _notes = self._velopack_update_label(update)
+        answer = QMessageBox.question(
+            self,
+            "准备完成",
+            f"版本 {version} 已下载完成。应用将关闭并自动完成更新，是否现在重启？",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.Yes,
+        )
+        if answer == QMessageBox.StandardButton.Yes and service.apply_update(update):
+            self._set_update_status("正在关闭应用并应用更新…")
+        else:
+            self._set_update_status("更新已下载，稍后可再次检查并应用。")
+
+    def _on_velopack_applying(self) -> None:
+        self.close()
+        application = QApplication.instance()
+        if application is not None:
+            application.quit()
 
     def _on_update_available(self, manifest: object, _manual: bool) -> None:
         if not isinstance(manifest, UpdateManifest):

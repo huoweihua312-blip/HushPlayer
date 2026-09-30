@@ -18,6 +18,7 @@ from typing import Any
 
 _LOGGER = logging.getLogger(__name__)
 _TRUE_VALUES = {"1", "true", "yes", "on"}
+VELOPACK_UPDATE_SOURCE_ENV = "HUSHPLAYER_VELOPACK_UPDATE_SOURCE"
 
 
 def _is_true(value: object) -> bool:
@@ -43,6 +44,13 @@ def is_velopack_enabled(executable: str | Path | None = None) -> bool:
     return _is_true(os.environ.get("HUSHPLAYER_ENABLE_VELOPACK")) or is_velopack_install(
         executable
     )
+
+
+def velopack_update_source() -> str | None:
+    """Return the opt-in Velopack feed used by the migration prototype."""
+
+    source = os.environ.get(VELOPACK_UPDATE_SOURCE_ENV, "").strip()
+    return source or None
 
 
 def bootstrap_velopack() -> bool:
