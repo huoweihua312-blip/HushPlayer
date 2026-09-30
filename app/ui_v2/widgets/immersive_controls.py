@@ -33,6 +33,7 @@ class ImmersiveControls(QWidget):
         self._theme = theme
         self._adapter: PlaybackAdapter | None = None
         self._dragging_progress = False
+        self._surface_opacity = 35
         self.shuffle_button = self._button("shuffle", "随机播放")
         self.previous_button = self._button("previous", "上一首")
         self.play_button = self._button("play", "播放")
@@ -89,7 +90,7 @@ class ImmersiveControls(QWidget):
         utility_layout.addWidget(self.volume_slider)
         utility_layout.addWidget(self.more_button)
         self._layout = QVBoxLayout(self)
-        self._layout.setContentsMargins(0, 0, 0, 0)
+        self._layout.setContentsMargins(12, 8, 12, 8)
         self._layout.setSpacing(10)
         self._layout.addWidget(self.transport_row)
         self._layout.addWidget(self.time_row)
@@ -99,6 +100,7 @@ class ImmersiveControls(QWidget):
         self.setMinimumHeight(126)
         self._reading_scene = False
         self.setAutoFillBackground(False)
+        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground)
         for widget in (self.progress_slider, self.volume_slider):
             widget.installEventFilter(self)
         self.set_theme(theme)
@@ -150,6 +152,12 @@ class ImmersiveControls(QWidget):
         reading = self._reading_scene
         self._theme = theme
         colors = theme.colors
+        surface_alpha = round(255 * self._surface_opacity / 100)
+        surface = _rgba(colors.surface_primary, surface_alpha)
+        border = _rgba(colors.primary_text, 36)
+        self.setStyleSheet(
+            f"QWidget#immersiveControls {{ background: {surface}; border: 1px solid {border}; border-radius: 14px; }}"
+        )
         subtle = (
             "QToolButton { min-width: 34px; min-height: 34px; border: 2px solid transparent; border-radius: 6px; padding: 0; "
             f"background: transparent; color: {_rgba(colors.primary_text, 228)}; }}"
@@ -203,6 +211,14 @@ class ImmersiveControls(QWidget):
         self._reading_scene = not reading
         self.set_reading_scene(reading)
 
+    @property
+    def surface_opacity(self) -> int:
+        return self._surface_opacity
+
+    def set_surface_opacity(self, value: int) -> None:
+        self._surface_opacity = max(20, min(80, int(value)))
+        self.set_theme(self._theme)
+
     def set_reading_scene(self, enabled: bool) -> None:
         """Quiet presentation; adapters, widgets and hit areas stay intact."""
         enabled = bool(enabled)
@@ -212,7 +228,7 @@ class ImmersiveControls(QWidget):
         colors = self._theme.colors
         for label in (self.elapsed_label, self.duration_label):
             label.setStyleSheet(
-                f"background: transparent; color: {_rgba(colors.secondary_text, 160 if enabled else 224)}; "
+                f"background: transparent; color: {_rgba(colors.primary_text, 224)}; "
                 f"font-size: {11 if enabled else self._theme.fonts.caption}px;"
             )
         for slider in (self.progress_slider, self.volume_slider):

@@ -1156,11 +1156,14 @@ class LyricsCanvasV2(QWidget):
         line_height = metrics.height()
         start_y = rect.y() + max(0, (rect.height() - line_height * len(wrapped)) // 2)
         flags = int(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
-        if shadow:
-            shadow_color = _with_alpha("#101820" if self._theme.mode == "dark" else "#ffffff", 44)
+        if shadow or (self._mode == "immersive" and self._immersive_reading_style and self._text_protection != "无"):
+            # Artwork can be bright even when the selected theme is dark. A
+            # neutral dark edge keeps inactive lines readable without changing
+            # their font color or lyric timing.
+            shadow_color = _with_alpha("#09121c", 104)
             painter.setPen(QPen(shadow_color, 1.0))
             for index, value in enumerate(wrapped):
-                painter.drawText(QRect(rect.x(), start_y + index * line_height + 1, rect.width(), line_height), flags, value)
+                painter.drawText(QRect(rect.x(), start_y + index * line_height + 2, rect.width(), line_height), flags, value)
         if draw_fill:
             painter.setPen(color)
             for index, value in enumerate(wrapped):

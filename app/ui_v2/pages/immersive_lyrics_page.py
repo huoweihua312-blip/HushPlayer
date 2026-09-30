@@ -6,7 +6,7 @@ from dataclasses import dataclass, fields
 from collections.abc import Callable
 
 from PySide6.QtCore import QEvent, QPoint, QRect, QSize, Qt, QTimer, Signal
-from PySide6.QtGui import QAction, QCursor
+from PySide6.QtGui import QAction, QColor, QCursor
 from PySide6.QtWidgets import QBoxLayout, QFrame, QHBoxLayout, QSlider, QSizePolicy, QStackedWidget, QToolButton, QVBoxLayout, QWidget
 
 from app.ui_v2.adapters.lyrics_adapter import LyricsAdapter
@@ -113,6 +113,7 @@ class ImmersiveLyricsPage(QWidget):
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         self.background = ArtworkAtmosphere(theme, self)
         self.readability_overlay = ReadabilityOverlay(theme, self)
+        self.background.contrast_need_changed.connect(self.readability_overlay.set_contrast_need)
         self.header = self._build_header(theme)
         self.content_stack = QStackedWidget(self)
         self.content = QWidget(self.content_stack)
@@ -260,8 +261,10 @@ class ImmersiveLyricsPage(QWidget):
 
     def _style_header(self, theme: Theme) -> None:
         colors = theme.colors
+        header_surface = QColor(colors.surface_primary)
+        header_surface.setAlpha(112)
         self.header.setStyleSheet(
-            f"QFrame#immersiveHeader {{ background: transparent; }}"
+            f"QFrame#immersiveHeader {{ background: rgba({header_surface.red()}, {header_surface.green()}, {header_surface.blue()}, {header_surface.alpha()}); }}"
             f"QToolButton {{ border: 1px solid transparent; border-radius: 6px; background: transparent; font-weight: 400; font-size: 13px; }}"
             f'QToolButton[hushKeyboardFocus="true"]:focus {{ border-color: {colors.focus_ring}; }}'
             f"QToolButton:hover {{ background: {colors.surface_hover}; }}"
@@ -551,6 +554,7 @@ class ImmersiveLyricsPage(QWidget):
     def set_control_surface_opacity(self, value: int) -> None:
         self._control_surface_opacity = max(20, min(80, int(value)))
         self.options.control_surface_opacity = self._control_surface_opacity
+        self.controls.set_surface_opacity(self._control_surface_opacity)
         self._sync_options()
 
     def set_lyric_protection_enabled(self, enabled: bool) -> None:
@@ -1103,9 +1107,10 @@ class ImmersiveLyricsPage(QWidget):
                 QRect(identity_origin, self.identity.size()),
                 QRect(lyrics_origin, self.canvas.size()),
                 QRect(controls_origin, self.controls.size()) if self.controls.isVisible() else QRect(),
+                QRect(self.header.geometry()),
             )
         else:
-            self.readability_overlay.set_regions(QRect(), QRect(), self.controls.geometry())
+            self.readability_overlay.set_regions(QRect(), QRect(), self.controls.geometry(), QRect(self.header.geometry()))
         self.overlay_host.setGeometry(self.rect())
         self._sync_overlay_hit_testing()
         self.overlay_host.raise_()

@@ -153,6 +153,22 @@ class ImmersiveConvergenceTests(unittest.TestCase):
         self.assertEqual(c.active_text_alpha, 255)
         c.deleteLater()
 
+    def test_readability_surfaces_adapt_without_changing_playback_state(self):
+        p = self.page
+        playback = self.window.playback_adapter
+        state = (playback.state.current_track.id, playback.state.position_ms, playback.state.is_playing)
+
+        p.set_control_surface_opacity(62)
+        p.background.contrast_need_changed.emit(0.9)
+        self.app.processEvents()
+
+        self.assertEqual(p.controls.surface_opacity, 62)
+        self.assertIn("background: rgba", p.controls.styleSheet())
+        self.assertIn("rgba", p.header.styleSheet())
+        self.assertAlmostEqual(p.readability_overlay._contrast_need, 0.9)
+        self.assertFalse(p.readability_overlay._header_rect.isNull())
+        self.assertEqual((playback.state.current_track.id, playback.state.position_ms, playback.state.is_playing), state)
+
 
 if __name__ == "__main__":
     unittest.main()

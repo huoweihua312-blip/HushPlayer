@@ -5,7 +5,7 @@ from __future__ import annotations
 from hashlib import sha256
 from pathlib import Path
 
-from PySide6.QtCore import QPointF, QRect, QRectF, Qt
+from PySide6.QtCore import QPointF, QRect, QRectF, Qt, Signal
 from PySide6.QtGui import QColor, QImage, QLinearGradient, QPainter, QPainterPath, QPen, QRadialGradient
 from PySide6.QtWidgets import QSizePolicy, QWidget
 
@@ -119,6 +119,8 @@ class AbstractArtwork(QWidget):
 class ArtworkAtmosphere(QWidget):
     """Full-bleed artwork field with only broad, boundary-free protection."""
 
+    contrast_need_changed = Signal(float)
+
     def __init__(self, theme: Theme, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self._theme = theme
@@ -136,6 +138,8 @@ class ArtworkAtmosphere(QWidget):
         self._custom_image = QImage()
         self._artwork_image = QImage()
         self._soft_artwork_image = QImage()
+        self._artwork_luminance = 0.5
+        self._custom_luminance = 0.5
         self.setObjectName("immersiveArtworkAtmosphere")
         self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
 
@@ -159,6 +163,8 @@ class ArtworkAtmosphere(QWidget):
             else QImage()
         )
         self._refresh_soft_artwork()
+        self._artwork_luminance = self._image_luminance(self._artwork_image)
+        self._notify_contrast_need()
         self._generation += 1
         self.update()
 
@@ -175,6 +181,7 @@ class ArtworkAtmosphere(QWidget):
 
     def set_theme(self, theme: Theme) -> None:
         self._theme = theme
+        self._notify_contrast_need()
         self.update()
 
     def set_reading_scene(self, enabled: bool) -> None:
@@ -185,6 +192,7 @@ class ArtworkAtmosphere(QWidget):
 
     def set_mode(self, mode: str) -> None:
         self._mode = mode if mode in {"artwork", "gradient", "solid", "transparent", "custom"} else "artwork"
+        self._notify_contrast_need()
         self.update()
 
     def set_custom_path(self, value: str) -> None:
@@ -202,7 +210,22 @@ class ArtworkAtmosphere(QWidget):
                         self._custom_image = image
             except OSError:
                 pass
+        self._custom_luminance = self._image_luminance(self._custom_image)
+        self._notify_contrast_need()
         self.update()
+
+    def _notify_contrast_need(self) -> None:
+        # Sample once when the source changes, never on lyric animation frames.
+        if self._mode == "artwork" and not self._artwork_image.isNull():
+            luminance = self._artwork_luminance
+        elif self._mode == "custom" and not self._custom_image.isNull():
+            luminance = self._custom_luminance
+        else:
+            self.contrast_need_changed.emit(0.0)
+            return
+        self.contrast_need_changed.emit(
+            luminance if self._theme.mode == "dark" else 1.0 - luminance
+        )
 
     @property
     def custom_image_available(self) -> bool:
@@ -347,9 +370,11 @@ class ReadabilityOverlay(QWidget):
         super().__init__(parent)
         self._theme = theme
         self._strength = 45
+        self._contrast_need = 0.0
         self._identity_rect = QRect()
         self._lyrics_rect = QRect()
         self._controls_rect = QRect()
+        self._header_rect = QRect()
         self.setObjectName("immersiveReadabilityOverlay")
         self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
@@ -366,30 +391,60 @@ class ReadabilityOverlay(QWidget):
         self._strength = max(15, min(85, int(value)))
         self.update()
 
-    def set_regions(self, identity: QRect, lyrics: QRect, controls: QRect) -> None:
-        if (identity, lyrics, controls) == (self._identity_rect, self._lyrics_rect, self._controls_rect):
+    def set_contrast_need(self, value: float) -> None:
+        value = max(0.0, min(1.0, float(value)))
+        if self._contrast_need != value:
+            self._contrast_need = value
+            self.update()
+
+    def set_regions(
+        self,
+        identity: QRect,
+        lyrics: QRect,
+        controls: QRect,
+        header: QRect | None = None,
+    ) -> None:
+        header_rect = QRect(header) if header is not None else QRect()
+        if (identity, lyrics, controls, header_rect) == (
+            self._identity_rect,
+            self._lyrics_rect,
+            self._controls_rect,
+            self._header_rect,
+        ):
             return
         self._identity_rect = QRect(identity)
         self._lyrics_rect = QRect(lyrics)
         self._controls_rect = QRect(controls)
+        self._header_rect = header_rect
         self.update()
 
     def paintEvent(self, event) -> None:  # noqa: N802
-        if self._lyrics_rect.isNull() and self._identity_rect.isNull():
+        if all(rect.isNull() for rect in (self._lyrics_rect, self._identity_rect, self._controls_rect, self._header_rect)):
             return
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         surface = "#09121c" if self._theme.mode == "dark" else "#fffaf3"
-        lyrics_surface = "#09121c" if self._theme.mode == "dark" else "#b0a79d"
+        lyrics_surface = surface
         strength = self._strength / 100
+        if not self._header_rect.isNull():
+            # Keep navigation readable over both pale and saturated artwork.
+            # The gradient fades before the lyric stage, so the artwork still
+            # reads as a single continuous background.
+            header_gradient = QLinearGradient(0, self._header_rect.top(), 0, self._header_rect.bottom() + 34)
+            header_alpha = round(76 + 64 * strength)
+            header_gradient.setColorAt(0.0, _color(surface, header_alpha))
+            header_gradient.setColorAt(1.0, _color(surface, 0))
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.setBrush(header_gradient)
+            painter.drawRect(self._header_rect.adjusted(0, 0, 0, 34))
         self._paint_region(
             painter,
             self._lyrics_rect,
             lyrics_surface,
-            round(48 + 110 * strength),
+            min(230, round(48 + 110 * strength + 90 * self._contrast_need)),
             1.22,
         )
-        self._paint_region(painter, self._identity_rect, surface, round(14 + 42 * strength), 1.12)
+        self._paint_region(painter, self._identity_rect, surface, round(28 + 54 * strength), 1.12)
         if not self._controls_rect.isNull():
             # Controls can now sit in the left identity column rather than at
             # the page bottom.  Use the same feathered treatment as text so
@@ -398,7 +453,7 @@ class ReadabilityOverlay(QWidget):
                 painter,
                 self._controls_rect,
                 surface,
-                round(12 + 28 * strength),
+                round(30 + 48 * strength),
                 1.04,
             )
 
@@ -411,7 +466,7 @@ class ReadabilityOverlay(QWidget):
         center = area.center()
         gradient = QRadialGradient(center, radius)
         gradient.setColorAt(0.0, _color(surface, alpha))
-        gradient.setColorAt(0.58, _color(surface, round(alpha * 0.38)))
+        gradient.setColorAt(0.58, _color(surface, round(alpha * 0.8)))
         gradient.setColorAt(1.0, _color(surface, 0))
         painter.setPen(Qt.PenStyle.NoPen)
         painter.setBrush(gradient)
