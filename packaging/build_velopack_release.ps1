@@ -92,6 +92,7 @@ $Arguments = @(
     "--packId", "HushPlayer",
     "--packTitle", "HushPlayer",
     "--packVersion", [string]$VersionMetadata.app_version,
+    "--runtime", "win-x64",
     "--packDir", $ReleasePath,
     "--mainExe", "HushPlayer.exe",
     "--icon", $IconPath,
