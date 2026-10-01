@@ -1,18 +1,15 @@
 {
     "schema_version": 1,
     "channel": "beta",
-    "version": "1.0.0-beta.14",
-    "numeric_version": "1.0.0.14",
+    "version": "1.0.1-beta.1",
+    "numeric_version": "1.0.1.1",
     "architecture": "win-x64",
     "mandatory": false,
-    "setup_url": "https://api.gitcode.com/api/v5/repos/gcw_iPVB8B5g/HushPlayer-updates/releases/v1.0.0-beta.14/attach_files/HushPlayer-1.0.0-beta.14-win-x64-setup.exe/download",
-    "setup_size": 132012110,
-    "sha256": "2018731e248668945d58380e3d86f7076c0ed931c1fa2342b86a752810bed30b",
+    "setup_url": "https://api.gitcode.com/api/v5/repos/gcw_iPVB8B5g/HushPlayer-updates/releases/v1.0.1-beta.1/attach_files/HushPlayer-1.0.1-beta.1-win-x64-setup.exe/download",
+    "setup_size": 132012073,
+    "sha256": "1bc7ec83502a975494961410542a0aecef1dcb24c14beccc49d203771acae413",
     "release_notes": [
-        "新增基于 Velopack 的后台更新链路，由独立更新助手负责等待退出、替换和重启，减少文件占用与权限错误。",
-        "修复已安装程序位于 `current` 子目录时无法识别更新环境的问题。",
-        "修复更新检查、下载或应用阶段退出时的线程残留、延迟回调和提前关闭问题。",
-        "将更新检查与下载放到后台线程，减少更新操作对播放器界面的阻塞。"
+        "正式安装包显示安装位置选择页，可将程序安装到其他本地磁盘；后续应用内更新沿用已选择的安装目录。"
     ],
     "release_history": [
         {
@@ -444,10 +441,18 @@
                 "修复更新检查、下载或应用阶段退出时的线程残留、延迟回调和提前关闭问题。",
                 "将更新检查与下载放到后台线程，减少更新操作对播放器界面的阻塞。"
             ]
+        },
+        {
+            "version": "1.0.1-beta.1",
+            "numeric_version": "1.0.1.1",
+            "release_date": "2026-10-01",
+            "notes": [
+                "正式安装包显示安装位置选择页，可将程序安装到其他本地磁盘；后续应用内更新沿用已选择的安装目录。"
+            ]
         }
     ],
-    "package_url": "https://api.gitcode.com/api/v5/repos/gcw_iPVB8B5g/HushPlayer-updates/releases/v1.0.0-beta.14/attach_files/HushPlayer-1.0.0-beta.14-win-x64-update.zip/download",
-    "package_size": 177527816,
-    "package_sha256": "c657a7ea7617adc58e4062346c091022d4cc4a0df6401786306c3acf85f0774b",
-    "package_filename": "HushPlayer-1.0.0-beta.14-win-x64-update.zip"
+    "package_url": "https://api.gitcode.com/api/v5/repos/gcw_iPVB8B5g/HushPlayer-updates/releases/v1.0.1-beta.1/attach_files/HushPlayer-1.0.1-beta.1-win-x64-update.zip/download",
+    "package_size": 177526452,
+    "package_sha256": "59cc2902919f92e01ed4243a3318705958eae9535eff325c05e95a09127d0519",
+    "package_filename": "HushPlayer-1.0.1-beta.1-win-x64-update.zip"
 }
