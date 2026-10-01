@@ -4,14 +4,47 @@ import os
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from app.services.velopack_runtime import (
+    VELOPACK_DEFAULT_UPDATE_SOURCE,
+    create_update_manager,
     is_velopack_enabled,
     is_velopack_install,
+    velopack_update_source,
 )
 
 
 class VelopackRuntimeTests(unittest.TestCase):
+    def test_default_source_is_available_for_packaged_builds(self) -> None:
+        previous = os.environ.pop("HUSHPLAYER_VELOPACK_UPDATE_SOURCE", None)
+        try:
+            self.assertEqual(velopack_update_source(), VELOPACK_DEFAULT_UPDATE_SOURCE)
+        finally:
+            if previous is not None:
+                os.environ["HUSHPLAYER_VELOPACK_UPDATE_SOURCE"] = previous
+
+    def test_environment_source_overrides_default(self) -> None:
+        previous = os.environ.get("HUSHPLAYER_VELOPACK_UPDATE_SOURCE")
+        try:
+            os.environ["HUSHPLAYER_VELOPACK_UPDATE_SOURCE"] = "http://127.0.0.1:8765"
+            self.assertEqual(velopack_update_source(), "http://127.0.0.1:8765")
+        finally:
+            if previous is None:
+                os.environ.pop("HUSHPLAYER_VELOPACK_UPDATE_SOURCE", None)
+            else:
+                os.environ["HUSHPLAYER_VELOPACK_UPDATE_SOURCE"] = previous
+
+    def test_github_source_uses_prerelease_channel(self) -> None:
+        with patch("velopack.GithubSource", return_value="github-source") as source:
+            with patch("velopack.UpdateManager", return_value="manager") as manager:
+                self.assertEqual(
+                    create_update_manager(VELOPACK_DEFAULT_UPDATE_SOURCE),
+                    "manager",
+                )
+        source.assert_called_once_with(VELOPACK_DEFAULT_UPDATE_SOURCE, prerelease=True)
+        manager.assert_called_once_with("github-source")
+
     def test_detects_current_directory_with_updater_in_parent(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

@@ -4,6 +4,8 @@ param(
     [string]$VpkPath = "",
     [string]$ReleaseDir = "",
     [string]$OutputDir = "",
+    [string]$PackId = "HushPlayer",
+    [string]$PackTitle = "HushPlayer",
     [switch]$BuildRelease,
     [switch]$DiagnosticOnly
 )
@@ -44,6 +46,17 @@ $Vpk = if ($VpkPath) {
 } else {
     $command = Get-Command vpk -ErrorAction SilentlyContinue
     if ($command) { $command.Source } else { $null }
+}
+
+$VpkLauncher = $Vpk
+$VpkPrefixArguments = @()
+if ($Vpk -and ([System.IO.Path]::GetExtension($Vpk) -ieq ".dll")) {
+    $Dotnet = Get-Command dotnet -ErrorAction SilentlyContinue
+    if (-not $Dotnet) {
+        throw "The vpk path is a .dll, but dotnet was not found."
+    }
+    $VpkLauncher = $Dotnet.Source
+    $VpkPrefixArguments = @($Vpk)
 }
 
 if ($DiagnosticOnly) {
@@ -89,8 +102,8 @@ $VersionMetadata = ($VersionJson -join [Environment]::NewLine) | ConvertFrom-Jso
 New-Item -ItemType Directory -Path $OutputPath -Force | Out-Null
 $Arguments = @(
     "pack",
-    "--packId", "HushPlayer",
-    "--packTitle", "HushPlayer",
+    "--packId", $PackId,
+    "--packTitle", $PackTitle,
     "--packVersion", [string]$VersionMetadata.app_version,
     "--runtime", "win-x64",
     "--packDir", $ReleasePath,
@@ -98,7 +111,7 @@ $Arguments = @(
     "--icon", $IconPath,
     "--outputDir", $OutputPath
 )
-& $Vpk @Arguments
+& $VpkLauncher @VpkPrefixArguments @Arguments
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
 Write-Host "Velopack package complete."

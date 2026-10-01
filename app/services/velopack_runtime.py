@@ -14,11 +14,13 @@ import os
 import sys
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit
 
 
 _LOGGER = logging.getLogger(__name__)
 _TRUE_VALUES = {"1", "true", "yes", "on"}
 VELOPACK_UPDATE_SOURCE_ENV = "HUSHPLAYER_VELOPACK_UPDATE_SOURCE"
+VELOPACK_DEFAULT_UPDATE_SOURCE = "https://github.com/huoweihua312-blip/HushPlayer"
 
 
 def _is_true(value: object) -> bool:
@@ -50,10 +52,10 @@ def is_velopack_enabled(executable: str | Path | None = None) -> bool:
 
 
 def velopack_update_source() -> str | None:
-    """Return the opt-in Velopack feed used by the migration prototype."""
+    """Return the Velopack feed, allowing a local source during acceptance."""
 
     source = os.environ.get(VELOPACK_UPDATE_SOURCE_ENV, "").strip()
-    return source or None
+    return source or VELOPACK_DEFAULT_UPDATE_SOURCE
 
 
 def bootstrap_velopack() -> bool:
@@ -84,14 +86,17 @@ def bootstrap_velopack() -> bool:
 
 
 def create_update_manager(update_source: str) -> Any | None:
-    """Create a Velopack UpdateManager for future opt-in update integration."""
+    """Create a manager for the packaged update source."""
 
     try:
         import velopack  # type: ignore[import-not-found]
     except ImportError:
         return None
-    source: Any = str(update_source)
-    if source.casefold().startswith(("http://", "https://")):
+    source: Any = str(update_source).strip()
+    parsed = urlsplit(source)
+    if parsed.hostname == "github.com" and len(parsed.path.strip("/").split("/")) == 2:
+        source = velopack.GithubSource(source, prerelease=True)
+    elif parsed.scheme.casefold() in {"http", "https"}:
         source = velopack.HttpSource(
             source, velopack.HttpOptions(Headers=[], TimeoutMilliseconds=120_000)
         )

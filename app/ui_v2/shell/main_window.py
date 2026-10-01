@@ -291,6 +291,9 @@ class MainWindow(QMainWindow):
             self._velopack_update_service.downloadStarted.connect(
                 self._on_velopack_download_started
             )
+            self._velopack_update_service.downloadProgress.connect(
+                self._on_velopack_download_progress
+            )
             self._velopack_update_service.updateReady.connect(
                 self._on_velopack_update_ready
             )
@@ -1428,14 +1431,20 @@ class MainWindow(QMainWindow):
         details = f"发现 Velopack 新版本 {version}。"
         if notes:
             details += f"\n\n{notes}"
-        answer = QMessageBox.question(
-            self,
-            "发现更新",
-            details + "\n\n是否下载并准备更新？",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-            QMessageBox.StandardButton.Yes,
+        prompt = QMessageBox(self)
+        prompt.setWindowTitle("发现更新")
+        prompt.setText(details + "\n\n请选择更新方式：")
+        silent_button = prompt.addButton("下载并静默更新", QMessageBox.ButtonRole.AcceptRole)
+        installer_button = prompt.addButton(
+            "使用安装向导",
+            QMessageBox.ButtonRole.ActionRole,
         )
-        if answer != QMessageBox.StandardButton.Yes:
+        prompt.addButton("稍后", QMessageBox.ButtonRole.RejectRole)
+        prompt.exec()
+        if prompt.clickedButton() is installer_button:
+            self._start_legacy_update_fallback()
+            return
+        if prompt.clickedButton() is not silent_button:
             self._set_update_status("已跳过本次更新。")
             return
         if service.download_update(update):
@@ -1446,27 +1455,62 @@ class MainWindow(QMainWindow):
 
     def _on_velopack_update_failed(self, message: str) -> None:
         self._set_update_status(f"Velopack 更新失败：{message}", state="failed")
-        QMessageBox.warning(self, "更新失败", message)
+        prompt = QMessageBox(self)
+        prompt.setIcon(QMessageBox.Icon.Warning)
+        prompt.setWindowTitle("更新失败")
+        prompt.setText(message)
+        prompt.setInformativeText("可以重试静默更新，也可以使用传统安装向导。")
+        retry_button = prompt.addButton("重试", QMessageBox.ButtonRole.AcceptRole)
+        installer_button = prompt.addButton(
+            "使用安装向导",
+            QMessageBox.ButtonRole.ActionRole,
+        )
+        prompt.addButton("关闭", QMessageBox.ButtonRole.RejectRole)
+        prompt.exec()
+        if prompt.clickedButton() is installer_button:
+            self._start_legacy_update_fallback()
+        elif prompt.clickedButton() is retry_button:
+            self._check_for_updates()
 
     def _on_velopack_download_started(self) -> None:
         self._set_update_status("正在下载 Velopack 更新…")
+
+    def _on_velopack_download_progress(self, received: int, total: int) -> None:
+        if total > 0:
+            percent = min(100, max(0, int(received * 100 / total)))
+            self._set_update_status(f"正在下载更新… {percent}%")
 
     def _on_velopack_update_ready(self, update: object) -> None:
         service = self._velopack_update_service
         if service is None:
             return
         version, _notes = self._velopack_update_label(update)
-        answer = QMessageBox.question(
-            self,
-            "准备完成",
-            f"版本 {version} 已下载完成。应用将关闭并自动完成更新，是否现在重启？",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-            QMessageBox.StandardButton.Yes,
+        prompt = QMessageBox(self)
+        prompt.setWindowTitle("更新包已准备完成")
+        prompt.setText(
+            f"版本 {version} 已下载完成。选择静默更新后，应用会自动关闭、完成替换并重新启动。"
         )
-        if answer == QMessageBox.StandardButton.Yes and service.apply_update(update):
+        silent_button = prompt.addButton("立即静默更新", QMessageBox.ButtonRole.AcceptRole)
+        installer_button = prompt.addButton(
+            "使用安装向导",
+            QMessageBox.ButtonRole.ActionRole,
+        )
+        prompt.addButton("稍后", QMessageBox.ButtonRole.RejectRole)
+        prompt.exec()
+        if prompt.clickedButton() is installer_button:
+            self._start_legacy_update_fallback()
+        elif prompt.clickedButton() is silent_button and service.apply_update(update):
             self._set_update_status("正在关闭应用并应用更新…")
         else:
             self._set_update_status("更新已下载，稍后可再次检查并应用。")
+
+    def _start_legacy_update_fallback(self) -> None:
+        """Open the established installer flow when silent update is unavailable."""
+
+        if self.update_service.check_for_updates(manual=True):
+            self._set_update_status("正在准备传统安装向导…")
+            return
+        self._set_update_status("当前无法启动传统安装向导，请稍后重试。", state="failed")
 
     def _on_velopack_applying(self) -> None:
         self.close()

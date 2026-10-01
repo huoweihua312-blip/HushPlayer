@@ -4,7 +4,7 @@ import json
 import os
 from pathlib import Path
 
-from PyInstaller.utils.hooks import collect_submodules
+from PyInstaller.utils.hooks import collect_all, collect_submodules
 
 
 PROJECT_ROOT = Path(SPECPATH).resolve().parent
@@ -98,7 +98,9 @@ for relative_path, metadata in sorted(package_entries.items()):
         )
     )
 
-hiddenimports = collect_submodules("mutagen")
+velopack_datas, velopack_binaries, velopack_hiddenimports = collect_all("velopack")
+datas.extend(velopack_datas)
+hiddenimports = collect_submodules("mutagen") + velopack_hiddenimports
 
 
 def without_conflicting_system_dlls(entries):
@@ -128,7 +130,7 @@ def without_conflicting_system_dlls(entries):
 a = Analysis(
     [str(PROJECT_ROOT / "main.py")],
     pathex=[str(PROJECT_ROOT)],
-    binaries=[(str(NODE_EXE), "runtime/node")],
+    binaries=[(str(NODE_EXE), "runtime/node"), *velopack_binaries],
     datas=datas,
     hiddenimports=hiddenimports,
     hookspath=[],

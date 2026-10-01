@@ -47,9 +47,8 @@ def main(argv: Sequence[str] | None = None) -> int:
 
 
 if __name__ == "__main__":
-    # Velopack is an optional parallel packaging path.  The bridge is a no-op
-    # for source runs and for the existing PyInstaller/Inno Setup build, so the
-    # current update flow remains the default until the new package is proven.
+    # Velopack handles startup for the packaged silent-update build.  Source
+    # runs and the existing Inno Setup build remain on the legacy path.
     from app.services.velopack_runtime import bootstrap_velopack
 
     bootstrap_velopack()
