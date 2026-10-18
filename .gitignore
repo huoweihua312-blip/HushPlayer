@@ -1,0 +1,16 @@
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+build/
+dist/
+artifacts/
+*.log
+.DS_Store
+Thumbs.db
+# 打包中间产物
+packaging/out/
+*.spec.bak
+/hush-*/
+/tmp*/
+/.devdata/

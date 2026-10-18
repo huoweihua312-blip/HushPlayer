@@ -1,0 +1,499 @@
+"""主题系统：调色板、尺寸度量、字体与全局样式表。
+
+设计原则（对应产品定位）：
+* 深色以中性炭黑为底，莓果红只做强调，不做大面积铺色；
+* 浅色干净通透，靠层次和留白而不是靠边框；
+* 所有控件共享同一套圆角、间距与字号阶梯，保持整体一致。
+"""
+
+from __future__ import annotations
+
+import math
+from dataclasses import dataclass, field
+from typing import Iterable
+
+from PySide6.QtCore import QObject, Qt, Signal
+from PySide6.QtGui import QColor, QFont, QFontDatabase, QPalette
+
+BRAND_ACCENT = "#C95770"
+
+
+def qcolor(value: str | QColor) -> QColor:
+    if isinstance(value, QColor):
+        return QColor(value)
+    return QColor(value)
+
+
+def rgba(value: str | QColor, alpha: float) -> QColor:
+    color = qcolor(value)
+    color.setAlphaF(max(0.0, min(1.0, alpha)))
+    return color
+
+
+def mix(first: str | QColor, second: str | QColor, t: float) -> QColor:
+    a, b = qcolor(first), qcolor(second)
+    t = max(0.0, min(1.0, t))
+    return QColor(
+        round(a.red() + (b.red() - a.red()) * t),
+        round(a.green() + (b.green() - a.green()) * t),
+        round(a.blue() + (b.blue() - a.blue()) * t),
+        round(a.alpha() + (b.alpha() - a.alpha()) * t),
+    )
+
+
+def css_rgba(value: str | QColor, alpha: float) -> str:
+    color = qcolor(value)
+    return f"rgba({color.red()},{color.green()},{color.blue()},{alpha:.3f})"
+
+
+def luminance(value: str | QColor) -> float:
+    color = qcolor(value)
+    channels = []
+    for part in (color.redF(), color.greenF(), color.blueF()):
+        channels.append(part / 12.92 if part <= 0.04045 else ((part + 0.055) / 1.055) ** 2.4)
+    return 0.2126 * channels[0] + 0.7152 * channels[1] + 0.0722 * channels[2]
+
+
+def readable_on(background: str | QColor) -> str:
+    return "#FFFFFF" if luminance(background) < 0.45 else "#14141A"
+
+
+@dataclass(frozen=True)
+class Palette:
+    mode: str
+    window: str
+    sidebar: str
+    surface: str
+    surface_alt: str
+    surface_hover: str
+    elevated: str
+    border: str
+    border_strong: str
+    text: str
+    text_secondary: str
+    text_tertiary: str
+    accent: str
+    accent_hover: str
+    accent_pressed: str
+    accent_soft: str
+    accent_text: str
+    hover: str
+    selection: str
+    scrim: str
+    shadow: str
+    danger: str
+    success: str
+    warning: str
+    player: str
+    row_alt: str
+
+    @property
+    def is_dark(self) -> bool:
+        return self.mode == "dark"
+
+    def get(self, name: str) -> str:
+        return getattr(self, name)
+
+
+DARK = Palette(
+    mode="dark",
+    window="#0F0F12",
+    sidebar="#0A0A0D",
+    surface="#15151A",
+    surface_alt="#1B1B21",
+    surface_hover="#232329",
+    elevated="#1E1E25",
+    border="#262630",
+    border_strong="#35353F",
+    text="#F4F4F6",
+    text_secondary="#A2A2AE",
+    text_tertiary="#6D6D79",
+    accent="#C95770",
+    accent_hover="#D96C82",
+    accent_pressed="#AF4460",
+    accent_soft="#2B1820",
+    accent_text="#FFFFFF",
+    hover="#FFFFFF0D",
+    selection="#C9577026",
+    scrim="#000000A8",
+    shadow="#00000066",
+    danger="#E06060",
+    success="#4FBF8B",
+    warning="#E0A33E",
+    player="#121216",
+    row_alt="#FFFFFF05",
+)
+
+LIGHT = Palette(
+    mode="light",
+    window="#F2F2F5",
+    sidebar="#EBEBF0",
+    surface="#FFFFFF",
+    surface_alt="#F7F7FA",
+    surface_hover="#EFEFF4",
+    elevated="#FFFFFF",
+    border="#E3E3EA",
+    border_strong="#D0D0DA",
+    text="#15151B",
+    text_secondary="#5B5B67",
+    text_tertiary="#8B8B98",
+    accent="#C24E68",
+    accent_hover="#B3455E",
+    accent_pressed="#9C3B52",
+    accent_soft="#FBECEF",
+    accent_text="#FFFFFF",
+    hover="#0000000A",
+    selection="#C957701F",
+    scrim="#00000066",
+    shadow="#1A1A2433",
+    danger="#C94A4A",
+    success="#2E9E6B",
+    warning="#C98A2E",
+    player="#FAFAFC",
+    row_alt="#00000003",
+)
+
+
+@dataclass(frozen=True)
+class Metrics:
+    radius_xs: int = 6
+    radius_sm: int = 8
+    radius: int = 12
+    radius_lg: int = 16
+    radius_xl: int = 22
+    titlebar_h: int = 48
+    sidebar_w: int = 236
+    sidebar_rail_w: int = 72
+    player_h: int = 90
+    page_pad: int = 30
+    gap: int = 16
+    row_h: int = 46
+    row_h_compact: int = 36
+    control: int = 34
+    hit: int = 30
+    motion_fast: int = 110
+    motion: int = 190
+    motion_slow: int = 300
+
+
+_metrics = Metrics()
+
+
+class Theme(QObject):
+    changed = Signal()
+
+    def __init__(self, parent: QObject | None = None) -> None:
+        super().__init__(parent)
+        self._mode = "dark"
+        self._palette = DARK
+        self._reduce_motion = False
+        self._font_scale = 1.0
+        self._accent = BRAND_ACCENT
+        self._density = "comfortable"
+        self._families = _detect_families()
+
+    # ------------------------------------------------------------------ 状态
+    @property
+    def mode(self) -> str:
+        return self._mode
+
+    @property
+    def palette(self) -> Palette:
+        return self._palette
+
+    @property
+    def metrics(self) -> Metrics:
+        return _metrics
+
+    @property
+    def is_dark(self) -> bool:
+        return self._palette.is_dark
+
+    @property
+    def reduce_motion(self) -> bool:
+        return self._reduce_motion
+
+    @property
+    def font_scale(self) -> float:
+        return self._font_scale
+
+    @property
+    def accent(self) -> str:
+        return self._accent
+
+    @property
+    def families(self) -> list[str]:
+        return self._families
+
+    def color(self, name: str) -> QColor:
+        return qcolor(getattr(self._palette, name))
+
+    def apply(
+        self,
+        *,
+        mode: str | None = None,
+        accent: str | None = None,
+        reduce_motion: bool | None = None,
+        font_scale: float | None = None,
+        density: str | None = None,
+    ) -> None:
+        changed = False
+        if mode is not None and mode != self._mode:
+            self._mode = mode
+            base = DARK if mode == "dark" else LIGHT
+            self._palette = base
+            changed = True
+        if accent and accent.lower() != self._accent.lower():
+            self._accent = accent
+            self._palette = _with_accent(self._palette, accent)
+            changed = True
+        elif changed:
+            self._palette = _with_accent(self._palette, self._accent)
+        if reduce_motion is not None and reduce_motion != self._reduce_motion:
+            self._reduce_motion = reduce_motion
+            changed = True
+        if font_scale is not None and abs(font_scale - self._font_scale) > 1e-3:
+            self._font_scale = font_scale
+            changed = True
+        if density is not None and density != self._density:
+            self._density = density
+            changed = True
+        if changed:
+            self.changed.emit()
+
+    @property
+    def density(self) -> str:
+        return self._density
+
+    def row_height(self) -> int:
+        return _metrics.row_h_compact if self._density == "compact" else _metrics.row_h
+
+    # ------------------------------------------------------------------ 字体
+    def font(self, size: float, weight: int = 400, *, display: bool = False) -> QFont:
+        families = self._families if not display else self._families
+        font = QFont()
+        font.setFamilies(families)
+        font.setPixelSize(max(9, round(size * self._font_scale)))
+        font.setWeight(QFont.Weight(weight))
+        font.setStyleStrategy(QFont.StyleStrategy.PreferAntialias)
+        return font
+
+    def mono_font(self, size: float, weight: int = 400) -> QFont:
+        font = QFont()
+        font.setFamilies(["Cascadia Mono", "Consolas", "Segoe UI"])
+        font.setPixelSize(max(9, round(size * self._font_scale)))
+        font.setWeight(QFont.Weight(weight))
+        return font
+
+    # ------------------------------------------------------------------ 动画
+    def duration(self, base: int) -> int:
+        if self._reduce_motion:
+            return 0
+        return base
+
+    # ------------------------------------------------------------------ 样式表
+    def qss(self) -> str:
+        p = self._palette
+        hover_bg = css_rgba("#FFFFFF" if p.is_dark else "#000000", 0.07)
+        return f"""
+QWidget {{
+    color: {p.text};
+    background: transparent;
+    selection-background-color: {p.accent};
+    selection-color: {p.accent_text};
+}}
+QWidget#RootWindow {{ background: {p.window}; }}
+QWidget#ContentHost {{ background: {p.window}; }}
+QToolTip {{
+    background: {p.elevated};
+    color: {p.text};
+    border: 1px solid {p.border};
+    border-radius: 8px;
+    padding: 6px 9px;
+    font-size: 12px;
+}}
+QMenu {{
+    background: {p.elevated};
+    border: 1px solid {p.border};
+    border-radius: 12px;
+    padding: 6px;
+}}
+QMenu::item {{
+    padding: 7px 28px 7px 12px;
+    border-radius: 8px;
+    color: {p.text};
+    font-size: 13px;
+}}
+QMenu::item:selected {{ background: {p.accent}; color: {p.accent_text}; }}
+QMenu::item:disabled {{ color: {p.text_tertiary}; }}
+QMenu::separator {{ height: 1px; background: {p.border}; margin: 5px 8px; }}
+QMenu::icon {{ padding-left: 8px; }}
+QScrollBar:vertical {{ background: transparent; width: 10px; margin: 2px; }}
+QScrollBar::handle:vertical {{
+    background: {css_rgba(p.text, 0.16)};
+    border-radius: 4px;
+    min-height: 32px;
+}}
+QScrollBar::handle:vertical:hover {{ background: {css_rgba(p.text, 0.30)}; }}
+QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{ height: 0; }}
+QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical {{ background: transparent; }}
+QScrollBar:horizontal {{ background: transparent; height: 10px; margin: 2px; }}
+QScrollBar::handle:horizontal {{
+    background: {css_rgba(p.text, 0.16)};
+    border-radius: 4px;
+    min-width: 32px;
+}}
+QScrollBar::handle:horizontal:hover {{ background: {css_rgba(p.text, 0.30)}; }}
+QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {{ width: 0; }}
+QScrollBar::add-page:horizontal, QScrollBar::sub-page:horizontal {{ background: transparent; }}
+QLineEdit, QPlainTextEdit, QTextEdit {{
+    background: {p.surface_alt};
+    border: 1px solid {p.border};
+    border-radius: 10px;
+    padding: 7px 10px;
+    color: {p.text};
+    selection-background-color: {p.accent};
+}}
+QLineEdit:focus, QPlainTextEdit:focus, QTextEdit:focus {{ border: 1px solid {p.accent}; }}
+QComboBox {{
+    background: {p.surface_alt};
+    border: 1px solid {p.border};
+    border-radius: 10px;
+    padding: 6px 10px;
+    min-height: 20px;
+    color: {p.text};
+}}
+QComboBox:hover {{ background: {p.surface_hover}; }}
+QComboBox::drop-down {{ border: none; width: 22px; }}
+QComboBox QAbstractItemView {{
+    background: {p.elevated};
+    border: 1px solid {p.border};
+    border-radius: 10px;
+    padding: 4px;
+    outline: none;
+    selection-background-color: {p.accent};
+}}
+QPushButton {{
+    background: {p.surface_alt};
+    border: 1px solid {p.border};
+    border-radius: 10px;
+    padding: 7px 14px;
+    color: {p.text};
+}}
+QPushButton:hover {{ background: {p.surface_hover}; }}
+QPushButton:pressed {{ background: {p.surface}; }}
+QPushButton:disabled {{ color: {p.text_tertiary}; }}
+QCheckBox {{ color: {p.text}; spacing: 8px; }}
+QMessageBox, QDialog {{ background: {p.window}; }}
+QTabWidget::pane {{ border: 1px solid {p.border}; border-radius: 12px; background: {p.surface}; }}
+QTabBar::tab {{
+    background: transparent;
+    padding: 7px 14px;
+    border-radius: 8px;
+    color: {p.text_secondary};
+}}
+QTabBar::tab:selected {{ background: {p.accent_soft}; color: {p.accent}; }}
+QSplitter::handle {{ background: transparent; }}
+QListView {{ background: transparent; border: none; outline: none; }}
+"""
+
+    def window_palette(self) -> QPalette:
+        p = self._palette
+        pal = QPalette()
+        pal.setColor(QPalette.ColorRole.Window, qcolor(p.window))
+        pal.setColor(QPalette.ColorRole.WindowText, qcolor(p.text))
+        pal.setColor(QPalette.ColorRole.Base, qcolor(p.surface))
+        pal.setColor(QPalette.ColorRole.AlternateBase, qcolor(p.surface_alt))
+        pal.setColor(QPalette.ColorRole.Text, qcolor(p.text))
+        pal.setColor(QPalette.ColorRole.Button, qcolor(p.surface_alt))
+        pal.setColor(QPalette.ColorRole.ButtonText, qcolor(p.text))
+        pal.setColor(QPalette.ColorRole.Highlight, qcolor(p.accent))
+        pal.setColor(QPalette.ColorRole.HighlightedText, qcolor(p.accent_text))
+        pal.setColor(QPalette.ColorRole.ToolTipBase, qcolor(p.elevated))
+        pal.setColor(QPalette.ColorRole.ToolTipText, qcolor(p.text))
+        pal.setColor(QPalette.ColorRole.PlaceholderText, qcolor(p.text_tertiary))
+        return pal
+
+
+def _with_accent(palette: Palette, accent: str) -> Palette:
+    from dataclasses import replace
+
+    base = qcolor(accent)
+    hover = mix(base, "#FFFFFF" if palette.is_dark else "#FFFFFF", 0.16 if palette.is_dark else 0.12)
+    pressed = mix(base, "#000000", 0.18)
+    soft = mix(palette.surface, base, 0.16 if palette.is_dark else 0.10)
+    return replace(
+        palette,
+        accent=base.name(),
+        accent_hover=hover.name(),
+        accent_pressed=pressed.name(),
+        accent_soft=soft.name(),
+        selection=QColor(base.red(), base.green(), base.blue(), 38 if palette.is_dark else 31).name(
+            QColor.NameFormat.HexArgb
+        ),
+    )
+
+
+def _detect_families() -> list[str]:
+    available = {name.lower() for name in QFontDatabase.families()}
+    wanted: Iterable[str] = (
+        "Segoe UI Variable Text",
+        "Segoe UI Variable Display",
+        "Segoe UI",
+        "Microsoft YaHei UI",
+        "Microsoft YaHei",
+        "PingFang SC",
+        "Noto Sans SC",
+        "Arial",
+    )
+    families = [name for name in wanted if name.lower() in available]
+    # 文本字体优先使用 Text 变体；Display 变体用于大标题（Qt 会自动回退）
+    if "Segoe UI Variable Text" in families:
+        families.remove("Segoe UI Variable Text")
+        families.insert(0, "Segoe UI Variable Text")
+    if not families:
+        families = ["Segoe UI"]
+    return families
+
+
+_theme: Theme | None = None
+
+
+def theme() -> Theme:
+    global _theme
+    if _theme is None:
+        _theme = Theme()
+    return _theme
+
+
+def resolve_mode(preference: str) -> str:
+    if preference in {"light", "dark"}:
+        return preference
+    try:
+        from PySide6.QtWidgets import QApplication
+
+        hints = QApplication.styleHints()
+        scheme = hints.colorScheme()
+        if scheme == Qt.ColorScheme.Light:
+            return "light"
+        if scheme == Qt.ColorScheme.Dark:
+            return "dark"
+    except Exception:
+        pass
+    return "dark"
+
+
+def apply_theme_to_app(app, *, preference: str | None = None, accent: str | None = None, **kwargs) -> str:
+    t = theme()
+    mode = resolve_mode(preference or "system")
+    t.apply(mode=mode, accent=accent or BRAND_ACCENT, **kwargs)
+    app.setStyleSheet(t.qss())
+    app.setPalette(t.window_palette())
+    base = t.font(13)
+    app.setFont(base)
+    return mode
+
+
+def alpha_text(base: str, color: str, amount: float) -> str:
+    """把 color 以 amount 不透明度叠加到 base 上，得到不透明 hex（用于无 alpha 的绘制）。"""
+    return mix(base, color, amount).name()

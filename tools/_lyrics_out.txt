@@ -1,0 +1,18 @@
+enhanced: synced=True kind=synced words=True lines=2
+  1000-3000 'hello world' words=[('hello', 1000, 1600), ('world', 1600, 3000)]
+  3000-8000 'bye' words=[('bye', 3000, 8000)]
+yrc: synced=True kind=synced words=True lines=2
+  1000-5000 '你好世界' words=[('你', 1000, 1600), ('好', 1600, 2200), ('世界', 2200, 5000)]
+  5000-8000 '再见' words=[('再见', 5000, 8000)]
+qrc: synced=True kind=synced words=True lines=2
+  1000-5000 '你好世界' words=[('你', 1000, 1600), ('好', 1600, 2200), ('世界', 2200, 5000)]
+  5000-8000 '再见' words=[('再见', 5000, 8000)]
+plain: synced=False kind=plain words=False lines=3
+  0-4000 '第一行' words=[]
+  4000-8000 '第二行' words=[]
+  8000-12000 '第三行' words=[]
+instr: synced=False kind=instrumental words=False lines=1
+  0-4000 '此歌曲为没有填词的纯音乐，请您静候' words=[]
+empty: synced=False kind=empty words=False lines=0
+idx@500 -> -1; idx@1300 -> 0; idx@1700 -> 0
+word_progress@1200 -> (0, 0.3333333333333333)
