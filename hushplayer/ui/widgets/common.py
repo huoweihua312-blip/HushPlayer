@@ -117,6 +117,9 @@ def paint_badge(
     palette = theme().palette
     painter.save()
     painter.setRenderHint(QPainter.Antialiasing, True)
+    tone = {"accent": palette.accent, "danger": palette.danger, "success": palette.success}.get(
+        tone, tone
+    )
     base = tone or palette.text
     fill = rgba(base, 0.09 if palette.is_dark else 0.06)
     foreground = rgba(base, 0.62)

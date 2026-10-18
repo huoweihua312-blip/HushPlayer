@@ -26,8 +26,10 @@ class TrackInfo(QWidget):
         self._title = ""
         self._artist = ""
         self._badge = ""
+        self._status = ""
         self._hover = HoverAnimation(self, 120)
-        self.setMinimumWidth(120)
+        self.setMinimumWidth(240)
+        self.setMaximumWidth(520)
         self.setCursor(Qt.PointingHandCursor)
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         self.setFixedHeight(46)
@@ -48,6 +50,11 @@ class TrackInfo(QWidget):
         self._artist = text
         self.update()
 
+    def set_status(self, text: str) -> None:
+        """Transient hint (e.g. buffering) shown instead of the source badge."""
+        self._status = text
+        self.update()
+
     def enterEvent(self, event) -> None:  # noqa: N802
         self._hover.to(1.0)
         super().enterEvent(event)
@@ -66,36 +73,53 @@ class TrackInfo(QWidget):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.Antialiasing, True)
         rect = QRectF(self.rect())
-        badge_width = 0.0
-        if self._badge:
-            font = theme().font(7.2, 600)
-            badge_width = QFontMetrics(font).horizontalAdvance(self._badge) + 14
-        width = rect.width() - badge_width - (6 if badge_width else 0)
 
-        title_font = theme().font(9.8, 600)
+        # Title keeps the whole width: the source badge (or the transient
+        # buffering hint) lives on the second line so long song names are not
+        # cut short by it.
+        title_font = theme().font(10.2, 600)
         painter.setFont(title_font)
         painter.setPen(QPen(rgba(palette.text, 0.96)))
         metrics = QFontMetrics(title_font)
         painter.drawText(
-            QRectF(0, rect.center().y() - 21, width, 21),
+            QRectF(0, rect.center().y() - 22, rect.width() - 4, 22),
             int(Qt.AlignLeft | Qt.AlignVCenter),
-            metrics.elidedText(self._title or "未在播放", Qt.ElideRight, int(max(10, width))),
+            metrics.elidedText(self._title or "未在播放", Qt.ElideRight, int(max(10, rect.width() - 4))),
         )
-        artist_font = theme().font(8.6, 500)
+
+        badge_text = self._status or self._badge
+        badge_width = 0.0
+        if badge_text:
+            font = theme().font(7.2, 600)
+            badge_width = QFontMetrics(font).horizontalAdvance(badge_text) + 14
+
+        artist_font = theme().font(8.8, 500)
         painter.setFont(artist_font)
         painter.setPen(QPen(rgba(palette.text, 0.32 + 0.28 * self._hover.value)))
-        painter.drawText(
-            QRectF(0, rect.center().y() + 1, width, 18),
-            int(Qt.AlignLeft | Qt.AlignVCenter),
-            QFontMetrics(artist_font).elidedText(self._artist, Qt.ElideRight, int(max(10, width))),
+        artist_width = rect.width() - badge_width - (8 if badge_width else 0)
+        artist_metrics = QFontMetrics(artist_font)
+        artist_text = artist_metrics.elidedText(
+            self._artist, Qt.ElideRight, int(max(10, artist_width))
         )
-        if self._badge and badge_width:
+        painter.drawText(
+            QRectF(0, rect.center().y() + 1, max(10, artist_width), 19),
+            int(Qt.AlignLeft | Qt.AlignVCenter),
+            artist_text,
+        )
+        if badge_text and badge_width:
             from .common import paint_badge
 
+            # Keep the badge next to the artist instead of pinning it to the far
+            # right of a wide info block, where it read as a disconnected chip.
+            badge_x = min(
+                rect.width() - badge_width,
+                artist_metrics.horizontalAdvance(artist_text) + 8,
+            )
             paint_badge(
                 painter,
-                QRectF(rect.width() - badge_width, rect.center().y() - 20, badge_width, 17),
-                self._badge,
+                QRectF(badge_x, rect.center().y() + 4, badge_width, 16),
+                badge_text,
+                tone="accent" if self._status else "",
             )
         painter.end()
 
@@ -128,7 +152,7 @@ class PlayerBar(QWidget):
 
         self.info = TrackInfo()
         self.info.clicked.connect(self.track_info_clicked)
-        layout.addWidget(self.info, 0, Qt.AlignVCenter)
+        layout.addWidget(self.info, 5, Qt.AlignVCenter)
         self.favorite = IconButton("heart", size=28, icon_size=16, tooltip="添加到「我喜欢」")
         self.favorite.clicked.connect(self._toggle_favorite)
         layout.addWidget(self.favorite, 0, Qt.AlignVCenter)
@@ -165,7 +189,7 @@ class PlayerBar(QWidget):
         progress.addWidget(self.total, 0)
         centre_layout.addLayout(progress)
         centre_layout.addStretch(1)
-        layout.addWidget(centre, 1)
+        layout.addWidget(centre, 5)
 
         # ---------------------------------------------------------- right
         right = QHBoxLayout()
@@ -226,6 +250,7 @@ class PlayerBar(QWidget):
         self._track = track
         self.cover.set_track(track)
         self.info.set_track(track)
+        self.info.set_status("")
         self._refresh_favorite()
         self._on_duration(track.duration_ms if track else 0)
         self._on_position(0)
@@ -274,7 +299,17 @@ class PlayerBar(QWidget):
     def _on_loading(self, loading: bool, message: str) -> None:
         self._loading = loading
         if loading:
-            self.info.set_subtitle(message or "正在加载…")
+            self.info.set_status("缓冲中")
+        else:
+            self.info.set_status("")
+            self._restore_subtitle()
+
+    def _restore_subtitle(self) -> None:
+        track = self._track
+        if track is None:
+            self.info.set_subtitle("选择一首歌曲开始收听")
+            return
+        self.info.set_subtitle(track.display_artist)
 
     def _refresh_queue_badge(self) -> None:
         try:
@@ -338,8 +373,20 @@ class PlayerBar(QWidget):
         width = self.width()
         self.volume.setVisible(width >= 860)
         self.mute.setVisible(width >= 860)
-        self.info.setMinimumWidth(120 if width >= 760 else 60)
-        self.info.setMaximumWidth(260 if width >= 1000 else 190)
+        # Give the song title real room: the old hard cap (260px) truncated long
+        # names to a handful of characters even on a wide window.
+        if width >= 1100:
+            self.info.setMinimumWidth(320)
+            self.info.setMaximumWidth(520)
+        elif width >= 860:
+            self.info.setMinimumWidth(260)
+            self.info.setMaximumWidth(400)
+        elif width >= 620:
+            self.info.setMinimumWidth(190)
+            self.info.setMaximumWidth(280)
+        else:
+            self.info.setMinimumWidth(110)
+            self.info.setMaximumWidth(180)
 
 
 class TimeLabel(QWidget):
