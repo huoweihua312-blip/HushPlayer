@@ -10,7 +10,16 @@ from __future__ import annotations
 import os
 from typing import Callable
 
-from PySide6.QtCore import QEasingCurve, QPointF, QRectF, QSize, Qt, QVariantAnimation, Signal
+from PySide6.QtCore import (
+    QEasingCurve,
+    QPointF,
+    QRectF,
+    QSize,
+    Qt,
+    QTimer,
+    QVariantAnimation,
+    Signal,
+)
 from PySide6.QtGui import QColor, QFontMetrics, QPainter, QPen
 from PySide6.QtWidgets import (
     QAbstractButton,
@@ -261,9 +270,17 @@ class SettingCombo(QComboBox):
 
 
 class SettingSlider(QWidget):
-    """Slider with a trailing value label; emits ``value_changed``."""
+    """Slider with a trailing value label.
+
+    ``value_changed`` fires continuously while dragging (cheap previews only);
+    ``committed`` fires once the user releases the handle or stops nudging with
+    the keyboard, which is when expensive work (theme re-polish, cache prune,
+    disk writes) should run. Applying those per pixel made the settings page
+    visibly stutter.
+    """
 
     value_changed = Signal(float)
+    committed = Signal(float)
 
     def __init__(
         self,
@@ -297,6 +314,11 @@ class SettingSlider(QWidget):
         self._set = False
         self.set_value(value)
         self.slider.valueChanged.connect(self._on_slider)
+        self.slider.sliderReleased.connect(self._emit_committed)
+        self._commit_timer = QTimer(self)
+        self._commit_timer.setSingleShot(True)
+        self._commit_timer.setInterval(220)
+        self._commit_timer.timeout.connect(self._emit_committed)
 
     def set_value(self, value: float) -> None:
         self._set = True
@@ -321,8 +343,16 @@ class SettingSlider(QWidget):
     def _on_slider(self, _value: int) -> None:
         value = self.value()
         self._update_label(value)
+        if self._set:
+            return
+        self.value_changed.emit(value)
+        if not self.slider.isSliderDown():
+            self._commit_timer.start()
+
+    def _emit_committed(self) -> None:
+        self._commit_timer.stop()
         if not self._set:
-            self.value_changed.emit(value)
+            self.committed.emit(self.value())
 
 
 class SettingField(QWidget):

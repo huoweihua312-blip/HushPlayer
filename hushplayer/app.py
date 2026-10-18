@@ -134,21 +134,41 @@ class HushApp(QObject):
             except Exception as exc:  # noqa: BLE001
                 log_exception("窗口响应设置失败", exc)
 
-    def apply_theme(self) -> None:
+    def apply_theme(self, *, animate: bool = True) -> None:
         preference = str(self.settings.get("appearance.theme", "system"))
         accent = str(self.settings.get("appearance.accent", "#C95770"))
+        reduce_motion = bool(self.settings.get("appearance.reduce_motion", False))
+        font_scale = float(self.settings.get("appearance.font_scale", 1.0) or 1.0)
+        density = str(self.settings.get("appearance.density", "comfortable"))
+        signature = (preference, accent, reduce_motion, font_scale, density)
+        if signature == getattr(self, "_theme_signature", None):
+            return
+        window = self.window
+        snapshot = None
+        if animate and window is not None and window.isVisible() and not window.isMinimized():
+            try:
+                snapshot = window.grab()
+            except Exception:  # noqa: BLE001
+                snapshot = None
+        self._theme_signature = signature
         actual = apply_theme_to_app(
             self.app,
             preference=preference,
             accent=accent,
-            reduce_motion=bool(self.settings.get("appearance.reduce_motion", False)),
-            font_scale=float(self.settings.get("appearance.font_scale", 1.0) or 1.0),
-            density=str(self.settings.get("appearance.density", "comfortable")),
+            reduce_motion=reduce_motion,
+            font_scale=font_scale,
+            density=density,
         )
         log.info("应用主题：%s → %s", preference, actual)
         self.app.setStyleSheet(theme().qss())
-        if self.window is not None:
-            self.window.refresh_theme()
+        if window is not None:
+            window.refresh_theme()
+            if snapshot is not None and not snapshot.isNull():
+                from .ui.widgets.transition import FadeOverlay
+
+                host = getattr(window, "container", None) or window
+                overlay = FadeOverlay(host, snapshot)
+                overlay.start()
 
     # ------------------------------------------------------------------- start
     def start(self) -> None:
@@ -320,6 +340,9 @@ def main(argv: list[str] | None = None) -> int:
     app.setOrganizationName("HushPlayer")
     app.setDesktopFileName(APP_ID)
     app.setStyle("Fusion")
+    from .core.fonts import load_bundled_fonts
+
+    load_bundled_fonts()
     try:
         app.setQuitOnLastWindowClosed(True)
     except Exception:  # noqa: BLE001

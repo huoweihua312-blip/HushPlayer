@@ -452,22 +452,24 @@ def _with_accent(palette: Palette, accent: str) -> Palette:
 
 
 def _detect_families() -> list[str]:
-    available = {name.lower() for name in QFontDatabase.families()}
+    # Bundled MiSans first: the original HushPlayer ships the same family, so
+    # both products render Chinese text with identical metrics and weight.
+    from .fonts import load_bundled_fonts
+
+    load_bundled_fonts()
+    available = {name.lower(): name for name in QFontDatabase.families()}
     wanted: Iterable[str] = (
+        "MiSans",
+        "Source Han Sans SC",
+        "Noto Sans SC",
         "Segoe UI Variable Text",
-        "Segoe UI Variable Display",
         "Segoe UI",
         "Microsoft YaHei UI",
         "Microsoft YaHei",
         "PingFang SC",
-        "Noto Sans SC",
         "Arial",
     )
-    families = [name for name in wanted if name.lower() in available]
-    # 文本字体优先使用 Text 变体；Display 变体用于大标题（Qt 会自动回退）
-    if "Segoe UI Variable Text" in families:
-        families.remove("Segoe UI Variable Text")
-        families.insert(0, "Segoe UI Variable Text")
+    families = [available[name.lower()] for name in wanted if name.lower() in available]
     if not families:
         families = ["Segoe UI"]
     return families

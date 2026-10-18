@@ -34,7 +34,11 @@ class LyricsBody(QWidget):
         super().__init__(parent)
         self.setMouseTracking(True)
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-        self.setAttribute(Qt.WA_TranslucentBackground, True)
+        # No WA_TranslucentBackground here: a translucent child inside a
+        # scrolling viewport is not cleared on repaint and flickered while
+        # lyrics scrolled. A plain widget without autoFillBackground already
+        # shows the parent's painting.
+        self.setAutoFillBackground(False)
         self._document: LyricDocument | None = None
         self._position = 0
         self._index = -1
@@ -47,6 +51,8 @@ class LyricsBody(QWidget):
         self._top_pad = 26.0
         self._bottom_pad = 32.0
         self._active_color = "#ffffff"
+        self._trans_active_color = "#ffffff"
+        self._override: dict[str, str | None] = {}
         self._inactive_color = "#8a8a92"
         self._accent = "#C95770"
         self._trans_color = "#7a7a82"
@@ -97,13 +103,36 @@ class LyricsBody(QWidget):
         self._bottom_pad = bottom
         self._relayout()
 
+    def set_override_colors(
+        self,
+        *,
+        active: str | None = None,
+        inactive: str | None = None,
+        accent: str | None = None,
+        trans: str | None = None,
+        trans_active: str | None = None,
+        hint: str | None = None,
+    ) -> None:
+        """Force colours regardless of theme (immersive stages paint on dark)."""
+        self._override = {
+            "active": active,
+            "inactive": inactive,
+            "accent": accent,
+            "trans": trans,
+            "trans_active": trans_active,
+            "hint": hint,
+        }
+        self.refresh_theme()
+
     def refresh_theme(self) -> None:
         palette = theme().palette
-        self._active_color = palette.text
-        self._inactive_color = rgba(palette.text, 0.40)
-        self._accent = palette.accent
-        self._trans_color = rgba(palette.text, 0.45)
-        self._hint_color = rgba(palette.text, 0.34)
+        override = getattr(self, "_override", None) or {}
+        self._active_color = override.get("active") or palette.text
+        self._inactive_color = override.get("inactive") or rgba(palette.text, 0.40)
+        self._accent = override.get("accent") or palette.accent
+        self._trans_color = override.get("trans") or rgba(palette.text, 0.45)
+        self._trans_active_color = override.get("trans_active") or rgba(palette.text, 0.55)
+        self._hint_color = override.get("hint") or rgba(palette.text, 0.34)
         self._relayout()
 
     # ------------------------------------------------------------------ 布局
@@ -221,7 +250,7 @@ class LyricsBody(QWidget):
             if self._show_translation and line.translation.strip():
                 trans_top = top + metrics.height() + 3
                 painter.setFont(trans_font)
-                painter.setPen(QPen(QColor(self._trans_color if not active else rgba(theme().palette.text, 0.55))))
+                painter.setPen(QPen(QColor(self._trans_color if not active else self._trans_active_color)))
                 trans_width = QFontMetrics(trans_font).horizontalAdvance(line.translation)
                 tx = (self.width() - trans_width) / 2 if center else 0.0
                 painter.drawText(QPointF(tx, trans_top + QFontMetrics(trans_font).ascent()), line.translation)
@@ -371,6 +400,9 @@ class LyricsView(QWidget):
         if index != previous:
             self._follow = True
             self._scroll_to_index(index, animate=True)
+
+    def set_override_colors(self, **colors: str | None) -> None:
+        self.body.set_override_colors(**colors)
 
     def set_font_scale(self, scale: float) -> None:
         self.body.set_font_scale(scale)

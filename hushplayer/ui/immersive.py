@@ -16,7 +16,6 @@ from PySide6.QtCore import (
 from PySide6.QtGui import QColor, QFont, QFontMetrics, QKeySequence, QLinearGradient, QPainter, QPen, QPixmap, QShortcut
 from PySide6.QtWidgets import (
     QGraphicsDropShadowEffect,
-    QGraphicsOpacityEffect,
     QHBoxLayout,
     QLabel,
     QSizePolicy,
@@ -40,6 +39,17 @@ from .widgets.sliders import SeekBar, VolumeSlider
 STAGE_COVER_MAX = 448
 COVER_MIN = 210
 
+
+def _use_stage_colors(view) -> None:  # noqa: ANN001
+    """The immersive stages are always dark, even in the light theme."""
+    view.set_override_colors(
+        active="#F7F4F5",
+        inactive=rgba("#F7F4F5", 0.46),
+        accent="#F2879B",
+        trans=rgba("#F7F4F5", 0.42),
+        trans_active=rgba("#F7F4F5", 0.62),
+        hint=rgba("#F7F4F5", 0.34),
+    )
 
 class _MoodBackground(QWidget):
     """负责绘制氛围光的窗口底层。"""
@@ -324,6 +334,7 @@ class _CoverStage(QWidget):
         self.lyrics.set_font_scale(0.74)
         self.lyrics.set_show_translation(False)
         self.lyrics.set_padding_ratio(0.16, 0.30)
+        _use_stage_colors(self.lyrics)
         layout.addWidget(self.lyrics)
         layout.addStretch(1)
         self.refresh_theme()
@@ -403,6 +414,7 @@ class _LyricsStage(QWidget):
 
         self.lyrics = LyricsView(self, centered=True)
         self.lyrics.set_font_scale(1.55)
+        _use_stage_colors(self.lyrics)
         layout.addWidget(self.lyrics, 1)
         self.refresh_theme()
 
@@ -677,12 +689,6 @@ class ImmersiveWindow(QWidget):
         self.controls = _ControlsBar(self)
         root.addWidget(self.controls)
 
-        self._fade_effect = QGraphicsOpacityEffect(self.stack)
-        self._fade_effect.setOpacity(1.0)
-        self.stack.setGraphicsEffect(self._fade_effect)
-        self._fade = QPropertyAnimation(self._fade_effect, b"opacity", self)
-        self._fade.setDuration(Metrics.motion_slow)
-        self._fade.setEasingCurve(QEasingCurve.OutCubic)
 
         player = ctx().player
         player.track_changed.connect(self._on_track_changed)
@@ -749,23 +755,20 @@ class ImmersiveWindow(QWidget):
         if not animate or theme().reduce_motion:
             self.stack.setCurrentIndex(index)
             return
-        self._fade.stop()
-        self._fade.setStartValue(1.0)
-        self._fade.setEndValue(0.0)
+        # Capture the outgoing stage and fade that bitmap out on top of the
+        # incoming one. Never put a QGraphicsOpacityEffect on live widgets: the
+        # offscreen surface it forces flickers while lyrics repaint at 60 Hz.
         try:
-            self._fade.finished.disconnect()
-        except (RuntimeError, TypeError):
-            pass
+            snapshot = self.stack.grab()
+        except Exception:  # noqa: BLE001
+            snapshot = None
+        self.stack.setCurrentIndex(index)
+        if snapshot is not None and not snapshot.isNull():
+            from .widgets.transition import FadeOverlay
 
-        def _swap() -> None:
-            self.stack.setCurrentIndex(index)
-            self._fade.stop()
-            self._fade.setStartValue(0.0)
-            self._fade.setEndValue(1.0)
-            self._fade.start()
-
-        self._fade.finished.connect(_swap)
-        self._fade.start()
+            overlay = FadeOverlay(self, snapshot)
+            overlay.setGeometry(self.stack.geometry())
+            overlay.start()
 
     def cycle_mode(self) -> None:
         self.set_mode(self.MODE_LYRICS if self._mode == self.MODE_COVER else self.MODE_COVER)
@@ -787,7 +790,19 @@ class ImmersiveWindow(QWidget):
         self._on_state(ctx().player.state)
         self._on_position(ctx().player.position)
         self._update_track_meta()
-        self._fade_effect.setOpacity(1.0)
+        # A frameless top-level window is mapped with the platform background
+        # for at least one frame; make that frame the mood base colour instead
+        # of the default white so entering the player can never flash white.
+        try:
+            from PySide6.QtGui import QColor, QPalette
+
+            pal = self.palette()
+            base = QColor(self.background.mood.base)
+            pal.setColor(QPalette.Window, base)
+            self.setPalette(pal)
+            self.setAutoFillBackground(True)
+        except Exception:  # noqa: BLE001
+            pass
         self.ensurePolished()
         self.layout().activate()
         # force layout + cover/lyrics rasterisation into the backing store so the

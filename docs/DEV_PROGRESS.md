@@ -89,3 +89,9 @@ powershell -ExecutionPolicy Bypass -File packaging\build.ps1 -Zip
 - 截图**不能**用 `QT_QPA_PLATFORM=offscreen`：Qt 该平台无字体目录，中文会渲染成方块。只有纯逻辑测试才用 offscreen。
 - 修改 `hushplayer/runtime/source_runtime/*.js` 后必须 `node --check` 并重跑在线用例。
 - 不要读取或修改旧项目目录与真实用户 AppData。
+
+### v1.0.2（第二轮反馈）
+
+- 已完成并验证：R2-01 闪屏（渲染层）、R2-02 幽灵窗口、R2-03 在线搜索与音源增删、R2-04 官方 Logo、R2-05 滑块卡顿、R2-06 主题过渡 + 日月按钮、R2-07 三角居中、R2-08 MiSans 字体、R2-09 最大化白边。
+- 全量测试 120 passed；打包与 verify 见 `docs/qa/REIMAGINED_FIX_ROUND2.md` 与 `docs/TEST_REPORT.md` 第 9 节。
+- 待人工确认：真实显示器上的闪屏观感、混合 DPI 拖动、字体主观一致性。

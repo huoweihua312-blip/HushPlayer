@@ -42,7 +42,10 @@ class SearchField(QWidget):
         self.edit.textChanged.connect(lambda _text: self._debounce.start())
         self.edit.returnPressed.connect(self._on_submit)
         self.edit.installEventFilter(self)
-        self.clear_button = IconButton("close", size=20, icon_size=11, tooltip="清除")
+        # BUG(R2-02): without a parent the clear button became its own
+        # top-level window, so typing in the search box popped a small ghost
+        # frame next to the window.
+        self.clear_button = IconButton("close", size=20, icon_size=11, tooltip="清除", parent=self)
         self.clear_button.clicked.connect(self.clear)
         self.clear_button.setVisible(False)
         self.setFixedHeight(32)

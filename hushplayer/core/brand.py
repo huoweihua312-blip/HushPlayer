@@ -43,29 +43,32 @@ def _existing(*candidates: tuple[str, ...]) -> Path | None:
     return None
 
 
+def _brand_file(name: str) -> Path | None:
+    path = brand_dir() / name
+    return path if path.is_file() else None
+
+
 def has_official_logo() -> bool:
     """True when the user has supplied the real logo files."""
-    return any(
-        _existing(("assets", "brand", name)) is not None
-        for name in (LOGO, LOGO_LIGHT, LOGO_DARK, ICON, ICON_PNG)
-    )
+    return any(_brand_file(name) is not None for name in (LOGO, LOGO_LIGHT, LOGO_DARK, ICON, ICON_PNG))
 
 
 def logo_path(mode: str = "dark") -> Path | None:
     """Path of the logo artwork appropriate for ``mode`` (``light``/``dark``)."""
     preferred = LOGO_LIGHT if mode == "light" else LOGO_DARK
-    return _existing(
-        ("assets", "brand", preferred),
-        ("assets", "brand", LOGO),
-        _PLACEHOLDER_PNG,
-    )
+    for name in (preferred, LOGO):
+        found = _brand_file(name)
+        if found is not None:
+            return found
+    return _existing(_PLACEHOLDER_PNG)
 
 
 def icon_path() -> Path | None:
-    return _existing(
-        ("assets", "brand", ICON),
-        _PLACEHOLDER_ICO,
-    )
+    for name in (ICON, "HushPlayer.ico", ICON_PNG):
+        found = _brand_file(name)
+        if found is not None:
+            return found
+    return _existing(_PLACEHOLDER_ICO)
 
 
 def logo_pixmap(size: int, mode: str = "dark", *, dpr: float = 2.0) -> QPixmap | None:

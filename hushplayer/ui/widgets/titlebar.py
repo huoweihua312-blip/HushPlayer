@@ -53,6 +53,7 @@ class TitleBar(QWidget):
     minimize_requested = Signal()
     maximize_requested = Signal()
     close_requested = Signal()
+    theme_toggle_requested = Signal()
 
     def __init__(self, window: FramelessWindow, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -88,6 +89,10 @@ class TitleBar(QWidget):
         layout.addWidget(self.title_label, 0, Qt.AlignCenter)
         layout.addStretch(1)
 
+        self.theme_button = WindowButton("moon", "切换到浅色模式")
+        self.theme_button.clicked.connect(self.theme_toggle_requested)
+        layout.addWidget(self.theme_button)
+
         self.minimize_button = WindowButton("minimize", "最小化")
         self.maximize_button = WindowButton("maximize", "最大化")
         self.close_button = WindowButton("close", "关闭", danger=True)
@@ -108,6 +113,12 @@ class TitleBar(QWidget):
         self._maximized = maximized
         self.maximize_button.set_icon("restore" if maximized else "maximize")
         self.maximize_button.setToolTip("还原" if maximized else "最大化")
+
+    def set_theme_mode(self, mode: str) -> None:
+        """Show a moon in dark mode and a sun in light mode."""
+        dark = mode == "dark"
+        self.theme_button.set_icon("moon" if dark else "sun")
+        self.theme_button.setToolTip("切换到浅色模式" if dark else "切换到深色模式")
 
     def set_history(self, can_back: bool, can_forward: bool) -> None:
         self.back_button.setEnabled(can_back)

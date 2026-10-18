@@ -229,6 +229,13 @@ def run() -> int:
         if scene in ("immersive", "immersive_lyrics"):
             immersive = getattr(window, "_immersive", None)
             if immersive is not None:
+                # The window is translucent; the first grab can happen before the
+                # ambient background has painted, which renders as a washed-out
+                # frame. Force one full repaint and discard that grab.
+                immersive.repaint()
+                app.processEvents()
+                immersive.grab()
+                app.processEvents()
                 pixmap = immersive.grab()
         ok = pixmap.save(str(path))
         print(("saved " if ok else "FAILED ") + path.name, pixmap.width(), "x", pixmap.height())

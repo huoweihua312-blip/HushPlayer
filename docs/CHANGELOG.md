@@ -2,6 +2,30 @@
 
 本项目遵循 [语义化版本](https://semver.org/lang/zh-CN/)；日期为发布日。
 
+## 1.0.2 — 2026-10-18
+
+第二轮反馈整改（9 项用户反馈 + 6 项巡检发现）。逐项复现、根因、修复与验收证据见
+[`docs/qa/REIMAGINED_FIX_ROUND2.md`](qa/REIMAGINED_FIX_ROUND2.md)。
+
+### 修复
+
+- **歌词 / 沉浸式播放中闪屏**：移除沉浸式窗口上的整窗 `QGraphicsOpacityEffect`（离屏合成），A/B 模式切换改用快照 + `FadeOverlay` 淡出；歌词视图去掉 `WA_TranslucentBackground`，进入沉浸式前先把窗口背景设为氛围底色。渲染层采样 `delta=0.00`。
+- **搜索时出现多余小窗口**：搜索框清除按钮构造时未设置 parent，显示后成为独立顶层窗口；已修复并加回归测试。
+- **设置滑块卡顿**：滑块拖动过程只更新标签，松手/静默 220ms 后才写入设置并触发主题/缓存动作；主题应用增加签名缓存。
+- **播放按钮三角形偏移**：改为按 icon 尺寸平移，像素测量中心与圆心一致。
+- **最大化白边**：最大化时关闭 DWM 圆角与边框颜色，还原时恢复。
+- **字体与原版不一致**：内置 MiSans（Regular/Semibold/Bold）并以私有方式加载，字体探测首选 MiSans。
+- **主题切换生硬**：切换时对旧界面做快照淡出（260ms），标题栏新增太阳/月亮切换按钮（125% 缩放下 28×28 命中区）。
+- **在线搜索体验**：音源胶囊栏（含各音源结果数）、最近搜索历史、「管理音源」入口、结果状态「N 首结果 · M 个音源 · K 个失败」。
+
+### 新增
+
+- 可写音源目录与音源管理：安装本地 `.js`、从 http(s) 链接安装、启用/停用、删除、恢复内置音源（`hushplayer/online/registry.py`）。
+- `assets/brand/` 正式 Logo（由用户提供的 `HushPlayer.ico` 渲染 `logo.png`），窗口/托盘/侧栏/关于/打包全部接入。
+- `assets/fonts/` 内置 MiSans 与许可文件；`hushplayer/core/fonts.py`。
+- `hushplayer/ui/widgets/transition.py`、`hushplayer/ui/widgets/source_filter.py`。
+- 测试：`tests/test_brand.py` 更新（官方素材优先后仍保留回退能力）。
+
 ## 1.0.1 — 2026-10-18
 
 第一轮缺陷整改（10 项用户反馈 + 7 项巡检发现）。逐项复现步骤、根因、修复文件与验收证据见

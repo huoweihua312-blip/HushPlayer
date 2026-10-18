@@ -236,7 +236,10 @@ class SettingsPage(Page):
             self.settings.set(key, new_value)
             if on_change is not None:
                 on_change(new_value)
-        slider.value_changed.connect(apply)
+        # Apply on release / after a short pause, not on every pixel of the
+        # drag: restyle, cache prune and disk writes are far too expensive to
+        # run dozens of times per second (visible stutter while dragging).
+        slider.committed.connect(apply)
         return slider
 
     def _row(self, title: str, description: str, control: QWidget) -> SettingRow:
@@ -590,6 +593,21 @@ class SettingsPage(Page):
         self._source_rows.setContentsMargins(0, 0, 0, 0)
         self._source_rows.setSpacing(2)
         card.add(self._source_container())
+        card.add_row(self._row(
+            "添加音源",
+            "安装社区 MusicFree 兼容插件（.js 文件），只保存在用户数据目录",
+            self._action_button("添加音源…", "plus", self._add_source),
+        ))
+        card.add_row(self._row(
+            "从链接添加",
+            "粘贴 MusicFree 兼容插件的 http(s) 地址，程序会下载并校验大小",
+            self._action_button("从链接…", "cloud", self._add_source_url),
+        ))
+        card.add_row(self._row(
+            "恢复内置音源",
+            "把删除过的内置音源重新加回列表",
+            self._action_button("恢复", "refresh", self._restore_sources),
+        ))
         column.addWidget(card)
 
         card = SettingsCard("网络", "")
@@ -666,7 +684,86 @@ class SettingsPage(Page):
                 mapping[sid] = bool(value)
                 self.settings.set("online.enabled_sources", mapping)
             switch.toggled.connect(apply)
-            self._source_rows.addWidget(SettingRow(label, detail, control=switch))
+            remove = IconButton("trash", size=28, icon_size=15, tooltip="删除该音源")
+            remove.clicked.connect(lambda _=False, sid=source.id, name=label: self._remove_source(sid, name))
+            holder = QWidget()
+            row = QHBoxLayout(holder)
+            row.setContentsMargins(0, 0, 0, 0)
+            row.setSpacing(6)
+            row.addWidget(switch)
+            row.addWidget(remove)
+            self._source_rows.addWidget(SettingRow(label, detail, control=holder))
+
+    def _add_source(self) -> None:
+        path, _ = QFileDialog.getOpenFileName(self, "选择音源插件", "", "MusicFree 插件 (*.js *.json)")
+        if not path:
+            return
+        try:
+            from ...online.registry import RegistryError, registry
+
+            entry = registry().install_file(path)
+        except RegistryError as exc:
+            self._toast(str(exc), "error")
+            return
+        except Exception as exc:  # noqa: BLE001
+            log_exception("安装音源失败", exc)
+            self._toast("安装音源失败，请查看日志", "error")
+            return
+        self._toast(f"已安装音源：{entry.get('name', '')}", "success")
+        self._reload_sources()
+
+    def _add_source_url(self) -> None:
+        from PySide6.QtWidgets import QInputDialog
+
+        url, ok = QInputDialog.getText(self, "从链接添加音源", "音源地址（http/https）：")
+        if not ok or not url.strip():
+            return
+        try:
+            from ...online.registry import RegistryError, registry
+
+            entry = registry().install_url(url.strip())
+        except RegistryError as exc:
+            self._toast(str(exc), "error")
+            return
+        except Exception as exc:  # noqa: BLE001
+            log_exception("从链接安装音源失败", exc)
+            self._toast("安装音源失败，请查看日志", "error")
+            return
+        self._toast(f"已安装音源：{entry.get('name') or entry.get('id')}", "success")
+        self._reload_sources()
+
+    def _restore_sources(self) -> None:
+        try:
+            from ...online.registry import registry
+
+            added = registry().restore_bundled()
+        except Exception as exc:  # noqa: BLE001
+            log_exception("恢复内置音源失败", exc)
+            self._toast("恢复失败，请查看日志", "error")
+            return
+        self._toast(f"已恢复 {added} 个内置音源" if added else "内置音源没有缺失", "success")
+        self._reload_sources()
+
+    def _remove_source(self, source_id: str, name: str) -> None:
+        answer = QMessageBox.question(
+            self,
+            "删除音源",
+            f"确定要删除音源「{name}」吗？插件文件也会一并删除。",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No,
+        )
+        if answer != QMessageBox.Yes:
+            return
+        try:
+            from ...online.registry import registry
+
+            registry().remove(source_id)
+        except Exception as exc:  # noqa: BLE001
+            log_exception("删除音源失败", exc)
+            self._toast(f"删除失败：{exc}", "error")
+            return
+        self._toast(f"已删除音源：{name}", "success")
+        self._reload_sources()
 
     def _reload_sources(self) -> None:
         try:

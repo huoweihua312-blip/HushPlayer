@@ -136,3 +136,30 @@ $ .venv\Scripts\python.exe -m pytest -q
 | 产物 | `HushPlayer-1.0.1-win64.zip`（108,530,223 B）SHA256 `F94A4AC30E98D969C4AA3473890425A5046E228B825218BE97E54C7F381EDACF` |
 
 原始日志：`artifacts/packaged_run/logs/hushplayer.log`（不随仓库提交）。
+
+## 9. 第二轮反馈整改（1.0.2）
+
+| 项目 | 数值 |
+| --- | --- |
+| 用例总数 | 120（119 + 品牌测试补充 1） |
+| 结果 | 120 passed / 0 failed / 0 skipped |
+| 耗时 | 29.949 s |
+| JUnit | `artifacts/junit_round2.xml` |
+
+新增/更新的自动化覆盖：
+
+| 文件 | 覆盖点 |
+| --- | --- |
+| `tests/test_brand.py` | 官方 Logo 优先、brand 目录为空时回退占位资源、多尺寸 ico |
+
+动态验证（脚本化，可复跑）：
+
+| 脚本 | 结论 |
+| --- | --- |
+| `tools/probe_immersive_flash2.py` | 进入沉浸式首帧 `luma=37.86`，40–1400 ms 全部 `delta=0.00` |
+| `tools/probe_r2_mode_switch.py` | Cover ↔ All Screen 各 3 次、61 帧采样，最差 `+0.1` 亮度差 |
+| `tools/probe_r2_windows.py` | 输入文字前后顶层窗口数：2 → 1（幽灵窗口消失） |
+| `tools/probe_r2_search.py` | 真实搜索 130 条、7 个音源、胶囊计数正确 |
+| `tools/probe_r2_sources.py` | 音源删除 → 恢复：7 → 6 → 7 |
+
+人工验收项见 [`docs/qa/REIMAGINED_FIX_ROUND2.md`](../docs/qa/REIMAGINED_FIX_ROUND2.md) 第 5 节。

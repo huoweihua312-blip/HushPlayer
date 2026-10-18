@@ -1,8 +1,8 @@
-"""Brand asset resolution (BUG-07).
+"""Brand asset resolution (BUG-07 / R2-04).
 
-The official logo is still user-supplied artwork, so the only thing to lock in
-is the fallback chain: every surface must render something sane, and dropping a
-file into ``assets/brand`` must be enough to replace it everywhere.
+The user supplied the official artwork in ``assets/brand``; these tests lock in
+that it is picked up everywhere, and that the fallback chain still renders
+something sane if the folder is ever empty.
 """
 
 from __future__ import annotations
@@ -35,6 +35,18 @@ def test_rounded_logo_pixmap_matches_requested_size(qapp):
     assert pixmap.width() == 112
 
 
-def test_official_logo_flag_tracks_files():
-    assert brand.has_official_logo() is False  # no assets/brand/logo*.png in the repo
+def test_official_logo_is_used():
+    assert brand.has_official_logo() is True
     assert brand.brand_dir().name == "brand"
+    logo = brand.logo_path("dark")
+    assert logo is not None
+    assert logo.parent == brand.brand_dir()
+    icon = brand.icon_path()
+    assert icon is not None
+    assert icon.suffix.lower() == ".ico"
+
+
+def test_falls_back_when_brand_folder_is_empty(tmp_path, monkeypatch):
+    monkeypatch.setattr(brand, "brand_dir", lambda: tmp_path)
+    assert brand.has_official_logo() is False
+    assert brand.logo_path("dark") is not None  # bundled placeholder still renders

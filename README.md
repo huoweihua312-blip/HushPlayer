@@ -16,7 +16,7 @@
 
 > 所有截图均来自真实运行的程序（`tools/shot_app.py`），不是设计稿。
 >
-> 当前版本 **1.0.1**：第一轮缺陷整改（10 项）已完成，逐项证据与验收口径见 [docs/qa/REIMAGINED_FIX_ROUND1.md](docs/qa/REIMAGINED_FIX_ROUND1.md)，变更摘要见 [docs/CHANGELOG.md](docs/CHANGELOG.md)。
+> 当前版本 **1.0.2**：第一轮 10 项与第二轮 9 项反馈均已整改，逐项证据见 [docs/qa/REIMAGINED_FIX_ROUND1.md](docs/qa/REIMAGINED_FIX_ROUND1.md) 与 [docs/qa/REIMAGINED_FIX_ROUND2.md](docs/qa/REIMAGINED_FIX_ROUND2.md)，变更摘要见 [docs/CHANGELOG.md](docs/CHANGELOG.md)。
 
 ## 功能
 
@@ -30,7 +30,9 @@
 - **设置中心**：外观（含主题预览）、播放、歌词、桌面歌词、音乐库目录、在线音源、缓存与下载、启动与窗口行为、更新、关于；修改即时生效并持久化。
 - **Windows 集成**：自绘标题栏（原生移动/缩放/贴边、DWM 圆角与暗色边框）、系统托盘、媒体键、单实例（命名互斥体）、高 DPI（Per-Monitor V2）、多显示器位置校正、关闭到托盘/最小化到托盘、崩溃日志与 faulthandler。
 - **在线缓存与下载**：本地 HTTP 代理（Range 支持 + 磁盘缓存 + 完整性索引）、缓存统计/清理/修复/容量上限；音源支持时下载到本地并记录索引。
-- **高分屏与品牌资源**：按物理分辨率自动缩放界面（2K → 125%，4K → 150%，可在设置中覆盖并重启生效）；`assets/brand/` 投放正式 Logo 即全局替换（侧栏、关于页、窗口、托盘、EXE 图标）。
+- **高分屏与品牌**：按物理分辨率自动缩放界面（2K → 125%，4K → 150%，可在设置中覆盖并重启生效）；接入官方 Logo（`assets/brand/`）与内置 MiSans 字体。
+- **外观与主题**：跟随系统/浅色/深色，标题栏太阳·月亮按钮一键切换并带 260ms 淡出过渡。
+- **在线音源管理**：安装本地或 http(s) 插件、启用/停用、删除、恢复内置音源；搜索结果带音源胶囊计数与最近搜索历史。
 
 ## 快速开始（开发）
 

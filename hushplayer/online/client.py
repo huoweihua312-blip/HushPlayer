@@ -134,11 +134,14 @@ class OnlineSourceClient(QObject):
         process.setWorkingDirectory(str(runtime_dir))
 
         env = QProcessEnvironment.systemEnvironment()
-        registry = os.path.join(runtime_dir, "source_registry.json")
-        user_sources = os.path.join(os.path.dirname(runtime_dir), "user_sources")
+        from .registry import registry as source_registry
+
+        home = source_registry().home
+        registry = str(source_registry().registry_path)
+        user_sources = str(source_registry().user_sources_dir)
         node_modules = os.path.join(runtime_dir, "node_modules")
         env.insert("HUSHPLAYER_SOURCE_REGISTRY", registry)
-        env.insert("HUSHPLAYER_SOURCE_HOME", runtime_dir)
+        env.insert("HUSHPLAYER_SOURCE_HOME", str(home))
         env.insert("HUSHPLAYER_USER_SOURCES", user_sources)
         inherited = env.value("NODE_PATH", "")
         parts = [p for p in (node_modules, inherited) if p]

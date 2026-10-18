@@ -29,21 +29,38 @@ HTBOTTOMLEFT = 16
 HTBOTTOMRIGHT = 17
 
 
-def _enable_dwm_rounding(widget: QWidget) -> None:
-    """Ask DWM for rounded corners (Windows 11) and a dark title bar."""
+def _set_dwm_attribute(hwnd: int, attribute: int, value: int) -> None:
+    try:
+        data = ctypes.c_int(value)
+        ctypes.windll.dwmapi.DwmSetWindowAttribute(
+            wintypes.HWND(hwnd), attribute, ctypes.byref(data), ctypes.sizeof(data)
+        )
+    except Exception:
+        pass
+
+
+def _enable_dwm_rounding(widget: QWidget, *, maximized: bool | None = None) -> None:
+    """Ask DWM for rounded corners (Windows 11) and a dark title bar.
+
+    A maximized frameless window still receives DWM's 1px frame, which shows up
+    as a light ring around the screen edge (very visible on 2560x1440). Turning
+    rounding off and setting the border colour to NONE removes it; restoring the
+    window re-enables both.
+    """
     if sys.platform != "win32":
         return
     try:
         hwnd = int(widget.winId())
     except Exception:
         return
-    try:
-        value = ctypes.c_int(2)  # DWMWCP_ROUND
-        ctypes.windll.dwmapi.DwmSetWindowAttribute(
-            wintypes.HWND(hwnd), 33, ctypes.byref(value), ctypes.sizeof(value)
-        )
-    except Exception:
-        pass
+    if maximized is None:
+        maximized = bool(widget.windowState() & Qt.WindowMaximized)
+    if maximized:
+        _set_dwm_attribute(hwnd, 33, 1)  # DWMWCP_DONOTROUND
+        _set_dwm_attribute(hwnd, 34, 0xFFFFFFFE)  # DWMWA_COLOR_NONE
+    else:
+        _set_dwm_attribute(hwnd, 33, 2)  # DWMWCP_ROUND
+        _set_dwm_attribute(hwnd, 34, 0xFFFFFFFF)  # DWMWA_COLOR_DEFAULT
     try:
         dark = ctypes.c_int(1 if theme().is_dark else 0)
         ctypes.windll.dwmapi.DwmSetWindowAttribute(
@@ -125,6 +142,7 @@ class FramelessWindow(QWidget):
         self._sync_maximized_ui()
 
     def _sync_maximized_ui(self) -> None:
+        _enable_dwm_rounding(self, maximized=self._maximized)
         self._update_root_style()
         bar = self._titlebar
         if bar is not None and hasattr(bar, "set_maximized"):

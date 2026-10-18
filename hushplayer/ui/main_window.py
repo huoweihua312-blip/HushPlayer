@@ -74,6 +74,7 @@ class MainWindow(FramelessWindow):
         self.titlebar.minimize_requested.connect(self.showMinimized)
         self.titlebar.maximize_requested.connect(self.toggle_maximize)
         self.titlebar.close_requested.connect(self.close_window)
+        self.titlebar.theme_toggle_requested.connect(self.toggle_theme_mode)
 
         body = QWidget()
         body_layout = QHBoxLayout(body)
@@ -517,7 +518,17 @@ class MainWindow(FramelessWindow):
                 except Exception as exc:  # noqa: BLE001
                     log_exception("刷新页面主题失败", exc)
         self.titlebar.update()
+        self.titlebar.set_theme_mode(theme().mode)
         self.update()
+
+    def toggle_theme_mode(self) -> None:
+        """Switch between light and dark from the title bar (sun / moon)."""
+        target = "light" if theme().mode == "dark" else "dark"
+        settings = ctx().settings
+        settings.set("appearance.theme", target)
+        toast = getattr(self, "_toasts", None)
+        if toast is not None:
+            self.toast("已切换到浅色模式" if target == "light" else "已切换到深色模式")
 
     def apply_theme(self, mode: str = "system") -> None:
         actual = apply_theme_to_app(QApplication.instance(), preference=mode)

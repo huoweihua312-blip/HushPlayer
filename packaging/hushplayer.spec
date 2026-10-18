@@ -82,7 +82,9 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
-    icon=str(ROOT / "assets" / "hushplayer.ico"),
+    icon=str(ROOT / "assets" / "brand" / "HushPlayer.ico")
+    if (ROOT / "assets" / "brand" / "HushPlayer.ico").is_file()
+    else str(ROOT / "assets" / "hushplayer.ico"),
     version=str(ROOT / "packaging" / "version_info.txt"),
     manifest=str(ROOT / "packaging" / "app.manifest"),
 )

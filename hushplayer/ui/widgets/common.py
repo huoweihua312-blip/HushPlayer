@@ -389,8 +389,11 @@ class PlayButton(QAbstractButton):
             painter.drawRoundedRect(left, 1.4, 1.4)
             painter.drawRoundedRect(right, 1.4, 1.4)
         else:
-            # optically centre the triangle
-            target = target.adjusted(icon_size * 0.06, 0, -icon_size * 0.10, 0)
+            # Optically centre the triangle: its centroid sits left of the
+            # bounding box, so the shape is nudged right instead of shrunk
+            # towards the left (which made it look off-centre).
+            target = QRectF(target)
+            target.translate(icon_size * 0.07, 0)
             path = QPainterPath()
             path.moveTo(target.left(), target.top())
             path.lineTo(target.right(), target.center().y())

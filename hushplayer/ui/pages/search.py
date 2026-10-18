@@ -22,6 +22,7 @@ from ..menus import track_menu
 from ..widgets.cards import AlbumCard, ArtistCard, CardGrid
 from ..widgets.common import TextButton
 from ..widgets.searchfield import SearchField, SegmentedControl
+from ..widgets.source_filter import HistoryChips, SourceFilterBar
 from ..widgets.tracklist import TrackListWidget
 from .page import EmptyState, Page
 
@@ -64,6 +65,7 @@ class SearchPage(Page):
         self.stack.addWidget(self._build_local())
         self.stack.addWidget(self._build_online())
 
+        self.history.set_history(self._history_items())
         ctx().library.library_changed.connect(self._maybe_reload_local)
         ctx().library.favorites_changed.connect(self._maybe_reload_local)
         client = ctx().client
@@ -123,22 +125,29 @@ class SearchPage(Page):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(12)
 
+        self.source_filter = SourceFilterBar()
+        self.source_filter.changed.connect(lambda _sid: self._run_online(self.field.text()))
+        layout.addWidget(self.source_filter)
+
         bar = QHBoxLayout()
         bar.setSpacing(10)
-        self.source_box = QComboBox()
-        self.source_box.setMinimumWidth(160)
-        self.source_box.currentIndexChanged.connect(lambda _i: self._run_online(self.field.text()))
-        bar.addWidget(self.source_box)
         self.online_status = QLabel("")
         self.online_status.setStyleSheet(
             f"font-size:9pt; color:{css_rgba(theme().palette.text, 0.5)};"
         )
         bar.addWidget(self.online_status, 1)
+        self.manage_button = TextButton("管理音源", icon_name="cloud", size=30)
+        self.manage_button.clicked.connect(self._manage_sources)
+        bar.addWidget(self.manage_button)
         self.play_all_button = TextButton("全部播放", icon_name="play", accent=True)
         self.play_all_button.clicked.connect(self._play_all_online)
         self.play_all_button.setEnabled(False)
         bar.addWidget(self.play_all_button)
         layout.addLayout(bar)
+
+        self.history = HistoryChips()
+        self.history.requested.connect(self._search_history)
+        layout.addWidget(self.history)
 
         self.online_empty = EmptyState(
             "搜索在线音乐",
@@ -176,6 +185,8 @@ class SearchPage(Page):
             self._run_local(self.field.text())
 
     def _on_text(self, text: str) -> None:
+        if hasattr(self, "history"):
+            self.history.setVisible(self._mode == 1 and not text.strip())
         if self._mode == 0:
             self._run_local(text)
         else:
@@ -260,17 +271,11 @@ class SearchPage(Page):
         client = ctx().client
         raw = client.sources if client is not None else []
         self._sources = [s for s in build_sources(raw) if s.enabled and s.searchable]
-        current = self.source_box.currentData() if self.source_box.count() else None
-        self.source_box.blockSignals(True)
-        self.source_box.clear()
-        self.source_box.addItem("全部音源", "")
-        for source in self._sources:
-            self.source_box.addItem(source.label or source.name, source.id)
-        if current:
-            index = self.source_box.findData(current)
-            if index >= 0:
-                self.source_box.setCurrentIndex(index)
-        self.source_box.blockSignals(False)
+        current = self.source_filter.current()
+        self.source_filter.blockSignals(True)
+        self.source_filter.set_sources([(s.id, s.label or s.name) for s in self._sources])
+        self.source_filter.set_current(current or "", emit=False)
+        self.source_filter.blockSignals(False)
         if not self._sources:
             self.online_status.setText("没有可用的在线音源")
         elif not self.field.text().strip():
@@ -295,7 +300,7 @@ class SearchPage(Page):
             return
         self._token += 1
         token = self._token
-        chosen = self.source_box.currentData() or ""
+        chosen = self.source_filter.current() or ""
         targets = [s for s in self._sources if not chosen or s.id == chosen]
         self._online_tracks = []
         self._pending = {s.id for s in targets}
@@ -351,15 +356,20 @@ class SearchPage(Page):
                 "没有找到在线结果",
                 "；".join(self._errors[:2]) if self._errors else "换个关键词，或切换音源再试",
             )
-        total_sources = len(self._sources)
         failed = len(self._errors)
-        parts = [f"{len(tracks)} 首结果"]
+        parts = [f"{len(tracks)} 首结果", f"{len(self._sources)} 个音源"]
         if failed:
-            parts.append(f"{failed} 个音源失败")
+            parts.append(f"{failed} 个失败")
         self.online_status.setText(" · ".join(parts))
+        counts: dict[str, int] = {}
+        for item in tracks:
+            counts[item.source_id] = counts.get(item.source_id, 0) + 1
+        counts[""] = len(tracks)
+        self.source_filter.set_counts(counts)
         self.play_all_button.setEnabled(bool(tracks))
         if self._errors:
             log.info("在线搜索部分失败: %s", self._errors)
+        self._remember_query(self.field.text().strip())
 
     def _favorites_of(self, tracks: list[Track]) -> set[str]:
         library = ctx().library
@@ -379,6 +389,32 @@ class SearchPage(Page):
             tracks, index, context=f"在线搜索 · {self.field.text().strip()}"
         )
         self.online_list.set_current(tracks[index].id, True)
+
+    # ------------------------------------------------------------- 历史 / 管理
+    def _history_items(self) -> list[str]:
+        raw = ctx().settings.get("online.search_history", []) or []
+        return [str(item) for item in raw][:8]
+
+    def _remember_query(self, text: str) -> None:
+        text = text.strip()
+        if not text:
+            return
+        items = [item for item in self._history_items() if item != text]
+        items.insert(0, text)
+        ctx().settings.set("online.search_history", items[:8])
+        self.history.set_history(items[:8])
+
+    def _search_history(self, text: str) -> None:
+        self.field.set_text(text)
+        self.segments.set_current(1)
+        self._mode = 1
+        self.stack.setCurrentIndex(1)
+        self._run_online(text, force=True)
+
+    def _manage_sources(self) -> None:
+        window = ctx().window
+        if window is not None:
+            window.navigate("settings", "online")
 
     def _play_all_online(self) -> None:
         if self._online_tracks:
