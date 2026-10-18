@@ -71,6 +71,13 @@ class LogoMark(QWidget):
         official = brand.rounded_logo_pixmap(max(12, self.width()), theme().mode)
         if official is not None:
             painter.drawPixmap(QPointF(0, 0), official)
+            if not brand.has_official_logo():
+                # The generated placeholder mark is charcoal on charcoal in the
+                # dark sidebar; a hairline keeps it legible until the official
+                # logo lands (see assets/brand/README.md).
+                painter.setBrush(Qt.NoBrush)
+                painter.setPen(QPen(rgba(theme().palette.text, 0.18), 1.0))
+                painter.drawRoundedRect(rect, rect.width() * 0.30, rect.width() * 0.30)
             painter.end()
             return
         gradient = QLinearGradient(rect.topLeft(), rect.bottomRight())
