@@ -719,6 +719,7 @@ class ImmersiveWindow(QWidget):
         self.controls.translate.setChecked(bool(ctx().settings.get("lyrics.translate", True)))
 
     # ------------------------------------------------------------------ 模式
+    @property
     def mode(self) -> str:
         return self._mode
 

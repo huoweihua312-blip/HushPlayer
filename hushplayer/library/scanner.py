@@ -142,8 +142,10 @@ class Scanner(QObject):
                     track.artwork_path = stored
             batch.append(track)
         if batch:
-            self._tracks.upsert_many(batch)
-            result.added = len(batch)
+            added, updated = self._tracks.upsert_many(batch, return_counts=True)
+            result.added = added
+            result.updated = updated
+            result.unchanged = max(0, len(batch) - added - updated)
         result.duration_s = time.monotonic() - started
         self.finished.emit(result)
         return result

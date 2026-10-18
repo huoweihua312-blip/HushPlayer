@@ -18,7 +18,9 @@ if TYPE_CHECKING:  # pragma: no cover
     from ..online.client import OnlineSourceClient
     from ..online.proxy import AudioProxy
     from ..services.cache import CacheService
+    from ..services.downloads import DownloadService
     from ..services.library import LibraryService
+    from ..services.updater import UpdateService
     from ..services.state import PlaybackKeeper
 
 
@@ -34,6 +36,8 @@ class AppContext:
     keeper: "PlaybackKeeper"
     settings: "Settings"
     window: Any = None
+    downloads: "DownloadService | None" = None
+    updater: "UpdateService | None" = None
     desktop_lyrics: Any = None
     immersive: Any = None
 

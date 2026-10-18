@@ -291,6 +291,10 @@ class LibraryService(QObject):
 
     def close(self) -> None:
         self.scanner.cancel()
+        try:
+            self.covers.shutdown()
+        except Exception:  # noqa: BLE001
+            pass
 
 
 __all__ = ["LibraryQuery", "LibraryService", "FAVORITES_NAME"]

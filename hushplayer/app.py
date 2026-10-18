@@ -12,7 +12,7 @@ from PySide6.QtWidgets import QApplication, QMessageBox
 
 from .core import icons
 from .core.logging_setup import get_logger, log_exception, recent_log_text, setup_logging
-from .core.paths import data_dir, ensure_dirs
+from .core.paths import data_dir, ensure_dirs, is_frozen
 from .core.settings import settings
 from .core.theme import apply_theme_to_app, theme
 from .version import APP_NAME, APP_ID, VERSION
@@ -44,6 +44,7 @@ class HushApp(QObject):
         from .online.client import OnlineSourceClient, runtime_available
         from .online.proxy import AudioProxy
         from .services.cache import CacheService
+        from .services.downloads import DownloadService
         from .services.library import LibraryService
         from .services.state import PlaybackKeeper
         from .store.db import Database
@@ -62,6 +63,10 @@ class HushApp(QObject):
         )
         self.cache = CacheService(self.proxy, self.library.covers.store, self)
         self.keeper = PlaybackKeeper(self.player, self.library.tracks, self)
+        self.downloads = DownloadService(self.client, self)
+        from .services.updater import UpdateService
+
+        self.updater = UpdateService(self)
 
         self.runtime_ok = runtime_available()
         log.info("在线音源运行时可用=%s", self.runtime_ok)
@@ -75,6 +80,8 @@ class HushApp(QObject):
             client=self.client,
             proxy=self.proxy,
             keeper=self.keeper,
+            downloads=self.downloads,
+            updater=self.updater,
             settings=self.settings,
             window=None,
             desktop_lyrics=None,
@@ -102,8 +109,12 @@ class HushApp(QObject):
         elif key == "playback.quality":
             self.player.configure(quality=str(value))
         elif key.startswith("general."):
-            if key == "general.close_to_tray":
-                pass
+            if key == "general.launch_at_startup":
+                from .services.startup import set_enabled
+
+                ok, detail = set_enabled(bool(value))
+                if not ok and self.window is not None:
+                    self.window.toast(f"设置开机自启失败：{detail}", "error")
         elif key.startswith("cache."):
             if key == "cache.max_mb":
                 self.cache.prune(int(value or 0))
@@ -145,8 +156,44 @@ class HushApp(QObject):
         self.app.setWindowIcon(QIcon(icons.pixmap("headphones", theme().palette.accent, 64)))
         self.window.show()
         self._maybe_rescan()
+        self._maybe_check_updates()
         self.ready.emit()
         log.info("%s %s 已启动，数据目录 %s", APP_NAME, VERSION, data_dir())
+
+    def _maybe_check_updates(self) -> None:
+        """启动后延迟检查更新：只提示，不下载、不安装。"""
+        from .services.updater import check_on_start_enabled
+
+        if not check_on_start_enabled():
+            return
+        QTimer.singleShot(6000, self._run_update_check)
+
+    def _run_update_check(self) -> None:
+        updater = getattr(self, "updater", None)
+        if updater is None:
+            return
+
+        def on_checked(info) -> None:
+            if info.available and self.window is not None:
+                self.window.toast(f"发现新版本 {info.version}，可在设置中查看", "info")
+
+        updater.checked.connect(on_checked)
+        updater.check_async()
+
+    def bring_to_front(self) -> None:
+        """第二个实例启动时，把已有窗口恢复并置前。"""
+        window = self.window
+        if window is None:
+            return
+        try:
+            if window.isMinimized():
+                window.setWindowState(window.windowState() & ~Qt.WindowState.WindowMinimized)
+            window.show()
+            window.raise_()
+            window.activateWindow()
+            window.toast("HushPlayer 已在运行，已切换到当前窗口", "info")
+        except Exception as exc:  # noqa: BLE001
+            log_exception("激活窗口失败", exc)
 
     def _configure_player(self) -> None:
         playback = {
@@ -201,7 +248,7 @@ class HushApp(QObject):
             self.keeper.flush()
         except Exception:  # noqa: BLE001
             pass
-        for name in ("player", "lyrics", "library", "cache", "client", "proxy"):
+        for name in ("player", "lyrics", "downloads", "updater", "library", "cache", "client", "proxy"):
             service = getattr(self, name, None)
             if service is None:
                 continue
@@ -245,7 +292,8 @@ def _install_excepthook(app: QApplication) -> None:
 def main(argv: list[str] | None = None) -> int:
     argv = list(sys.argv if argv is None else argv)
     ensure_dirs()
-    setup_logging(console=os.environ.get("HUSH_CONSOLE", "1") != "0")
+    default_console = "0" if is_frozen() else "1"
+    setup_logging(console=os.environ.get("HUSH_CONSOLE", default_console) != "0")
     log.info("启动 HushPlayer %s", VERSION)
 
     QApplication.setAttribute(Qt.AA_DontCreateNativeWidgetSiblings, True)
@@ -261,10 +309,19 @@ def main(argv: list[str] | None = None) -> int:
     except Exception:  # noqa: BLE001
         pass
 
+    from .core.single_instance import SingleInstance
+
+    guard = SingleInstance(app)
+    if not guard.try_lock():
+        guard.notify_existing()
+        return 0
+
     _install_excepthook(app)
     hush = HushApp(app)
     hush.start()
+    guard.activate.connect(hush.bring_to_front)
     app.aboutToQuit.connect(hush.shutdown)
+    app.aboutToQuit.connect(guard.close)
     return app.exec()
 
 

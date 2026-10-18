@@ -339,6 +339,9 @@ class SearchPage(Page):
 
     def _finish_online(self, last_source: str) -> None:
         tracks = self._online_tracks
+        covers = ctx().covers
+        for item in tracks[:60]:
+            covers.prefetch(item)
         self.online_list.set_tracks(tracks)
         self.online_list.set_favorites(self._favorites_of(tracks))
         self.online_list.setVisible(bool(tracks))

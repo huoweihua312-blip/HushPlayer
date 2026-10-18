@@ -130,6 +130,17 @@ class Track:
         return max(0.0, self.duration_ms / 1000.0)
 
     # ------------------------------------------------------------------ 序列化
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "Track":
+        """从快照恢复曲目（与 ``to_dict`` 对称，忽略未知字段）。"""
+        if not isinstance(data, dict):
+            raise TypeError("Track.from_dict 需要一个字典")
+        allowed = {field for field in cls.__dataclass_fields__}
+        payload = {key: value for key, value in data.items() if key in allowed}
+        payload.setdefault("id", "")
+        payload.setdefault("title", "")
+        return cls(**payload)
+
     def to_dict(self, *, include_raw: bool = False) -> dict[str, Any]:
         data = {
             "id": self.id,

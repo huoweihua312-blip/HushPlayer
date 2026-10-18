@@ -152,6 +152,9 @@ def track_from_item(
         duration *= 1000
     artwork = str(item.get("artwork") or "").strip()
     source_name = str(item.get("sourceName") or (source.name if source else "") or "")
+    if source is not None and source.label:
+        # 徽章展示用户可读的平台名（例如「酷我」），而不是插件内部 id。
+        source_name = source.label
     caps = item.get("capabilities") or {}
     if not isinstance(caps, Mapping):
         caps = {}

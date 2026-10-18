@@ -14,3 +14,14 @@ packaging/out/
 /hush-*/
 /tmp*/
 /.devdata/
+
+# 内置 Node 运行时（由 packaging/build.ps1 下载）
+hushplayer/runtime/node/
+packaging/*.zip
+packaging/out/
+
+# 数据目录不可写时的回退位置
+/Data/
+/hush-e2e-*/
+.pytest-tmp/
+pytest-of-*/

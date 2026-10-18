@@ -371,8 +371,17 @@ function normalizeHeaders(value) {
 }
 
 function normalizeResolvedResource(result, requestedQuality = "standard") {
-    if (!result || typeof result !== "object" || Array.isArray(result)) {
-        throw new Error("音源返回的播放资源必须是对象");
+    // 有些 MusicFree 插件直接返回 URL 字符串（尤其是 download 能力），
+    // 这里统一包装成资源对象，行为等价于 { url }。
+    if (typeof result === "string") {
+        result = { url: result };
+    }
+    if (result === false || result === null || result === undefined) {
+        throw new Error("音源未提供可用的播放资源（可能受版权或会员限制）");
+    }
+    if (typeof result !== "object" || Array.isArray(result)) {
+        console.error(`[resolved] unexpected type=${typeof result}`);
+        throw new Error("音源返回的播放资源格式不受支持");
     }
 
     const url = String(result.url || "").trim();

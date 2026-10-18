@@ -632,6 +632,12 @@ class SettingsPage(Page):
             self.settings.set("downloads.dir", text)
         field.text_changed.connect(change_dir)
         card.add_row(self._row("下载目录", "下载的音频文件保存位置", field))
+        if hasattr(app_ctx := ctx(), "downloads") and app_ctx.downloads is not None:
+            done = app_ctx.downloads.count_done()
+            card.add_row(self._row(
+                "已下载歌曲", f"共 {done} 首，保存在上方目录",
+                self._action_button("打开文件夹", "folder", app_ctx.downloads.open_folder),
+            ))
         card.add_row(self._row(
             "下载音质", "",
             self._combo("downloads.quality", [("标准", "standard"), ("较高", "higher"), ("极高", "exhigh"), ("无损", "lossless")], "higher"),
@@ -752,19 +758,42 @@ class SettingsPage(Page):
             return "未知"
 
     def _check_updates(self) -> None:
-        try:
-            from ...services.updater import UpdateService
+        from ...services.updater import UpdateService
 
-            service = UpdateService(self)
-            service.checked.connect(lambda info: self._toast(
-                f"发现新版本 {info.version}" if info.available else "当前已是最新版本",
-                "success" if info.available else "info",
-            ))
-            service.failed.connect(lambda message: self._toast(f"检查更新失败：{message}", "error"))
-            service.check_async()
-        except Exception as exc:  # noqa: BLE001
-            log_exception("检查更新失败", exc)
-            self._toast("检查更新失败，请查看日志", "error")
+        self._toast("正在检查更新…", "info")
+        existing = getattr(ctx(), "updater", None)
+        service = existing or UpdateService(self)
+        if existing is None:
+            self._update_service = service
+
+        def on_checked(info) -> None:
+            if not info.available:
+                self._toast(f"当前已是最新版本（{info.current}）", "info")
+                return
+            self._toast(f"发现新版本 {info.version}", "success")
+            if info.url:
+                from PySide6.QtWidgets import QMessageBox
+
+                box = QMessageBox(self.window())
+                box.setWindowTitle("发现新版本")
+                box.setText(f"HushPlayer {info.version} 已发布")
+                detail = info.notes or "点击「打开下载页」前往发布页面。"
+                box.setInformativeText(detail[:600])
+                open_button = box.addButton("打开下载页", QMessageBox.ButtonRole.AcceptRole)
+                box.addButton("稍后", QMessageBox.ButtonRole.RejectRole)
+                box.exec()
+                if box.clickedButton() is open_button:
+                    import webbrowser
+
+                    webbrowser.open(info.url)
+
+        def on_failed(message: str) -> None:
+            self._toast(f"检查更新失败：{message}", "error")
+
+        service.checked.connect(on_checked)
+        service.failed.connect(on_failed)
+        if not service.check_async():
+            pass
 
     def _open_logs(self) -> None:
         self._open_path(str(paths.logs_dir()))

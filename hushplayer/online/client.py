@@ -19,7 +19,15 @@ import shutil
 import time
 from typing import Any, Callable
 
-from PySide6.QtCore import QObject, QProcess, QProcessEnvironment, QTimer, Signal
+from PySide6.QtCore import (
+    QCoreApplication,
+    QEvent,
+    QObject,
+    QProcess,
+    QProcessEnvironment,
+    QTimer,
+    Signal,
+)
 
 from ..core import paths
 from ..core.logging_setup import get_logger
@@ -31,6 +39,10 @@ STARTUP_TIMEOUT_MS = 20000
 
 Response = dict[str, Any]
 Callback = Callable[[Response], None]
+
+# 已停止但仍可能有残留事件的 QProcess。挂到应用对象并保留引用，
+# 避免 Python GC 在 Qt 事件队列尚未排空时销毁它们（Windows 上会 fail-fast）。
+_RETIRED_PROCESSES: list[QProcess] = []
 
 
 class OnlineSourceError(RuntimeError):
@@ -117,9 +129,9 @@ class OnlineSourceClient(QObject):
 
         runtime_dir = os.path.dirname(runner)
         process = QProcess(self)
-        process.setProgram(node)
-        process.setArguments([runner])
-        process.setWorkingDirectory(runtime_dir)
+        process.setProgram(str(node))
+        process.setArguments([str(runner)])
+        process.setWorkingDirectory(str(runtime_dir))
 
         env = QProcessEnvironment.systemEnvironment()
         registry = os.path.join(runtime_dir, "source_registry.json")
@@ -194,7 +206,31 @@ class OnlineSourceClient(QObject):
                 if not process.waitForFinished(1200):
                     process.kill()
                     process.waitForFinished(600)
+        self._detach_process(process)
+
+    def _detach_process(self, process: QProcess) -> None:
+        """断开信号并延迟销毁 QProcess，避免遗留的 notifier 在下次事件循环里崩溃。"""
         self._process = None
+        for signal in (
+            process.readyReadStandardOutput,
+            process.readyReadStandardError,
+            process.finished,
+            process.errorOccurred,
+        ):
+            try:
+                signal.disconnect()
+            except (RuntimeError, TypeError):  # pragma: no cover - already gone
+                pass
+        process.setParent(None)
+        if process.state() != QProcess.ProcessState.NotRunning:
+            # 进程还没退出：只保留引用，绝不销毁（否则 Qt 会 fail-fast 报
+            # "QProcess: Destroyed while process is still running"）。
+            _RETIRED_PROCESSES.append(process)
+            return
+        process.deleteLater()
+        app = QCoreApplication.instance()
+        if app is not None:
+            app.sendPostedEvents(process, QEvent.Type.DeferredDelete)
 
     def shutdown(self) -> None:
         self.stop()

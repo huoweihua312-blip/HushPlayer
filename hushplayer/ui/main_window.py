@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Callable
 
-from PySide6.QtCore import QPoint, QRect, QTimer, Qt, Signal
+from PySide6.QtCore import QEvent, QPoint, QRect, QTimer, Qt, Signal
 from PySide6.QtGui import QAction, QIcon, QKeySequence, QShortcut
 from PySide6.QtWidgets import (
     QApplication,
@@ -62,6 +62,7 @@ class MainWindow(FramelessWindow):
         self._pages: dict[str, QWidget] = {}
         self._history: list[tuple[str, object]] = []
         self._history_index = -1
+        self._current_route = ""
         self._toasts: ToastHost | None = None
         self._tray: QSystemTrayIcon | None = None
 
@@ -119,6 +120,7 @@ class MainWindow(FramelessWindow):
         self._toasts.set_bottom_offset(96)
 
         self._wire_player()
+        self._wire_downloads()
         self._wire_library()
         self._install_shortcuts()
         self._build_tray()
@@ -185,6 +187,7 @@ class MainWindow(FramelessWindow):
             self.toast("页面加载失败，请查看日志", "error")
             return
         self.stack.setCurrentWidget(page)
+        self._current_route = route
         if payload is not None and hasattr(page, "set_payload"):
             try:
                 page.set_payload(payload)  # type: ignore[attr-defined]
@@ -206,6 +209,11 @@ class MainWindow(FramelessWindow):
             self._push_history(route, payload)
         if self.queue_panel.isVisible():
             self.queue_panel.open_panel()
+
+    @property
+    def current_route(self) -> str:
+        """当前页面路由（供测试与外部诊断使用）。"""
+        return self._current_route
 
     def _push_history(self, route: str, payload: object) -> None:
         if self._history_index >= 0 and self._history_index < len(self._history) - 1:
@@ -239,6 +247,26 @@ class MainWindow(FramelessWindow):
         self._sync_history_buttons()
 
     # ----------------------------------------------------------------- player
+    def _wire_downloads(self) -> None:
+        """下载完成 / 失败在主窗口用 toast 反馈（进度过多，不逐条提示）。"""
+        self._download_failures: set[str] = set()
+        downloads = getattr(ctx(), "downloads", None)
+        if downloads is None:
+            return
+        downloads.job_finished.connect(self._on_download_finished)
+        downloads.job_updated.connect(self._on_download_updated)
+
+    def _on_download_finished(self, job) -> None:
+        self.toast(f"已下载：{job.title}")
+
+    def _on_download_updated(self, job) -> None:
+        if getattr(job, "state", "") != "failed":
+            return
+        if job.id in self._download_failures:
+            return
+        self._download_failures.add(job.id)
+        self.toast(f"下载失败：{job.title}（{job.error or '未知原因'}）", "error")
+
     def _wire_player(self) -> None:
         player = ctx().player
         player.status_message.connect(lambda text: self.toast(text, "info"))
@@ -512,11 +540,42 @@ class MainWindow(FramelessWindow):
             super().closeEvent(event)
             return
         self._save_geometry()
+        prefer_tray = str(ctx().settings.get("general.close_action", "quit")) == "tray"
+        if prefer_tray and self._tray is not None and self._tray.isVisible():
+            event.ignore()
+            self.hide()
+            self._tray.showMessage(
+                "HushPlayer",
+                "已最小化到系统托盘，双击图标可恢复。",
+                QSystemTrayIcon.MessageIcon.Information,
+                2600,
+            )
+            return
         self.closing.emit()
         if self._tray is not None:
             self._tray.hide()
         super().closeEvent(event)
         QApplication.instance().quit()
+
+    def changeEvent(self, event) -> None:  # noqa: N802
+        if event.type() == QEvent.Type.WindowStateChange:
+            try:
+                minimize_to_tray = bool(ctx().settings.get("general.minimize_to_tray", False))
+            except Exception:  # noqa: BLE001
+                minimize_to_tray = False
+            if minimize_to_tray and self.isMinimized() and self._tray is not None:
+                QTimer.singleShot(0, self._hide_to_tray)
+        super().changeEvent(event)
+
+    def _hide_to_tray(self) -> None:
+        self.hide()
+        if self._tray is not None:
+            self._tray.showMessage(
+                "HushPlayer",
+                "仍在后台播放，双击托盘图标可恢复窗口。",
+                QSystemTrayIcon.MessageIcon.Information,
+                2200,
+            )
 
     # ------------------------------------------------------------- geometry
     def _restore_geometry(self) -> None:

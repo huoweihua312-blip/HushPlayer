@@ -105,7 +105,6 @@ class QueuePanel(QWidget):
 
     def _panel_height(self, parent) -> int:
         """Height of the panel: the content area minus the player bar."""
-        bar = getattr(getattr(self, "window", None), None)
         try:
             from ..context import ctx
 

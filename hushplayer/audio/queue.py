@@ -166,11 +166,8 @@ class PlayQueue(QObject):
         for track in added:
             self._items.append(track)
             self._by_id[track.id] = track
-            if self._shuffle and self._pos >= 0:
-                insert_at = self._rng.randint(self._pos + 1, len(self._order)) if len(self._order) > self._pos + 1 else len(self._order)
-                self._order.insert(insert_at, track.id)
-            else:
-                self._order.append(track.id)
+            # 追加的歌曲一律排在播放顺序末尾：随机模式下不打乱已经预告的 upcoming
+            self._order.append(track.id)
         if self._pos < 0 and self._items:
             self._pos = 0
         self.changed.emit()
@@ -181,20 +178,18 @@ class PlayQueue(QObject):
         added = [track for track in tracks if track is not None]
         if not added:
             return 0
+        current = self.current
         base = self.current_row
         insert_row = base + 1 if base >= 0 else len(self._items)
         for offset, track in enumerate(added):
             self._items.insert(insert_row + offset, track)
             self._by_id[track.id] = track
-        if self._pos < 0:
-            self._order = [track.id for track in self._items]
-            self._pos = 0
-        elif self._shuffle:
+        if self._shuffle:
             for offset, track in enumerate(added):
                 self._order.insert(self._pos + 1 + offset, track.id)
         else:
             self._order = [track.id for track in self._items]
-            self._pos = insert_row
+        self._pos = self._order.index(current.id) if current and current.id in self._order else (0 if self._order else -1)
         self.changed.emit()
         return len(added)
 
@@ -232,19 +227,17 @@ class PlayQueue(QObject):
         if not (0 <= from_row < len(self._items)):
             return False
         to_row = max(0, min(to_row, len(self._items) - 1))
+        current = self.current
         track = self._items.pop(from_row)
         self._items.insert(to_row, track)
         if not self._shuffle:
             self._order = [item.id for item in self._items]
-            current = self.current
-            self._pos = self._order.index(current.id) if current else -1
         else:
             order_from = self._order.index(track.id) if track.id in self._order else -1
             if order_from >= 0:
                 self._order.pop(order_from)
                 self._order.insert(max(0, min(to_row, len(self._order))), track.id)
-                current = self.current
-                self._pos = self._order.index(current.id) if current else -1
+        self._pos = self._order.index(current.id) if current and current.id in self._order else -1
         self.changed.emit()
         return True
 
@@ -392,7 +385,10 @@ class PlayQueue(QObject):
                 continue
             if resolver is not None:
                 restored = resolver(item.get("id", ""))
-                tracks.append(restored or Track.from_dict(item))
+                if restored is None:
+                    # 文件已被删除 / 在线曲目已失效：恢复到队列时跳过
+                    continue
+                tracks.append(restored)
             else:
                 tracks.append(Track.from_dict(item))
         if not tracks:

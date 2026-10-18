@@ -130,6 +130,21 @@ def run() -> int:
     OUT.mkdir(parents=True, exist_ok=True)
     errors: list[str] = []
 
+    def pump_until(predicate, timeout_s: float = 25.0) -> bool:
+        from PySide6.QtCore import QEventLoop
+
+        import time as _time
+
+        deadline = _time.monotonic() + timeout_s
+        while _time.monotonic() < deadline:
+            app.processEvents()
+            if predicate():
+                return True
+            loop = QEventLoop()
+            QTimer.singleShot(120, loop.quit)
+            loop.exec()
+        return False
+
     def shoot(scene: str, payload: object, mode: str) -> None:
         hush.settings.set("appearance.theme", mode)
         hush.apply_theme()
@@ -186,6 +201,20 @@ def run() -> int:
             if immersive is not None:
                 immersive.set_mode("lyrics" if scene == "immersive_lyrics" else "cover", animate=False)
                 app.processEvents()
+        elif scene == "online":
+            window.navigate("search")
+            app.processEvents()
+            page = window._page("search")
+            page.segments.set_current(1, emit=True)
+            page.field.set_text("周杰伦 晴天")
+            page._run_online("周杰伦 晴天", force=True)
+            ok = pump_until(lambda: page.online_list.table.model().rowCount() > 0, 30.0)
+            print("online rows:", page.online_list.table.model().rowCount(), "ready:", ok)
+            app.processEvents()
+        elif scene == "narrow":
+            window.resize(960, 680)
+            window.navigate("songs")
+            app.processEvents()
         else:
             window.navigate(scene, payload)
             app.processEvents()
@@ -203,6 +232,9 @@ def run() -> int:
                 pixmap = immersive.grab()
         ok = pixmap.save(str(path))
         print(("saved " if ok else "FAILED ") + path.name, pixmap.width(), "x", pixmap.height())
+        if scene == "narrow":
+            window.resize(1280, 820)
+            app.processEvents()
         if not ok:
             errors.append(path.name)
 
@@ -231,6 +263,10 @@ def run() -> int:
 
     QTimer.singleShot(700, tick)
     code = app.exec()
+    try:
+        hush.shutdown()
+    except Exception as exc:  # noqa: BLE001
+        print("shutdown:", exc)
     print("errors:", errors)
     return code
 

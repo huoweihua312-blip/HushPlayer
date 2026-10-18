@@ -81,8 +81,26 @@ def default_data_dir() -> Path:
     return Path.home() / f".{APP_DIR_NAME.lower()}"
 
 
+def _writable(path: Path) -> bool:
+    """尝试创建目录并写一个探针文件，判断是否真的可写。"""
+    try:
+        path.mkdir(parents=True, exist_ok=True)
+        probe = path / ".write-probe"
+        probe.write_bytes(b"0")
+        probe.unlink()
+        return True
+    except OSError:
+        return False
+
+
 def data_dir() -> Path:
-    """可写用户数据目录（设置、数据库、日志、缓存）。"""
+    """可写用户数据目录（设置、数据库、日志、缓存）。
+
+    解析顺序：``HUSHPLAYER_DATA_DIR`` → 便携模式（exe 同级 ``Data``）→
+    ``%LOCALAPPDATA%\\HushPlayerReimagined``。若首选位置不可写（受限账户、
+    组策略、沙箱等），自动退回到 exe 同级 ``Data``，最后退回临时目录，
+    避免启动时因权限问题直接崩溃。
+    """
     global _cached_data_dir
     if _cached_data_dir is not None:
         return _cached_data_dir
@@ -93,6 +111,14 @@ def data_dir() -> Path:
         path = executable_dir() / "Data"
     else:
         path = default_data_dir()
+    if not _writable(path):
+        fallback = executable_dir() / "Data"
+        if fallback != path and _writable(fallback):
+            path = fallback
+        else:
+            import tempfile
+
+            path = Path(tempfile.mkdtemp(prefix="HushPlayer-"))
     _cached_data_dir = path
     return path
 
@@ -145,8 +171,22 @@ def lyrics_dir() -> Path:
 
 
 def downloads_dir() -> Path:
-    music = Path.home() / "Music"
-    return (music if music.is_dir() else Path.home()) / "HushPlayer Downloads"
+    """默认下载目录：优先用户「音乐」目录，不可写时退回数据目录下的 Downloads。
+
+    Windows 上 ``%USERPROFILE%\\Music`` 可能被组策略/OneDrive 重定向导致不可写，
+    因此这里只做「可创建」探测，失败就使用随应用数据目录走的稳定位置。
+    """
+    candidates = [Path.home() / "Music" / "HushPlayer Downloads", data_dir() / "Downloads"]
+    for candidate in candidates:
+        try:
+            candidate.mkdir(parents=True, exist_ok=True)
+            probe = candidate / ".write-test"
+            probe.write_bytes(b"0")
+            probe.unlink()
+            return candidate
+        except OSError:
+            continue
+    return data_dir() / "Downloads"
 
 
 def backups_dir() -> Path:

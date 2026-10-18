@@ -272,12 +272,18 @@ class TrackHeader(QWidget):
 
     def _spans(self) -> list[tuple[int, int]]:
         view = self._view
-        if view is not None and len(self._columns) <= view.model().columnCount():
+        if view is not None:
             spans = []
-            for index in range(len(self._columns)):
-                width = view.columnWidth(index)
+            for column in self._columns:
+                try:
+                    position = DEFAULT_COLUMNS.index(column)
+                except ValueError:
+                    continue
+                if view.isColumnHidden(position):
+                    continue
+                width = view.columnWidth(position)
                 if width > 0:
-                    spans.append((view.columnViewportPosition(index), width))
+                    spans.append((view.columnViewportPosition(position), width))
             if len(spans) == len(self._columns):
                 return spans
         spans = []
@@ -538,7 +544,7 @@ class TrackDelegate(QStyledItemDelegate):
                 badge_width,
                 17,
             )
-            paint_badge(painter, badge_rect, badge, track.source or "")
+            paint_badge(painter, badge_rect, badge)
 
     def _paint_text(
         self,
@@ -749,36 +755,45 @@ class TrackTable(QTableView):
 
     # ---------------------------------------------------------------- columns
     def _apply_columns(self) -> None:
-        width = max(320, self.viewport().width())
+        width = max(240, self.viewport().width())
         compact = self._model.compact or width < 760
-        columns = []
-        available = width
+        visible: list[Column] = []
+        widths: list[int] = []
         fixed = 0
         for column in DEFAULT_COLUMNS:
             if column.key == COLUMN_ALBUM and width < 900:
                 continue
             if column.key == COLUMN_ARTIST and width < 620:
                 continue
-            columns.append(column)
-            if column.width:
-                fixed += column.width
-        stretch = max(160, available - fixed)
-        widths = []
-        for column in columns:
-            widths.append(column.width or stretch)
-        self._columns = columns
-        for index, column in enumerate(columns):
-            self.setColumnWidth(index, widths[index])
-        self._header.set_columns(columns)
-        self._header.set_widths(widths)
+            if column.key == COLUMN_FAVORITE and width < 360:
+                continue
+            column_width = column.width
+            if column.key == COLUMN_INDEX and width < 360:
+                column_width = 30
+            if column.key == COLUMN_DURATION and width < 360:
+                column_width = 46
+            visible.append(column)
+            widths.append(column_width)
+            if column_width:
+                fixed += column_width
+        stretch = max(110, width - fixed)
+        for position, column in enumerate(DEFAULT_COLUMNS):
+            hidden = column not in visible
+            self.setColumnHidden(position, hidden)
+        resolved: list[int] = []
+        for column, column_width in zip(visible, widths):
+            if not column_width:
+                column_width = stretch
+            position = DEFAULT_COLUMNS.index(column)
+            self.setColumnWidth(position, column_width)
+            resolved.append(column_width)
+        self._columns = visible
+        self._header.set_columns(visible)
+        self._header.set_widths(resolved)
         if self._model.compact != compact:
             self._model.compact = compact
             self.verticalHeader().setDefaultSectionSize(44 if compact else 54)
-        # keep the title column stretched to the remaining space
-        if columns:
-            self.horizontalHeader().setSectionResizeMode(
-                1 if len(columns) > 1 else 0, QHeaderView.Fixed
-            )
+        self._header.update()
 
     def resizeEvent(self, event) -> None:  # noqa: N802
         super().resizeEvent(event)

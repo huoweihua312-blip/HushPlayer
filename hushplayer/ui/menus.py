@@ -50,6 +50,7 @@ def track_menu(
     playlist_id: int | None = None,
     on_play: Callable[[], None] | None = None,
     on_remove: Callable[[], None] | None = None,
+    on_download: Callable[[list[Track]], None] | None = None,
     on_go_to_album: Callable[[Track], None] | None = None,
     on_go_to_artist: Callable[[Track], None] | None = None,
 ) -> QMenu:
@@ -88,6 +89,13 @@ def track_menu(
     playlist_menu.setIcon(make_icon("plus", theme().palette.text_secondary, 16))
     _fill_playlists(playlist_menu, items, parent)
 
+    if any(track.kind == "online" for track in items):
+        download = _action(menu, "下载到本地", icon_name="download")
+        if on_download is not None:
+            download.triggered.connect(lambda: on_download(items))
+        else:
+            download.triggered.connect(lambda: _download(items, parent))
+
     menu.addSeparator()
     if playlist_id is not None:
         remove = _action(menu, "从该歌单中移除", icon_name="minus")
@@ -120,6 +128,21 @@ def track_menu(
         remove.triggered.connect(on_remove)
 
     return menu
+
+
+def _download(items: Sequence[Track], parent: QWidget) -> None:
+    """菜单内默认的下载入口：交给 DownloadService，并通过 toast 汇报结果。"""
+    app = ctx()
+    service = getattr(app, "downloads", None)
+    if service is None:
+        return
+    created = service.download([track for track in items if track.kind == "online"])
+    window = app.window
+    if window is not None and hasattr(window, "toast"):
+        if created:
+            window.toast(f"已开始下载 {len(created)} 首歌曲")
+        else:
+            window.toast("所选歌曲不支持下载")
 
 
 def _toggle_favorite(tracks: Sequence[Track], favorite: bool) -> None:

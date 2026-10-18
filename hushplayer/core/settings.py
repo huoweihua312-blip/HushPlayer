@@ -113,7 +113,7 @@ DEFAULTS: dict[str, Any] = {
         "motion": True,
     },
     "update": {
-        "manifest_url": "https://raw.githubusercontent.com/hushplayer/releases/main/latest.json",
+        "manifest_url": "",  # 留空表示未配置更新源；见 docs/UPDATES.md
         "last_check": 0,
         "skipped_version": "",
     },

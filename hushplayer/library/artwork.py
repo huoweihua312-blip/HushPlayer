@@ -160,6 +160,7 @@ class CoverProvider(QObject):
         self._lock = threading.Lock()
         self._pool = QThreadPool(self)
         self._pool.setMaxThreadCount(4)
+        self._closing = False
         self._placeholder_cache: dict[tuple[int, bool], QPixmap] = {}
 
     # -- 查询 ------------------------------------------------------------
@@ -251,10 +252,23 @@ class CoverProvider(QObject):
 
     def _on_job_done(self, track_id: str, path: str) -> None:
         # 可能在不同线程：仅做字典写入，信号由 Qt 排队投递
+        if self._closing:
+            return
         if path:
             self._resolved[track_id] = path
         self._pending.discard(track_id)
-        self.ready.emit(track_id)
+        try:
+            self.ready.emit(track_id)
+        except RuntimeError:
+            # 退出过程中 C++ 对象可能已被销毁，忽略即可。
+            pass
+
+    def shutdown(self) -> None:
+        """停止接收后台结果并等待线程池收尾（退出时调用）。"""
+        self._closing = True
+        self._pending.clear()
+        self._pool.clear()
+        self._pool.waitForDone(1500)
 
     @staticmethod
     def guess_ext(data: bytes) -> str:

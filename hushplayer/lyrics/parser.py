@@ -312,7 +312,15 @@ def _document_from_timed_lines(
         if line.words:
             _fill_word_ends(line)
 
-    document = LyricDocument(lines=lines, synced=bool(lines), offset_ms=offset, provider=provider)
+    document = LyricDocument(
+        lines=lines,
+        synced=bool(lines),
+        offset_ms=offset,
+        provider=provider,
+        kind="synced" if lines else "empty",
+        raw=text,
+    )
+    document.has_word_timing = any(line.has_word_timing for line in lines)
     document.title = meta.get("ti", "")
     document.artist = meta.get("ar", "")
     document.album = meta.get("al", "")
@@ -334,6 +342,13 @@ def attach_translation(document: LyricDocument, translation_text: str) -> LyricD
         return document
     translated = parse_lrc(translation_text)
     if not translated.lines:
+        # 没有时间轴的翻译文件：按行号对齐（常见于同目录 *.trans.lrc 手工文件）
+        rows = [row.strip() for row in translation_text.split("\n") if row.strip()]
+        if not rows:
+            return document
+        for line, row in zip(document.lines, rows):
+            line.translation = row
+        document.has_translation = any(line.translation.strip() for line in document.lines)
         return document
 
     if len(translated.lines) == len(document.lines):
