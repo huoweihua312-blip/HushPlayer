@@ -41,6 +41,7 @@ DEFAULTS: dict[str, Any] = {
         "accent": "#C95770",
         "reduce_motion": False,
         "font_scale": 1.0,
+        "ui_scale": "auto",  # auto | 1.0 | 1.15 | 1.25 | 1.5（需重启）
         "sidebar_visible": True,
         "density": "comfortable",  # comfortable | compact
         "show_source_badge": True,

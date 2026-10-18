@@ -28,6 +28,7 @@ from PySide6.QtWidgets import (
 )
 
 from ...core import icons
+from ...core import brand
 from ...core.theme import css_rgba, qcolor, rgba, theme
 from ...model.track import Playlist
 
@@ -65,6 +66,13 @@ class LogoMark(QWidget):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.Antialiasing, True)
         rect = QRectF(self.rect()).adjusted(0.5, 0.5, -0.5, -0.5)
+        # BUG-07: the official logo, once supplied, replaces the placeholder mark
+        # everywhere (sidebar, about card, window/tray icon, installer).
+        official = brand.rounded_logo_pixmap(max(12, self.width()), theme().mode)
+        if official is not None:
+            painter.drawPixmap(QPointF(0, 0), official)
+            painter.end()
+            return
         gradient = QLinearGradient(rect.topLeft(), rect.bottomRight())
         accent = qcolor(theme().palette.accent)
         gradient.setColorAt(0.0, accent.lighter(112))

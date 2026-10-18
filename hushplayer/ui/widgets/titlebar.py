@@ -97,8 +97,11 @@ class TitleBar(QWidget):
         for button in (self.minimize_button, self.maximize_button, self.close_button):
             layout.addWidget(button)
 
+        # NOTE: only wire the request signals here for standalone previews.
+        # MainWindow connects the same signals to its own handlers, so binding
+        # window.toggle_maximize here as well made every click toggle twice
+        # (maximise -> restore in the same event), i.e. the button appeared dead.
         self.minimize_requested.connect(window.minimize)
-        self.maximize_requested.connect(window.toggle_maximize)
         self.close_requested.connect(window.close_window)
 
     def set_maximized(self, maximized: bool) -> None:

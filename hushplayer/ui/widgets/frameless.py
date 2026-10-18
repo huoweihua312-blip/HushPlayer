@@ -6,7 +6,7 @@ import ctypes
 import sys
 from ctypes import wintypes
 
-from PySide6.QtCore import QPoint, QRect, QSize, Qt, Signal
+from PySide6.QtCore import QPoint, QRect, QSize, Qt, QTimer, Signal
 from PySide6.QtGui import QColor, QGuiApplication
 from PySide6.QtWidgets import QApplication, QVBoxLayout, QWidget
 
@@ -104,13 +104,88 @@ class FramelessWindow(QWidget):
         return self._maximized
 
     def toggle_maximize(self) -> None:
-        if self.isMaximized() and not self._maximized:
+        """Maximise or restore using the native window manager.
+
+        Restoring must never leave the window at screen size: some Windows
+        themes report a bogus ``normalGeometry()`` after a maximise that was
+        triggered from a restored session, so HushPlayer tracks its own
+        last normal geometry and re-applies it after ``showNormal()``.
+        """
+        if self.isMaximized():
             self.showNormal()
+            self._maximized = False
+            self._sync_maximized_ui()
+            QTimer.singleShot(0, self._restore_normal_geometry)
             return
-        if self._maximized:
-            self.showNormal()
-        else:
-            self.showMaximized()
+        geometry = QRect(self.geometry())
+        if self._usable_normal_geometry(geometry):
+            self._normal_geometry = geometry
+        self.showMaximized()
+        self._maximized = True
+        self._sync_maximized_ui()
+
+    def _sync_maximized_ui(self) -> None:
+        self._update_root_style()
+        bar = self._titlebar
+        if bar is not None and hasattr(bar, "set_maximized"):
+            bar.set_maximized(self._maximized)  # type: ignore[attr-defined]
+
+    @staticmethod
+    def _usable_normal_geometry(geometry: QRect) -> bool:
+        if geometry.width() < 480 or geometry.height() < 360:
+            return False
+        screen = QGuiApplication.screenAt(geometry.center()) or QGuiApplication.primaryScreen()
+        if screen is None:
+            return True
+        available = screen.availableGeometry()
+        if geometry.width() >= available.width() - 2 and geometry.height() >= available.height() - 2:
+            return False
+        return True
+
+    def _restore_normal_geometry(self) -> None:
+        if self.isMaximized() or self.isMinimized():
+            return
+        geometry = QRect(self._normal_geometry)
+        if not self._usable_normal_geometry(geometry):
+            screen = self.screen() or QGuiApplication.primaryScreen()
+            if screen is None:
+                return
+            available = screen.availableGeometry()
+            width = max(960, int(available.width() * 0.78))
+            height = max(680, int(available.height() * 0.78))
+            geometry = QRect(
+                available.x() + (available.width() - width) // 2,
+                available.y() + (available.height() - height) // 2,
+                width,
+                height,
+            )
+        self.setGeometry(ensure_on_screen(self, geometry))
+
+    def normal_geometry(self) -> QRect:
+        """Geometry that ``showNormal()`` should return to."""
+        if self.isMaximized():
+            if self._usable_normal_geometry(self._normal_geometry):
+                return QRect(self._normal_geometry)
+            fallback = self.normalGeometry()
+            if self._usable_normal_geometry(fallback):
+                return fallback
+            return QRect(self._normal_geometry)
+        return QRect(self.geometry())
+
+    def resizeEvent(self, event) -> None:  # noqa: N802
+        super().resizeEvent(event)
+        self._remember_normal_geometry()
+
+    def moveEvent(self, event) -> None:  # noqa: N802
+        super().moveEvent(event)
+        self._remember_normal_geometry()
+
+    def _remember_normal_geometry(self) -> None:
+        if self.isMaximized() or self.isMinimized() or self.isFullScreen():
+            return
+        geometry = QRect(self.geometry())
+        if self._usable_normal_geometry(geometry):
+            self._normal_geometry = geometry
 
     def minimize(self) -> None:
         self.showMinimized()
@@ -133,12 +208,7 @@ class FramelessWindow(QWidget):
             maximized = bool(self.windowState() & Qt.WindowMaximized)
             if maximized != self._maximized:
                 self._maximized = maximized
-                if not maximized:
-                    self._normal_geometry = QRect()
-                self._update_root_style()
-                bar = self._titlebar
-                if bar is not None and hasattr(bar, "set_maximized"):
-                    bar.set_maximized(maximized)  # type: ignore[attr-defined]
+                self._sync_maximized_ui()
 
     def _update_root_style(self) -> None:
         palette = theme().palette

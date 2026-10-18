@@ -395,6 +395,23 @@ QTabBar::tab {{
 QTabBar::tab:selected {{ background: {p.accent_soft}; color: {p.accent}; }}
 QSplitter::handle {{ background: transparent; }}
 QListView {{ background: transparent; border: none; outline: none; }}
+/* BUG-10: the global QWidget selection colour painted a solid berry block
+   behind selected rows, and the "now playing" title was berry too -> red on
+   red. Item views paint their own tinted selection in the delegate, so keep
+   the native selection fill transparent here. */
+QTableView, QTreeView, QListView {{
+    background: transparent;
+    border: none;
+    outline: none;
+    alternate-background-color: transparent;
+    selection-background-color: transparent;
+    selection-color: {p.text};
+}}
+QTableView::item, QTreeView::item, QListView::item {{ background: transparent; }}
+QTableView::item:selected, QTreeView::item:selected, QListView::item:selected {{
+    background: transparent;
+    color: {p.text};
+}}
 """
 
     def window_palette(self) -> QPalette:

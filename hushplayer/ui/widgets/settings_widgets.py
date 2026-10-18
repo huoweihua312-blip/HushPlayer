@@ -10,7 +10,7 @@ from __future__ import annotations
 import os
 from typing import Callable
 
-from PySide6.QtCore import QEasingCurve, QRectF, QSize, Qt, QVariantAnimation, Signal
+from PySide6.QtCore import QEasingCurve, QPointF, QRectF, QSize, Qt, QVariantAnimation, Signal
 from PySide6.QtGui import QColor, QFontMetrics, QPainter, QPen
 from PySide6.QtWidgets import (
     QAbstractButton,
@@ -184,7 +184,17 @@ class ToggleSwitch(QAbstractButton):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.Antialiasing, True)
         rect = QRectF(1, 2, self.width() - 2, self.height() - 4)
-        off = qcolor(mix_color(palette.text, 0.18) if palette.is_dark else mix_color(palette.text, 0.16))
+        # The "off" track must read as a neutral groove on the card surface:
+        # blending text toward the surface (not toward black/white) keeps it
+        # visible in both themes (BUG-08 follow-up: it used to render near-white
+        # in dark mode and near-black in light mode).
+        base = qcolor(palette.surface_alt if palette.is_dark else palette.surface)
+        ratio = 0.30 if palette.is_dark else 0.16
+        off = QColor(
+            int(base.red() + (qcolor(palette.text).red() - base.red()) * ratio),
+            int(base.green() + (qcolor(palette.text).green() - base.green()) * ratio),
+            int(base.blue() + (qcolor(palette.text).blue() - base.blue()) * ratio),
+        )
         brush = QColor(off)
         accent = qcolor(palette.accent)
         brush = QColor(
@@ -199,7 +209,9 @@ class ToggleSwitch(QAbstractButton):
         x = rect.left() + 2 + (rect.width() - knob - 4) * self._pos
         knob_rect = QRectF(x, rect.top() + 2, knob, knob)
         painter.setBrush(qcolor("#FFFFFF"))
+        painter.setPen(QPen(rgba(palette.text, 0.10), 1))
         painter.drawEllipse(knob_rect)
+        painter.setPen(Qt.NoPen)
         if self.hasFocus():
             painter.setBrush(Qt.NoBrush)
             painter.setPen(QPen(rgba(accent, 0.55), 1.4))
@@ -443,11 +455,20 @@ class SegmentedPicker(QWidget):
 
 
 class ThemePicker(QWidget):
-    """Three preview tiles for the theme preference (system / light / dark)."""
+    """Preview tiles for the theme preference (BUG-08).
+
+    Each tile renders a miniature of the real window in that palette so the
+    choice is recognisable at a glance; the active tile carries an accent ring,
+    a check badge and a bolder label, and the *resolved* mode is spelled out
+    underneath "跟随系统".
+    """
 
     changed = Signal(str)
 
-    OPTIONS = [("system", "跟随系统"), ("light", "浅色"), ("dark", "深色")]
+    OPTIONS = [("system", "跟随系统", "随 Windows 设置"), ("light", "浅色", "始终浅色"), ("dark", "深色", "始终深色")]
+    TILE_W = 132
+    TILE_H = 108
+    GAP = 12
 
     def __init__(self, value: str = "system", parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -455,8 +476,11 @@ class ThemePicker(QWidget):
         self._hover = ""
         self.setMouseTracking(True)
         self.setCursor(Qt.PointingHandCursor)
-        self.setFixedSize(3 * 116 + 2 * 12, 96)
+        self.setFocusPolicy(Qt.StrongFocus)
+        self.setAccessibleName("主题")
+        self.setFixedSize(3 * self.TILE_W + 2 * self.GAP, self.TILE_H)
 
+    # ------------------------------------------------------------------ API
     def value(self) -> str:
         return self._value
 
@@ -465,9 +489,12 @@ class ThemePicker(QWidget):
             self._value = value
             self.update()
 
+    # ------------------------------------------------------------------ 交互
     def _tiles(self) -> list[QRectF]:
-        width = 116
-        return [QRectF(i * (width + 12), 0, width, 96) for i in range(3)]
+        return [
+            QRectF(i * (self.TILE_W + self.GAP), 0, self.TILE_W, self.TILE_H)
+            for i in range(len(self.OPTIONS))
+        ]
 
     def _hit(self, pos) -> str:
         for index, rect in enumerate(self._tiles()):
@@ -488,74 +515,135 @@ class ThemePicker(QWidget):
 
     def mouseReleaseEvent(self, event) -> None:  # noqa: N802
         if event.button() == Qt.LeftButton:
-            hit = self._hit(event.position())
-            if hit and hit != self._value:
-                self._value = hit
-                self.update()
-                self.changed.emit(hit)
+            self._activate(self._hit(event.position()))
         super().mouseReleaseEvent(event)
 
+    def keyPressEvent(self, event) -> None:  # noqa: N802
+        keys = list(self.OPTIONS)
+        index = next((i for i, option in enumerate(keys) if option[0] == self._value), 0)
+        if event.key() in (Qt.Key_Left, Qt.Key_Up):
+            self._activate(keys[max(0, index - 1)][0])
+        elif event.key() in (Qt.Key_Right, Qt.Key_Down):
+            self._activate(keys[min(len(keys) - 1, index + 1)][0])
+        elif event.key() in (Qt.Key_Space, Qt.Key_Return, Qt.Key_Enter):
+            self._activate(self._value)
+        else:
+            super().keyPressEvent(event)
+
+    def _activate(self, key: str) -> None:
+        if not key:
+            return
+        if key != self._value:
+            self._value = key
+            self.update()
+            self.changed.emit(key)
+
+    # ------------------------------------------------------------------ 绘制
     def paintEvent(self, event) -> None:  # noqa: N802
         palette = theme().palette
         painter = QPainter(self)
         painter.setRenderHint(QPainter.Antialiasing, True)
+        accent = qcolor(palette.accent)
         for index, rect in enumerate(self._tiles()):
-            key, label = self.OPTIONS[index]
+            key, label, hint = self.OPTIONS[index]
             selected = key == self._value
             hovered = key == self._hover
-            # Preview card: light and dark use their own palette, "system" splits.
-            preview = rect.adjusted(0, 0, 0, -20)
-            radius = 10.0
+            preview = QRectF(rect.left(), rect.top(), rect.width(), rect.height() - 30)
+            radius = 11.0
+            clip = preview.adjusted(2.5, 2.5, -2.5, -2.5)
+
             painter.save()
-            clip = preview.adjusted(2, 2, -2, -2)
-            painter.setPen(Qt.NoPen)
-            painter.setBrush(rgba(palette.text, 0.06 if not hovered else 0.1))
-            painter.drawRoundedRect(preview.adjusted(-1, -1, 1, 1), radius + 2, radius + 2)
             painter.setClipRect(clip)
             if key == "system":
-                painter.fillRect(QRectF(clip.left(), clip.top(), clip.width() / 2, clip.height()), qcolor("#F4F4F7"))
+                painter.fillRect(
+                    QRectF(clip.left(), clip.top(), clip.width() / 2, clip.height()),
+                    qcolor("#F5F5F8"),
+                )
                 painter.fillRect(
                     QRectF(clip.left() + clip.width() / 2, clip.top(), clip.width() / 2, clip.height()),
-                    qcolor("#17171C"),
+                    qcolor("#16161B"),
                 )
             else:
-                painter.fillRect(clip, qcolor("#F4F4F7" if key == "light" else "#17171C"))
-            # Miniature window: sidebar + content lines.
-            fore = qcolor("#191920" if key == "light" else "#EDEDF2")
-            accent = qcolor(palette.accent)
-            painter.setBrush(rgba(fore, 0.12))
-            painter.drawRoundedRect(
-                QRectF(clip.left() + 8, clip.top() + 10, 22, clip.height() - 20), 4, 4
-            )
-            painter.setBrush(rgba(fore, 0.28))
-            painter.drawRoundedRect(QRectF(clip.left() + 38, clip.top() + 12, 40, 6), 3, 3)
-            painter.setBrush(rgba(fore, 0.16))
-            for row in range(3):
-                painter.drawRoundedRect(
-                    QRectF(clip.left() + 38, clip.top() + 26 + row * 12, 52 - row * 8, 5), 2.5, 2.5
-                )
-            painter.setBrush(accent)
-            painter.drawRoundedRect(
-                QRectF(clip.left() + clip.width() - 26, clip.top() + clip.height() - 16, 14, 8), 3, 3
-            )
+                painter.fillRect(clip, qcolor("#F5F5F8" if key == "light" else "#16161B"))
+            self._paint_mock(painter, clip, light=key == "light", accent=accent)
             painter.restore()
+
+            # border: accent when selected, soft otherwise; hover lifts the edge
             if selected:
                 painter.setBrush(Qt.NoBrush)
                 painter.setPen(QPen(accent, 2))
-                painter.drawRoundedRect(preview.adjusted(0.5, 0.5, -0.5, -0.5), radius, radius)
             else:
                 painter.setBrush(Qt.NoBrush)
-                painter.setPen(QPen(rgba(palette.text, 0.14), 1))
-                painter.drawRoundedRect(preview.adjusted(0.5, 0.5, -0.5, -0.5), radius, radius)
-            font = theme().font(9.0, 600 if selected else 500)
+                painter.setPen(QPen(rgba(palette.text, 0.18 if hovered else 0.12), 1))
+            painter.drawRoundedRect(preview.adjusted(0.5, 0.5, -0.5, -0.5), radius, radius)
+
+            if selected:
+                badge = QRectF(preview.right() - 22, preview.top() + 6, 16, 16)
+                painter.setPen(Qt.NoPen)
+                painter.setBrush(accent)
+                painter.drawEllipse(badge)
+                painter.setPen(QPen(qcolor("#FFFFFF"), 1.8))
+                painter.setBrush(Qt.NoBrush)
+                painter.drawLine(
+                    QPointF(badge.center().x() - 3.4, badge.center().y() + 0.2),
+                    QPointF(badge.center().x() - 1.0, badge.center().y() + 2.6),
+                )
+                painter.drawLine(
+                    QPointF(badge.center().x() - 1.0, badge.center().y() + 2.6),
+                    QPointF(badge.center().x() + 3.6, badge.center().y() - 2.6),
+                )
+
+            font = theme().font(9.4, 600 if selected else 500)
             painter.setFont(font)
-            painter.setPen(QPen(qcolor(palette.accent) if selected else rgba(palette.text, 0.7)))
+            painter.setPen(QPen(accent if selected else qcolor(palette.text)))
             painter.drawText(
-                QRectF(rect.left(), rect.bottom() - 18, rect.width(), 18),
+                QRectF(rect.left(), preview.bottom() + 4, rect.width(), 13),
                 int(Qt.AlignHCenter | Qt.AlignVCenter),
                 label,
             )
+            hint_font = theme().font(7.8, 400)
+            painter.setFont(hint_font)
+            painter.setPen(QPen(rgba(palette.text, 0.42)))
+            text = hint
+            if key == "system":
+                resolved = "深色" if theme().mode == "dark" else "浅色"
+                text = f"当前 {resolved}"
+            painter.drawText(
+                QRectF(rect.left(), preview.bottom() + 16, rect.width(), 12),
+                int(Qt.AlignHCenter | Qt.AlignVCenter),
+                text,
+            )
         painter.end()
+
+    def _paint_mock(self, painter: QPainter, clip: QRectF, *, light: bool, accent: QColor) -> None:
+        fore = qcolor("#17171C" if light else "#EDEDF2")
+        # sidebar
+        painter.setBrush(rgba(fore, 0.10 if light else 0.12))
+        painter.setPen(Qt.NoPen)
+        painter.drawRoundedRect(QRectF(clip.left() + 8, clip.top() + 11, 26, clip.height() - 22), 5, 5)
+        # nav dots
+        painter.setBrush(rgba(fore, 0.22))
+        for row in range(4):
+            painter.drawRoundedRect(
+                QRectF(clip.left() + 14, clip.top() + 18 + row * 10, 14, 3.2), 1.6, 1.6
+            )
+        # header + rows
+        painter.setBrush(rgba(fore, 0.30))
+        painter.drawRoundedRect(QRectF(clip.left() + 44, clip.top() + 12, 38, 5), 2.5, 2.5)
+        painter.setBrush(rgba(fore, 0.14))
+        for row in range(3):
+            painter.drawRoundedRect(
+                QRectF(clip.left() + 44, clip.top() + 26 + row * 13, 58 - row * 10, 5), 2.5, 2.5
+            )
+        # player bar with accent progress
+        painter.setBrush(rgba(fore, 0.10 if light else 0.14))
+        painter.drawRoundedRect(
+            QRectF(clip.left() + 8, clip.bottom() - 15, clip.width() - 16, 8), 4, 4
+        )
+        painter.setBrush(accent)
+        painter.drawRoundedRect(
+            QRectF(clip.left() + 8, clip.bottom() - 15, (clip.width() - 16) * 0.42, 8), 4, 4
+        )
 
 
 class FolderEditor(QWidget):

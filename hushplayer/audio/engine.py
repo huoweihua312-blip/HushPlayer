@@ -114,6 +114,23 @@ class PlaybackEngine(QObject):
     def is_playing(self) -> bool:
         return self._state == STATE_PLAYING
 
+    @property
+    def is_playing_actual(self) -> bool:
+        """True only while Qt really reports an active playback state."""
+        return self._player.playbackState() == QMediaPlayer.PlaybackState.PlayingState
+
+    def halt_pending(self) -> None:
+        """Abort a pending/loading playback and settle in a paused state.
+
+        Used when the user pauses while a stream is still resolving or
+        buffering: without this the load would finish later and start playing
+        against the user's wish, and the transport controls would stay dead
+        because the state machine was stuck in ``loading``.
+        """
+        if self._state == STATE_LOADING:
+            self._player.stop()
+            self._set_state(STATE_PAUSED)
+
     def available(self) -> bool:
         return self._player.isAvailable()
 
@@ -154,13 +171,16 @@ class PlaybackEngine(QObject):
         self._player.play()
 
     def pause(self) -> None:
+        if self._state == STATE_LOADING:
+            self.halt_pending()
+            return
         self._player.pause()
 
     def toggle(self) -> None:
-        if self._state == STATE_PLAYING:
+        if self._state == STATE_PLAYING or self.is_playing_actual:
             self.pause()
         else:
-            if self._state == STATE_LOADING or not self._source:
+            if not self._source:
                 return
             self.play()
 
@@ -232,7 +252,11 @@ class PlaybackEngine(QObject):
             if self._state not in (STATE_PLAYING, STATE_PAUSED):
                 self._set_state(STATE_LOADING)
         elif status == enum.BufferedMedia:
-            if self._state == STATE_LOADING:
+            # NOTE: only trust Qt's real playback state here. Forcing PAUSED on
+            # BufferedMedia desynchronised the UI from the audio pipeline
+            # (buffered-but-playing showed up as paused, and a failed stream
+            # could end up "paused" with no audio at all).
+            if self._state == STATE_LOADING and not self.is_playing_actual:
                 self._set_state(STATE_PAUSED)
         elif status == enum.NoMedia:
             self.buffering_changed.emit(0)

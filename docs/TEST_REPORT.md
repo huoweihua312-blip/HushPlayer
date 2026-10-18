@@ -22,13 +22,13 @@
 | 项 | 值 |
 | --- | --- |
 | 执行时间 | 2026-10-18 |
-| 用例总数 | **95** |
-| 通过 | **95** |
+| 用例总数 | **119** |
+| 通过 | **119** |
 | 失败 | 0 |
 | 错误 | 0 |
 | 跳过 | 0 |
-| 总耗时 | **28.66 s**（复跑 28.74 s，波动属正常） |
-| JUnit 原始结果 | `artifacts/junit.xml` |
+| 总耗时 | **29.81 s**（波动属正常） |
+| JUnit 原始结果 | `artifacts/junit_round1.xml` |
 
 ```
 $ .venv\Scripts\python.exe -m pytest -q
@@ -51,6 +51,11 @@ $ .venv\Scripts\python.exe -m pytest -q
 | `tests/test_updater.py` | 7 | 版本比较、清单解析、更新源缺失、坏 JSON、HTTP 503 |
 | `tests/test_cache.py` | 5 | 统计、修复、清理、Range 206、完整性索引 |
 | `tests/test_online.py` | 5 | 音源列表、真实搜索、`resolvePlayback`、未知音源错误、退出 |
+| `tests/test_playback_state.py` | 4 | 解析中暂停取消、失败落 stopped、stop 取消迟到结果、`halt_pending` |
+| `tests/test_clock.py` | 6 | 60 Hz 插值时钟：仅播放时 tick、位置插值、暂停冻结、时长钳制、reset |
+| `tests/test_sweep.py` | 6 | 软边逐字扫过：面积随进度增长、亚字符步进、词时间轴、无词回退 |
+| `tests/test_display.py` | 8 | 高 DPI 缩放：阈值推荐、auto 跟随物理屏、显式偏好、非法值、环境变量写入/清除 |
+| `tests/test_brand.py` | 4 | 品牌资源回退链、多尺寸 `QIcon`、圆角 pixmap、`has_official_logo()` |
 | `tests/test_playback.py` | 5 | 真实 WAV 播放、暂停、seek、结束事件、控制器切歌/循环/静音、会话恢复 |
 | `tests/test_single_instance.py` | 3 | 命名互斥体、激活请求、环境变量旁路 |
 
@@ -94,17 +99,40 @@ $ .venv\Scripts\python.exe -m pytest -q
 - 极端规模（10 万首）未做压力测试；当前结论基于数千首级别的实测与设计。
 - 网络用例依赖第三方音源可用性；音源失效时这些用例会失败或跳过，属外部变化，不是产品回归。
 
+## 8. 第一轮缺陷整改（1.0.1）
+
+针对用户录屏反馈的 10 项缺陷，逐项完成「复现 → 根因 → 修复 → 自动化 → 真实 GUI 验证」，台账见
+[`docs/qa/REIMAGINED_FIX_ROUND1.md`](qa/REIMAGINED_FIX_ROUND1.md)。
+
+| 编号 | 内容 | 状态 | 本轮新增自动化 |
+| --- | --- | --- | --- |
+| BUG-01 | 进入沉浸式黑帧/闪屏 | 已验证修复 | 动态帧检 `tools/probe_immersive_flash2.py`（首帧 `delta=0.00`） |
+| BUG-02 | 在线播放暂停/停止失效 | 已验证修复 | `tests/test_playback_state.py`（4） |
+| BUG-03 | 最大化/还原异常 | 已验证修复 | `tools/probe_maximize*.py`（QTest 真实点击 + 持久化） |
+| BUG-04 | 在线使用中弹出错误对话框 | 已验证修复 | 真实 GUI 打开「在线音源」分区（`artifacts/qa/settings_online_loaded.png`） |
+| BUG-05 | 2K 下界面偏小 | 已验证修复 | `tests/test_display.py`（8） |
+| BUG-06 | 桌面歌词高亮不平滑 | 已验证修复 | `tests/test_clock.py`（6）+ `tests/test_sweep.py`（6）+ `tools/probe_sweep.py` 动态测量 |
+| BUG-07 | 正式 Logo 缺失 | 受阻（等待素材） | `tests/test_brand.py`（4） |
+| BUG-08 | 主题切换/预览卡 | 已验证修复 | 主题实时切换截图（`artifacts/qa/theme/`） |
+| BUG-09 | 播放标识偏移 | 已验证修复 | 像素级对齐复核（`artifacts/qa/_idx_light.png`） |
+| BUG-10 | 选中与播放撞色 | 已验证修复 | 状态矩阵截图（`artifacts/qa/rowstates_*.png`） |
+
+回归：既有 95 例全部保持通过，未删除、未放宽断言；新增 24 例，合计 **119 例通过**。
+
 ## 7. 打包产物验收（真实执行）
 
 在 `packaging/out/HushPlayer/HushPlayer.exe` 上执行 `tools/verify_package.ps1`（脚本会启动真实进程、截图、启动第二个实例、发送 `WM_CLOSE`）：
 
-| 检查 | 结果 |
+| 检查 | 1.0.1 结果 |
 | --- | --- |
-| 进程启动 | 成功，窗口 1280×820，标题 `HushPlayer` |
+| 版本 | 日志 `启动 HushPlayer 1.0.1`，exe 文件版本同步 |
+| 进程启动 | 成功，窗口 `1600×1025` 物理像素（1280×820 逻辑 × 125%），标题 `HushPlayer` |
+| 高 DPI 缩放 | 日志 `界面缩放：125%（QT_SCALE_FACTOR=1.25）` |
 | 内置 Node 运行时 | 日志 `online runtime started ...\_internal\hushplayer\runtime\node\node.exe`，随后 `runner ready` |
 | 数据目录 | 通过 `HUSHPLAYER_DATA_DIR` 隔离到临时目录，未触碰真实用户数据 |
-| 单实例 | 第二个实例检测到已有实例后退出，主实例日志出现「收到第二个实例的激活请求」，进程总数保持 1 |
-| 优雅退出 | `WM_CLOSE` 后进程退出，日志出现「正在退出 HushPlayer」并保存窗口几何 |
-| 截图 | `docs/screenshots/packaged_light.png` |
+| 单实例 | 第二个实例检测到已有实例后退出，主实例日志「收到第二个实例的激活请求」，进程总数保持 1 |
+| 优雅退出 | `WM_CLOSE` 后进程退出，日志「正在退出 HushPlayer」 |
+| 截图 | `docs/screenshots/packaged_dark_125.png`（用 `PrintWindow` 抓取，避免被前台浏览器遮挡） |
+| 产物 | `HushPlayer-1.0.1-win64.zip`（108,530,282 B）SHA256 `359667F96CCE111AE0603B1C25A1FE04EBB2D215D639DB89D5D0C12828CDD0B2` |
 
 原始日志：`artifacts/packaged_run/logs/hushplayer.log`（不随仓库提交）。

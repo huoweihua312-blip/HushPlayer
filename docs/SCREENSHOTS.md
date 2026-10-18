@@ -39,7 +39,7 @@
 
 | 文件 | 说明 |
 | --- | --- |
-| `packaged_light.png` | 从 `packaging/out/HushPlayer/HushPlayer.exe` 启动后的空库首页（浅色），证明发布产物可独立运行 |
+| `packaged_dark_125.png` | `1.0.1` 打包产物 `packaging/out/HushPlayer/HushPlayer.exe` 启动后的空库首页：1600×1025 物理像素 = 1280×820 逻辑像素 × 125%，即 2K 屏默认缩放生效；窗口由 `PrintWindow` 抓取 |
 
 ## 截图里刻意保留的真实状态
 

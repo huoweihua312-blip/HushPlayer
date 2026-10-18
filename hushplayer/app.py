@@ -12,6 +12,7 @@ from PySide6.QtWidgets import QApplication, QMessageBox
 
 from .core import icons
 from .core.logging_setup import get_logger, log_exception, recent_log_text, setup_logging
+from .core import brand
 from .core.paths import data_dir, ensure_dirs, is_frozen
 from .core.settings import settings
 from .core.theme import apply_theme_to_app, theme
@@ -36,6 +37,7 @@ class HushApp(QObject):
 
     # ---------------------------------------------------------------- services
     def _build_services(self) -> None:
+        from .audio.clock import PlaybackClock
         from .audio.controller import PlayerController
         from .audio.engine import PlaybackEngine
         from .library.artwork import ArtworkStore
@@ -62,6 +64,12 @@ class HushApp(QObject):
             self.library.tracks, self.library.bindings, self.library.meta, self.client, self
         )
         self.cache = CacheService(self.proxy, self.library.covers.store, self)
+        self.clock = PlaybackClock(self)
+        self.player.position_changed.connect(self.clock.set_position)
+        self.player.duration_changed.connect(self.clock.set_duration)
+        self.player.state_changed.connect(
+            lambda state: self.clock.set_playing(state == "playing")
+        )
         self.keeper = PlaybackKeeper(self.player, self.library.tracks, self)
         self.downloads = DownloadService(self.client, self)
         from .services.updater import UpdateService
@@ -80,6 +88,7 @@ class HushApp(QObject):
             client=self.client,
             proxy=self.proxy,
             keeper=self.keeper,
+            clock=self.clock,
             downloads=self.downloads,
             updater=self.updater,
             settings=self.settings,
@@ -153,7 +162,7 @@ class HushApp(QObject):
         self._configure_player()
         self._restore_session()
 
-        self.app.setWindowIcon(QIcon(icons.pixmap("headphones", theme().palette.accent, 64)))
+        self.app.setWindowIcon(brand.app_icon())
         self.window.show()
         self._maybe_rescan()
         self._maybe_check_updates()
@@ -295,6 +304,13 @@ def main(argv: list[str] | None = None) -> int:
     default_console = "0" if is_frozen() else "1"
     setup_logging(console=os.environ.get("HUSH_CONSOLE", default_console) != "0")
     log.info("启动 HushPlayer %s", VERSION)
+
+    # BUG-05: scale Qt's logical pixels for high-resolution displays. Must run
+    # before QApplication exists, otherwise the factor is ignored.
+    from .core.display import apply_scale_environment, scale_text
+
+    ui_scale = apply_scale_environment()
+    log.info("界面缩放：%s（QT_SCALE_FACTOR=%s）", scale_text(), ui_scale)
 
     QApplication.setAttribute(Qt.AA_DontCreateNativeWidgetSiblings, True)
     app = QApplication(argv)

@@ -50,6 +50,23 @@
 | 截图工具 | `tools/shot_app.py` |
 | 旧数据迁移 | `tools/migrate_legacy.py` |
 
+## 当前轮次状态（v1.0.1 · 缺陷整改第一轮）
+
+- 台账：[`docs/qa/REIMAGINED_FIX_ROUND1.md`](qa/REIMAGINED_FIX_ROUND1.md)；变更摘要：[`docs/CHANGELOG.md`](CHANGELOG.md)。
+- 10 项用户反馈：9 项「已验证修复」，1 项（BUG-07 正式 Logo）「受阻（等待素材）」，机制已完成。
+- 自动化：`119 passed`（`artifacts/junit_round1.xml`），既有 95 例未改动断言。
+- 新增关键模块：`core/display.py`（高 DPI 缩放）、`core/brand.py`（品牌资源）、`audio/clock.py`（60 Hz 插值时钟）、`ui/widgets/sweep.py`（软边逐字扫过）。
+- 重新生成的真实截图：`artifacts/shots/` → `docs/screenshots/`（34 张，含在线搜索、窄窗口、桌面歌词）。
+- 打包：`packaging/out/HushPlayer-1.0.1-win64.zip`（见 `packaging/out/SHA256SUMS.txt`）。
+
+### 后续可继续的方向
+
+1. 收到正式 Logo 后放入 `assets/brand/`，跑 `pytest tests/test_brand.py` 并重打包。
+2. 系统级媒体控制（SMTC）、任务栏缩略图按钮。
+3. 大型音乐库（>2 万首）分页/代理模型。
+4. 音源逐条进度与可取消的单音源搜索。
+5. 安装向导（可选）与代码签名。
+
 ## 常用命令
 
 ```powershell

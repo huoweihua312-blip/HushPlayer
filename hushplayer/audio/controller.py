@@ -90,6 +90,7 @@ class PlayerController(QObject):
         self._failures = 0
         self._pending_resume = 0
         self._paused_at = 0.0
+        self._paused_pending = False
         self._active_online: Track | None = None
         self._fallback_tried: set[str] = set()
         self._sources: list[SourceInfo] = []
@@ -137,6 +138,17 @@ class PlayerController(QObject):
 
     @property
     def state(self) -> str:
+        """UI-facing transport state.
+
+        While an online resource is being resolved/开流 the engine has not been
+        touched yet, so reporting ``engine.state`` alone made the UI claim
+        "stopped" while it was really loading — and, combined with the old
+        no-op pause, left the controls dead after a failed resolve.
+        """
+        if self._busy:
+            return "loading"
+        if self._paused_pending and self.engine.state == "stopped":
+            return "paused"
         return self.engine.state
 
     @property
@@ -245,7 +257,12 @@ class PlayerController(QObject):
             if self.queue.count:
                 self._play_current(reset_position=True)
             return
-        if self.engine.state == "playing":
+        if self._busy or self.engine.state == "loading":
+            # a pending stream counts as "playing" for the user: pressing the
+            # button must cancel it, not queue another resolve
+            self.pause()
+            return
+        if self.engine.state == "playing" or self.engine.is_playing_actual:
             self.pause()
         else:
             self.resume()
@@ -261,9 +278,26 @@ class PlayerController(QObject):
             self._load(self._track, position=self._position, autoplay=True)
 
     def pause(self) -> None:
-        if self.engine.state == "playing":
+        """Pause playback, including a stream that is still resolving/buffering.
+
+        Bug fix (round 1, BUG-02): previously this silently did nothing unless
+        the engine was already ``playing``. When an online resolve or proxy
+        fetch failed, the controller stayed ``loading`` for ever and the
+        transport control looked dead (the user's "can't pause/stop NetEase").
+        """
+        if self.engine.state == "playing" or self.engine.is_playing_actual:
             self._paused_at = time.monotonic()
             self.engine.pause()
+            return
+        if self.engine.state == "loading" or self._busy:
+            self._paused_at = time.monotonic()
+            # invalidate the in-flight resolve so a late answer cannot start
+            # playback behind the user's back
+            self._resolve_generation += 1
+            self._set_busy(False)
+            self._paused_pending = True
+            self.engine.halt_pending()
+            self.state_changed.emit("paused")
 
     def resume(self) -> None:
         if self._track is None:
@@ -273,7 +307,9 @@ class PlayerController(QObject):
             and (time.monotonic() - self._paused_at) * 1000 > RESUME_RECHECK_MS
             and self._track.is_online
         )
-        if self.engine.state == "paused" and not long_pause:
+        self._paused_pending = False
+        if self.engine.state == "paused" and not long_pause and self.engine.source:
+            self._paused_at = 0.0
             self.engine.play()
             return
         if long_pause:
@@ -283,9 +319,13 @@ class PlayerController(QObject):
         self._load(self._track, position=self._position, autoplay=True)
 
     def stop(self) -> None:
+        self._resolve_generation += 1
+        self._paused_pending = False
+        self._set_busy(False)
         self.engine.stop()
         self._position = 0
         self.position_changed.emit(0)
+        self.state_changed.emit("stopped")
 
     def next(self, *, auto: bool = False) -> None:
         if not self.queue.count:
@@ -397,6 +437,7 @@ class PlayerController(QObject):
         if track is None:
             return
         was_playing = self.engine.state == "playing"
+        self._paused_pending = False
         self._track = track
         self._pending_resume = max(0, int(position))
         self._position = self._pending_resume
@@ -507,6 +548,11 @@ class PlayerController(QObject):
         if self._failures < MAX_CONSECUTIVE_FAILURES and self.queue.count > 1:
             QTimer.singleShot(600, lambda: self.next(auto=True))
         else:
+            # The attempt is over: settle on a stopped, usable state instead of
+            # leaving ``loading`` stuck for ever with dead transport controls.
+            self._resolve_generation += 1
+            self._set_busy(False)
+            self.engine.stop()
             self.error_message.emit("在线播放失败，已停止")
 
     def _pick_fallback(self, track: Track, tried: set[str]) -> SourceInfo | None:
@@ -679,6 +725,11 @@ class PlayerController(QObject):
         if self._failures < MAX_CONSECUTIVE_FAILURES and self.queue.count > 1:
             QTimer.singleShot(700, lambda: self.next(auto=True))
         else:
+            # never leave the UI in a fake playing/loading state after a fatal
+            # error: stop the pipeline and clear the busy flag
+            self._resolve_generation += 1
+            self._set_busy(False)
+            self.engine.stop()
             self.error_message.emit("播放出错，已停止")
 
     def _on_sources(self, raw: list) -> None:

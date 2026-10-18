@@ -35,6 +35,7 @@ class AppContext:
     proxy: "AudioProxy"
     keeper: "PlaybackKeeper"
     settings: "Settings"
+    clock: "PlaybackClock | None" = None
     window: Any = None
     downloads: "DownloadService | None" = None
     updater: "UpdateService | None" = None

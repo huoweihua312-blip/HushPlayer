@@ -20,6 +20,7 @@ from PySide6.QtGui import QColor, QFont, QFontMetrics, QPainter, QPen
 from PySide6.QtWidgets import QScrollArea, QSizePolicy, QWidget
 
 from ...core.theme import rgba, theme
+from .sweep import paint_sweep
 from ...model.lyrics import LyricDocument, LyricLine
 
 
@@ -207,12 +208,15 @@ class LyricsBody(QWidget):
             if active and document.synced:
                 cut = self._sweep_offset(line, index, metrics, elided)
                 if cut > 0:
-                    sung_rect = QRectF(x - 4, top - 8, cut + 4, metrics.height() + 10)
-                    painter.save()
-                    painter.setClipRect(sung_rect)
-                    painter.setPen(QPen(QColor(self._accent)))
-                    painter.drawText(QPointF(x, baseline), elided)
-                    painter.restore()
+                    paint_sweep(
+                        painter,
+                        text=elided,
+                        font=font,
+                        color=QColor(self._accent),
+                        x=x,
+                        baseline=baseline,
+                        progress=cut,
+                    )
 
             if self._show_translation and line.translation.strip():
                 trans_top = top + metrics.height() + 3
@@ -325,6 +329,7 @@ class LyricsView(QWidget):
         self.scroll.setWidget(self.body)
         self.body.seek_requested.connect(self.seek_requested)
         self.body.active_changed.connect(self._on_active)
+        self._attach_clock()
 
         from PySide6.QtWidgets import QVBoxLayout
 
@@ -384,6 +389,22 @@ class LyricsView(QWidget):
         self._scroll_to_index(self.body.active_index, animate=False)
 
     # ------------------------------------------------------------------ 滚动
+    def _attach_clock(self) -> None:
+        try:
+            from ..context import ctx, has_context
+
+            if not has_context():
+                return
+            clock = ctx().clock
+        except Exception:  # noqa: BLE001 - contexts are optional in tests
+            return
+        if clock is not None:
+            clock.tick.connect(self._on_clock_tick)
+
+    def _on_clock_tick(self, position_ms: int) -> None:
+        if self.isVisible():
+            self.set_position(position_ms)
+
     def _on_active(self, index: int) -> None:
         self.active_changed.emit(index)
 

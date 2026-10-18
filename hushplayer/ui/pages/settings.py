@@ -9,6 +9,7 @@ import sys
 from PySide6.QtCore import QSize, Qt, Signal
 from PySide6.QtGui import QColor, QFontMetrics, QPainter, QPen
 from PySide6.QtWidgets import (
+    QApplication,
     QHBoxLayout,
     QLabel,
     QScrollArea,
@@ -20,8 +21,10 @@ from PySide6.QtWidgets import (
 from ...core import icons, paths
 from ...core.logging_setup import get_logger, log_exception
 from ...core.settings import settings as settings_singleton
+from ...core import brand
 from ...core.theme import Metrics, css_rgba, qcolor, rgba, theme
 from ...model.track import format_duration
+from ...online.models import build_sources
 from ..context import ctx
 from ..widgets.common import IconButton, TextButton
 from ..widgets.settings_widgets import (
@@ -288,6 +291,24 @@ class SettingsPage(Page):
         card.add_row(self._row("显示侧边栏", "隐藏后可通过标题栏左侧按钮恢复", self._toggle("appearance.sidebar_visible", True)))
         column.addWidget(card)
 
+        from ...core.display import SCALE_LABELS, physical_screen_size, recommended_scale, scale_text
+
+        card = SettingsCard("界面缩放", "针对 2K / 4K 显示器整体放大界面；切换后需要重启程序")
+        width, height = physical_screen_size()
+        recommended = SCALE_LABELS[recommended_scale(width)]
+        screen_note = f"（屏幕 {width}×{height}）" if width else ""
+        card.add_row(self._row(
+            "缩放比例",
+            f"当前生效 {scale_text()} · 推荐 {recommended}{screen_note}",
+            self._combo("appearance.ui_scale", list(SCALE_LABELS.items()), "auto"),
+        ))
+        card.add_row(self._row(
+            "立即重启",
+            "保存设置并重新打开 HushPlayer，使新的缩放比例生效",
+            self._action_button("重启程序", "refresh", self._restart_app),
+        ))
+        column.addWidget(card)
+
         card = SettingsCard("文字", "字号会按比例应用到整个界面")
         card.add_row(self._row(
             "界面字号",
@@ -525,6 +546,25 @@ class SettingsPage(Page):
         card.add(info)
         column.addWidget(card)
 
+    def _restart_app(self) -> None:
+        """Restart so a changed QT_SCALE_FACTOR is picked up (BUG-05)."""
+        from PySide6.QtCore import QProcess
+
+        from ...core.paths import is_frozen
+
+        program = sys.executable
+        args: list[str] = [] if is_frozen() else ["-m", "hushplayer"]
+        try:
+            self.settings.flush()
+            QProcess.startDetached(program, args)
+        except Exception as exc:  # noqa: BLE001
+            log_exception("重启程序失败", exc)
+            self._toast("重启失败，请手动关闭后重新打开 HushPlayer", "error")
+            return
+        app = QApplication.instance()
+        if app is not None:
+            app.quit()
+
     def _action_button(self, text: str, icon_name: str, handler) -> QWidget:
         holder = QWidget()
         layout = QHBoxLayout(holder)
@@ -559,6 +599,21 @@ class SettingsPage(Page):
         card.add_row(self._row("跨音源回退", "当前音源无法播放时，自动在其他音源中查找同一首歌", self._toggle("online.cross_source_fallback", True)))
         card.add_row(self._row("刷新音源列表", "重新加载插件目录，安装新音源后使用", self._action_button("刷新", "refresh", self._reload_sources)))
         column.addWidget(card)
+        # The Node runtime reports its plugin list asynchronously; subscribe once so
+        # the rows appear as soon as the sources arrive instead of staying empty
+        # until the user presses 刷新 (they used to see "尚未加载音源插件" forever).
+        if not getattr(self, "_sources_wired", False):
+            self._sources_wired = True
+            try:
+                client.sources_changed.connect(self._on_sources_changed)
+                client.ensure_started()
+            except Exception:  # noqa: BLE001
+                log_exception("订阅在线音源列表失败", None)
+        self._fill_sources()
+
+    def _on_sources_changed(self, sources) -> None:
+        if not hasattr(self, "_source_rows"):
+            return
         self._fill_sources()
 
     def _source_container(self) -> QWidget:
@@ -573,8 +628,11 @@ class SettingsPage(Page):
             if widget is not None:
                 widget.deleteLater()
         try:
-            sources = ctx().client.sources
-        except Exception:  # noqa: BLE001
+            sources = build_sources(ctx().client.sources)
+        except Exception as exc:  # noqa: BLE001
+            # Never swallow this: a wiring mistake here used to render an empty
+            # "尚未加载音源插件" card forever, with the real error hidden.
+            log_exception("读取在线音源列表失败", exc)
             sources = []
         if not sources:
             note = QLabel("尚未加载音源插件，点击「刷新」重试")
@@ -582,7 +640,15 @@ class SettingsPage(Page):
             note.setStyleSheet(f"color:{css_rgba(theme().palette.text, 0.5)};")
             self._source_rows.addWidget(note)
             return
+        # Several community plugins can share a display name (two "QQ音乐"
+        # builds, for example); disambiguate them with a short id suffix.
+        label_counts: dict[str, int] = {}
         for source in sources:
+            label_counts[source.label] = label_counts.get(source.label, 0) + 1
+        for source in sources:
+            label = source.label
+            if label_counts.get(label, 0) > 1:
+                label = f"{label} · {source.id[-4:]}"
             enabled = bool((self.settings.get("online.enabled_sources", {}) or {}).get(source.id, source.enabled))
             state = []
             if source.can_play:
@@ -600,7 +666,7 @@ class SettingsPage(Page):
                 mapping[sid] = bool(value)
                 self.settings.set("online.enabled_sources", mapping)
             switch.toggled.connect(apply)
-            self._source_rows.addWidget(SettingRow(source.label, detail, control=switch))
+            self._source_rows.addWidget(SettingRow(label, detail, control=switch))
 
     def _reload_sources(self) -> None:
         try:
@@ -681,6 +747,11 @@ class SettingsPage(Page):
         logo.setStyleSheet(
             f"color: #FFFFFF; background: {theme().palette.accent}; border-radius: 14px;"
         )
+        official = brand.rounded_logo_pixmap(56, theme().mode)
+        if official is not None:
+            logo.setText("")
+            logo.setStyleSheet("background: transparent;")
+            logo.setPixmap(official)
         row = QWidget()
         layout = QHBoxLayout(row)
         layout.setContentsMargins(0, 4, 0, 4)
@@ -840,6 +911,19 @@ class SettingsPage(Page):
 
     def refresh_theme(self) -> None:
         super().refresh_theme()
+        # BUG-08: cards and rows bake their colours into inline stylesheets at
+        # construction time, so they must be told to re-read the palette when the
+        # theme changes while the page is alive (they used to stay white).
         for section in self._sections.values():
+            self._refresh_tree(section)
             section.update()
         self._nav.update()
+
+    def _refresh_tree(self, root) -> None:
+        for child in root.findChildren(QWidget):
+            refresh = getattr(child, "refresh_theme", None)
+            if callable(refresh):
+                try:
+                    refresh()
+                except Exception:  # noqa: BLE001 - never let a card break theming
+                    pass

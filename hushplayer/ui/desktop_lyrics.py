@@ -15,11 +15,12 @@ import sys
 from typing import Any
 
 from PySide6.QtCore import QPoint, QRectF, Qt
-from PySide6.QtGui import QColor, QFont, QFontMetrics, QGuiApplication, QPainter, QPen
+from PySide6.QtGui import QColor, QFont, QFontMetrics, QFontMetricsF, QGuiApplication, QPainter, QPen
 from PySide6.QtWidgets import QMenu, QWidget
 
 from ..core.logging_setup import get_logger, log_exception
 from ..core.theme import rgba, theme
+from .widgets.sweep import paint_sweep, sweep_pixels_for_line
 from ..model.lyrics import LyricDocument
 from ..model.track import Track
 from .context import ctx
@@ -85,6 +86,9 @@ class DesktopLyricsWindow(QWidget):
         player = ctx().player
         player.track_changed.connect(self._on_track_changed)
         player.position_changed.connect(self._on_position)
+        clock = ctx().clock
+        if clock is not None:
+            clock.tick.connect(self._on_clock_tick)
         player.state_changed.connect(self._on_state)
         ctx().lyrics.resolved.connect(self._on_lyrics)
         self._settings.changed.connect(self._on_setting_changed)
@@ -122,6 +126,15 @@ class DesktopLyricsWindow(QWidget):
         self._position = max(0, int(position))
         if self.isVisible():
             self.update()
+
+    def _on_clock_tick(self, position_ms: int) -> None:
+        """60 Hz interpolated position keeps the karaoke sweep continuous (BUG-06)."""
+        if not self.isVisible() or self._document is None:
+            return
+        if position_ms == self._position:
+            return
+        self._position = position_ms
+        self.update()
 
     def _on_state(self, _state: str) -> None:
         if self.isVisible():
@@ -400,9 +413,22 @@ class DesktopLyricsWindow(QWidget):
             QColor(self._color),
             Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignVCenter,
         )
-        cut = self._sweep_chars(document, line, index)
-        if cut > 0:
-            self._paint_sweep(painter, main_rect, text, cut, metrics, QColor(self._highlight))
+        progress = self._sweep_pixels(document, line, index, primary, metrics, text)
+        if progress > 0:
+            baseline = (
+                main_rect.center().y()
+                - (metrics.ascent() + metrics.descent()) / 2
+                + metrics.ascent()
+            )
+            paint_sweep(
+                painter,
+                text=text,
+                font=primary,
+                color=QColor(self._highlight),
+                x=main_rect.center().x() - metrics.horizontalAdvance(text) / 2,
+                baseline=baseline,
+                progress=progress,
+            )
 
         y = top + main_h
         if self._show_translation and trans_h:
@@ -457,53 +483,24 @@ class DesktopLyricsWindow(QWidget):
             "桌面歌词 · 暂无歌词" if self._track is not None else "桌面歌词",
         )
 
-    def _sweep_chars(self, document: LyricDocument, line, index: int) -> int:
-        """返回当前行已「唱过」的字符数（支持逐词时间轴与行内插值）。"""
-        duration = max(1, line.end_ms - line.start_ms)
-        position = self._position
-        if line.has_word_timing:
-            word_index, fraction = document.word_progress(index, position)
-            if word_index < 0:
-                return 0
-            consumed = 0
-            for i, word in enumerate(line.words):
-                if i < word_index:
-                    consumed += len(word.text)
-                elif i == word_index:
-                    if fraction >= 0.999:
-                        consumed += len(word.text)
-                    else:
-                        # 词内按字符均分，避免整词突然变色
-                        consumed += int(round(len(word.text) * fraction))
-                    break
-            return min(len(line.text), consumed)
+    def _sweep_pixels(self, document, line, index: int, font: QFont, metrics: QFontMetrics, text: str) -> float:
+        """Sweep offset in fractional pixels, honouring real per-word timings."""
+        position = self._position - getattr(document, "offset_ms", 0)
+        if getattr(line, "words", None):
+            return sweep_pixels_for_line(
+                QFontMetricsF(font),
+                text,
+                progress=0.0,
+                words=line.words,
+                position=position,
+            )
         if position <= line.start_ms:
-            return 0
+            return 0.0
         if position >= line.end_ms:
-            return len(line.text)
-        return int(round(len(line.text) * (position - line.start_ms) / duration))
-
-    def _paint_sweep(
-        self,
-        painter: QPainter,
-        rect: QRectF,
-        text: str,
-        cut: int,
-        metrics: QFontMetrics,
-        highlight: QColor,
-    ) -> None:
-        if cut <= 0:
-            return
-        total = metrics.horizontalAdvance(text)
-        prefix = metrics.horizontalAdvance(text[:cut])
-        if total <= 0 or prefix <= 0:
-            return
-        left = rect.center().x() - total / 2
-        painter.save()
-        painter.setClipRect(QRectF(left - 2, rect.top(), prefix + 2, rect.height()))
-        painter.setPen(QPen(highlight))
-        painter.drawText(rect, Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignVCenter, text)
-        painter.restore()
+            return float(metrics.horizontalAdvance(text))
+        span = max(1, line.end_ms - line.start_ms)
+        ratio = (position - line.start_ms) / span
+        return float(metrics.horizontalAdvance(text)) * max(0.0, min(1.0, ratio))
 
 
 __all__ = ["DesktopLyricsWindow", "ensure_desktop_lyrics"]

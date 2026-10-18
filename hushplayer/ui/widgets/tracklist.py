@@ -389,42 +389,71 @@ class TrackDelegate(QStyledItemDelegate):
 
         rect = QRectF(option.rect).adjusted(1, 1, -1, -2)
         selected = bool(option.state & QStyle.State_Selected)
-        hover = bool(option.state & QStyle.State_MouseOver) and not selected
+        hovered = bool(option.state & QStyle.State_MouseOver)
+        hover = hovered and not selected
+        focused = bool(option.state & QStyle.State_HasFocus)
         is_current = track.id == model.current_id
         radius = 7.0
-        if selected:
+
+        # --- visual precedence (BUG-10) ------------------------------------
+        # selected  : soft berry tint, title/text keep the normal colour so the
+        #             playing state can never make the row unreadable
+        # playing   : berry title + equaliser bars + leading accent marker
+        # both      : tint + bars + marker, title stays text colour
+        # hover     : neutral wash (never a second accent layer)
+        if index.column() == 0:
+            # Paint the highlight once per row (not per cell) so the selection
+            # reads as one continuous row instead of four rounded pills.
+            row_rect = QRectF(
+                0.5,
+                option.rect.top() + 1.0,
+                max(1.0, self.view.viewport().width() - 1.0),
+                option.rect.height() - 3.0,
+            )
+            if selected:
+                alpha = (0.20 if hovered else 0.15) if palette.is_dark else (0.15 if hovered else 0.11)
+                painter.setPen(Qt.NoPen)
+                painter.setBrush(rgba(palette.accent, alpha))
+                painter.drawRoundedRect(row_rect, radius, radius)
+            elif hover:
+                painter.setPen(Qt.NoPen)
+                painter.setBrush(rgba(palette.text, 0.045))
+                painter.drawRoundedRect(row_rect, radius, radius)
+
+        if is_current and index.column() == COLUMN_INDEX:
+            marker = QRectF(rect.left() + 2.5, rect.center().y() - rect.height() * 0.20, 3.0,
+                            rect.height() * 0.40)
             painter.setPen(Qt.NoPen)
-            painter.setBrush(rgba(palette.accent, 0.18 if palette.is_dark else 0.13))
-            painter.drawRoundedRect(rect, radius, radius)
-        elif hover:
-            painter.setPen(Qt.NoPen)
-            painter.setBrush(rgba(palette.text, 0.045))
-            painter.drawRoundedRect(rect, radius, radius)
+            painter.setBrush(rgba(palette.accent, 0.95))
+            painter.drawRoundedRect(marker, 1.5, 1.5)
 
         column = DEFAULT_COLUMNS[index.column()].key
         inner = rect.adjusted(12, 0, -10, 0)
         if column == COLUMN_INDEX:
-            self._paint_index(painter, rect, index.row(), is_current)
+            self._paint_index(painter, rect, index.row(), is_current, selected)
         elif column == COLUMN_TITLE:
-            self._paint_title(painter, inner, track, is_current)
+            self._paint_title(painter, inner, track, is_current, selected)
         elif column == COLUMN_ARTIST:
-            self._paint_text(painter, inner, track.artist, 9.2, 0.66, is_current, secondary=True)
+            self._paint_text(painter, inner, track.artist, 9.2, 0.66, is_current, selected,
+                             secondary=True)
         elif column == COLUMN_ALBUM:
-            self._paint_text(painter, inner, track.album, 9.2, 0.52, is_current, secondary=True)
+            self._paint_text(painter, inner, track.album, 9.2, 0.52, is_current, selected,
+                             secondary=True)
         elif column == COLUMN_DURATION:
-            self._paint_duration(painter, inner, track)
+            self._paint_duration(painter, inner, track, selected)
         elif column == COLUMN_FAVORITE:
             self._paint_favorite(painter, rect, track, index.row())
         painter.restore()
 
-    def _paint_index(self, painter: QPainter, rect: QRectF, row: int, is_current: bool) -> None:
+    def _paint_index(self, painter: QPainter, rect: QRectF, row: int, is_current: bool,
+                     selected: bool = False) -> None:
         palette = theme().palette
         if is_current:
             self._paint_bars(painter, rect)
             return
         font = theme().font(8.8, 500)
         painter.setFont(font)
-        painter.setPen(QPen(rgba(palette.text, 0.32)))
+        painter.setPen(QPen(rgba(palette.text, 0.50 if selected else 0.32)))
         painter.drawText(
             rect.adjusted(0, 0, -8, 0),
             int(Qt.AlignRight | Qt.AlignVCenter),
@@ -447,7 +476,10 @@ class TrackDelegate(QStyledItemDelegate):
         width = 2.4
         gap = 2.6
         total = 3 * width + 2 * gap
-        x = rect.center().x() - total / 2
+        # BUG-09: the row-number column right-aligns its text (rect.right()-8),
+        # but the equaliser used to be centred in the column, so the playing
+        # indicator looked shifted left compared with every other row number.
+        x = rect.right() - 8 - total
         for height in heights:
             bar = QRectF(x, rect.center().y() - height / 2, width, height)
             painter.setPen(Qt.NoPen)
@@ -455,7 +487,8 @@ class TrackDelegate(QStyledItemDelegate):
             painter.drawRoundedRect(bar, width / 2, width / 2)
             x += width + gap
 
-    def _paint_title(self, painter: QPainter, rect: QRectF, track: Track, is_current: bool) -> None:
+    def _paint_title(self, painter: QPainter, rect: QRectF, track: Track, is_current: bool,
+                     selected: bool = False) -> None:
         palette = theme().palette
         compact = self.view.model().compact
         cover_size = 36 if compact else 40
@@ -494,7 +527,19 @@ class TrackDelegate(QStyledItemDelegate):
 
         title_font = theme().font(9.6 if not compact else 9.2, 600 if is_current else 500)
         painter.setFont(title_font)
-        color = palette.accent if is_current else palette.text
+        # accent title only while the row is *not* selected: on the tinted
+        # selection background berry-on-berry was unreadable (BUG-10)
+        if is_current and not selected:
+            # The raw brand accent is 4.4:1 on the surface tone; nudge it toward
+            # the foreground in dark mode so the playing title clears WCAG AA
+            # (4.5:1) without losing the berry hue.
+            color = (
+                mix(palette.accent, palette.text, 0.16)
+                if palette.is_dark
+                else palette.accent
+            )
+        else:
+            color = palette.text
         painter.setPen(QPen(rgba(color, 0.98)))
         metrics = QFontMetrics(title_font)
         title = metrics.elidedText(track.title, Qt.ElideRight, int(max(20, available)))
@@ -507,7 +552,7 @@ class TrackDelegate(QStyledItemDelegate):
             )
             sub_font = theme().font(8.2, 400)
             painter.setFont(sub_font)
-            painter.setPen(QPen(rgba(palette.text, 0.5)))
+            painter.setPen(QPen(rgba(palette.text, 0.62 if selected else 0.5)))
             painter.drawText(
                 QRectF(text_left, rect.center().y() + 1, max(20, available), 14),
                 int(Qt.AlignLeft | Qt.AlignVCenter),
@@ -522,7 +567,7 @@ class TrackDelegate(QStyledItemDelegate):
                 )
                 sub_font = theme().font(8.4, 400)
                 painter.setFont(sub_font)
-                painter.setPen(QPen(rgba(palette.text, 0.46)))
+                painter.setPen(QPen(rgba(palette.text, 0.62 if selected else 0.46)))
                 painter.drawText(
                     QRectF(text_left, rect.center().y() + 1, max(20, available), 16),
                     int(Qt.AlignLeft | Qt.AlignVCenter),
@@ -554,14 +599,16 @@ class TrackDelegate(QStyledItemDelegate):
         size: float,
         opacity: float,
         is_current: bool,
+        selected: bool = False,
         *,
         secondary: bool = False,
     ) -> None:
         palette = theme().palette
         font = theme().font(size, 500)
         painter.setFont(font)
-        color = palette.accent if is_current and not secondary else palette.text
-        painter.setPen(QPen(rgba(color, opacity if not is_current else max(opacity, 0.75))))
+        color = palette.text
+        alpha = max(opacity, 0.72) if selected else opacity
+        painter.setPen(QPen(rgba(color, alpha)))
         metrics = QFontMetrics(font)
         painter.drawText(
             rect,
@@ -569,11 +616,12 @@ class TrackDelegate(QStyledItemDelegate):
             metrics.elidedText(text or "—", Qt.ElideRight, int(rect.width())),
         )
 
-    def _paint_duration(self, painter: QPainter, rect: QRectF, track: Track) -> None:
+    def _paint_duration(self, painter: QPainter, rect: QRectF, track: Track,
+                        selected: bool = False) -> None:
         palette = theme().palette
         font = theme().font(8.6, 500)
         painter.setFont(font)
-        painter.setPen(QPen(rgba(palette.text, 0.42)))
+        painter.setPen(QPen(rgba(palette.text, 0.58 if selected else 0.42)))
         text = format_duration(track.duration_ms) if track.duration_ms else "—"
         painter.drawText(rect, int(Qt.AlignRight | Qt.AlignVCenter), text)
 
@@ -638,6 +686,10 @@ class TrackTable(QTableView):
         self.setFocusPolicy(Qt.StrongFocus)
         self.setCornerButtonEnabled(False)
         self.setStyleSheet("QTableView{background:transparent;border:none;outline:none;}")
+        # BUG-10: Qt still painted its own highlight/focus decorations (solid
+        # blue bars at every cell edge) on top of the delegate painter. Make
+        # the native highlight fully transparent; the delegate owns selection.
+        self._neutralise_native_selection()
         self.viewport().setAutoFillBackground(False)
         self.setAutoFillBackground(False)
         self._columns = list(DEFAULT_COLUMNS)
@@ -655,6 +707,20 @@ class TrackTable(QTableView):
         self._empty_text = "这里还没有歌曲"
         self._empty_hint = ""
         self.setAccessibleName("歌曲列表")
+
+    def _neutralise_native_selection(self) -> None:
+        from PySide6.QtGui import QColor as _QColor, QPalette as _QPalette
+
+        pal = self.palette()
+        for role in (_QPalette.ColorRole.Highlight, _QPalette.ColorRole.HighlightedText):
+            color = _QColor(0, 0, 0, 0) if role == _QPalette.ColorRole.Highlight else _QColor(
+                theme().palette.text
+            )
+            pal.setColor(_QPalette.ColorGroup.Active, role, color)
+            pal.setColor(_QPalette.ColorGroup.Inactive, role, color)
+            pal.setColor(_QPalette.ColorGroup.Disabled, role, color)
+        self.setPalette(pal)
+        self.viewport().setPalette(pal)
 
     # ------------------------------------------------------------------- api
     @property
@@ -730,6 +796,7 @@ class TrackTable(QTableView):
             self.scrollTo(index, QAbstractItemView.EnsureVisible)
 
     def refresh_theme(self) -> None:
+        self._neutralise_native_selection()
         self.viewport().update()
         self._header.update()
 

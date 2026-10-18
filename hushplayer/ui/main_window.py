@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Callable
 
 from PySide6.QtCore import QEvent, QPoint, QRect, QTimer, Qt, Signal
-from PySide6.QtGui import QAction, QIcon, QKeySequence, QShortcut
+from PySide6.QtGui import QGuiApplication, QAction, QIcon, QKeySequence, QShortcut
 from PySide6.QtWidgets import (
     QApplication,
     QHBoxLayout,
@@ -20,7 +20,7 @@ from PySide6.QtWidgets import (
 from ..core.logging_setup import get_logger, log_exception
 from ..core.paths import data_dir
 from ..core.theme import apply_theme_to_app, theme
-from ..core import icons
+from ..core import brand, icons
 from .context import ctx
 from .menus import playlist_menu
 from .widgets.frameless import FramelessWindow, center_on_screen, ensure_on_screen
@@ -57,7 +57,7 @@ class MainWindow(FramelessWindow):
         self.setWindowTitle("HushPlayer")
         self.setMinimumSize(940, 620)
         self.resize(1240, 800)
-        self.setWindowIcon(QIcon(icons.pixmap("headphones", theme().palette.accent, 48)))
+        self.setWindowIcon(brand.app_icon())
 
         self._pages: dict[str, QWidget] = {}
         self._history: list[tuple[str, object]] = []
@@ -429,7 +429,7 @@ class MainWindow(FramelessWindow):
         if not QSystemTrayIcon.isSystemTrayAvailable():
             return
         self._tray = QSystemTrayIcon(self)
-        self._tray.setIcon(QIcon(icons.pixmap("headphones", theme().palette.accent, 32)))
+        self._tray.setIcon(brand.app_icon())
         self._tray.setToolTip("HushPlayer")
         menu = QMenu()
         show_action = QAction("显示 HushPlayer", self)
@@ -585,18 +585,29 @@ class MainWindow(FramelessWindow):
         height = int(stored.get("h", 0) or 0)
         x = int(stored.get("x", -1) or -1)
         y = int(stored.get("y", -1) or -1)
-        if width >= 940 and height >= 620:
+        screen = self.screen() or QGuiApplication.primaryScreen()
+        available = screen.availableGeometry() if screen is not None else QRect(0, 0, 1280, 820)
+        too_big = width >= available.width() - 2 and height >= available.height() - 2
+        if width >= 940 and height >= 620 and not too_big:
             rect = ensure_on_screen(self, QRect(x, y, width, height))
             self.setGeometry(rect)
         else:
-            self.resize(1240, 800)
             center_on_screen(self, screen_ratio=0.78)
+        self._normal_geometry = QRect(self.geometry())
         if stored.get("maximized"):
-            QTimer.singleShot(0, self.showMaximized)
+            QTimer.singleShot(0, self._start_maximized)
+
+    def _start_maximized(self) -> None:
+        self.showMaximized()
+        self._maximized = True
+        self._sync_maximized_ui()
 
     def _save_geometry(self) -> None:
         settings = ctx().settings
-        geometry = self.normalGeometry() if self.isMaximized() else self.geometry()
+        maximized = bool(self.isMaximized())
+        geometry = self.normal_geometry() if maximized else QRect(self.geometry())
+        if geometry.width() < 480 or geometry.height() < 360:
+            geometry = QRect(self._normal_geometry)
         settings.set(
             "general.window",
             {
@@ -604,7 +615,7 @@ class MainWindow(FramelessWindow):
                 "y": geometry.y(),
                 "w": geometry.width(),
                 "h": geometry.height(),
-                "maximized": bool(self.isMaximized()),
+                "maximized": maximized,
             },
         )
         settings.flush()

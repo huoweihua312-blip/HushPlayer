@@ -74,6 +74,19 @@ class _MoodBackground(QWidget):
         self._mix = float(value)
         self.update()
 
+    def snap_to(self, mood: Mood) -> None:
+        """Apply a mood without any cross-fade.
+
+        Used for the very first frame when the window opens: animating from the
+        neutral near-black base produced a visible dark flash (BUG-01, measured
+        ~0.4 s / luma 80 -> 33 in the recording).
+        """
+        self._anim.stop()
+        self._previous = mood
+        self._mood = mood
+        self._mix = 1.0
+        self.update()
+
     def mood(self) -> Mood:
         return self._mood
 
@@ -765,15 +778,24 @@ class ImmersiveWindow(QWidget):
             geometry = screen.availableGeometry()
             self.setGeometry(geometry)
         self._restore_mode()
-        self._on_track_changed(ctx().player.current, force=True)
+        # BUG-01: build the complete first frame *before* the window is mapped.
+        # Showing first and filling it afterwards produced a black frame plus a
+        # 680 ms mood cross-fade from near-black every time the player opened.
+        self._on_track_changed(ctx().player.current, force=True, animate_mood=False)
+        self.set_mode(self._mode, animate=False)
+        self.controls.sync_from_player()
+        self._on_state(ctx().player.state)
+        self._on_position(ctx().player.position)
+        self._update_track_meta()
+        self._fade_effect.setOpacity(1.0)
+        self.ensurePolished()
+        self.layout().activate()
+        # force layout + cover/lyrics rasterisation into the backing store so the
+        # first mapped frame already has content
+        self.grab()
         self.show()
         self.raise_()
         self.activateWindow()
-        self._on_state(ctx().player.state)
-        position = ctx().player.position
-        self._on_position(position)
-        self.controls.sync_from_player()
-        self._update_track_meta()
 
     def close_immersive(self) -> None:
         if self._fullscreen:
@@ -821,7 +843,8 @@ class ImmersiveWindow(QWidget):
             self.toggle_queue()
 
     # ------------------------------------------------------------------ 同步
-    def _on_track_changed(self, track: Track | None, *, force: bool = False) -> None:
+    def _on_track_changed(self, track: Track | None, *, force: bool = False,
+                          animate_mood: bool = True) -> None:
         if track is self._track and not force:
             return
         self._track = track
@@ -834,7 +857,10 @@ class ImmersiveWindow(QWidget):
                 mood = mood_for_pixmap(ctx().covers.pixmap(track, 96))
             except Exception:
                 mood = NEUTRAL_DARK
-        self.background.set_mood(mood)
+        if animate_mood:
+            self.background.set_mood(mood)
+        else:
+            self.background.snap_to(mood)
         self.stage.set_document(None)
         self.lyrics_stage.set_document(None)
         if track is not None:

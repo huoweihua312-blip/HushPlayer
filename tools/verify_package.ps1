@@ -28,6 +28,9 @@ using System.Runtime.InteropServices;
 public class W {
   [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr h, out RECT r);
   [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr h);
+    [DllImport("user32.dll")] public static extern bool BringWindowToTop(IntPtr h);
+    [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr h, int c);
+    [DllImport("user32.dll")] public static extern bool PrintWindow(IntPtr h, IntPtr hdc, uint flags);
   [DllImport("user32.dll")] public static extern bool PostMessage(IntPtr h, uint m, IntPtr w, IntPtr l);
   [DllImport("user32.dll")] public static extern bool IsWindowVisible(IntPtr h);
   public struct RECT { public int Left, Top, Right, Bottom; }
@@ -55,11 +58,22 @@ $rect = New-Object W+RECT
 $w = $rect.Right - $rect.Left
 $h = $rect.Bottom - $rect.Top
 Write-Host "window=${w}x${h} at $($rect.Left),$($rect.Top)"
-[void][W]::SetForegroundWindow($hwnd)
-Start-Sleep -Milliseconds 700
-$bmp = New-Object System.Drawing.Bitmap $w, $h
-$g = [System.Drawing.Graphics]::FromImage($bmp)
-$g.CopyFromScreen($rect.Left, $rect.Top, 0, 0, $bmp.Size)
+    # Focus stealing prevention can ignore SetForegroundWindow when the terminal
+    # owns the foreground; raise the window explicitly and capture it with
+    # PrintWindow so the shot shows the app even when a browser is on top.
+    [void][W]::ShowWindow($hwnd, 5)
+    [void][W]::BringWindowToTop($hwnd)
+    [void][W]::SetForegroundWindow($hwnd)
+    Start-Sleep -Milliseconds 900
+    $bmp = New-Object System.Drawing.Bitmap $w, $h
+    $g = [System.Drawing.Graphics]::FromImage($bmp)
+    $hdc = $g.GetHdc()
+    $captured = [W]::PrintWindow($hwnd, $hdc, 2)
+    $g.ReleaseHdc($hdc)
+    if (-not $captured) {
+        Write-Host "PrintWindow failed, falling back to screen capture"
+        $g.CopyFromScreen($rect.Left, $rect.Top, 0, 0, $bmp.Size)
+    }
 $shot = Join-Path $root "artifacts\shots\packaged_run.png"
 $bmp.Save($shot, [System.Drawing.Imaging.ImageFormat]::Png)
 $g.Dispose(); $bmp.Dispose()
