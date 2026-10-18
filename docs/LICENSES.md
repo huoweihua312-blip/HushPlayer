@@ -67,3 +67,12 @@ Qt 以 LGPL 方式动态链接，允许在闭源/开源应用中分发；PyInsta
 | 资源 | 来源 | 说明 |
 | --- | --- | --- |
 | `assets/brand/HushPlayer.ico`、`assets/brand/logo.png` | 用户提供 | 仅用于本应用；不得再自造替代标志 |
+
+
+## 品牌素材
+
+- `assets/brand/HushPlayer.ico`、`assets/brand/logo_dark.svg`、`assets/brand/logo_light.svg`
+  来自用户已有的 HushPlayer 项目（`assets/icons/`、`app/ui_v2/assets/quiet-orbit-logo*.svg`），
+  随本项目一同分发，仅用于 HushPlayer 自身界面与安装包。
+- `assets/fonts/MiSans-*.ttf` 版权归小米科技，按 `MiSans-NOTICE.md` 与 `MiSans-License.pdf`
+  以应用资源方式嵌入，不安装到系统、不单独分发。

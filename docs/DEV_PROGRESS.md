@@ -95,3 +95,11 @@ powershell -ExecutionPolicy Bypass -File packaging\build.ps1 -Zip
 - 已完成并验证：R2-01 闪屏（渲染层）、R2-02 幽灵窗口、R2-03 在线搜索与音源增删、R2-04 官方 Logo、R2-05 滑块卡顿、R2-06 主题过渡 + 日月按钮、R2-07 三角居中、R2-08 MiSans 字体、R2-09 最大化白边。
 - 全量测试 120 passed；打包与 verify 见 `docs/qa/REIMAGINED_FIX_ROUND2.md` 与 `docs/TEST_REPORT.md` 第 9 节。
 - 待人工确认：真实显示器上的闪屏观感、混合 DPI 拖动、字体主观一致性。
+
+
+## 当前轮次状态（v1.0.3）
+
+- 第三轮反馈：清晰度/字号范围、跨源播放、原版 LOGO 全部完成，台账见
+  [`qa/REIMAGINED_FIX_ROUND3.md`](qa/REIMAGINED_FIX_ROUND3.md)。
+- 已交付：源码、124 项自动化测试、真实窗口截图、1.0.3 打包产物与验证日志。
+- 后续可做：SMTC 系统媒体面板、任务栏进度、插件自动更新检查、跨源回退候选列表 UI。

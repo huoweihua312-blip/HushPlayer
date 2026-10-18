@@ -11,6 +11,7 @@ from PySide6.QtCore import (
     QPropertyAnimation,
     QRectF,
     QSize,
+    QSizeF,
     Qt,
     Signal,
 )
@@ -58,26 +59,25 @@ COLLECTION: tuple[NavEntry, ...] = (
 
 
 class LogoMark(QWidget):
-    def __init__(self, size: int = 26, parent: QWidget | None = None) -> None:
+    """The original vector mark (112x76), drawn without an icon tile."""
+
+    def __init__(self, width: int = 38, parent: QWidget | None = None) -> None:
         super().__init__(parent)
-        self.setFixedSize(size, size)
+        self.setFixedSize(width, max(18, round(width * 76 / 112)))
 
     def paintEvent(self, event) -> None:  # noqa: N802
         painter = QPainter(self)
         painter.setRenderHint(QPainter.Antialiasing, True)
         rect = QRectF(self.rect()).adjusted(0.5, 0.5, -0.5, -0.5)
-        # BUG-07: the official logo, once supplied, replaces the placeholder mark
-        # everywhere (sidebar, about card, window/tray icon, installer).
-        official = brand.rounded_logo_pixmap(max(12, self.width()), theme().mode)
+        # BUG-07 / R3-03: the in-app mark is the original vector logo (two
+        # colour variants), not the padded application icon tile.
+        official = brand.logo_pixmap(max(16, self.width()), theme().mode)
         if official is not None:
-            painter.drawPixmap(QPointF(0, 0), official)
-            if not brand.has_official_logo():
-                # The generated placeholder mark is charcoal on charcoal in the
-                # dark sidebar; a hairline keeps it legible until the official
-                # logo lands (see assets/brand/README.md).
-                painter.setBrush(Qt.NoBrush)
-                painter.setPen(QPen(rgba(theme().palette.text, 0.18), 1.0))
-                painter.drawRoundedRect(rect, rect.width() * 0.30, rect.width() * 0.30)
+            logical = QSizeF(official.width() / (official.devicePixelRatio() or 1.0),
+                             official.height() / (official.devicePixelRatio() or 1.0))
+            x = (self.width() - logical.width()) / 2
+            y = (self.height() - logical.height()) / 2
+            painter.drawPixmap(QPointF(x, y), official)
             painter.end()
             return
         gradient = QLinearGradient(rect.topLeft(), rect.bottomRight())

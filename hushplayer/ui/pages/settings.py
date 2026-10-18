@@ -317,7 +317,7 @@ class SettingsPage(Page):
             "界面字号",
             "",
             self._slider(
-                "appearance.font_scale", 0.85, 1.2, default=1.0,
+                "appearance.font_scale", 0.80, 1.80, default=1.0,
                 formatter=lambda v: f"{int(round(v * 100))}%",
             ),
         ))
@@ -420,7 +420,7 @@ class SettingsPage(Page):
 
         card = SettingsCard("显示", "")
         card.add_row(self._row(
-            "歌词字号", "", self._slider("lyrics.font_scale", 0.8, 1.5, default=1.0, formatter=lambda v: f"{int(round(v * 100))}%")
+            "歌词字号", "", self._slider("lyrics.font_scale", 0.7, 2.0, default=1.0, formatter=lambda v: f"{int(round(v * 100))}%")
         ))
         card.add_row(self._row(
             "歌词对齐", "沉浸式与歌词页面对齐方式", self._segmented("lyrics.alignment", [("居中", "center"), ("左对齐", "left")], "center")
@@ -844,7 +844,7 @@ class SettingsPage(Page):
         logo.setStyleSheet(
             f"color: #FFFFFF; background: {theme().palette.accent}; border-radius: 14px;"
         )
-        official = brand.rounded_logo_pixmap(56, theme().mode)
+        official = brand.logo_pixmap(56, theme().mode)
         if official is not None:
             logo.setText("")
             logo.setStyleSheet("background: transparent;")

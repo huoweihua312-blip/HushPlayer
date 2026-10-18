@@ -163,3 +163,18 @@ $ .venv\Scripts\python.exe -m pytest -q
 | `tools/probe_r2_sources.py` | 音源删除 → 恢复：7 → 6 → 7 |
 
 人工验收项见 [`docs/qa/REIMAGINED_FIX_ROUND2.md`](../docs/qa/REIMAGINED_FIX_ROUND2.md) 第 5 节。
+
+
+## 10. 第三轮反馈整改（v1.0.3）
+
+| 项目 | 结果 |
+| --- | --- |
+| 全量自动化测试 | **127 passed / 0 failed / 0 skipped**，30.48 s（`artifacts/junit_round3_final.xml`） |
+| 新增测试文件 | `tests/test_cross_source.py`（4 例：打分排序、跨源回退、音质递进、关闭回退）、`tests/test_theme.py`（3 例：整数像素与 hinting、字号下限、缩放单调性） |
+| 更新测试 | `tests/test_playback_state.py` 改为整条音质链失败后必须落到 stopped 且给出错误提示 |
+| 真实网络验证 | `tools/probe_r3_sources.py` 7 个音源搜索/解析；`tools/probe_r3_fallback.py` 酷狗 404 → 跨源播放 `state=playing`、`position=1665ms` |
+| 真实 GUI | 首页/歌曲/设置 1600×1025（1280×820 @125%）截图重采；侧栏标志与关于页改为原版 SVG |
+| 打包产物 | 1.0.3 onedir + zip，`tools/verify_package.ps1` 启动/单实例/退出验证 |
+
+结论：第三轮 3 项可修反馈全部修复并验证；酷狗/QQ海棠的 404 与小米搜索异常属于插件依赖的第三方接口，
+通过跨源回退保证同一首歌仍可播放，已在 UI 标明实际来源。

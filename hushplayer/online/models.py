@@ -46,6 +46,7 @@ class SourceInfo:
     loaded: bool = False
     capabilities: dict[str, Any] = field(default_factory=dict)
     raw: dict[str, Any] = field(default_factory=dict)
+    suffix: str = ""
 
     # ------------------------------------------------------------- factories
     @classmethod
@@ -73,7 +74,7 @@ class SourceInfo:
     # ------------------------------------------------------------ properties
     @property
     def label(self) -> str:
-        return platform_label(self.platform, self.name)
+        return f"{platform_label(self.platform, self.name)}{self.suffix}"
 
     @property
     def searchable(self) -> bool:
@@ -123,6 +124,16 @@ def build_sources(raw_sources: Iterable[Mapping[str, Any]]) -> list[SourceInfo]:
             info = SourceInfo.from_dict(entry)
             if info.id:
                 items.append(info)
+    # Community plugins can share a display name (two "QQ音乐" builds); keep
+    # the label recognisable but unambiguous in badges and status messages.
+    counts: dict[str, int] = {}
+    for source in items:
+        counts[source.label] = counts.get(source.label, 0) + 1
+    for source in items:
+        if counts.get(source.label, 0) > 1:
+            # ``label`` is derived from ``platform``; a suffix keeps two builds
+            # of the same platform distinguishable everywhere.
+            source.suffix = f" · {source.id[-4:]}"
     return items
 
 

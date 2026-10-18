@@ -26,6 +26,14 @@ from PySide6.QtCore import QObject, QTimer, Signal
 from ..core.logging_setup import get_logger
 from ..model.track import Track
 from ..online.client import OnlineSourceClient
+from ..online.matching import (
+    AUTO_MARGIN,
+    AUTO_MIN_SCORE,
+    CANDIDATE_MIN_SCORE,
+    MatchCandidate,
+    normalize_text,
+    rank_candidates,
+)
 from ..online.models import SourceInfo, build_sources, runtime_track, tracks_from_items
 from ..online.proxy import AudioProxy
 from .engine import PlaybackEngine
@@ -35,7 +43,11 @@ log = get_logger("audio.controller")
 
 MAX_CONSECUTIVE_FAILURES = 3
 RESUME_RECHECK_MS = 240_000       # re-resolve online streams after a long pause
-FALLBACK_MAX = 2                  # how many other sources to try
+FALLBACK_MAX = 4                  # how many other sources to try
+#: Some plugins only expose one quality; try the common tiers before giving up.
+QUALITY_CHAIN = ("standard", "higher", "320k")
+FALLBACK_SEARCH_TIMEOUT_MS = 14000
+FALLBACK_MAX_CANDIDATES = 3
 
 
 @dataclass(slots=True)
@@ -95,6 +107,7 @@ class PlayerController(QObject):
         self._fallback_tried: set[str] = set()
         self._sources: list[SourceInfo] = []
         self._quality = "standard"
+        self._quality_index = 0
         self._online_fallback = True
 
         self.engine.set_volume(self._volume)
@@ -150,6 +163,14 @@ class PlayerController(QObject):
         if self._paused_pending and self.engine.state == "stopped":
             return "paused"
         return self.engine.state
+
+    @property
+    def _quality_chain(self) -> tuple[str, ...]:
+        chain = [self._quality or "standard"]
+        for tier in QUALITY_CHAIN:
+            if tier not in chain:
+                chain.append(tier)
+        return tuple(chain)
 
     @property
     def current(self):
@@ -484,6 +505,7 @@ class PlayerController(QObject):
             return
         self._resolve_generation += 1
         generation = self._resolve_generation
+        self._quality_index = 0
         self._set_busy(True, "正在获取播放地址…")
         self.client.resolve_playback(
             source_id,
@@ -499,6 +521,23 @@ class PlayerController(QObject):
         self._set_busy(False)
         if not response.get("ok"):
             error = str(response.get("error") or "未知错误")
+            chain = self._quality_chain
+            if self._quality_index + 1 < len(chain):
+                # Some plugins only resolve one quality tier; try the next
+                # tier before declaring the whole source unusable.
+                self._quality_index += 1
+                next_quality = chain[self._quality_index]
+                log.info("retry %s with quality %s (%s)", track.title, next_quality, error)
+                self.client.resolve_playback(
+                    track.source_id,
+                    runtime_track(track),
+                    lambda resp: self._on_resolved(
+                        track, resp, generation, autoplay, tried, was_playing
+                    ),
+                    quality=next_quality,
+                )
+                return
+            self._quality_index = 0
             self._online_failed(track, error, tried, autoplay)
             return
         data = response.get("data") or {}
@@ -536,14 +575,13 @@ class PlayerController(QObject):
         log.info("resolve failed for %s: %s", track.title, error)
         tried.add(track.source_id)
         if self._online_fallback and len(tried) <= FALLBACK_MAX:
-            fallback = self._pick_fallback(track, tried)
-            if fallback is not None:
-                self.status_message.emit(
-                    f"{self._source_label(track.source_id)} 暂时无法播放，正在尝试 {fallback.label}…"
-                )
-                self._search_fallback(track, fallback, tried, autoplay)
+            # Original HushPlayer behaviour: an unavailable source silently
+            # falls back to any other enabled source that has the same song.
+            if self._fallback_all_sources(track, tried, autoplay, error):
                 return
-        self.status_message.emit(f"无法播放《{track.display_title}》：{_short(error)}")
+        # Nothing else to try: surface it as a real error (toast) instead of a
+        # transient status line, otherwise a failed resolve looks silent.
+        self.error_message.emit(f"无法播放《{track.display_title}》：{_short(error)}")
         self._failures += 1
         if self._failures < MAX_CONSECUTIVE_FAILURES and self.queue.count > 1:
             QTimer.singleShot(600, lambda: self.next(auto=True))
@@ -554,6 +592,107 @@ class PlayerController(QObject):
             self._set_busy(False)
             self.engine.stop()
             self.error_message.emit("在线播放失败，已停止")
+
+    def _fallback_all_sources(
+        self, track: Track, tried: set[str], autoplay: bool, error: str
+    ) -> bool:
+        """Search every remaining playable source for the same recording.
+
+        Returns True when a search was kicked off (playback may still fail and
+        continue through the chain); False means nothing else can be tried.
+        """
+        sources = [s for s in self.playable_sources() if s.id not in tried][:FALLBACK_MAX]
+        if not sources:
+            return False
+        generation = self._resolve_generation
+        keyword = f"{track.title} {track.artist}".strip() or track.title
+        pending = {source.id for source in sources}
+        collected: list[MatchCandidate] = []
+        names = "、".join(source.label for source in sources)
+        self.status_message.emit(
+            f"{self._source_label(track.source_id)} 暂时无法播放（{_short(error)}），正在其他音源中查找：{names}"
+        )
+
+        settled = False
+
+        def choose() -> None:
+            nonlocal settled
+            if settled:
+                return
+            settled = True
+            if generation != self._resolve_generation:
+                return
+            if not collected:
+                self._online_failed(track, "其他音源没有找到同一首歌", tried, autoplay)
+                return
+            # Duplicates of the same recording (common in one source's result
+            # list) must not shrink the margin against a *different* song.
+            best_by_song: dict[tuple[str, str], MatchCandidate] = {}
+            for item in collected:
+                key = (
+                    normalize_text(item.track.title),
+                    normalize_text(item.track.artist),
+                )
+                current = best_by_song.get(key)
+                if current is None or item.score > current.score:
+                    best_by_song[key] = item
+            ordered = sorted(best_by_song.values(), key=lambda item: item.score, reverse=True)
+            best = ordered[0]
+            margin = best.score - ordered[1].score if len(ordered) > 1 else best.score
+            confident = best.score >= AUTO_MIN_SCORE and margin >= AUTO_MARGIN
+            if not confident and best.score < CANDIDATE_MIN_SCORE:
+                self._online_failed(track, "其他音源没有找到同一首歌", tried, autoplay)
+                return
+            label = self._source_label(best.track.source_id)
+            if confident:
+                self.status_message.emit(f"已切换到 {label} 音源播放")
+            else:
+                self.status_message.emit(f"未找到完全一致的版本，已用 {label} 的最接近结果继续播放")
+            self._play_candidate(track, best.track, tried, autoplay)
+
+        def on_search(source: SourceInfo, response: dict) -> None:
+            if generation != self._resolve_generation:
+                return
+            pending.discard(source.id)
+            if response.get("ok"):
+                items = response.get("data") or []
+                if isinstance(items, dict):
+                    items = items.get("items") or items.get("songs") or []
+                try:
+                    candidates = tracks_from_items(items, source=source)
+                except Exception as exc:  # noqa: BLE001
+                    log.warning("解析回退搜索结果失败：%s", exc)
+                    candidates = []
+                collected.extend(rank_candidates(track, candidates))
+            if not pending:
+                choose()
+
+        for source in sources:
+            self.client.search(
+                source.id,
+                keyword,
+                1,
+                lambda response, s=source: on_search(s, response),
+                timeout=FALLBACK_SEARCH_TIMEOUT_MS,
+            )
+        # A source may never answer (runtime restart, dropped request); never
+        # leave the player stuck on "loading" because one callback is missing.
+        QTimer.singleShot(FALLBACK_SEARCH_TIMEOUT_MS + 2500, choose)
+        return True
+
+    def _play_candidate(self, track: Track, match: Track, tried: set[str], autoplay: bool) -> None:
+        self._resolve_generation += 1
+        generation = self._resolve_generation
+        tried.add(match.source_id)
+        self._set_busy(True, "正在获取播放地址…")
+        self.client.resolve_playback(
+            match.source_id,
+            runtime_track(match),
+            lambda response: self._on_fallback_resolved(
+                track, match, response, generation, autoplay, tried
+            ),
+            quality=self._quality_chain[0],
+        )
 
     def _pick_fallback(self, track: Track, tried: set[str]) -> SourceInfo | None:
         for source in self.playable_sources():
@@ -619,6 +758,9 @@ class PlayerController(QObject):
         if match.duration_ms and not track.duration_ms:
             self._duration = match.duration_ms
             self.duration_changed.emit(self._duration)
+        # Leaving ``busy`` set would keep the UI on "loading" although the
+        # fallback stream is already playing.
+        self._set_busy(False)
         self.engine.load(stream_url, duration_hint=self._duration or match.duration_ms, autoplay=autoplay)
         self._apply_pending_position()
 

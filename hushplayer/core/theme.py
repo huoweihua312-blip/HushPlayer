@@ -269,20 +269,29 @@ class Theme(QObject):
         return _metrics.row_h_compact if self._density == "compact" else _metrics.row_h
 
     # ------------------------------------------------------------------ 字体
+    #: Small UI text looked washed out on high-DPI screens: a slight floor plus
+    #: full hinting keeps glyph stems on whole device pixels.
+    FONT_LEGIBILITY_BONUS = 0.4
+
     def font(self, size: float, weight: int = 400, *, display: bool = False) -> QFont:
-        families = self._families if not display else self._families
+        families = self._families
         font = QFont()
         font.setFamilies(families)
-        font.setPixelSize(max(9, round(size * self._font_scale)))
+        scaled = (size + self.FONT_LEGIBILITY_BONUS) * self._font_scale
+        font.setPixelSize(max(11, round(scaled)))
         font.setWeight(QFont.Weight(weight))
+        font.setHintingPreference(QFont.HintingPreference.PreferFullHinting)
         font.setStyleStrategy(QFont.StyleStrategy.PreferAntialias)
+        font.setKerning(True)
         return font
 
     def mono_font(self, size: float, weight: int = 400) -> QFont:
         font = QFont()
         font.setFamilies(["Cascadia Mono", "Consolas", "Segoe UI"])
-        font.setPixelSize(max(9, round(size * self._font_scale)))
+        scaled = (size + self.FONT_LEGIBILITY_BONUS) * self._font_scale
+        font.setPixelSize(max(11, round(scaled)))
         font.setWeight(QFont.Weight(weight))
+        font.setHintingPreference(QFont.HintingPreference.PreferFullHinting)
         return font
 
     # ------------------------------------------------------------------ 动画

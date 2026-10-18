@@ -1,0 +1,33 @@
+"""R3-01 回归：字体必须落在整数像素并保留足够可读性。"""
+
+from __future__ import annotations
+
+from PySide6.QtGui import QFont
+
+from hushplayer.core.theme import theme
+
+
+def test_font_pixel_sizes_are_integers(qapp) -> None:
+    font = theme().font(9.4, 500)
+    assert isinstance(font, QFont)
+    assert font.pixelSize() > 0
+    assert font.hintingPreference() == QFont.HintingPreference.PreferFullHinting
+    assert font.kerning() is True
+
+
+def test_small_text_gets_a_legibility_floor(qapp) -> None:
+    theme().apply(font_scale=1.25)
+    smallest = theme().font(7.4, 400)
+    body = theme().font(10.5, 400)
+    theme().apply(font_scale=1.0)
+    assert smallest.pixelSize() >= 11
+    assert body.pixelSize() > smallest.pixelSize()
+
+
+def test_font_scale_is_monotonic(qapp) -> None:
+    theme().apply(font_scale=0.8)
+    small = theme().font(10.5).pixelSize()
+    theme().apply(font_scale=1.8)
+    large = theme().font(10.5).pixelSize()
+    theme().apply(font_scale=1.0)
+    assert large > small

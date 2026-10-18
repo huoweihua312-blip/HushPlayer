@@ -102,16 +102,21 @@ def test_failed_resolve_settles_stopped_and_keeps_controls_alive(qapp) -> None:
     controller.error_message.connect(errors.append)
     controller.play_track(online_track())
 
-    client.pending[0]({"ok": False, "error": "音源未提供可用的播放资源（可能受版权或会员限制）"})
+    # 解析失败后控制器会依次尝试其它音质；把它们全部答成失败，模拟整条链都不可用。
+    for _ in range(8):
+        if not client.pending:
+            break
+        client.pending.pop(0)({"ok": False, "error": "音源未提供可用的播放资源（可能受版权或会员限制）"})
 
     assert engine.state == "stopped", "终止失败后必须离开 loading"
     assert controller.busy is False
     assert controller.state == "stopped"
     assert errors, "应给出可见的错误提示"
 
-    # 停止后仍然可以重新播放，说明传输控件没有被卡死
+    # 停止后仍可以重新开始播放，说明传输控件没有被卡死
+    before = len(client.pending)
     controller.toggle()
-    assert len(client.pending) == 2
+    assert len(client.pending) == before + 1
     assert controller.state == "loading"
     controller.stop()
     controller.shutdown()

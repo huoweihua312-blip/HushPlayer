@@ -15,8 +15,9 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
-from PySide6.QtCore import QSize, Qt
+from PySide6.QtCore import QRectF, QSize, Qt
 from PySide6.QtGui import QIcon, QPainter, QPainterPath, QPixmap
+from PySide6.QtSvg import QSvgRenderer
 
 from .paths import resource_path
 
@@ -24,6 +25,8 @@ from .paths import resource_path
 LOGO = "logo.png"
 LOGO_LIGHT = "logo_light.png"
 LOGO_DARK = "logo_dark.png"
+LOGO_LIGHT_SVG = "logo_light.svg"
+LOGO_DARK_SVG = "logo_dark.svg"
 ICON = "icon.ico"
 ICON_PNG = "icon.png"
 
@@ -54,13 +57,43 @@ def has_official_logo() -> bool:
 
 
 def logo_path(mode: str = "dark") -> Path | None:
-    """Path of the logo artwork appropriate for ``mode`` (``light``/``dark``)."""
-    preferred = LOGO_LIGHT if mode == "light" else LOGO_DARK
-    for name in (preferred, LOGO):
+    """Path of the logo artwork appropriate for ``mode`` (``light``/``dark``).
+
+    The original HushPlayer ships a vector mark (two colour variants) for the
+    in-app surfaces and a multi-size ``.ico`` for the application icon; keep
+    that split so the sidebar mark matches the old build exactly.
+    """
+    if mode == "light":
+        order = (LOGO_LIGHT_SVG, LOGO_LIGHT, LOGO_DARK_SVG, LOGO)
+    else:
+        order = (LOGO_DARK_SVG, LOGO_DARK, LOGO_LIGHT_SVG, LOGO)
+    for name in order:
         found = _brand_file(name)
         if found is not None:
             return found
     return _existing(_PLACEHOLDER_PNG)
+
+
+def _render_logo(path: Path, target: int) -> QPixmap | None:
+    """Render a logo file (svg or raster) into a transparent square pixmap."""
+    if path.suffix.lower() == ".svg":
+        renderer = QSvgRenderer(str(path))
+        if not renderer.isValid():
+            return None
+        pixmap = QPixmap(target, target)
+        pixmap.fill(Qt.GlobalColor.transparent)
+        painter = QPainter(pixmap)
+        painter.setRenderHint(QPainter.Antialiasing, True)
+        size = renderer.defaultSize()
+        scale = min(target / max(1, size.width()), target / max(1, size.height()))
+        width = size.width() * scale
+        height = size.height() * scale
+        rect = QRectF((target - width) / 2, (target - height) / 2, width, height)
+        renderer.render(painter, rect)
+        painter.end()
+        return pixmap
+    pixmap = QPixmap(str(path))
+    return None if pixmap.isNull() else pixmap
 
 
 def icon_path() -> Path | None:
@@ -75,11 +108,11 @@ def logo_pixmap(size: int, mode: str = "dark", *, dpr: float = 2.0) -> QPixmap |
     path = logo_path(mode)
     if path is None:
         return None
-    pixmap = QPixmap(str(path))
-    if pixmap.isNull():
-        return None
     target = max(8, int(size * dpr))
-    scaled = pixmap.scaled(
+    rendered = _render_logo(path, target)
+    if rendered is None:
+        return None
+    scaled = rendered.scaled(
         QSize(target, target),
         Qt.AspectRatioMode.KeepAspectRatio,
         Qt.TransformationMode.SmoothTransformation,
@@ -93,10 +126,10 @@ def logo_pixmap_cropped(size: int, mode: str = "dark", *, dpr: float = 2.0) -> Q
     path = logo_path(mode)
     if path is None:
         return None
-    pixmap = QPixmap(str(path))
-    if pixmap.isNull():
-        return None
     target = max(8, int(size * dpr))
+    pixmap = _render_logo(path, target)
+    if pixmap is None:
+        return None
     scaled = pixmap.scaled(
         QSize(target, target),
         Qt.AspectRatioMode.KeepAspectRatioByExpanding,

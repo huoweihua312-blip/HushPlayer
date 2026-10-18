@@ -16,7 +16,7 @@
 
 > 所有截图均来自真实运行的程序（`tools/shot_app.py`），不是设计稿。
 >
-> 当前版本 **1.0.2**：第一轮 10 项与第二轮 9 项反馈均已整改，逐项证据见 [docs/qa/REIMAGINED_FIX_ROUND1.md](docs/qa/REIMAGINED_FIX_ROUND1.md) 与 [docs/qa/REIMAGINED_FIX_ROUND2.md](docs/qa/REIMAGINED_FIX_ROUND2.md)，变更摘要见 [docs/CHANGELOG.md](docs/CHANGELOG.md)。
+> 当前版本 **1.0.3**：第一轮 10 项与第二轮 9 项反馈均已整改，逐项证据见 [docs/qa/REIMAGINED_FIX_ROUND1.md](docs/qa/REIMAGINED_FIX_ROUND1.md) 与 [docs/qa/REIMAGINED_FIX_ROUND2.md](docs/qa/REIMAGINED_FIX_ROUND2.md)，变更摘要见 [docs/CHANGELOG.md](docs/CHANGELOG.md)。
 
 ## 功能
 

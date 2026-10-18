@@ -26,7 +26,8 @@ from PySide6.QtCore import QTimer  # noqa: E402
 from PySide6.QtGui import QColor, QPainter, QPixmap  # noqa: E402
 from PySide6.QtWidgets import QApplication  # noqa: E402
 
-from hushplayer.app import HushApp  # noqa: E402
+from hushplayer.app import HushApp
+from hushplayer.core import display  # noqa: E402
 from hushplayer.core import paths  # noqa: E402
 from hushplayer.ui.context import ctx  # noqa: E402
 
@@ -86,7 +87,13 @@ def prepare_library() -> None:
     library.record_play(library.tracks_page()[1])
 
 
+def _prepare_scale() -> None:
+    """Match the real entry point: Qt must see QT_SCALE_FACTOR before init."""
+    display.apply_scale_environment()
+
+
 def run() -> int:
+    _prepare_scale()
     app = QApplication(sys.argv)
     app.setApplicationName("HushPlayer")
     app.setStyle("Fusion")
