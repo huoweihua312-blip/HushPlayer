@@ -133,6 +133,6 @@ $ .venv\Scripts\python.exe -m pytest -q
 | 单实例 | 第二个实例检测到已有实例后退出，主实例日志「收到第二个实例的激活请求」，进程总数保持 1 |
 | 优雅退出 | `WM_CLOSE` 后进程退出，日志「正在退出 HushPlayer」 |
 | 截图 | `docs/screenshots/packaged_dark_125.png`（用 `PrintWindow` 抓取，避免被前台浏览器遮挡） |
-| 产物 | `HushPlayer-1.0.1-win64.zip`（108,530,282 B）SHA256 `359667F96CCE111AE0603B1C25A1FE04EBB2D215D639DB89D5D0C12828CDD0B2` |
+| 产物 | `HushPlayer-1.0.1-win64.zip`（108,530,223 B）SHA256 `F94A4AC30E98D969C4AA3473890425A5046E228B825218BE97E54C7F381EDACF` |
 
 原始日志：`artifacts/packaged_run/logs/hushplayer.log`（不随仓库提交）。
