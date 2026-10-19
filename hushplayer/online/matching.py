@@ -130,3 +130,20 @@ def best_candidate(
     if require_margin and len(ranked) > 1 and best.score - ranked[1].score < AUTO_MARGIN:
         return None
     return best
+
+
+def dedupe_tracks(tracks):
+    """Drop duplicate search hits (same recording offered by several sources).
+
+    Keeps the first occurrence; identity is normalised title + artist, so
+    "晴天 (Live)" and "晴天" stay separate entries.
+    """
+    seen = set()
+    result = []
+    for track in tracks:
+        key = (normalize_text(track.title or ""), normalize_text(track.artist or ""))
+        if key in seen:
+            continue
+        seen.add(key)
+        result.append(track)
+    return result

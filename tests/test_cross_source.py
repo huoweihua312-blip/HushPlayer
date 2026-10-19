@@ -13,6 +13,7 @@ from PySide6.QtCore import QObject, Signal
 from hushplayer.audio.controller import PlayerController
 from hushplayer.audio.engine import PlaybackEngine
 from hushplayer.model.track import Track
+from hushplayer.model.track import Track
 from hushplayer.online import matching
 from hushplayer.online.models import SourceInfo, track_from_item
 
@@ -133,3 +134,44 @@ def test_no_fallback_when_disabled(qapp):
     assert not loaded
     assert not client.search_calls
     assert errors
+
+def test_resolved_url_is_reused_within_ttl(qapp):
+    client = FakeClient(search_items=[])
+    controller, loaded = make_controller(client)
+    track = track_from_item(KG_ITEM, source=KG)
+
+    controller.play_tracks([track], 0, context="test")
+    calls_after_first = len(client.resolve_calls)
+    controller.play_track(track)
+    assert len(client.resolve_calls) == calls_after_first, "second play should reuse the cached URL"
+    assert len(loaded) >= 2
+
+
+def test_expired_cache_entry_is_refreshed(qapp):
+    import time as _time
+
+    from hushplayer.audio import controller as controller_module
+
+    client = FakeClient(search_items=[])
+    controller, _loaded = make_controller(client)
+    track = track_from_item(KG_ITEM, source=KG)
+    controller.play_tracks([track], 0, context="test")
+    key = controller._resolve_cache_key(track)
+    stamped, payload = controller._resolve_cache[key]
+    controller._resolve_cache[key] = (
+        stamped - (controller_module.RESOLVE_CACHE_TTL_MS / 1000 + 1),
+        payload,
+    )
+    calls = len(client.resolve_calls)
+    controller.play_track(track)
+    assert len(client.resolve_calls) == calls + 1
+
+def test_dedupe_keeps_versions_apart():
+    tracks = [
+        Track(id="1", title="晴天", artist="周杰伦", duration_ms=269000),
+        Track(id="2", title="晴天 (Live)", artist="周杰伦", duration_ms=249000),
+        Track(id="3", title="晴天", artist="周杰伦", duration_ms=269000),
+        Track(id="4", title="晴天", artist="翻唱歌手", duration_ms=200000),
+    ]
+    kept = matching.dedupe_tracks(tracks)
+    assert [track.id for track in kept] == ["1", "2", "4"]

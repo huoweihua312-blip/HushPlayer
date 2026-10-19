@@ -102,6 +102,33 @@ class HushApp(QObject):
     def _connect_settings(self) -> None:
         self.settings.changed.connect(self._on_setting_changed)
 
+    def _arm_sleep_timer(self, minutes: int) -> None:
+        """Pause playback after N minutes; 0 disables the timer."""
+        timer = getattr(self, "_sleep_timer", None)
+        if timer is None:
+            from PySide6.QtCore import QTimer
+
+            timer = QTimer(self)
+            timer.setSingleShot(True)
+            timer.timeout.connect(self._on_sleep_timer)
+            self._sleep_timer = timer
+        timer.stop()
+        if minutes <= 0:
+            return
+        timer.start(int(minutes * 60_000))
+        log.info("睡眠定时：%d 分钟后暂停播放", minutes)
+        if getattr(self, "window", None) is not None:
+            self.window.toast(f"睡眠定时已设为 {minutes} 分钟")
+
+    def _on_sleep_timer(self) -> None:
+        try:
+            self.player.pause()
+        except Exception:  # noqa: BLE001
+            log.exception("睡眠定时暂停失败")
+        self.settings.set("playback.sleep_timer_minutes", 0)
+        if getattr(self, "window", None) is not None:
+            self.window.toast("睡眠定时已到，已暂停播放")
+
     def _on_setting_changed(self, key: str, value: object) -> None:
         log.info("设置变更 %s = %r", key, value)
         if key.startswith("appearance."):
@@ -111,6 +138,8 @@ class HushApp(QObject):
                 self.player.set_volume(float(value))
             except (TypeError, ValueError):
                 pass
+        elif key == "playback.sleep_timer_minutes":
+            self._arm_sleep_timer(int(value or 0))
         elif key == "playback.shuffle":
             self.player.set_shuffle(bool(value))
         elif key == "playback.repeat":

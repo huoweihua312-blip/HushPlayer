@@ -42,7 +42,10 @@ from .queue import PlayQueue
 log = get_logger("audio.controller")
 
 MAX_CONSECUTIVE_FAILURES = 3
-RESUME_RECHECK_MS = 240_000       # re-resolve online streams after a long pause
+RESUME_RECHECK_MS = 240_000
+#: Resolved stream URLs are reused for this long; re-resolving costs a network
+#: round trip and is the main delay when skipping back and forth.
+RESOLVE_CACHE_TTL_MS = 120_000       # re-resolve online streams after a long pause
 FALLBACK_MAX = 4                  # how many other sources to try
 #: Some plugins only expose one quality; try the common tiers before giving up.
 QUALITY_CHAIN = ("standard", "higher", "320k")
@@ -108,6 +111,7 @@ class PlayerController(QObject):
         self._sources: list[SourceInfo] = []
         self._quality = "standard"
         self._quality_index = 0
+        self._resolve_cache: dict[str, tuple[float, dict]] = {}
         self._online_fallback = True
 
         self.engine.set_volume(self._volume)
@@ -506,6 +510,20 @@ class PlayerController(QObject):
         self._resolve_generation += 1
         generation = self._resolve_generation
         self._quality_index = 0
+        cache_key = self._resolve_cache_key(track)
+        cached = self._resolve_cache.get(cache_key)
+        if cached is not None and not force:
+            stamped, payload = cached
+            age_ms = (time.monotonic() - stamped) * 1000
+            expires_at = float(payload.get("expiresAt") or 0)
+            fresh = age_ms < RESOLVE_CACHE_TTL_MS and (
+                not expires_at or expires_at * 1000 - time.time() * 1000 > 15_000
+            )
+            if fresh:
+                log.info("resolve cache hit for %s (%.0fms old)", track.title, age_ms)
+                self._apply_resolved(track, payload, generation, autoplay, was_playing)
+                return
+            self._resolve_cache.pop(cache_key, None)
         self._set_busy(True, "正在获取播放地址…")
         self.client.resolve_playback(
             source_id,
@@ -540,7 +558,20 @@ class PlayerController(QObject):
             self._quality_index = 0
             self._online_failed(track, error, tried, autoplay)
             return
-        data = response.get("data") or {}
+        data = dict(response.get("data") or {})
+        self._resolve_cache[self._resolve_cache_key(track)] = (time.monotonic(), data)
+        self._apply_resolved(track, data, generation, autoplay, was_playing, tried)
+
+    def _resolve_cache_key(self, track: Track) -> str:
+        return f"{track.source_id}:{track.remote_id or track.id}:{self._quality}"
+
+    def _apply_resolved(self, track: Track, data: dict, generation: int,
+                        autoplay: bool, was_playing: bool,
+                        tried: set[str] | None = None) -> None:
+        tried = tried if tried is not None else set()
+        if generation != self._resolve_generation:
+            return
+        self._set_busy(False)
         url = str(data.get("url") or "")
         if not url:
             self._online_failed(track, "音源没有返回播放地址", tried, autoplay)

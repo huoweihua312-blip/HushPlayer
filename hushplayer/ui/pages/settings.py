@@ -374,6 +374,13 @@ class SettingsPage(Page):
         ))
         card.add_row(self._row("启动时恢复播放", "恢复上次退出时的歌曲与进度", self._toggle("playback.resume_on_start", True)))
         card.add_row(self._row("自动跳过无法播放的歌曲", "连续失败时提示并跳到下一首", self._toggle("playback.skip_unavailable", True)))
+        card.add_row(self._row(
+            "睡眠定时",
+            "到时间后自动暂停播放（下次启动不会保留）",
+            self._combo("playback.sleep_timer_minutes", [
+                ("关闭", 0), ("15 分钟", 15), ("30 分钟", 30), ("60 分钟", 60), ("90 分钟", 90),
+            ], 0),
+        ))
         column.addWidget(card)
 
         card = SettingsCard("音频输出", "使用系统当前可用的音频设备")

@@ -50,6 +50,7 @@ DEFAULTS: dict[str, Any] = {
         "show_source_badge": True,
     },
     "playback": {
+            "sleep_timer_minutes": 0,
         "volume": 0.72,
         "muted": False,
         "repeat": "off",  # off | all | one
@@ -92,6 +93,7 @@ DEFAULTS: dict[str, Any] = {
         "cover_from_folder": True,
     },
     "online": {
+            "dedupe_results": True,
         "sources_expanded": False,
         "enabled_sources": {},
         "preferred_source": "",

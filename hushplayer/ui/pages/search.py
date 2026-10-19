@@ -18,6 +18,7 @@ import time
 from ...core.logging_setup import get_logger
 from ...core.theme import css_rgba, rgba, theme
 from ...model.track import Track
+from ...online.matching import dedupe_tracks
 from ...online.models import build_sources, tracks_from_items
 from ..context import ctx
 from ..menus import track_menu
@@ -473,6 +474,8 @@ class SearchPage(Page):
 
     def _render_online(self) -> None:
         tracks = self._online_tracks
+        if self._dedupe_enabled():
+            tracks = dedupe_tracks(tracks)
         if not self._finished:
             # Show partial results while slower plugins are still answering; the
             # previous implementation waited for every source and only then
@@ -490,6 +493,12 @@ class SearchPage(Page):
         counts[""] = len(tracks)
         self.source_filter.set_counts(counts)
         self.play_all_button.setEnabled(bool(tracks))
+
+    def _dedupe_enabled(self) -> bool:
+        try:
+            return bool(ctx().settings.get("online.dedupe_results", True))
+        except Exception:  # noqa: BLE001
+            return True
 
     def _on_deadline(self) -> None:
         if self._finished:
