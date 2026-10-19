@@ -74,50 +74,53 @@ class TrackInfo(QWidget):
         painter.setRenderHint(QPainter.Antialiasing, True)
         rect = QRectF(self.rect())
 
-        # Title keeps the whole width: the source badge (or the transient
-        # buffering hint) lives on the second line so long song names are not
-        # cut short by it.
         title_font = theme().font(10.2, 600)
-        painter.setFont(title_font)
-        painter.setPen(QPen(rgba(palette.text, 0.96)))
-        metrics = QFontMetrics(title_font)
-        painter.drawText(
-            QRectF(0, rect.center().y() - 22, rect.width() - 4, 22),
-            int(Qt.AlignLeft | Qt.AlignVCenter),
-            metrics.elidedText(self._title or "未在播放", Qt.ElideRight, int(max(10, rect.width() - 4))),
-        )
-
+        title_metrics = QFontMetrics(title_font)
+        artist_font = theme().font(8.8, 500)
+        artist_metrics = QFontMetrics(artist_font)
         badge_text = self._status or self._badge
         badge_width = 0.0
         if badge_text:
             font = theme().font(7.2, 600)
             badge_width = QFontMetrics(font).horizontalAdvance(badge_text) + 14
 
-        artist_font = theme().font(8.8, 500)
+        # Two metric-driven rows, vertically centred: fixed offsets used to make
+        # the title and subtitle collide once the type scale grew.
+        row_gap = 2
+        total = title_metrics.height() + row_gap + artist_metrics.height()
+        top = max(0, int((rect.height() - total) / 2))
+        painter.setFont(title_font)
+        painter.setPen(QPen(rgba(palette.text, 0.96)))
+        painter.drawText(
+            QRectF(0, top, max(10.0, rect.width() - 4), title_metrics.height()),
+            int(Qt.AlignLeft | Qt.AlignVCenter),
+            title_metrics.elidedText(
+                self._title or "未在播放", Qt.ElideRight, int(max(10, rect.width() - 4))
+            ),
+        )
+
+        y = top + title_metrics.height() + row_gap
         painter.setFont(artist_font)
         painter.setPen(QPen(rgba(palette.text, 0.32 + 0.28 * self._hover.value)))
         artist_width = rect.width() - badge_width - (8 if badge_width else 0)
-        artist_metrics = QFontMetrics(artist_font)
         artist_text = artist_metrics.elidedText(
             self._artist, Qt.ElideRight, int(max(10, artist_width))
         )
         painter.drawText(
-            QRectF(0, rect.center().y() + 1, max(10, artist_width), 19),
+            QRectF(0, y, max(10, artist_width), artist_metrics.height()),
             int(Qt.AlignLeft | Qt.AlignVCenter),
             artist_text,
         )
         if badge_text and badge_width:
             from .common import paint_badge
 
-            # Keep the badge next to the artist instead of pinning it to the far
-            # right of a wide info block, where it read as a disconnected chip.
             badge_x = min(
                 rect.width() - badge_width,
                 artist_metrics.horizontalAdvance(artist_text) + 8,
             )
             paint_badge(
                 painter,
-                QRectF(badge_x, rect.center().y() + 4, badge_width, 16),
+                QRectF(badge_x, y + 1, badge_width, max(14, artist_metrics.height())),
                 badge_text,
                 tone="accent" if self._status else "",
             )

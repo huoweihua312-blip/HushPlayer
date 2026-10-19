@@ -170,21 +170,23 @@ class SidebarItem(QAbstractButton):
         )
         if self._selected:
             color = qcolor(palette.accent)
-        icon_size = 17
+        icon_size = theme().scaled(17, factor=1.0)
         if self._collapsed:
             icon_rect = QRectF(0, 0, icon_size, icon_size)
             icon_rect.moveCenter(rect.center())
         else:
             icon_rect = QRectF(0, 0, icon_size, icon_size)
-            icon_rect.moveCenter(QPointF(rect.x() + 11 + icon_size / 2, rect.center().y()))
+            pad = theme().scaled(11, factor=1.0)
+            icon_rect.moveCenter(QPointF(rect.x() + pad + icon_size / 2, rect.center().y()))
         icons.draw(painter, self.entry.icon, icon_rect, color)
 
         if not self._collapsed:
             font = theme().font(9.6, 600 if self._selected else 500)
             painter.setFont(font)
             painter.setPen(QPen(color))
-            text_x = rect.x() + 38
-            available = rect.width() - 44
+            pad = theme().scaled(11, factor=1.0)
+            text_x = rect.x() + pad + icon_size + theme().scaled(10, factor=1.0)
+            available = rect.width() - (text_x - rect.x()) - 6
             if self._badge:
                 badge_font = theme().font(8.2, 600)
                 badge_width = QFontMetrics(badge_font).horizontalAdvance(self._badge) + 14

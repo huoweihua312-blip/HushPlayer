@@ -269,3 +269,10 @@ $ .venv\Scripts\python.exe -m pytest -q
 - 产物：`packaging/out/HushPlayer-1.0.24-win64.zip`（270.8 MB 解包），SHA256 `DDEE91C6ECA999B8D3BFD4355111F10580AEF20EA94622FBFAD679107160948B`。
 - 启动日志：`界面缩放：100%（QT_SCALE_FACTOR=1.0）`、`应用主题：system → dark（字号缩放 ×1.50）`、窗口 2560×1392、单实例拦截、退出干净。
 - 截图 `docs/screenshots/packaged_dark.png`（2560×1392，1.5 类型缩放）。
+
+
+### 1.0.25 文字重叠修复
+
+- 全量测试 **181 passed / 0 failed / 0 skipped**，41.06 s（`artifacts/junit_round28.xml`）。
+- 自绘文字（PageHeader / EmptyState / 播放栏信息区 / 导航图标）改为按 `QFontMetrics` 计算行高与居中，字号放大到 150% 不再互相遮挡。
+- 产物 `HushPlayer-1.0.25-win64.zip`，SHA256 `3DE0E925179DB015EBE3106CE4739CAFC0AB16FF993621E25F07DFCDBF1D4614`；启动日志 `字号缩放 ×1.50`、窗口 2560×1392、单实例、干净退出。

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from PySide6.QtCore import QEasingCurve, QRectF, Qt, QVariantAnimation, Signal
+from PySide6.QtCore import QRect, QEasingCurve, QRectF, Qt, QVariantAnimation, Signal
 from PySide6.QtGui import QFontMetrics, QPainter, QPen
 from PySide6.QtWidgets import (
     QFrame,
@@ -39,7 +39,8 @@ class PageHeader(QWidget):
         self._trailing_layout.setContentsMargins(0, 0, 0, 0)
         self._trailing_layout.setSpacing(8)
         self._trailing_layout.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
-        self.setFixedHeight(72 if large else 56)
+        self._title_large = large
+        self._sync_height()
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
 
     def add_action(self, widget: QWidget) -> None:
@@ -58,6 +59,26 @@ class PageHeader(QWidget):
         width = max(150, min(self.width() // 2, self.trailing.sizeHint().width() + 6))
         self.trailing.setGeometry(self.width() - width, 0, width, self.height())
 
+    def _fonts(self):
+        title_font = theme().font(21.0 if self._large else 15.0, 700)
+        sub_font = theme().font(9.4, 500)
+        return title_font, sub_font
+
+    def _content_height(self) -> int:
+        title_font, sub_font = self._fonts()
+        height = QFontMetrics(title_font).height()
+        if self._subtitle:
+            height += 2 + QFontMetrics(sub_font).height()
+        return height
+
+    def _sync_height(self) -> None:
+        # The header must grow with the type scale: a fixed 72px strip made the
+        # title overlap its subtitle once fonts got bigger.
+        base = 72 if self._large else 56
+        wanted = max(base, self._content_height() + (28 if self._large else 18))
+        if wanted != self.height():
+            self.setFixedHeight(wanted)
+
     def _text_width(self) -> int:
         return max(80, self.width() - self.trailing.sizeHint().width() - 22)
 
@@ -65,33 +86,34 @@ class PageHeader(QWidget):
         palette = theme().palette
         painter = QPainter(self)
         painter.setRenderHint(QPainter.Antialiasing, True)
-        title_font = theme().font(21.0 if self._large else 15.0, 700)
+        title_font, sub_font = self._fonts()
         metrics = QFontMetrics(title_font)
         width = self._text_width()
         title = metrics.elidedText(self._title, Qt.ElideRight, width)
+        title_h = metrics.height()
+        sub_h = QFontMetrics(sub_font).height() if self._subtitle else 0
+        total = title_h + (2 + sub_h if self._subtitle else 0)
+        top = max(0, int((self.height() - total) / 2) - (2 if self._large else 0))
         painter.setFont(title_font)
         painter.setPen(QPen(qcolor(palette.text)))
+        painter.drawText(
+            QRectF(0, top, width, title_h),
+            int(Qt.AlignLeft | Qt.AlignVCenter),
+            title,
+        )
         if self._subtitle:
-            painter.drawText(
-                QRectF(0, 4, width, self.height() - 32),
-                int(Qt.AlignLeft | Qt.AlignBottom),
-                title,
-            )
-            sub_font = theme().font(9.4, 500)
             painter.setFont(sub_font)
             painter.setPen(QPen(rgba(palette.text, 0.5)))
             painter.drawText(
-                QRectF(1, self.height() - 26, width, 18),
+                QRectF(1, top + title_h + 2, width, sub_h),
                 int(Qt.AlignLeft | Qt.AlignVCenter),
                 QFontMetrics(sub_font).elidedText(self._subtitle, Qt.ElideRight, width),
             )
-        else:
-            painter.drawText(
-                QRectF(0, 0, width, self.height()),
-                int(Qt.AlignLeft | Qt.AlignVCenter),
-                title,
-            )
         painter.end()
+
+    def showEvent(self, event) -> None:  # noqa: N802
+        super().showEvent(event)
+        self._sync_height()
 
 
 class Page(QWidget):
@@ -179,7 +201,8 @@ class EmptyState(QWidget):
             self.action = TextButton(action_text, accent=True, size=32)
             self.action.setParent(self)
             self.action.clicked.connect(self.action_clicked)
-        self.setMinimumHeight(150 if compact else 260)
+        base_min = 150 if compact else 260
+        self.setMinimumHeight(base_min + (44 if action_text else 0))
 
     def set_text(self, title: str, description: str = "") -> None:
         self._title = title
@@ -192,43 +215,69 @@ class EmptyState(QWidget):
             self.action.set_text(text)
             self.action.setVisible(bool(text))
 
+    def _top(self) -> int:
+        return max(6, int((self.height() - self._block_height()) / 2))
+
     def resizeEvent(self, event) -> None:  # noqa: N802
         super().resizeEvent(event)
         if self.action is not None:
             hint = self.action.sizeHint()
             self.action.setGeometry(
                 (self.width() - hint.width()) // 2,
-                int(self.height() / 2) + 58,
+                self._top() + self._block_height() + 12,
                 hint.width(),
                 hint.height(),
             )
+
+    def _block_height(self) -> int:
+        icon_size = self._scaled_icon()
+        title_font = theme().font(11.0 if self._compact else 13.0, 600)
+        height = icon_size + 8 + QFontMetrics(title_font).height()
+        if self._description:
+            sub_font = theme().font(9.2, 400)
+            metrics = QFontMetrics(sub_font)
+            useful = max(120, self.width() - 80)
+            rect = metrics.boundingRect(
+                QRect(0, 0, useful, 400),
+                int(Qt.TextWordWrap),
+                self._description,
+            )
+            height += 4 + rect.height()
+        return height
+
+    def _scaled_icon(self) -> int:
+        return theme().scaled(40 if self._compact else 52, factor=0.6)
 
     def paintEvent(self, event) -> None:  # noqa: N802
         palette = theme().palette
         painter = QPainter(self)
         painter.setRenderHint(QPainter.Antialiasing, True)
-        center_y = self.height() / 2 - (20 if self._compact else 40)
-        icon_size = 40 if self._compact else 52
+        icon_size = self._scaled_icon()
+        title_font = theme().font(11.0 if self._compact else 13.0, 600)
+        title_metrics = QFontMetrics(title_font)
+        sub_font = theme().font(9.2, 400)
+        sub_metrics = QFontMetrics(sub_font)
+        top = self._top()
         draw_icon(
             painter,
             self._icon,
-            QRectF(self.width() / 2 - icon_size / 2, center_y - icon_size, icon_size, icon_size),
+            QRectF(self.width() / 2 - icon_size / 2, top, icon_size, icon_size),
             rgba(palette.text, 0.16),
         )
-        title_font = theme().font(11.0 if self._compact else 13.0, 600)
+        y = top + icon_size + 8
         painter.setFont(title_font)
         painter.setPen(QPen(rgba(palette.text, 0.62)))
         painter.drawText(
-            QRectF(20, center_y + 2, self.width() - 40, 26),
-            int(Qt.AlignHCenter | Qt.AlignTop),
+            QRectF(20, y, self.width() - 40, title_metrics.height()),
+            int(Qt.AlignHCenter | Qt.AlignVCenter),
             self._title,
         )
         if self._description:
-            sub_font = theme().font(9.2, 400)
+            y += title_metrics.height() + 4
             painter.setFont(sub_font)
             painter.setPen(QPen(rgba(palette.text, 0.40)))
             painter.drawText(
-                QRectF(40, center_y + 30, self.width() - 80, 40),
+                QRectF(40, y, self.width() - 80, sub_metrics.height() * 3),
                 int(Qt.AlignHCenter | Qt.AlignTop | Qt.TextWordWrap),
                 self._description,
             )
