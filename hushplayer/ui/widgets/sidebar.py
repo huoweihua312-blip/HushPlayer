@@ -181,7 +181,7 @@ class SidebarItem(QAbstractButton):
         icons.draw(painter, self.entry.icon, icon_rect, color)
 
         if not self._collapsed:
-            font = theme().font(9.6, 600 if self._selected else 500)
+            font = theme().font(9.6, 500 if self._selected else 400)
             painter.setFont(font)
             painter.setPen(QPen(color))
             pad = theme().scaled(11, factor=1.0)
@@ -265,7 +265,7 @@ class PlaylistItem(QAbstractButton):
         icon_name = "heart_fill" if self.playlist.is_favorites else "list"
         icons.draw(painter, icon_name, icon_rect, color)
         if not self._collapsed:
-            font = theme().font(9.5, 600 if self._selected else 500)
+            font = theme().font(9.5, 500 if self._selected else 400)
             painter.setFont(font)
             painter.setPen(QPen(color))
             text = QFontMetrics(font).elidedText(
