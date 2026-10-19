@@ -1,5 +1,15 @@
 # Changelog
 
+## v1.0.21 — 2026-10-19
+
+### 新增
+- **迷你播放器**：托盘菜单「迷你播放器」或 `Ctrl+Shift+M` 切换到 380×118 置顶小窗，显示封面、歌名/歌手、上一首/播放/下一首、进度条；可拖动位置、双击或 Esc 返回主界面，位置写入 `general.mini_player_x/y`。
+
+### 验证
+- `tests/test_gui_smoke.py::test_mini_player_round_trip`（主窗隐藏 → 迷你窗显示 → 关闭后恢复）。
+- 真实探针：播放中切换迷你窗，`next()` 切歌成功，关闭后主窗恢复，截图 `docs/screenshots/mini_player.png`。
+- 全量 **175 passed / 0 failed / 0 skipped**（`artifacts/junit_round24.xml`）。
+
 ## v1.0.20 — 2026-10-19
 
 ### 新增

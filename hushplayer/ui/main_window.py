@@ -401,6 +401,7 @@ class MainWindow(FramelessWindow):
         add("Ctrl+M", lambda: ctx().player.toggle_mute())
         add("Ctrl+L", lambda: self.navigate("lyrics"))
         add("Ctrl+Shift+L", self.toggle_desktop_lyrics)
+        add("Ctrl+Shift+M", self.toggle_mini_player)
         add("F11", self.open_immersive)
         add("Ctrl+Q", self.close_window)
         add("Alt+1", lambda: self.navigate("home"))
@@ -427,6 +428,25 @@ class MainWindow(FramelessWindow):
         page = self._pages.get("search")
         if page is not None and hasattr(page, "field"):
             page.field.focus()  # type: ignore[attr-defined]
+
+    def toggle_mini_player(self) -> None:
+        from .mini_player import MiniPlayer
+
+        window = getattr(self, "_mini", None)
+        if window is not None and window.isVisible():
+            window.close_to_main()
+            return
+        if window is None:
+            window = MiniPlayer()
+            window.closed.connect(self._on_mini_closed)
+            self._mini = window
+        self.hide()
+        window.show_player()
+
+    def _on_mini_closed(self) -> None:
+        self.show()
+        self.raise_()
+        self.activateWindow()
 
     def _escape(self) -> None:
         if self.queue_panel.isVisible():
@@ -460,6 +480,9 @@ class MainWindow(FramelessWindow):
         immersive_action = QAction("沉浸模式", self)
         immersive_action.triggered.connect(self.open_immersive)
         menu.addAction(immersive_action)
+        mini_action = QAction("迷你播放器", self)
+        mini_action.triggered.connect(self.toggle_mini_player)
+        menu.addAction(mini_action)
         menu.addSeparator()
         quit_action = QAction("退出", self)
         quit_action.triggered.connect(self._quit)

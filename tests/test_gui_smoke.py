@@ -251,3 +251,16 @@ def test_favorite_heart_does_not_break_favorites_page(app_bundle) -> None:
     # undo so later tests in this module see the same state
     library.toggle_favorite(track)
     pump(application, 0.2)
+
+
+def test_mini_player_round_trip(app_bundle) -> None:
+    """迷你播放器：主窗隐藏 → 迷你窗显示 → 关闭后主窗恢复。"""
+    _application, window, _library, _player = app_bundle
+    window.toggle_mini_player()
+    mini = window._mini  # noqa: SLF001 - GUI smoke seam
+    assert mini.isVisible()
+    assert not window.isVisible()
+    assert mini.title.text()
+    window.toggle_mini_player()
+    assert window.isVisible()
+    assert not mini.isVisible()
