@@ -162,13 +162,13 @@ class Metrics:
     radius_lg: int = 16
     radius_xl: int = 22
     titlebar_h: int = 48
-    sidebar_w: int = 236
-    sidebar_rail_w: int = 72
-    player_h: int = 90
+    sidebar_w: int = 244
+    sidebar_rail_w: int = 76
+    player_h: int = 94
     page_pad: int = 30
     gap: int = 16
-    row_h: int = 46
-    row_h_compact: int = 36
+    row_h: int = 50
+    row_h_compact: int = 38
     control: int = 34
     hit: int = 30
     motion_fast: int = 110
@@ -188,6 +188,7 @@ class Theme(QObject):
         self._palette = DARK
         self._reduce_motion = False
         self._font_scale = 1.0
+        self._ui_scale = 1.0
         self._accent = BRAND_ACCENT
         self._density = "comfortable"
         self._families = _detect_families()
@@ -218,6 +219,29 @@ class Theme(QObject):
         return self._font_scale
 
     @property
+    def ui_scale(self) -> float:
+        """Layout-independent type scale for high-resolution screens.
+
+        Keeping the device pixel ratio at 1.0 and enlarging type/metrics here
+        keeps glyphs on whole pixels (crisp) while still looking comfortable on
+        a 1440p panel.
+        """
+        return self._ui_scale
+
+    @property
+    def type_scale(self) -> float:
+        return self._ui_scale * self._font_scale
+
+    def scaled(self, value: int | float, *, factor: float = 0.85) -> int:
+        """Scale a layout constant with the type scale (nav rows, chips, …)."""
+        scale = 1.0 + (self.type_scale - 1.0) * factor
+        return int(round(float(value) * scale))
+
+    def pt(self, size: float) -> float:
+        """Point size scaled with both UI density and the user font slider."""
+        return size * self.type_scale
+
+    @property
     def accent(self) -> str:
         return self._accent
 
@@ -236,6 +260,7 @@ class Theme(QObject):
         reduce_motion: bool | None = None,
         font_scale: float | None = None,
         density: str | None = None,
+        ui_scale: float | None = None,
     ) -> None:
         changed = False
         if mode is not None and mode != self._mode:
@@ -254,6 +279,9 @@ class Theme(QObject):
             changed = True
         if font_scale is not None and abs(font_scale - self._font_scale) > 1e-3:
             self._font_scale = font_scale
+            changed = True
+        if ui_scale is not None and abs(ui_scale - self._ui_scale) > 1e-3:
+            self._ui_scale = ui_scale
             changed = True
         if density is not None and density != self._density:
             self._density = density
@@ -277,7 +305,7 @@ class Theme(QObject):
         families = self._families
         font = QFont()
         font.setFamilies(families)
-        scaled = (size + self.FONT_LEGIBILITY_BONUS) * self._font_scale
+        scaled = (size + self.FONT_LEGIBILITY_BONUS) * self.type_scale
         font.setPixelSize(max(11, round(scaled)))
         font.setWeight(QFont.Weight(weight))
         font.setHintingPreference(QFont.HintingPreference.PreferFullHinting)
@@ -288,7 +316,7 @@ class Theme(QObject):
     def mono_font(self, size: float, weight: int = 400) -> QFont:
         font = QFont()
         font.setFamilies(["Cascadia Mono", "Consolas", "Segoe UI"])
-        scaled = (size + self.FONT_LEGIBILITY_BONUS) * self._font_scale
+        scaled = (size + self.FONT_LEGIBILITY_BONUS) * self.type_scale
         font.setPixelSize(max(11, round(scaled)))
         font.setWeight(QFont.Weight(weight))
         font.setHintingPreference(QFont.HintingPreference.PreferFullHinting)

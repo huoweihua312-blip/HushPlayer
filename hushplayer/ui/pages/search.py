@@ -187,7 +187,7 @@ class SearchPage(Page):
 
         self.online_status = QLabel("")
         self.online_status.setStyleSheet(
-            f"font-size:9pt; color:{css_rgba(theme().palette.text, 0.5)};"
+            f"font-size:{theme().pt(9):.1f}pt; color:{css_rgba(theme().palette.text, 0.5)};"
         )
         layout.addWidget(self.online_status)
 
@@ -622,11 +622,11 @@ class SearchPage(Page):
         self.online_list.refresh_theme()
         self.segments.update()
         self.online_status.setStyleSheet(
-            f"font-size:9pt; color:{css_rgba(theme().palette.text, 0.5)};"
+            f"font-size:{theme().pt(9):.1f}pt; color:{css_rgba(theme().palette.text, 0.5)};"
         )
 
 
 class _MiniTitle(QLabel):
     def __init__(self, text: str, parent: QWidget | None = None) -> None:
         super().__init__(text, parent)
-        self.setStyleSheet("font-size:11pt; font-weight:700;")
+        self.setStyleSheet(f"font-size:{theme().pt(11):.1f}pt; font-weight:700;")

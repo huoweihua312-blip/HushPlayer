@@ -89,13 +89,19 @@ class _SectionList(QWidget):
             self.update()
             self.changed.emit(index)
 
+    def _row_h(self) -> int:
+        from ...core.theme import theme
+
+        return theme().scaled(36)
+
     def sizeHint(self) -> QSize:
-        return QSize(196, len(SECTIONS) * 36 + 8)
+        return QSize(196, len(SECTIONS) * self._row_h() + 8)
 
     def _rect(self, index: int):
         from PySide6.QtCore import QRectF
 
-        return QRectF(0, index * 36 + 4, self.width(), 32)
+        row = self._row_h()
+        return QRectF(0, index * row + 4, self.width(), row - 4)
 
     def mouseMoveEvent(self, event) -> None:  # noqa: N802
         hover = -1

@@ -165,6 +165,23 @@ class HushApp(QObject):
             except Exception as exc:  # noqa: BLE001
                 log_exception("窗口响应设置失败", exc)
 
+    def _ui_type_scale(self) -> float:
+        import os
+
+        from .core import display
+
+        override = os.environ.get("HUSHPLAYER_TYPE_SCALE")
+        if override:
+            try:
+                return max(1.0, float(override))
+            except ValueError:
+                pass
+        try:
+            width, _height = display.physical_screen_size()
+        except Exception:  # noqa: BLE001
+            return 1.0
+        return display.recommended_type_scale(width)
+
     def apply_theme(self, *, animate: bool = True) -> None:
         preference = str(self.settings.get("appearance.theme", "system"))
         accent = str(self.settings.get("appearance.accent", "#C95770"))
@@ -189,8 +206,9 @@ class HushApp(QObject):
             reduce_motion=reduce_motion,
             font_scale=font_scale,
             density=density,
+            ui_scale=self._ui_type_scale(),
         )
-        log.info("应用主题：%s → %s", preference, actual)
+        log.info("应用主题：%s → %s（字号缩放 ×%.2f）", preference, actual, theme().type_scale)
         self.app.setStyleSheet(theme().qss())
         if window is not None:
             window.refresh_theme()

@@ -95,13 +95,13 @@ class HeroPanel(QWidget):
     def refresh_theme(self) -> None:
         palette = theme().palette
         self.eyebrow.setStyleSheet(
-            f"color:{css_rgba(palette.text, 0.5)}; font-size:8.6pt; font-weight:600;"
+            f"color:{css_rgba(palette.text, 0.5)}; font-size:{theme().pt(8.6):.1f}pt; font-weight:600;"
         )
         self.title.setStyleSheet(
-            f"color:{css_rgba(palette.text, 0.98)}; font-size:26pt; font-weight:700;"
+            f"color:{css_rgba(palette.text, 0.98)}; font-size:{theme().pt(26):.1f}pt; font-weight:700;"
         )
         self.title.setWordWrap(True)
         self.meta.setStyleSheet(
-            f"color:{css_rgba(palette.text, 0.55)}; font-size:9pt; font-weight:400;"
+            f"color:{css_rgba(palette.text, 0.55)}; font-size:{theme().pt(9):.1f}pt; font-weight:400;"
         )
         self.update()

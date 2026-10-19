@@ -197,7 +197,7 @@ class _TopBar(QWidget):
         layout.addWidget(self.collapse)
 
         self.brand = QLabel("HushPlayer", self)
-        self.brand.setStyleSheet(f"color:{css_rgba('#ffffff', 0.34)};font-size:9pt;")
+        self.brand.setStyleSheet(f"color:{css_rgba('#ffffff', 0.34)};font-size:{theme().pt(9):.1f}pt;")
         layout.addWidget(self.brand)
         layout.addStretch(1)
 
@@ -369,13 +369,13 @@ class _CoverStage(QWidget):
 
     def refresh_theme(self) -> None:
         self.info_title.setStyleSheet(
-            f"color:#ffffff;font-size:{max(20.0, 25 * theme().font_scale):.1f}pt;font-weight:700;"
+            f"color:#ffffff;font-size:{max(20.0, 25 * theme().type_scale):.1f}pt;font-weight:700;"
         )
         self.info_artist.setStyleSheet(
-            f"color:{css_rgba('#ffffff', 0.66)};font-size:{12.4 * theme().font_scale:.1f}pt;"
+            f"color:{css_rgba('#ffffff', 0.66)};font-size:{12.4 * theme().type_scale:.1f}pt;"
         )
         self.info_album.setStyleSheet(
-            f"color:{css_rgba('#ffffff', 0.38)};font-size:{9.4 * theme().font_scale:.1f}pt;"
+            f"color:{css_rgba('#ffffff', 0.38)};font-size:{9.4 * theme().type_scale:.1f}pt;"
         )
         self.lyrics.refresh_theme()
 
@@ -444,13 +444,13 @@ class _LyricsStage(QWidget):
 
     def refresh_theme(self) -> None:
         self.info_title.setStyleSheet(
-            f"color:#ffffff;font-size:{13.0 * theme().font_scale:.1f}pt;font-weight:600;"
+            f"color:#ffffff;font-size:{13.0 * theme().type_scale:.1f}pt;font-weight:600;"
         )
         self.info_artist.setStyleSheet(
-            f"color:{css_rgba('#ffffff', 0.55)};font-size:{9.2 * theme().font_scale:.1f}pt;"
+            f"color:{css_rgba('#ffffff', 0.55)};font-size:{9.2 * theme().type_scale:.1f}pt;"
         )
         self.source_label.setStyleSheet(
-            f"color:{css_rgba('#ffffff', 0.32)};font-size:{8.6 * theme().font_scale:.1f}pt;"
+            f"color:{css_rgba('#ffffff', 0.32)};font-size:{8.6 * theme().type_scale:.1f}pt;"
         )
         self.lyrics.refresh_theme()
 
@@ -612,7 +612,7 @@ class _MonoLabel(QLabel):
         super().__init__(text, parent)
         self.setFixedWidth(40)
         self.setAlignment(Qt.AlignCenter)
-        self.setStyleSheet(f"color:{css_rgba('#ffffff', 0.45)};font-size:9pt;")
+        self.setStyleSheet(f"color:{css_rgba('#ffffff', 0.45)};font-size:{theme().pt(9):.1f}pt;")
 
 
 class _BigPlayButton(IconButton):

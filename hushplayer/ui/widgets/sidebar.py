@@ -121,7 +121,7 @@ class SidebarItem(QAbstractButton):
         self.setCursor(Qt.PointingHandCursor)
         self.setCheckable(False)
         self.setFocusPolicy(Qt.NoFocus)
-        self.setFixedHeight(32)
+        self.setFixedHeight(theme().scaled(32))
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         self.setToolTip(entry.label)
 
@@ -216,7 +216,7 @@ class PlaylistItem(QAbstractButton):
         self._collapsed = False
         self.setCursor(Qt.PointingHandCursor)
         self.setFocusPolicy(Qt.NoFocus)
-        self.setFixedHeight(32)
+        self.setFixedHeight(theme().scaled(32))
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         self.setToolTip(playlist.name)
         self.setContextMenuPolicy(Qt.CustomContextMenu)

@@ -229,8 +229,8 @@ class _SectionTitle(QWidget):
 
         self.title = QLabel(title)
         self.hint = QLabel(hint)
-        self.title.setStyleSheet("font-size:14pt; font-weight:700;")
-        self.hint.setStyleSheet(f"font-size:9pt; color:{css_rgba(theme().palette.text, 0.45)};")
+        self.title.setStyleSheet(f"font-size:{theme().pt(14):.1f}pt; font-weight:700;")
+        self.hint.setStyleSheet(f"font-size:{theme().pt(9):.1f}pt; color:{css_rgba(theme().palette.text, 0.45)};")
         layout = QHBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(10)

@@ -44,6 +44,21 @@ def physical_screen_size() -> tuple[int, int]:
         return 0, 0
 
 
+def recommended_type_scale(physical_width: int) -> float:
+    """Type enlargement applied at DPR 1.0 on high-resolution panels.
+
+    1440p at 100% has very small logical text; scaling type here (instead of
+    QT_SCALE_FACTOR) keeps glyphs on whole device pixels.
+    """
+    if physical_width >= 3200:
+        return 1.0  # 4K normally runs at DPR 1.5
+    if physical_width >= 2400:
+        return 1.5
+    if physical_width >= 2000:
+        return 1.2
+    return 1.0
+
+
 def recommended_scale(physical_width: int) -> str:
     """Pick a comfortable UI scale for the given physical width.
 

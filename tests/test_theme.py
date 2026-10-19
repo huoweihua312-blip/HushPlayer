@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import pytest
 from PySide6.QtGui import QFont
 
 from hushplayer.core.theme import theme
@@ -31,3 +32,13 @@ def test_font_scale_is_monotonic(qapp) -> None:
     large = theme().font(10.5).pixelSize()
     theme().apply(font_scale=1.0)
     assert large > small
+
+
+def test_ui_scale_enlarges_type_without_changing_dpr(qapp) -> None:
+    theme().apply(ui_scale=1.0, font_scale=1.0)
+    base = theme().font(10.5).pixelSize()
+    theme().apply(ui_scale=1.18)
+    scaled = theme().font(10.5).pixelSize()
+    theme().apply(ui_scale=1.0)
+    assert scaled > base
+    assert theme().pt(9) == pytest.approx(9.0)

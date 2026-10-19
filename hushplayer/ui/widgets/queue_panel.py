@@ -33,10 +33,10 @@ class QueuePanel(QWidget):
         head = QHBoxLayout()
         head.setSpacing(8)
         self.title = QLabel("播放队列")
-        self.title.setStyleSheet("font-size:13pt; font-weight:700;")
+        self.title.setStyleSheet(f"font-size:{theme().pt(13):.1f}pt; font-weight:700;")
         head.addWidget(self.title)
         self.count = QLabel("0 首")
-        self.count.setStyleSheet(f"font-size:9pt; color:{css_rgba(theme().palette.text, 0.45)};")
+        self.count.setStyleSheet(f"font-size:{theme().pt(9):.1f}pt; color:{css_rgba(theme().palette.text, 0.45)};")
         head.addWidget(self.count)
         head.addStretch(1)
         self.clear_button = IconButton("trash", size=28, icon_size=15, tooltip="清空播放队列")
@@ -49,7 +49,7 @@ class QueuePanel(QWidget):
 
         self.context_label = QLabel("")
         self.context_label.setStyleSheet(
-            f"font-size:9pt; color:{css_rgba(theme().palette.text, 0.45)};"
+            f"font-size:{theme().pt(9):.1f}pt; color:{css_rgba(theme().palette.text, 0.45)};"
         )
         layout.addWidget(self.context_label)
 
@@ -210,9 +210,9 @@ class QueuePanel(QWidget):
             }}
             """
         )
-        self.count.setStyleSheet(f"font-size:9pt; color:{css_rgba(theme().palette.text, 0.45)};")
+        self.count.setStyleSheet(f"font-size:{theme().pt(9):.1f}pt; color:{css_rgba(theme().palette.text, 0.45)};")
         self.context_label.setStyleSheet(
-            f"font-size:9pt; color:{css_rgba(theme().palette.text, 0.45)};"
+            f"font-size:{theme().pt(9):.1f}pt; color:{css_rgba(theme().palette.text, 0.45)};"
         )
         self.list.refresh_theme()
 

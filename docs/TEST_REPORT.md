@@ -250,3 +250,22 @@ $ .venv\Scripts\python.exe -m pytest -q
 | 文字清晰度 | 界面默认缩放 1440p 及以下改为 100%；同一文本的边缘梯度 3.08（125%）→ **3.43（100%）**；字号下限 +0.6px 补偿视觉大小 |
 | 设置侧栏对齐 | 图标固定 20px 列（18px 字形 + 0.5px 光学校正），文字左边距 42px；`artifacts/qa/settings_general.png` 复核 |
 | 打包产物 | `HushPlayer-1.0.23-win64.zip`，SHA256 `21D8ED7DE3A5C4C59892809C2532C6DF8DD82F0EC5C14D20A9F02D2BC11B536E`；verify 日志 `启动 HushPlayer 1.0.23`、`界面缩放：100%`、单实例、干净退出 |
+
+
+## 18. 1440p 字号偏小（v1.0.24）
+
+| 项目 | 结果 |
+| --- | --- |
+| 全量自动化测试 | **181 passed / 0 failed / 0 skipped**，41.30 s（`artifacts/junit_round27_final2.xml`） |
+| 方案 | 保持 DPR=1.0（字形落在整数像素、不发虚），通过 `Theme.ui_scale` 把字号整体放大 50%（正文 10.5→18px），并同步 QSS 中 pt 字号；新增 `Theme.pt()` |
+| 阈值 | `display.recommended_type_scale()`：≥3200 → 1.0，≥2400 → 1.5，≥2000 → 1.2，其余 1.0（4K 仍由 150% DPR 承担） |
+| 布局 | 列表行高 46→50、播放栏 90→94、侧栏 236→244 |
+| 新增测试 | `tests/test_theme.py::test_ui_scale_enlarges_type_without_changing_dpr`、`tests/test_display.py::test_type_scale_thresholds` |
+| 截图 | `docs/screenshots/songs_dark.png`、`settings_light.png`、`lyrics_light.png`（100% DPR + 1.18 类型缩放） |
+
+
+### 1.0.24 打包与验收
+
+- 产物：`packaging/out/HushPlayer-1.0.24-win64.zip`（270.8 MB 解包），SHA256 `DDEE91C6ECA999B8D3BFD4355111F10580AEF20EA94622FBFAD679107160948B`。
+- 启动日志：`界面缩放：100%（QT_SCALE_FACTOR=1.0）`、`应用主题：system → dark（字号缩放 ×1.50）`、窗口 2560×1392、单实例拦截、退出干净。
+- 截图 `docs/screenshots/packaged_dark.png`（2560×1392，1.5 类型缩放）。

@@ -79,3 +79,9 @@ def test_scale_text_mentions_percentage(settings_file):
     settings_file("1.25")
     display.apply_scale_environment()
     assert "125" in display.scale_text()
+
+
+def test_type_scale_thresholds():
+    assert display.recommended_type_scale(1920) == pytest.approx(1.0)
+    assert display.recommended_type_scale(2560) == pytest.approx(1.5)
+    assert display.recommended_type_scale(3840) == pytest.approx(1.0)

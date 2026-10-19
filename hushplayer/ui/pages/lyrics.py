@@ -162,24 +162,24 @@ class LyricsPage(Page):
     def refresh_theme(self) -> None:
         palette = theme().palette
         self.title_label.setStyleSheet(
-            f"color:{palette.text};font-size:{17 * theme().font_scale:.1f}pt;font-weight:700;"
+            f"color:{palette.text};font-size:{17 * theme().type_scale:.1f}pt;font-weight:700;"
         )
         self.artist_label.setStyleSheet(
             f"color:{palette.text_secondary};"
-            f"font-size:{11.4 * theme().font_scale:.1f}pt;"
+            f"font-size:{11.4 * theme().type_scale:.1f}pt;"
         )
         self.album_label.setStyleSheet(
             f"color:{palette.text_tertiary};"
-            f"font-size:{9.6 * theme().font_scale:.1f}pt;"
+            f"font-size:{9.6 * theme().type_scale:.1f}pt;"
         )
         self.provider_label.setStyleSheet(
-            f"color:{palette.text_tertiary};font-size:{8.8 * theme().font_scale:.1f}pt;"
+            f"color:{palette.text_tertiary};font-size:{8.8 * theme().type_scale:.1f}pt;"
         )
         self.offset_label.setStyleSheet(
-            f"color:{palette.text_secondary};font-size:{9 * theme().font_scale:.1f}pt;"
+            f"color:{palette.text_secondary};font-size:{9 * theme().type_scale:.1f}pt;"
         )
         self.hint_label.setStyleSheet(
-            f"color:{palette.text_tertiary};font-size:{9 * theme().font_scale:.1f}pt;"
+            f"color:{palette.text_tertiary};font-size:{9 * theme().type_scale:.1f}pt;"
         )
         self.view.refresh_theme()
 
