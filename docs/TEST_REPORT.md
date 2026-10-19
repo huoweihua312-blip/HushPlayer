@@ -132,7 +132,7 @@ $ .venv\Scripts\python.exe -m pytest -q
 | 数据目录 | 通过 `HUSHPLAYER_DATA_DIR` 隔离到临时目录，未触碰真实用户数据 |
 | 单实例 | 第二个实例检测到已有实例后退出，主实例日志「收到第二个实例的激活请求」，进程总数保持 1 |
 | 优雅退出 | `WM_CLOSE` 后进程退出，日志「正在退出 HushPlayer」 |
-| 截图 | `docs/screenshots/packaged_dark_125.png`（用 `PrintWindow` 抓取，避免被前台浏览器遮挡） |
+| 截图 | `docs/screenshots/packaged_dark.png`（用 `PrintWindow` 抓取，避免被前台浏览器遮挡） |
 | 产物 | `HushPlayer-1.0.1-win64.zip`（108,530,223 B）SHA256 `F94A4AC30E98D969C4AA3473890425A5046E228B825218BE97E54C7F381EDACF` |
 
 原始日志：`artifacts/packaged_run/logs/hushplayer.log`（不随仓库提交）。

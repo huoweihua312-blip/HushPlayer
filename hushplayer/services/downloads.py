@@ -161,8 +161,11 @@ class _FetchJob(QRunnable):
                 raise RuntimeError("下载内容为空")
             os.replace(temp, target)
             job.path = str(target)
-            job.state = STATE_DONE
+            # Persist the index *before* flipping to DONE: callers treat
+            # ``state == done`` as "the download is fully committed", so the
+            # entry must already be readable at that moment.
             service._record_success(job)
+            job.state = STATE_DONE
         except _Cancelled:
             job.state = STATE_CANCELLED
             log.info("下载已取消：%s", job.display_name)

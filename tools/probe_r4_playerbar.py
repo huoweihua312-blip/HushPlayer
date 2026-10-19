@@ -10,9 +10,9 @@ from hushplayer.model.track import Track
 app = QApplication(sys.argv)
 hush = HushApp(app); hush.start()
 win = hush.window
-win.resize(1600, 900)
+win.resize(2047, 1100)
 bar = win.playerbar
-bar.resize(1600, bar.height())
+bar.resize(2047, bar.height())
 
 track = Track(
     id="online:test", kind="online", title="colt.45（Live 版）feat. 加木 - 说唱梦工厂 第 6 期 现场完整收录",
@@ -29,9 +29,18 @@ def shot():
     bar._on_loading(True, "")
     app.processEvents()
     bar.grab().save("artifacts/qa/r4/playerbar_loading.png")
+    win.resize(1280, 820)
+    app.processEvents()
+    QTimer.singleShot(120, shot_mid)
+    app.processEvents()
+    QTimer.singleShot(150, shot2)
+
+def shot_mid():
+    bar.grab().save("artifacts/qa/r4/playerbar_mid.png")
     win.resize(1000, 820)
     app.processEvents()
     QTimer.singleShot(150, shot2)
+
 
 def shot2():
     bar.grab().save("artifacts/qa/r4/playerbar_narrow.png")

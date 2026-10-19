@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from PySide6.QtCore import QRectF, QSize, Qt, Signal
 from PySide6.QtGui import QFontMetrics, QPainter, QPen
-from PySide6.QtWidgets import QHBoxLayout, QSizePolicy, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QGridLayout, QHBoxLayout, QSizePolicy, QVBoxLayout, QWidget
 
 from ...audio.engine import STATE_LOADING, STATE_PLAYING
 from ...core.theme import Metrics, mix, qcolor, rgba, theme
@@ -140,22 +140,31 @@ class PlayerBar(QWidget):
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         self.setAttribute(Qt.WA_StyledBackground, False)
 
-        layout = QHBoxLayout(self)
-        layout.setContentsMargins(20, 12, 20, 12)
-        layout.setSpacing(18)
+        # Three-column grid: equal stretch on the outer columns keeps the
+        # transport block exactly in the middle of the bar, while the left
+        # cluster may grow to show long titles without pushing it off centre.
+        grid = QGridLayout(self)
+        grid.setContentsMargins(20, 12, 20, 12)
+        grid.setHorizontalSpacing(16)
+        grid.setVerticalSpacing(0)
+
+        left = QHBoxLayout()
+        left.setContentsMargins(0, 0, 0, 0)
+        left.setSpacing(12)
 
         # ---------------------------------------------------------- left
         self.cover = CoverWidget(54, radius=8)
         self.cover.setCursor(Qt.PointingHandCursor)
         self.cover.clicked.connect(self.track_info_clicked)
-        layout.addWidget(self.cover, 0, Qt.AlignVCenter)
+        left.addWidget(self.cover, 0, Qt.AlignVCenter)
 
         self.info = TrackInfo()
         self.info.clicked.connect(self.track_info_clicked)
-        layout.addWidget(self.info, 5, Qt.AlignVCenter)
+        left.addWidget(self.info, 1, Qt.AlignVCenter)
         self.favorite = IconButton("heart", size=28, icon_size=16, tooltip="添加到「我喜欢」")
         self.favorite.clicked.connect(self._toggle_favorite)
-        layout.addWidget(self.favorite, 0, Qt.AlignVCenter)
+        left.addWidget(self.favorite, 0, Qt.AlignVCenter)
+        grid.addLayout(left, 0, 0)
 
         # ---------------------------------------------------------- centre
         centre = QWidget()
@@ -189,7 +198,8 @@ class PlayerBar(QWidget):
         progress.addWidget(self.total, 0)
         centre_layout.addLayout(progress)
         centre_layout.addStretch(1)
-        layout.addWidget(centre, 5)
+        self._centre = centre
+        grid.addWidget(centre, 0, 1, Qt.AlignCenter)
 
         # ---------------------------------------------------------- right
         right = QHBoxLayout()
@@ -202,7 +212,11 @@ class PlayerBar(QWidget):
         self.immersive = IconButton("immersive", size=32, icon_size=17, tooltip="沉浸式播放 (Ctrl+M)")
         for widget in (self.lyrics_button, self.queue_button, self.mute, self.volume, self.immersive):
             right.addWidget(widget, 0, Qt.AlignVCenter)
-        layout.addLayout(right, 0)
+        grid.addLayout(right, 0, 2)
+        self._grid = grid
+        grid.setColumnStretch(0, 1)
+        grid.setColumnStretch(1, 0)
+        grid.setColumnStretch(2, 1)
 
         self._wire()
 
@@ -373,20 +387,23 @@ class PlayerBar(QWidget):
         width = self.width()
         self.volume.setVisible(width >= 860)
         self.mute.setVisible(width >= 860)
-        # Give the song title real room: the old hard cap (260px) truncated long
-        # names to a handful of characters even on a wide window.
-        if width >= 1100:
-            self.info.setMinimumWidth(320)
-            self.info.setMaximumWidth(520)
-        elif width >= 860:
-            self.info.setMinimumWidth(260)
-            self.info.setMaximumWidth(400)
-        elif width >= 620:
-            self.info.setMinimumWidth(190)
-            self.info.setMaximumWidth(280)
+        if not hasattr(self, "_centre"):
+            return
+        # Reserve the same width on both sides of the transport block so it
+        # sits exactly in the middle of the bar; the title then uses whatever
+        # is left of its own column (long names keep priority up to 520px).
+        if width >= 900:
+            centre_width = min(560, max(300, int(width * 0.30)))
         else:
-            self.info.setMinimumWidth(110)
-            self.info.setMaximumWidth(180)
+            centre_width = min(320, max(240, int(width * 0.28)))
+        self.favorite.setVisible(width >= 760)
+        self._centre.setFixedWidth(centre_width)
+        side = max(120, (width - 40 - 32 - centre_width) // 2)
+        self._grid.setColumnMinimumWidth(0, side)
+        self._grid.setColumnMinimumWidth(2, side)
+        info_width = max(96, side - 54 - 28 - 24)
+        self.info.setMinimumWidth(min(info_width, 260))
+        self.info.setMaximumWidth(info_width)
 
 
 class TimeLabel(QWidget):

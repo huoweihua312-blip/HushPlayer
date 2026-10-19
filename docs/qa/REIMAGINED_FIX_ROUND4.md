@@ -38,3 +38,30 @@
 ## 遗留
 
 - 标题仍为单行省略；极长标题（>60 字）在 1000px 以下窗口仍会截断，可后续加入 hover 显示完整标题的 tooltip。
+
+
+## 后续修正（v1.0.5，用户第二轮反馈）
+
+**反馈**：「偏离中央了，你要在完整显示信息的情况下保持中间的控件居中」。
+
+**根因**：1.0.4 仍是 `QHBoxLayout` + stretch 分配（信息区 5 / 控制区 5）。QHBoxLayout 按
+sizeHint + stretch 分配空间，左侧（封面 54 + 信息 + 心形 28）的固有宽度大于右侧工具组，
+因此控制区整体右偏（2559px 窗口下约 190px）。
+
+**修复**：`hushplayer/ui/widgets/playerbar.py` 改为 `QGridLayout` 三列：
+
+- 第 0 列：封面 + 信息 + 心形（左对齐）；第 1 列：传输控件 + 进度条（居中）；第 2 列：歌词/队列/音量/沉浸（右对齐）。
+- `resizeEvent()` 里把中列固定为自适应宽度，并把第 0/2 列的最小宽度设为同一个 `side`，
+  左右等宽 → 中列严格居中。
+- 信息区宽度 = `side - 封面 - 心形 - 间距`，宽窗下仍可完整显示长标题（1811px 窗口实测 36 字完整）。
+- <760px 隐藏心形，窄窗标题可显示约 14 字。
+
+**验证**（`tools/probe_r4_playerbar.py`，真实 `HushApp` + 真实 `PlayerBar`）：
+`playerbar_long.png`（1811px，播放键中心 905 = 窗口中心 905，标题完整）、
+`playerbar_mid.png`（1044px，居中且标题 22 字）、`playerbar_narrow.png`（764px，居中、标题 14 字、音量隐藏）。
+全量测试 127 passed / 0 failed（`artifacts/junit_round5.xml`，30.1 s）。
+
+顺带修掉一个测试暴露的真实竞态：`hushplayer/services/downloads.py` 原来先把任务置为
+`done` 再写下载索引，调用方看到 `done` 时索引可能还读不到；现改为先写索引再置 `done`。
+截图：`docs/screenshots/playerbar_long_title.png`（1811px 居中 + 完整标题）、
+`playerbar_centred.png`（1044px）、`playerbar_buffering.png`。
