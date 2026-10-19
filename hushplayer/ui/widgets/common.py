@@ -208,6 +208,9 @@ class IconButton(QAbstractButton):
         self.setFocusPolicy(Qt.NoFocus)
         if tooltip:
             self.setToolTip(tooltip)
+            # Screen readers and tooling both use this; keep it in sync with the
+            # visible hint instead of leaving the button anonymous.
+            self.setAccessibleName(tooltip.split(" (")[0].strip() or icon_name)
 
     def set_icon(self, name: str) -> None:
         if name != self._icon_name:
@@ -280,11 +283,13 @@ class TextButton(QAbstractButton):
         self.setFocusPolicy(Qt.TabFocus)
         self.setFixedHeight(size)
         self._pad = 12
+        self.setAccessibleName(text)
         if tooltip:
             self.setToolTip(tooltip)
 
     def set_text(self, text: str) -> None:
         self._text = text
+        self.setAccessibleName(text)
         self.updateGeometry()
         self.update()
 
@@ -355,10 +360,12 @@ class PlayButton(QAbstractButton):
         self.setCursor(Qt.PointingHandCursor)
         self.setFocusPolicy(Qt.NoFocus)
         self.setToolTip("播放 / 暂停 (Space)")
+        self.setAccessibleName("播放")
 
     def set_playing(self, playing: bool) -> None:
         if self._playing != playing:
             self._playing = playing
+            self.setAccessibleName("暂停" if playing else "播放")
             self.update()
 
     def enterEvent(self, event) -> None:  # noqa: N802

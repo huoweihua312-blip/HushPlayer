@@ -179,6 +179,7 @@ class _TopBar(QWidget):
     close_requested = Signal()
     minimize_requested = Signal()
     queue_requested = Signal()
+    settings_requested = Signal()
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -211,6 +212,10 @@ class _TopBar(QWidget):
         self.queue_button = IconButton("queue", size=32, icon_size=18, tooltip="播放队列")
         self.queue_button.clicked.connect(self.queue_requested)
         layout.addWidget(self.queue_button)
+
+        self.settings_button = IconButton("settings", size=32, icon_size=17, tooltip="歌词与画面设置")
+        self.settings_button.clicked.connect(self.settings_requested)
+        layout.addWidget(self.settings_button)
 
         self.minimize_button = IconButton("minimize", size=32, icon_size=16, tooltip="最小化")
         self.minimize_button.clicked.connect(self.minimize_requested)
@@ -677,6 +682,7 @@ class ImmersiveWindow(QWidget):
         self.topbar.close_requested.connect(self.close_immersive)
         self.topbar.minimize_requested.connect(self.showMinimized)
         self.topbar.queue_requested.connect(self.toggle_queue)
+        self.topbar.settings_requested.connect(self.show_quick_settings)
         root.addWidget(self.topbar)
 
         self.stack = QStackedWidget(self)
@@ -826,6 +832,50 @@ class ImmersiveWindow(QWidget):
         else:
             self.showFullScreen()
             self._fullscreen = True
+
+    def show_quick_settings(self) -> None:
+        """Small popover: lyrics size/translation/alignment and background."""
+        from PySide6.QtWidgets import QMenu
+
+        from ..core.theme import theme
+
+        settings = ctx().settings
+        menu = QMenu(self)
+        header = menu.addAction("歌词与画面")
+        header.setEnabled(False)
+        menu.addSeparator()
+
+        scale = float(settings.get("lyrics.font_scale", 1.0) or 1.0)
+        bigger = menu.addAction("放大歌词")
+        smaller = menu.addAction("缩小歌词")
+        bigger.triggered.connect(lambda: self._nudge_lyrics_scale(0.1))
+        smaller.triggered.connect(lambda: self._nudge_lyrics_scale(-0.1))
+
+        translate = menu.addAction("显示翻译")
+        translate.setCheckable(True)
+        translate.setChecked(bool(settings.get("lyrics.translate", True)))
+        translate.toggled.connect(lambda value: settings.set("lyrics.translate", bool(value)))
+
+        align = menu.addAction("左对齐歌词")
+        align.setCheckable(True)
+        align.setChecked(str(settings.get("lyrics.alignment", "center")) == "left")
+        align.toggled.connect(
+            lambda value: settings.set("lyrics.alignment", "left" if value else "center")
+        )
+
+        menu.addSeparator()
+        switch = menu.addAction("切换全幕歌词" if self._mode == self.MODE_COVER else "切换封面舞台")
+        switch.triggered.connect(
+            lambda: self.set_mode(self.MODE_LYRICS if self._mode == self.MODE_COVER else self.MODE_COVER)
+        )
+        self._quick_menu = menu
+        menu.popup(self.topbar.settings_button.mapToGlobal(self.topbar.settings_button.rect().bottomLeft()))
+
+    def _nudge_lyrics_scale(self, delta: float) -> None:
+        settings = ctx().settings
+        current = float(settings.get("lyrics.font_scale", 1.0) or 1.0)
+        value = max(0.7, min(2.0, round(current + delta, 2)))
+        settings.set("lyrics.font_scale", value)
 
     def toggle_queue(self) -> None:
         from .widgets.queue_panel import QueuePanel

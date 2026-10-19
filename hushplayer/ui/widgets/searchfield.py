@@ -36,6 +36,8 @@ class SearchField(QWidget):
 
         self.edit = QLineEdit(self)
         self.edit.setPlaceholderText(placeholder)
+        self.edit.setAccessibleName("搜索")
+        self.setAccessibleName("搜索")
         self.edit.setFrame(False)
         self.edit.setStyleSheet("QLineEdit{background:transparent;border:none;padding:0;}")
         self.edit.setClearButtonEnabled(False)

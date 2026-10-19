@@ -695,6 +695,7 @@ class TrackTable(QTableView):
         self._columns = list(DEFAULT_COLUMNS)
         self._header = TrackHeader()
         self._header.set_view(self)
+        self.setAccessibleName("歌曲列表")
         self._header.sort_requested.connect(self._on_sort_requested)
         self.bar_phase = 0.0
         self.favorite_hover_row = -1

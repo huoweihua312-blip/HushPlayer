@@ -18,6 +18,7 @@ class SeekBar(QWidget):
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
+        self.setAccessibleName("播放进度")
         self._duration = 0
         self._position = 0
         self._dragging = False
@@ -205,6 +206,7 @@ class VolumeSlider(QWidget):
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
+        self.setAccessibleName("音量")
         self._value = 1.0
         self._hover = 0.0
         self._dragging = False
