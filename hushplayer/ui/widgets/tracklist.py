@@ -544,34 +544,39 @@ class TrackDelegate(QStyledItemDelegate):
         metrics = QFontMetrics(title_font)
         title = metrics.elidedText(track.title, Qt.ElideRight, int(max(20, available)))
 
+        # The two text rows are laid out from font metrics: fixed offsets
+        # (16/20 px boxes) overlapped as soon as the type scale grew.
+        sub_font = theme().font(8.2 if compact else 8.4, 400)
+        title_metrics = QFontMetrics(title_font)
+        sub_metrics = QFontMetrics(sub_font)
+        row_gap = 2
+        block_h = title_metrics.height() + row_gap + sub_metrics.height()
+        block_top = rect.center().y() - block_h / 2.0
+        title_rect = QRectF(text_left, block_top, max(20, available), title_metrics.height())
+        sub_rect = QRectF(
+            text_left,
+            block_top + title_metrics.height() + row_gap,
+            max(20, available),
+            sub_metrics.height(),
+        )
         if compact:
-            painter.drawText(
-                QRectF(text_left, rect.center().y() - 15, max(20, available), 16),
-                int(Qt.AlignLeft | Qt.AlignVCenter),
-                title,
-            )
-            sub_font = theme().font(8.2, 400)
+            painter.drawText(title_rect, int(Qt.AlignLeft | Qt.AlignVCenter), title)
             painter.setFont(sub_font)
             painter.setPen(QPen(rgba(palette.text, 0.62 if selected else 0.5)))
             painter.drawText(
-                QRectF(text_left, rect.center().y() + 1, max(20, available), 14),
+                sub_rect,
                 int(Qt.AlignLeft | Qt.AlignVCenter),
-                QFontMetrics(sub_font).elidedText(track.artist, Qt.ElideRight, int(max(20, available))),
+                sub_metrics.elidedText(track.artist, Qt.ElideRight, int(max(20, available))),
             )
         else:
             if track.artist:
-                painter.drawText(
-                    QRectF(text_left, rect.center().y() - 19, max(20, available), 20),
-                    int(Qt.AlignLeft | Qt.AlignVCenter),
-                    title,
-                )
-                sub_font = theme().font(8.4, 400)
+                painter.drawText(title_rect, int(Qt.AlignLeft | Qt.AlignVCenter), title)
                 painter.setFont(sub_font)
                 painter.setPen(QPen(rgba(palette.text, 0.62 if selected else 0.46)))
                 painter.drawText(
-                    QRectF(text_left, rect.center().y() + 1, max(20, available), 16),
+                    sub_rect,
                     int(Qt.AlignLeft | Qt.AlignVCenter),
-                    QFontMetrics(sub_font).elidedText(track.artist, Qt.ElideRight, int(max(20, available))),
+                    sub_metrics.elidedText(track.artist, Qt.ElideRight, int(max(20, available))),
                 )
             else:
                 painter.drawText(
