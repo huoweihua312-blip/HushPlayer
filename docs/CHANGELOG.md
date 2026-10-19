@@ -1,5 +1,20 @@
 # Changelog
 
+## v1.0.39 — 2026-10-12
+
+托盘图标改用随包 `.ico`，并加一个一定能用的“找回来”快捷键。
+
+### 修复
+- 托盘图标改为优先加载 `assets/brand/HushPlayer.ico`（16–96px 多帧原生图标，`QIcon(path)` 与系统资源帧一致），矢量图标只作兜底；此前用 `QPixmap` 现画再 `addPixmap`，与系统托盘取帧路径不同。
+- 新增全局快捷键 `Ctrl+Alt+H`：无论窗口在托盘、迷你播放器还是被隐藏，都能把主窗口叫回来（`GlobalHotkeys.show_window_requested` → `MainWindow.show_from_background()`，迷你播放器可见时先关闭它）。设置页快捷键说明同步补充。
+
+### 说明
+本机 `Shell_NotifyIconW` 直接返回 `FALSE`（`GetLastError()=5`），最小 PySide6 托盘也一样不显示，因此无法在本环境做“图标可见”的自动断言；`Ctrl+Alt+H` 是独立于托盘的恢复通道。
+
+### 验证
+- `pytest -q`：183 passed / 0 failed。
+- `brand.tray_icon()` 尺寸帧：16/20/24/32/40/48/64/96/128/256。
+
 ## v1.0.38 — 2026-10-12
 
 托盘图标不再被误判；迷你播放器重做。

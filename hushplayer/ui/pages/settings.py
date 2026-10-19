@@ -328,7 +328,7 @@ class SettingsPage(Page):
         ))
         card.add_row(self._row(
             "全局快捷键",
-            "Ctrl+Alt+Space 播放/暂停，Ctrl+Alt+←/→ 上一首/下一首，Ctrl+Alt+M 静音",
+            "Ctrl+Alt+Space 播放/暂停，Ctrl+Alt+←/→ 上一首/下一首，Ctrl+Alt+M 静音，Ctrl+Alt+H 显示主窗口",
             self._toggle("general.global_hotkeys", True),
         ))
         column.addWidget(card)

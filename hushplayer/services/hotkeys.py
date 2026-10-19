@@ -25,6 +25,7 @@ DEFAULT_HOTKEYS: dict[str, tuple[int, int, str]] = {
     "next": (MOD_CONTROL | MOD_ALT | MOD_NOREPEAT, 0x27, "Ctrl+Alt+Right"),
     "previous": (MOD_CONTROL | MOD_ALT | MOD_NOREPEAT, 0x25, "Ctrl+Alt+Left"),
     "mute": (MOD_CONTROL | MOD_ALT | MOD_NOREPEAT, 0x4D, "Ctrl+Alt+M"),
+    "show_window": (MOD_CONTROL | MOD_ALT | MOD_NOREPEAT, 0x48, "Ctrl+Alt+H"),
 }
 
 
@@ -39,12 +40,14 @@ class GlobalHotkeys(QObject, QAbstractNativeEventFilter):
     next_requested = Signal()
     previous_requested = Signal()
     mute_requested = Signal()
+    show_window_requested = Signal()
 
     _ACTIONS = {
         "play_pause": "play_pause_requested",
         "next": "next_requested",
         "previous": "previous_requested",
         "mute": "mute_requested",
+        "show_window": "show_window_requested",
     }
 
     def __init__(self, hwnd: int, parent: QObject | None = None) -> None:

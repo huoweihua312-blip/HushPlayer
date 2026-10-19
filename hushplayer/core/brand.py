@@ -200,7 +200,15 @@ __all__ = [
 
 
 def tray_icon() -> QIcon:
-    """Tray icon: the brand mark on a dark rounded tile, crisp down to 16 px."""
+    """Tray icon: prefer the shipped .ico (native frames), fall back to vector."""
+    for candidate in (_ico_path(), theme_icon_path()):
+        if not candidate:
+            continue
+        from PySide6.QtGui import QIcon as _QIcon
+
+        loaded = _QIcon(candidate)
+        if not loaded.isNull() and loaded.availableSizes():
+            return loaded
     icon = QIcon()
     for size in (16, 20, 24, 32, 48, 64):
         pixmap = _tray_pixmap(size)
@@ -209,6 +217,16 @@ def tray_icon() -> QIcon:
     if icon.isNull():
         icon = app_icon()
     return icon
+
+
+def _ico_path() -> str | None:
+    path = Path(__file__).resolve().parents[2] / "assets" / "brand" / "HushPlayer.ico"
+    return str(path) if path.exists() else None
+
+
+def theme_icon_path() -> str | None:
+    path = Path(__file__).resolve().parents[2] / "assets" / "hushplayer.ico"
+    return str(path) if path.exists() else None
 
 
 def _tray_pixmap(size: int) -> QPixmap | None:

@@ -454,6 +454,16 @@ class MainWindow(FramelessWindow):
         self.hide()
         window.show_player()
 
+    def show_from_background(self) -> None:
+        """Bring the player back after it was hidden to tray or mini player."""
+        mini = getattr(self, "_mini", None)
+        if mini is not None and mini.isVisible():
+            mini.close_to_main()
+            return
+        self.showNormal()
+        self.raise_()
+        self.activateWindow()
+
     def _on_mini_closed(self) -> None:
         self.show()
         self.raise_()

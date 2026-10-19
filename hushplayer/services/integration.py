@@ -56,7 +56,13 @@ class MediaIntegration(QObject):
             self.hotkeys.next_requested.connect(self._player.next)
             self.hotkeys.previous_requested.connect(self._player.previous)
             self.hotkeys.mute_requested.connect(self._player.toggle_mute)
+            self.hotkeys.show_window_requested.connect(self._window_from_tray)
         self.apply_settings()
+
+    def _window_from_tray(self) -> None:
+        window = getattr(self, "_window", None)
+        if window is not None and hasattr(window, "show_from_background"):
+            window.show_from_background()
 
     # ------------------------------------------------------------------ settings
     def apply_settings(self) -> None:
