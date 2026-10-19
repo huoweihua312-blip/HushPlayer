@@ -254,6 +254,73 @@ class LibraryService(QObject):
         self.tracks.record_play(track.id, context)
         self.track_updated.emit(track.id)
 
+    # ------------------------------------------------------- 失效文件与重定位
+    def missing_tracks(self, limit: int = 0) -> list[Track]:
+        """Local tracks whose file is gone (moved, renamed or unplugged drive)."""
+        tracks = self.tracks.list(kind="local")
+        missing = [track for track in tracks if track.path and not os.path.exists(track.path)]
+        return missing[:limit] if limit else missing
+
+    def missing_count(self) -> int:
+        return len(self.missing_tracks())
+
+    def relocate_folder(self, old_root: str, new_root: str) -> tuple[int, int]:
+        """Rewrite paths of tracks under ``old_root`` to the same relative path
+        under ``new_root``. Returns ``(moved, still_missing)``."""
+        old_root = old_root.rstrip("\\/")
+        new_root = new_root.rstrip("\\/")
+        moved = 0
+        still = 0
+        for track in self.tracks.tracks_under(old_root):
+            try:
+                relative = os.path.relpath(track.path, old_root)
+            except ValueError:
+                still += 1
+                continue
+            candidate = os.path.join(new_root, relative)
+            if not os.path.exists(candidate):
+                still += 1
+                continue
+            try:
+                stat = os.stat(candidate)
+                self.tracks.update_path(track.id, candidate, stat.st_size, stat.st_mtime)
+                moved += 1
+            except OSError:
+                still += 1
+        if moved:
+            self.library_changed.emit()
+        return moved, still
+
+    def relocate_by_name(self, new_root: str, *, limit: int = 4000) -> tuple[int, int]:
+        """Fallback for tracks whose old root is unknown: match by file name."""
+        missing = self.missing_tracks()
+        if not missing:
+            return 0, 0
+        wanted = {os.path.basename(track.path): track for track in missing}
+        found: dict[str, str] = {}
+        scanned = 0
+        for root, _dirs, files in os.walk(new_root):
+            for name in files:
+                scanned += 1
+                if name in wanted and name not in found:
+                    found[name] = os.path.join(root, name)
+                if scanned >= limit or len(found) == len(wanted):
+                    break
+            if scanned >= limit or len(found) == len(wanted):
+                break
+        moved = 0
+        for name, path in found.items():
+            track = wanted[name]
+            try:
+                stat = os.stat(path)
+                self.tracks.update_path(track.id, path, stat.st_size, stat.st_mtime)
+                moved += 1
+            except OSError:
+                continue
+        if moved:
+            self.library_changed.emit()
+        return moved, len(missing) - moved
+
     def scan_errors(self, limit: int = 40):
         return self.meta.scan_errors(limit=limit)
 

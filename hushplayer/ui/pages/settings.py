@@ -575,6 +575,11 @@ class SettingsPage(Page):
         card.add_row(self._row("启动时自动扫描", "在后台增量扫描音乐库，不阻塞界面", self._toggle("library.auto_scan_on_start", True)))
         card.add_row(self._row("优先使用文件夹封面", "音频内没有封面时查找同目录图片", self._toggle("library.cover_from_folder", True)))
         card.add_row(self._row("立即重新扫描全部目录", "重新读取元数据与封面，可能需要一些时间", self._action_button("重新扫描", "refresh", self._rescan)))
+        card.add_row(self._row(
+            "修复失效文件",
+            "文件被移动或改名后，按新位置重新关联歌曲（不会删除任何数据）",
+            self._action_button("检查并修复…", "folder", self._repair_missing),
+        ))
         column.addWidget(card)
 
         stats = ctx().library.stats
@@ -615,6 +620,47 @@ class SettingsPage(Page):
         button.clicked.connect(handler)
         layout.addWidget(button)
         return holder
+
+    def _repair_missing(self) -> None:
+        library = ctx().library
+        missing = library.missing_tracks()
+        if not missing:
+            self._toast("没有发现失效文件", "success")
+            return
+        answer = QMessageBox.question(
+            self,
+            "修复失效文件",
+            f"发现 {len(missing)} 首歌曲的文件已不存在。\n\n"
+            "选择一个文件夹，程序会先按原来的相对路径寻找，再按文件名搜索并重新关联。",
+            QMessageBox.StandardButton.Ok | QMessageBox.StandardButton.Cancel,
+        )
+        if answer != QMessageBox.StandardButton.Ok:
+            return
+        new_root = QFileDialog.getExistingDirectory(self, "选择歌曲现在所在的文件夹")
+        if not new_root:
+            return
+        QApplication.setOverrideCursor(Qt.WaitCursor)
+        try:
+            moved = 0
+            for folder in list(self.settings.get("library.folders", []) or []):
+                count, _still = library.relocate_folder(str(folder), new_root)
+                moved += count
+            by_name, still = library.relocate_by_name(new_root)
+            moved += by_name
+            folders = [str(f) for f in (self.settings.get("library.folders", []) or [])]
+            if new_root not in folders:
+                folders.append(new_root)
+            self.settings.set("library.folders", folders)
+        except Exception as exc:  # noqa: BLE001
+            QApplication.restoreOverrideCursor()
+            log_exception("修复失效文件失败", exc)
+            self._toast("修复失败，请查看日志", "error")
+            return
+        QApplication.restoreOverrideCursor()
+        if moved:
+            self._toast(f"已重新关联 {moved} 首歌曲" + (f"，仍有 {still} 首未找到" if still else ""), "success")
+        else:
+            self._toast(f"没有找到可关联的文件，仍有 {still} 首失效", "warning")
 
     def _rescan(self) -> None:
         folders = list(self.settings.get("library.folders", []) or [])
