@@ -149,10 +149,19 @@ class _SectionList(QWidget):
             # shrinking into a fixed 18px column.
             icon_size = theme().scaled(18, factor=1.0)
             pad = theme().scaled(14, factor=1.0)
-            gap = theme().scaled(10, factor=1.0)
-            target = QRectF(0, 0, icon_size, icon_size)
-            target.moveCenter(
-                QRectF(rect.left() + pad + icon_size / 2, rect.center().y(), icon_size, icon_size).center()
+            gap = theme().scaled(2, factor=1.0)
+            font = theme().font(9.6, 500 if selected else 400)
+            fm = QFontMetrics(font)
+            # Align the glyph with the *ink* of the label, not with the row box:
+            # AlignVCenter centres the font box, whose ink sits slightly lower
+            # (the ascent carries air above the cap height).
+            baseline = rect.center().y() + (fm.ascent() - fm.descent()) / 2.0
+            icon_cy = baseline - fm.capHeight() / 2.0
+            target = QRectF(
+                rect.left() + pad,
+                icon_cy - icon_size / 2.0,
+                icon_size,
+                icon_size,
             )
             icons.draw(
                 painter,
@@ -160,7 +169,7 @@ class _SectionList(QWidget):
                 target,
                 qcolor(palette.accent) if selected else rgba(palette.text, 0.6 if index == self._hover else 0.5),
             )
-            painter.setFont(theme().font(9.6, 500 if selected else 400))
+            painter.setFont(font)
             painter.setPen(QPen(qcolor(palette.accent) if selected else rgba(palette.text, 0.86)))
             painter.drawText(
                 rect.adjusted(pad + icon_size + gap, 0, -theme().scaled(10), 0),

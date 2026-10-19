@@ -177,7 +177,14 @@ class SidebarItem(QAbstractButton):
         else:
             icon_rect = QRectF(0, 0, icon_size, icon_size)
             pad = theme().scaled(11, factor=1.0)
-            icon_rect.moveCenter(QPointF(rect.x() + pad + icon_size / 2, rect.center().y()))
+            # Align with the label ink (the font box centre sits above the CJK
+            # glyph centre because of the ascent), same rule as the settings nav.
+            row_font = theme().font(9.6, 500 if self._selected else 400)
+            fm = QFontMetrics(row_font)
+            baseline = rect.center().y() + (fm.ascent() - fm.descent()) / 2.0
+            icon_rect.moveCenter(
+                QPointF(rect.x() + pad + icon_size / 2, baseline - fm.capHeight() / 2.0)
+            )
         icons.draw(painter, self.entry.icon, icon_rect, color)
 
         if not self._collapsed:
