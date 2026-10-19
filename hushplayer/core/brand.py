@@ -197,3 +197,60 @@ __all__ = [
     "logo_pixmap_cropped",
     "rounded_logo_pixmap",
 ]
+
+
+def tray_icon() -> QIcon:
+    """Tray icon: the brand mark on a dark rounded tile, crisp down to 16 px."""
+    icon = QIcon()
+    for size in (16, 20, 24, 32, 48, 64):
+        pixmap = _tray_pixmap(size)
+        if pixmap is not None:
+            icon.addPixmap(pixmap)
+    if icon.isNull():
+        icon = app_icon()
+    return icon
+
+
+def _tray_pixmap(size: int) -> QPixmap | None:
+    from PySide6.QtCore import QRectF
+    from PySide6.QtGui import QColor, QPainter, QPainterPath
+
+    pixmap = QPixmap(size, size)
+    pixmap.fill(Qt.GlobalColor.transparent)
+    painter = QPainter(pixmap)
+    painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+    tile = QPainterPath()
+    tile.addRoundedRect(QRectF(0, 0, size, size), size * 0.28, size * 0.28)
+    painter.fillPath(tile, QColor("#1C1B1D"))
+
+    bright = QColor("#D9738A")
+    deep = QColor("#A83E58")
+    # Fewer, wider bars at small sizes keep the mark legible in the 16 px tray.
+    if size >= 24:
+        ratios = (0.42, 0.62, 0.86, 0.62, 0.42)
+        colors = (bright, deep, bright, deep, bright)
+        bar_w = size * 0.10
+        gap = size * 0.055
+    else:
+        ratios = (0.46, 0.80, 0.46)
+        colors = (deep, bright, deep)
+        bar_w = size * 0.16
+        gap = size * 0.09
+    total = len(ratios) * bar_w + (len(ratios) - 1) * gap
+    x = (size - total) / 2.0
+    for ratio, color in zip(ratios, colors):
+        height = size * ratio
+        painter.setBrush(color)
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.drawRoundedRect(
+            QRectF(x, (size - height) / 2.0, bar_w, height), bar_w / 2.0, bar_w / 2.0
+        )
+        x += bar_w + gap
+    if size >= 24:
+        painter.setBrush(QColor("#FFFFFF"))
+        dot = size * 0.11
+        painter.drawEllipse(
+            QRectF((size - dot) / 2.0, (size - dot) / 2.0, dot, dot)
+        )
+    painter.end()
+    return pixmap

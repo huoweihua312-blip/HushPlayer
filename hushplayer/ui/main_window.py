@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import time
 import sys
 
 from typing import Callable
@@ -463,7 +464,7 @@ class MainWindow(FramelessWindow):
             log.info("系统托盘不可用，关闭/最小化将保持窗口可见")
             return
         self._tray = QSystemTrayIcon(self)
-        icon = brand.app_icon()
+        icon = brand.tray_icon()
         if icon.isNull():
             from ..core import icons
 
@@ -504,11 +505,14 @@ class MainWindow(FramelessWindow):
         self._tray.activated.connect(self._on_tray_activated)
         self._tray.show()
         log.info(
-            "托盘图标：null=%s visible=%s available=%s",
+            "托盘图标：null=%s visible=%s available=%s sizes=%s",
             getattr(self, "_tray_null_icon", True),
             self._tray.isVisible(),
             QSystemTrayIcon.isSystemTrayAvailable(),
+            [s.width() for s in icon.availableSizes()],
         )
+        # Explorer occasionally ignores the first registration; re-assert once.
+        QTimer.singleShot(1200, self._reassert_tray_icon)
 
     def toggle_desktop_lyrics(self) -> None:
         from .desktop_lyrics import ensure_desktop_lyrics
@@ -527,6 +531,13 @@ class MainWindow(FramelessWindow):
             QSystemTrayIcon.ActivationReason.DoubleClick,
         ):
             self._restore_from_tray()
+
+    def _reassert_tray_icon(self) -> None:
+        tray = getattr(self, "_tray", None)
+        if tray is None:
+            return
+        tray.setIcon(brand.tray_icon())
+        tray.show()
 
     def _restore_from_tray(self) -> None:
         self.showNormal()
@@ -643,8 +654,21 @@ class MainWindow(FramelessWindow):
         if os.environ.get("HUSHPLAYER_NO_CLOSE_PROMPT") == "1" or "pytest" in sys.modules:
             # Automated tests and scripted runs must never block on a modal.
             action = "quit"
+        if getattr(self, "_close_prompt_open", False):
+            event.ignore()
+            return
+        if time.monotonic() < getattr(self, "_close_suppress_until", 0.0):
+            # Windows delivers a second WM_CLOSE when the dialog itself closes;
+            # asking twice looks like a bug.
+            event.ignore()
+            return
         if action == "ask":
-            action = self._ask_close_action()
+            self._close_prompt_open = True
+            try:
+                action = self._ask_close_action()
+            finally:
+                self._close_prompt_open = False
+                self._close_suppress_until = time.monotonic() + 1.2
             if action == "cancel":
                 event.ignore()
                 return
@@ -659,6 +683,7 @@ class MainWindow(FramelessWindow):
                 2600,
             )
             return
+        self._force_quit = True
         self.closing.emit()
         if self._tray is not None:
             self._tray.hide()
