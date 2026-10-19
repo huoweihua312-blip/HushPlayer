@@ -349,6 +349,13 @@ class SettingsPage(Page):
 
         card = SettingsCard("动效与密度", "")
         card.add_row(self._row("减少动画效果", "关闭页面切换、悬停与歌词动画，适合低性能设备", self._toggle("appearance.reduce_motion", False)))
+        card.add_row(
+            self._row(
+                "主题切换动画",
+                "在深浅色之间切换时播放日出 / 日落过渡",
+                self._toggle("appearance.theme_animation", True),
+            )
+        )
         card.add_row(self._row(
             "界面密度",
             "紧凑模式会缩小列表行高，一屏显示更多歌曲",

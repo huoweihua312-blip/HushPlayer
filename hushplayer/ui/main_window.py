@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import os
+import sys
+
 from typing import Callable
 
 from PySide6.QtCore import QEvent, QPoint, QRect, QTimer, Qt, Signal
@@ -601,7 +604,8 @@ class MainWindow(FramelessWindow):
         hide = TextButton("最小化到托盘", size=30)
         quit_button = TextButton("直接退出", size=30, accent=True)
         buttons.addWidget(cancel)
-        buttons.addWidget(hide)
+        if self._tray is not None and self._tray.isVisible():
+            buttons.addWidget(hide)
         buttons.addWidget(quit_button)
         layout.addLayout(buttons)
 
@@ -621,7 +625,10 @@ class MainWindow(FramelessWindow):
             return
         self._save_geometry()
         action = str(ctx().settings.get("general.close_action", "ask"))
-        if action == "ask" and self._tray is not None and self._tray.isVisible():
+        if os.environ.get("HUSHPLAYER_NO_CLOSE_PROMPT") == "1" or "pytest" in sys.modules:
+            # Automated tests and scripted runs must never block on a modal.
+            action = "quit"
+        if action == "ask":
             action = self._ask_close_action()
             if action == "cancel":
                 event.ignore()

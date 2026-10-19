@@ -28,7 +28,7 @@ DEFAULTS: dict[str, Any] = {
         "start_page": "home",
         "restore_last_page": True,
         "remember_queue": True,
-        "close_action": "quit",  # quit | tray
+        "close_action": "ask",  # ask | quit | tray
         "minimize_to_tray": False,
         "launch_at_startup": False,
         "check_updates_on_start": True,

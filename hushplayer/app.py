@@ -31,6 +31,7 @@ class HushApp(QObject):
         super().__init__()
         self.app = app
         self.window = None
+        self._resolved_mode: str | None = None
         self._build_services()
         self._connect_settings()
         self._watch_client()
@@ -213,17 +214,54 @@ class HushApp(QObject):
         if window is not None:
             window.refresh_theme()
             if snapshot is not None and not snapshot.isNull():
-                from .ui.widgets.transition import FadeOverlay
+                self._play_theme_transition(window, snapshot, actual)
 
-                host = getattr(window, "container", None) or window
-                overlay = FadeOverlay(host, snapshot)
-                overlay.start()
+    def _play_theme_transition(self, window, snapshot, resolved_mode: str) -> None:
+        """Animate the palette change: sunrise/sunset reveal, else a fade."""
+        from PySide6.QtCore import QPointF
+
+        from .ui.widgets.transition import FadeOverlay, ThemeReveal
+
+        host = getattr(window, "container", None) or window
+        previous = getattr(self, "_resolved_mode", None)
+        self._resolved_mode = resolved_mode
+        enabled = bool(self.settings.get("appearance.theme_animation", True))
+        if enabled and previous is not None and previous != resolved_mode:
+            try:
+                self.app.processEvents()
+                latest = window.grab()
+            except Exception:  # noqa: BLE001
+                latest = None
+            if latest is not None and not latest.isNull():
+                button = getattr(getattr(window, "titlebar", None), "theme_button", None)
+                if button is not None:
+                    point = button.mapTo(host, button.rect().center())
+                    origin = QPointF(point)
+                else:
+                    origin = QPointF(host.width() / 2.0, 0.0)
+                reveal = ThemeReveal(
+                    host,
+                    snapshot,
+                    latest,
+                    origin,
+                    to_dark=resolved_mode == "dark",
+                )
+                reveal.start()
+                return
+        FadeOverlay(host, snapshot).start()
 
     # ------------------------------------------------------------------- start
     def start(self) -> None:
         from .ui.main_window import MainWindow
 
         self.apply_theme()
+        self._resolved_mode = theme().mode
+        # Older builds persisted "quit" as the default without ever asking, so
+        # owners of such profiles never saw the close dialog. Surface it once.
+        if not bool(self.settings.get("general.close_prompt_migrated", False)):
+            if str(self.settings.get("general.close_action", "ask")) == "quit":
+                self.settings.set("general.close_action", "ask")
+            self.settings.set("general.close_prompt_migrated", True)
         self.window = MainWindow()
         context = ctx()
         if context is not None:
