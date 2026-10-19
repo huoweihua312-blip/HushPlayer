@@ -24,6 +24,8 @@ import time
 from dataclasses import dataclass
 from typing import Any
 
+import requests
+
 from PySide6.QtCore import QObject, QRunnable, QThreadPool, Signal
 
 from ..core import paths
@@ -40,6 +42,8 @@ LRCLIB_SEARCH = "https://lrclib.net/api/search"
 LRCLIB_UA = "HushPlayer/1.0 (desktop music player; lyrics lookup)"
 SIDECAR_SUFFIXES = (".lrc", ".LRC", ".txt", ".yrc", ".qrc", ".krc")
 
+_USER_AGENT = "HushPlayer/1.0 (desktop music player; lyrics lookup)"
+
 STATUS_OK = "ok"
 STATUS_NONE = "none"
 STATUS_INSTRUMENTAL = "instrumental"
@@ -54,6 +58,13 @@ class LyricsResult:
     status: str
     provider: str = ""
     message: str = ""
+
+
+def _network_error(exc: Exception) -> str:
+    text = str(exc)
+    if "timed out" in text.lower() or "timeout" in text.lower():
+        return "网络超时，请稍后重试"
+    return f"搜索失败：{type(exc).__name__}"
 
 
 def _cache_file(track_id: str) -> str:
@@ -271,8 +282,70 @@ class _LrclibJob(QRunnable):
         return best
 
 
+@dataclass(frozen=True)
+class LyricsCandidate:
+    """A lyric search hit (LRCLIB entry normalised for the picker)."""
+
+    id: int
+    title: str
+    artist: str
+    album: str
+    duration_ms: int
+    synced: str
+    plain: str
+
+    @property
+    def duration_text(self) -> str:
+        seconds = max(0, self.duration_ms // 1000)
+        return f"{seconds // 60}:{seconds % 60:02d}"
+
+    @property
+    def has_timing(self) -> bool:
+        return bool(self.synced.strip())
+
+
+class _LyricsSearchJob(QRunnable):
+    def __init__(self, service: "LyricsService", query: str, token: int) -> None:
+        super().__init__()
+        self._service = service
+        self._query = query
+        self._token = token
+
+    def run(self) -> None:  # pragma: no cover - network
+        candidates: list[LyricsCandidate] = []
+        error = ""
+        try:
+            response = requests.get(
+                LRCLIB_SEARCH,
+                params={"q": self._query},
+                headers={"User-Agent": LRCLIB_UA, "Accept": "application/json"},
+                timeout=(6, 12),
+            )
+            response.raise_for_status()
+            for entry in response.json() or []:
+                try:
+                    candidates.append(
+                        LyricsCandidate(
+                            id=int(entry.get("id") or 0),
+                            title=str(entry.get("trackName") or entry.get("name") or ""),
+                            artist=str(entry.get("artistName") or ""),
+                            album=str(entry.get("albumName") or ""),
+                            duration_ms=int(float(entry.get("duration") or 0) * 1000),
+                            synced=str(entry.get("syncedLyrics") or ""),
+                            plain=str(entry.get("plainLyrics") or ""),
+                        )
+                    )
+                except Exception:
+                    continue
+        except Exception as exc:  # noqa: BLE001
+            error = _network_error(exc)
+        self._service._on_search_done(self._token, candidates, error)  # noqa: SLF001
+
+
 class LyricsService(QObject):
     resolved = Signal(object)  # LyricsResult
+    search_finished = Signal(list)  # list[LyricsCandidate]
+    search_failed = Signal(str)
 
     def __init__(
         self,
@@ -294,8 +367,59 @@ class LyricsService(QObject):
         self._pool = QThreadPool(self)
         self._pool.setMaxThreadCount(2)
         self._generation = 0
+        self._search_token = 0
+        self._search_pool = QThreadPool(self)
+        self._search_pool.setMaxThreadCount(1)
 
     # ------------------------------------------------------------------ api
+    def search(self, query: str) -> None:
+        """Search LRCLIB by free text; emits search_finished/search_failed."""
+        query = query.strip()
+        if not query:
+            self.search_failed.emit("请输入歌曲名或歌手名")
+            return
+        self._search_token += 1
+        self._search_pool.start(_LyricsSearchJob(self, query, self._search_token))
+
+    def _on_search_done(
+        self, token: int, candidates: list[LyricsCandidate], error: str
+    ) -> None:
+        if token != self._search_token:
+            return
+        if error:
+            self.search_failed.emit(error)
+            return
+        self.search_finished.emit(candidates)
+
+    def apply_candidate(self, track: Track, candidate: LyricsCandidate) -> LyricsResult:
+        """Use a searched lyric as this track's lyrics and persist it."""
+        if candidate.synced.strip():
+            text = candidate.synced
+            has_timing = True
+        else:
+            text = candidate.plain
+            has_timing = False
+        provider = f"LRCLIB · {candidate.artist}".strip(" ·")
+        document = lyric_parser.parse(
+            text,
+            source="lrclib",
+            provider=provider,
+            duration_ms=track.duration_ms,
+            plain=not has_timing,
+        )
+        document.offset_ms = self.offset_for(track) + self._tag_offsets.get(track.id, 0)
+        result = LyricsResult(
+            track_id=track.id,
+            document=document,
+            status=STATUS_NONE if document.is_empty() else STATUS_OK,
+            provider="lrclib",
+            message="手动选择",
+        )
+        self._cache[track.id] = result
+        _write_cache(track.id, text, provider="lrclib-manual")
+        self.resolved.emit(result)
+        return result
+
     def offset_for(self, track: Track) -> int:
         if track.id in self._offsets:
             return self._offsets[track.id]

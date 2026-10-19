@@ -139,12 +139,15 @@ class LyricsPage(Page):
         self.smaller_button.clicked.connect(lambda: self.scale_font(-0.1))
         self.larger_button = IconButton("plus", size=30, icon_size=16, tooltip="放大歌词")
         self.larger_button.clicked.connect(lambda: self.scale_font(0.1))
+        self.search_button = IconButton("search", size=32, icon_size=16, tooltip="搜索并更换歌词")
+        self.search_button.clicked.connect(self._search_lyrics)
         self.refresh_button = IconButton("refresh", size=32, icon_size=17, tooltip="重新获取歌词")
         self.refresh_button.clicked.connect(self._reload_lyrics)
         for button in (
             self.translate_button,
             self.smaller_button,
             self.larger_button,
+            self.search_button,
             self.refresh_button,
         ):
             toolbar.addWidget(button)
@@ -326,6 +329,20 @@ class LyricsPage(Page):
     def _toggle_translation(self, checked: bool) -> None:
         self.view.set_show_translation(bool(checked))
         ctx().settings.set("lyrics.translate", bool(checked), save=True)
+
+    def _search_lyrics(self) -> None:
+        track = self._track
+        if track is None:
+            return
+        from ..widgets.lyrics_search import LyricsSearchDialog
+
+        query = f"{track.title} {track.artist}".strip()
+        dialog = LyricsSearchDialog(self.window(), initial=query)
+        if dialog.exec() != dialog.DialogCode.Accepted or dialog.candidate is None:
+            return
+        result = ctx().lyrics.apply_candidate(track, dialog.candidate)
+        self._apply_result(result)
+        self.view.set_document(result.document, keep_position=True)
 
     def _reload_lyrics(self) -> None:
         if self._track is None:

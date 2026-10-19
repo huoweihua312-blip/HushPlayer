@@ -6,6 +6,7 @@ import time
 from pathlib import Path
 
 from hushplayer.lyrics.service import LyricsService, find_sidecar, find_translation_sidecar
+from hushplayer.services.library import LibraryQuery
 from hushplayer.model.track import Track
 
 LRC_TEXT = """[ti:夜航信号]
@@ -147,3 +148,73 @@ def test_manual_binding(loaded_library, music_dir, qapp, tmp_path) -> None:
     wait_for(lambda: results)
     assert results[-1].provider.split(":")[0] in {"manual", "local"}
     assert results[-1].document.lines[0].text == "绑定歌词"
+
+def hushplayer_track(library):
+    tracks = library.tracks_page(LibraryQuery(sort="title", limit=5))
+    for track in tracks:
+        if track.title == "夜航信号":
+            return track
+    return tracks[0]
+
+
+def test_apply_searched_lyrics_persists_and_wins(loaded_library, qapp, data_dir) -> None:
+    from hushplayer.lyrics.service import LyricsCandidate
+
+    service = make_service(loaded_library, qapp)
+    track = hushplayer_track(loaded_library)
+    candidate = LyricsCandidate(
+        id=1,
+        title="夜航信号",
+        artist="Aurora Field",
+        album="夜航信号",
+        duration_ms=12000,
+        synced="[00:01.00]line one\n[00:03.50]line two",
+        plain="",
+    )
+    result = service.apply_candidate(track, candidate)
+    assert result.status == "ok"
+    assert result.document.kind == "synced"
+    assert len(result.document.lines) == 2
+    assert result.document.lines[0].start_ms == 1000
+
+    # The manual choice is cached and reused instead of re-fetching sources.
+    fresh = make_service(loaded_library, qapp)
+    cached = fresh.request(track)
+    assert cached.provider.startswith("lrclib")
+    assert len(cached.document.lines) == 2
+    service.shutdown()
+    fresh.shutdown()
+
+
+def test_apply_plain_search_result_falls_back_to_plain(qapp, loaded_library) -> None:
+    from hushplayer.lyrics.service import LyricsCandidate
+
+    service = make_service(loaded_library, qapp)
+    track = hushplayer_track(loaded_library)
+    candidate = LyricsCandidate(
+        id=2,
+        title="夜航信号",
+        artist="Aurora Field",
+        album="",
+        duration_ms=0,
+        synced="",
+        plain="no timing here\nsecond line",
+    )
+    result = service.apply_candidate(track, candidate)
+    assert result.document.kind in {"plain", "synced"}
+    assert result.document.lines
+    service.shutdown()
+
+
+def test_search_token_ignores_stale_results(qapp, loaded_library) -> None:
+    from hushplayer.lyrics.service import LyricsCandidate, LyricsService
+
+    service = make_service(loaded_library, qapp)
+    seen: list[list] = []
+    service.search_finished.connect(seen.append)
+    service._search_token = 5
+    service._on_search_done(4, [LyricsCandidate(1, "x", "y", "", 0, "", "z")], "")
+    assert not seen
+    service._on_search_done(5, [LyricsCandidate(2, "x", "y", "", 0, "", "z")], "")
+    assert seen and len(seen[0]) == 1
+    service.shutdown()
