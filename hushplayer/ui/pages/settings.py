@@ -144,20 +144,26 @@ class _SectionList(QWidget):
                 painter.drawRoundedRect(rect, 7, 7)
             from PySide6.QtCore import QRectF
 
-            # A fixed 20px icon column keeps every glyph on the same optical
-            # axis as the label; the previous 16px box sat half a pixel high.
-            target = QRectF(0, 0, 18, 18)
-            target.moveCenter(QRectF(rect.left() + 14 + 9, rect.center().y() + 0.5, 18, 18).center())
+            # Icon box and label offset both follow the type scale, so at 150%
+            # the glyphs stay the same optical size as the text instead of
+            # shrinking into a fixed 18px column.
+            icon_size = theme().scaled(18, factor=1.0)
+            pad = theme().scaled(14, factor=1.0)
+            gap = theme().scaled(10, factor=1.0)
+            target = QRectF(0, 0, icon_size, icon_size)
+            target.moveCenter(
+                QRectF(rect.left() + pad + icon_size / 2, rect.center().y(), icon_size, icon_size).center()
+            )
             icons.draw(
                 painter,
                 icon_name,
                 target,
                 qcolor(palette.accent) if selected else rgba(palette.text, 0.6 if index == self._hover else 0.5),
             )
-            painter.setFont(theme().font(9.6, 600 if selected else 500))
+            painter.setFont(theme().font(9.6, 500 if selected else 400))
             painter.setPen(QPen(qcolor(palette.accent) if selected else rgba(palette.text, 0.86)))
             painter.drawText(
-                rect.adjusted(46, 0, -10, 0),
+                rect.adjusted(pad + icon_size + gap, 0, -theme().scaled(10), 0),
                 int(Qt.AlignLeft | Qt.AlignVCenter),
                 label,
             )
@@ -212,7 +218,7 @@ class SettingsPage(Page):
         host.setStyleSheet("background:transparent;")
         column = QVBoxLayout(host)
         column.setContentsMargins(0, 0, 12, 18)
-        column.setSpacing(14)
+        column.setSpacing(theme().scaled(14, factor=0.8))
         builder = self._builders[key]
         builder(column)
         column.addStretch(1)

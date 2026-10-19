@@ -127,11 +127,14 @@ class SettingRow(QWidget):
         self._title = title
         self._description = description
         layout = QHBoxLayout(self)
-        layout.setContentsMargins(0, 9, 0, 9)
-        layout.setSpacing(16)
+        # Vertical rhythm follows the type scale, otherwise enlarged labels sit
+        # right on top of their description and the card feels cramped.
+        pad = theme().scaled(9, factor=0.9)
+        layout.setContentsMargins(0, pad, 0, pad)
+        layout.setSpacing(theme().scaled(16))
         text_box = QVBoxLayout()
         text_box.setContentsMargins(0, 0, 0, 0)
-        text_box.setSpacing(2)
+        text_box.setSpacing(theme().scaled(3, factor=1.0))
         self.title_label = _label(title, size=10.0, weight=500)
         self.title_label.setWordWrap(False)
         self.desc_label = _label(description, size=8.8, alpha=0.5)

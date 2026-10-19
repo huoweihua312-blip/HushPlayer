@@ -60,7 +60,7 @@ class PageHeader(QWidget):
         self.trailing.setGeometry(self.width() - width, 0, width, self.height())
 
     def _fonts(self):
-        title_font = theme().font(21.0 if self._large else 15.0, 700)
+        title_font = theme().font(21.0 if self._large else 15.0, 600)
         sub_font = theme().font(9.4, 500)
         return title_font, sub_font
 
