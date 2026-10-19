@@ -679,7 +679,7 @@ class TrackTable(QTableView):
         self.customContextMenuRequested.connect(self._on_context_menu)
         self.setAlternatingRowColors(False)
         self.verticalHeader().setVisible(False)
-        self.verticalHeader().setDefaultSectionSize(54)
+        self.verticalHeader().setDefaultSectionSize(theme().scaled(54, factor=0.8))
         self.verticalHeader().setSectionResizeMode(QHeaderView.Fixed)
         self.horizontalHeader().setVisible(False)
         self.horizontalHeader().setSectionResizeMode(QHeaderView.Fixed)
@@ -746,7 +746,9 @@ class TrackTable(QTableView):
 
     def set_compact(self, compact: bool) -> None:
         self._model.set_compact(compact)
-        self.verticalHeader().setDefaultSectionSize(44 if compact else 54)
+        self.verticalHeader().setDefaultSectionSize(
+            theme().scaled(44 if compact else 54, factor=0.8)
+        )
         self._apply_columns()
         self.viewport().update()
 
@@ -863,7 +865,9 @@ class TrackTable(QTableView):
         self._header.set_widths(resolved)
         if self._model.compact != compact:
             self._model.compact = compact
-            self.verticalHeader().setDefaultSectionSize(44 if compact else 54)
+            self.verticalHeader().setDefaultSectionSize(
+            theme().scaled(44 if compact else 54, factor=0.8)
+        )
         self._header.update()
 
     def resizeEvent(self, event) -> None:  # noqa: N802

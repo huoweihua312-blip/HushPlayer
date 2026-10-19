@@ -500,7 +500,6 @@ class ThemePicker(QWidget):
 
     OPTIONS = [("system", "跟随系统", "随 Windows 设置"), ("light", "浅色", "始终浅色"), ("dark", "深色", "始终深色")]
     TILE_W = 132
-    TILE_H = 108
     GAP = 12
 
     def __init__(self, value: str = "system", parent: QWidget | None = None) -> None:
@@ -511,6 +510,20 @@ class ThemePicker(QWidget):
         self.setCursor(Qt.PointingHandCursor)
         self.setFocusPolicy(Qt.StrongFocus)
         self.setAccessibleName("主题")
+        # Tile height is derived from the two label rows, otherwise enlarged
+        # type overlaps the preview (it used to be a fixed 108 px block).
+        label_metrics = QFontMetrics(theme().font(9.4, 600))
+        hint_metrics = QFontMetrics(theme().font(7.8, 400))
+        self._label_h = label_metrics.height()
+        self._hint_h = hint_metrics.height()
+        self._preview_h = theme().scaled(78, factor=0.6)
+        self._label_gap = 4
+        self._hint_gap = 2
+        self.TILE_H = (
+            self._preview_h + self._label_gap + self._label_h + self._hint_gap + self._hint_h
+        )
+        self.TILE_W = theme().scaled(type(self).TILE_W, factor=0.6)
+        self.GAP = theme().scaled(12, factor=0.6)
         self.setFixedSize(3 * self.TILE_W + 2 * self.GAP, self.TILE_H)
 
     # ------------------------------------------------------------------ API
@@ -581,7 +594,7 @@ class ThemePicker(QWidget):
             key, label, hint = self.OPTIONS[index]
             selected = key == self._value
             hovered = key == self._hover
-            preview = QRectF(rect.left(), rect.top(), rect.width(), rect.height() - 30)
+            preview = QRectF(rect.left(), rect.top(), rect.width(), self._preview_h)
             radius = 11.0
             clip = preview.adjusted(2.5, 2.5, -2.5, -2.5)
 
@@ -630,7 +643,7 @@ class ThemePicker(QWidget):
             painter.setFont(font)
             painter.setPen(QPen(accent if selected else qcolor(palette.text)))
             painter.drawText(
-                QRectF(rect.left(), preview.bottom() + 4, rect.width(), 13),
+                QRectF(rect.left(), preview.bottom() + self._label_gap, rect.width(), self._label_h),
                 int(Qt.AlignHCenter | Qt.AlignVCenter),
                 label,
             )
@@ -642,7 +655,12 @@ class ThemePicker(QWidget):
                 resolved = "深色" if theme().mode == "dark" else "浅色"
                 text = f"当前 {resolved}"
             painter.drawText(
-                QRectF(rect.left(), preview.bottom() + 16, rect.width(), 12),
+                QRectF(
+                    rect.left(),
+                    preview.bottom() + self._label_gap + self._label_h + self._hint_gap,
+                    rect.width(),
+                    self._hint_h,
+                ),
                 int(Qt.AlignHCenter | Qt.AlignVCenter),
                 text,
             )

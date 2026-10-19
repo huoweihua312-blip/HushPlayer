@@ -29,7 +29,7 @@ class TrackInfo(QWidget):
         self._status = ""
         self._hover = HoverAnimation(self, 120)
         self.setMinimumWidth(240)
-        self.setMaximumWidth(520)
+        self.setMaximumWidth(theme().scaled(200, factor=0.6))
         self.setCursor(Qt.PointingHandCursor)
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         self._fit_height()
@@ -176,7 +176,7 @@ class PlayerBar(QWidget):
         self.favorite = IconButton("heart", size=28, icon_size=16, tooltip="添加到「我喜欢」")
         self.favorite.clicked.connect(self._toggle_favorite)
         left.addWidget(self.favorite, 0, Qt.AlignVCenter)
-        grid.addLayout(left, 0, 0)
+        grid.addLayout(left, 0, 0, Qt.AlignLeft)
 
         # ---------------------------------------------------------- centre
         centre = QWidget()
@@ -224,11 +224,13 @@ class PlayerBar(QWidget):
         self.immersive = IconButton("immersive", size=32, icon_size=17, tooltip="沉浸式播放 (Ctrl+M)")
         for widget in (self.lyrics_button, self.queue_button, self.mute, self.volume, self.immersive):
             right.addWidget(widget, 0, Qt.AlignVCenter)
-        grid.addLayout(right, 0, 2)
+        grid.addLayout(right, 0, 2, Qt.AlignRight)
         self._grid = grid
-        grid.setColumnStretch(0, 1)
-        grid.setColumnStretch(1, 0)
-        grid.setColumnStretch(2, 1)
+        # Only the centre column absorbs slack, so the two side clusters keep
+        # their natural widths instead of drifting towards the window edges.
+        grid.setColumnStretch(0, 0)
+        grid.setColumnStretch(1, 1)
+        grid.setColumnStretch(2, 0)
 
         self._wire()
 
@@ -417,8 +419,8 @@ class PlayerBar(QWidget):
         self._grid.setColumnMinimumWidth(0, side)
         self._grid.setColumnMinimumWidth(2, side)
         info_width = max(96, side - 54 - 28 - 24)
-        self.info.setMinimumWidth(min(info_width, 260))
-        self.info.setMaximumWidth(info_width)
+        self.info.setMinimumWidth(min(info_width, theme().scaled(150, factor=0.6)))
+        self.info.setMaximumWidth(min(info_width, theme().scaled(200, factor=0.6)))
 
 
 class TimeLabel(QWidget):

@@ -31,6 +31,7 @@ class SeekBar(QWidget):
         self._animation.valueChanged.connect(self._on_hover_value)
         self.setFixedHeight(20)
         self.setMinimumWidth(120)
+        self.setMaximumWidth(theme().scaled(420, factor=0.6))
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         self.setMouseTracking(True)
         self.setFocusPolicy(Qt.StrongFocus)
