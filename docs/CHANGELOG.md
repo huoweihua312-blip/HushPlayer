@@ -7,6 +7,7 @@
 - **切歌预加载**：播放开始 2.5s 后提前解析队列下一首在线歌曲，切换时直接使用解析结果，省掉解析往返；预加载失败的曲目在切换时自动回退到正常解析。
 
 ### 验证
+- 本地切歌实测：`stopped → playing` **23 ms**（`tools/probe_r25_gap.py`）。
 - `tests/test_replaygain.py`（标签解析、album 回落、无标签/缺失文件回退 1.0、引擎增益不影响滑块音量）、`tests/test_preload.py`（提前解析下一首、切歌复用结果）。
 - 全量 **178 passed / 0 failed / 0 skipped**（`artifacts/junit_round25.xml`）。
 

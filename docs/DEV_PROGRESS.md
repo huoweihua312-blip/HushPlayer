@@ -121,3 +121,5 @@ powershell -ExecutionPolicy Bypass -File packaging\build.ps1 -Zip
 已完成（1.0.18 追加）：批量操作条；（1.0.19 追加）：沉浸式快捷设置、无障碍名称，桌面歌词位置/字号记忆复核；（1.0.20 追加）：失效文件重定位。
 
 已完成：预加载（解析级）与 ReplayGain；未做：样本级无缝拼接（gapless）。
+
+- 无缝验收：本地 `stopped → playing` 实测 23 ms；在线走预加载（解析级）。真正的样本拼接 gapless 未实现（Qt 公共 API 不提供），已在 FEATURES 与 CHANGELOG 说明。
