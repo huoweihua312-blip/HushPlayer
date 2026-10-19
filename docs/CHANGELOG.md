@@ -1,5 +1,23 @@
 # Changelog
 
+## v1.0.12 — 2026-10-19
+
+### 新增
+- **导入 MusicFree 订阅**（设置 → 在线音源 → 导入订阅）：粘贴 `mf.json` 订阅地址，
+  自动解析 `{"plugins": [{"name", "url", "version"}]}`（兼容 `sources`/`data`/`items`
+  以及纯数组），逐个下载并安装，返回「已安装 N / 重复 M / 失败 K」汇总；单个插件
+  下载或安装失败不会中断其余条目，失败项会列出名称与原因。
+- 订阅里每个插件仍走同一套校验：仅 http(s)、单文件 ≤2 MB、sha256 去重、写入用户数据
+  目录，不执行插件代码（元数据只从源码头部解析）。
+
+### 实现
+- `hushplayer/online/registry.py`：`download_plugin_bytes()`（流式下载 + 2 MB 上限）、
+  `subscription_entries()`（四种常见文档结构）、`SourceRegistry._install_bytes()`
+  （落盘/去重/写注册表的统一入口，`install_file` 复用它）、`install_subscription()`。
+- `hushplayer/ui/pages/settings.py`：新增「导入订阅…」行与 `_import_subscription()`
+  （等待光标、失败 `QMessageBox`、成功 toast 汇总、自动刷新音源列表）。
+- 测试：`tests/test_source_registry.py` 新增订阅结构解析、本地 HTTP 订阅安装（2 成功 + 1 失败）。
+
 ## v1.0.11 — 2026-10-19
 
 在线搜索提速（面向 64 个音源的场景）。

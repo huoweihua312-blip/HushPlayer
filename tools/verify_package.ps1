@@ -56,6 +56,13 @@ $proc = Get-AppProcess $pid1
 if (-not $proc) { throw "第一个实例没有启动" }
 $proc.Refresh()
 $hwnd = $proc.MainWindowHandle
+# The window may not exist yet on a fast start; poll instead of reading once.
+for ($i = 0; $i -lt 40 -and ($hwnd -eq [IntPtr]::Zero); $i++) {
+    Start-Sleep -Milliseconds 500
+    $proc.Refresh()
+    $hwnd = $proc.MainWindowHandle
+}
+if ($hwnd -eq [IntPtr]::Zero) { throw "窗口没有出现" }
 Write-Host "pid=$($proc.Id) hwnd=$hwnd title=$($proc.MainWindowTitle)"
 
 $log = Join-Path $data "logs\hushplayer.log"

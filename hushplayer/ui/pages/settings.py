@@ -618,6 +618,11 @@ class SettingsPage(Page):
             self._action_button("从链接…", "cloud", self._add_source_url),
         ))
         card.add_row(self._row(
+            "导入订阅",
+            "粘贴 MusicFree 订阅地址（mf.json），一次导入订阅里的全部音源",
+            self._action_button("导入订阅…", "cloud", self._import_subscription),
+        ))
+        card.add_row(self._row(
             "批量导入",
             "选择一个文件夹，把它里面的 .js / .json 插件一次性安装（不递归子目录）",
             self._action_button("选择文件夹…", "folder", self._import_source_folder),
@@ -790,6 +795,37 @@ class SettingsPage(Page):
             self._toast("安装音源失败，请查看日志", "error")
             return
         self._toast(f"已安装音源：{entry.get('name', '')}", "success")
+        self._reload_sources()
+
+    def _import_subscription(self) -> None:
+        from ...online.registry import RegistryError, registry
+
+        url, ok = QInputDialog.getText(
+            self,
+            "导入音源订阅",
+            "MusicFree 订阅地址（通常是 mf.json）：",
+            text=getattr(self, "_last_subscription", ""),
+        )
+        url = (url or "").strip()
+        if not ok or not url:
+            return
+        self._last_subscription = url
+        QApplication.setOverrideCursor(Qt.WaitCursor)
+        try:
+            report = registry().install_subscription(url)
+        except RegistryError as exc:
+            QMessageBox.warning(self, "导入订阅失败", str(exc))
+            return
+        except Exception as exc:  # noqa: BLE001 - surface unexpected failures
+            log_exception("导入音源订阅失败", exc)
+            QMessageBox.warning(self, "导入订阅失败", str(exc))
+            return
+        finally:
+            QApplication.restoreOverrideCursor()
+
+        self._toast(report.summary(), "success" if report.installed else "info")
+        if report.failed:
+            QMessageBox.warning(self, "部分音源导入失败", report.failure_text())
         self._reload_sources()
 
     def _add_source_url(self) -> None:

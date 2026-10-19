@@ -7,7 +7,11 @@ from pathlib import Path
 
 import pytest
 
-from hushplayer.online.registry import SourceRegistry, peek_plugin_metadata
+from hushplayer.online.registry import (
+    SourceRegistry,
+    peek_plugin_metadata,
+    subscription_entries,
+)
 
 PLUGIN = """module.exports = {
     platform: "测试音乐",
@@ -110,3 +114,62 @@ def test_install_many_reports_and_continues(registry: SourceRegistry, tmp_path: 
     stored = json.loads(registry.registry_path.read_text(encoding="utf-8"))
     user_ids = [item["id"] for item in stored["sources"] if str(item["id"]).startswith("user_source_")]
     assert len(user_ids) == 2
+
+
+def test_subscription_entries_accepts_common_shapes() -> None:
+    assert subscription_entries({"plugins": [{"url": "a"}]}) == [{"url": "a"}]
+    assert subscription_entries({"sources": [{"url": "b"}]}) == [{"url": "b"}]
+    assert subscription_entries({"data": [{"url": "c"}]}) == [{"url": "c"}]
+    assert subscription_entries([{"url": "d"}]) == [{"url": "d"}]
+    assert subscription_entries({"foo": 1}) == []
+    assert subscription_entries("nope") == []
+
+
+def _serve(directory: Path):
+    import functools
+    import http.server
+    import threading
+
+    handler = functools.partial(http.server.SimpleHTTPRequestHandler, directory=str(directory))
+    server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    return server, f"http://127.0.0.1:{server.server_address[1]}"
+
+
+def test_install_subscription_downloads_and_keeps_going(registry) -> None:
+    import json
+
+    folder = registry.home / "_test_subscription"
+    folder.mkdir(parents=True, exist_ok=True)
+    (folder / "a.js").write_text(PLUGIN, encoding="utf-8")
+    (folder / "b.js").write_text(PLUGIN.replace("a.mp3", "b.mp3"), encoding="utf-8")
+    (folder / "mf.json").write_text(
+        json.dumps(
+            {
+                "plugins": [
+                    {"name": "订阅源 A", "url": "__BASE__/a.js", "version": "9.9"},
+                    {"name": "订阅源 B", "url": "__BASE__/b.js"},
+                    {"name": "坏源", "url": "__BASE__/missing.js"},
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    server, base = _serve(folder)
+    (folder / "mf.json").write_text(
+        (folder / "mf.json").read_text(encoding="utf-8").replace("__BASE__", base),
+        encoding="utf-8",
+    )
+    try:
+        report = registry.install_subscription(f"{base}/mf.json")
+    finally:
+        server.shutdown()
+        server.server_close()
+
+    assert [entry["name"] for entry in report.installed] == ["订阅源 A", "订阅源 B"]
+    assert report.duplicates == []
+    assert len(report.failed) == 1 and report.failed[0][0] == "坏源"
+    assert report.installed[0]["version"] == "9.9"
+    saved = registry.entries()
+    assert sum(1 for entry in saved if entry.get("userInstalled")) >= 2
