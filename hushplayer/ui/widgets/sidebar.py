@@ -50,6 +50,7 @@ LIBRARY: tuple[NavEntry, ...] = (
     NavEntry("songs", "歌曲", "music_note"),
     NavEntry("albums", "专辑", "disc"),
     NavEntry("artists", "歌手", "mic"),
+    NavEntry("downloads", "下载", "download"),
 )
 
 COLLECTION: tuple[NavEntry, ...] = (
@@ -462,9 +463,12 @@ class Sidebar(QWidget):
 
     def set_counts(self, counts: dict[str, str]) -> None:
         for key, text in counts.items():
-            item = self._nav_items.get(key)
-            if item is not None:
-                item.set_badge(text)
+            self.set_count(key, text)
+
+    def set_count(self, key: str, text: str) -> None:
+        item = self._nav_items.get(key)
+        if item is not None:
+            item.set_badge(text)
 
     def paintEvent(self, event) -> None:  # noqa: N802
         palette = theme().palette

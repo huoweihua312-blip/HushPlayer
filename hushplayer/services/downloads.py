@@ -12,6 +12,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import threading
 import time
 import uuid
 from dataclasses import dataclass, field
@@ -61,6 +62,10 @@ def downloads_dir() -> Path:
 
 def index_file() -> Path:
     return paths.data_dir() / "downloads.json"
+
+
+#: Downloads finish on worker threads; index updates are read-modify-write.
+_INDEX_LOCK = threading.Lock()
 
 
 def read_index() -> list[dict]:
@@ -265,6 +270,35 @@ class DownloadService(QObject):
         job.state = STATE_CANCELLED
         self._emit(job, final=True)
 
+    def retry(self, job_id: str) -> DownloadJob | None:
+        """Re-queue a failed or cancelled download."""
+        job = self._jobs.get(job_id)
+        if job is None:
+            return None
+        if job.state not in {STATE_FAILED, STATE_CANCELLED}:
+            return job
+        job.state = STATE_QUEUED
+        job.error = ""
+        job.downloaded = 0
+        job.total = 0
+        job.cancelled = False
+        job.path = ""
+        self.job_updated.emit(job)
+        self.jobs_changed.emit()
+        self._resolve(job)
+        return job
+
+    def remove(self, job_id: str) -> None:
+        """Forget a finished job (files on disk are untouched)."""
+        job = self._jobs.get(job_id)
+        if job is None:
+            return
+        if job.state in {STATE_QUEUED, STATE_RESOLVING, STATE_DOWNLOADING}:
+            self.cancel(job_id)
+        self._order = [item for item in self._order if item != job_id]
+        self._jobs.pop(job_id, None)
+        self.jobs_changed.emit()
+
     def clear_finished(self) -> None:
         for job_id in list(self._order):
             job = self._jobs.get(job_id)
@@ -343,6 +377,12 @@ class DownloadService(QObject):
         self._pool.start(fetch)
 
     def _record_success(self, job: DownloadJob) -> None:
+        # Two downloads can finish at the same time; without the lock the second
+        # read-modify-write drops the first entry from the history index.
+        with _INDEX_LOCK:
+            self._record_success_locked(job)
+
+    def _record_success_locked(self, job: DownloadJob) -> None:
         items = read_index()
         entry = {
             "track_id": job.track.id,

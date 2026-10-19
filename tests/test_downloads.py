@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import http.server
 import json
+import pathlib
 import threading
 
 import pytest
@@ -182,3 +183,31 @@ def test_safe_filename() -> None:
     assert dl.safe_filename("   ") == "track"
     assert len(dl.safe_filename("x" * 400)) == 120
     assert settings().get("downloads.quality") in {"standard", "higher", "exhigh", "lossless"}
+
+def test_retry_recovers_a_failed_download(data_dir, qapp, server) -> None:
+    client = FakeClient(f"{server}/song.mp3", fail=True)
+    service = dl.DownloadService(client)
+    track = Track(id="online:src:r1", kind="online", title="重试测试", artist="歌手", source_id="src")
+    job = service.download([track])[0]
+    assert wait_for(lambda: job.state == dl.STATE_FAILED, 5000)
+    assert not job.path
+
+    client.fail = False
+    service.retry(job.id)
+    assert wait_for(lambda: job.state == dl.STATE_DONE, 15000)
+    assert job.path and pathlib.Path(job.path).is_file()
+    service.shutdown()
+
+
+def test_remove_drops_job_but_keeps_history(data_dir, qapp, server) -> None:
+    client = FakeClient(f"{server}/song.mp3")
+    service = dl.DownloadService(client)
+    track = Track(id="online:src:r2", kind="online", title="移除测试", artist="歌手", source_id="src")
+    job = service.download([track])[0]
+    assert wait_for(lambda: job.state == dl.STATE_DONE, 15000)
+    assert len(service.history()) == 1
+
+    service.remove(job.id)
+    assert service.jobs == []
+    assert len(service.history()) == 1
+    service.shutdown()

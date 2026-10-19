@@ -46,6 +46,7 @@ ROUTE_TITLES = {
     "search": "搜索",
     "settings": "设置",
     "lyrics": "歌词",
+    "downloads": "下载",
 }
 
 
@@ -147,6 +148,7 @@ class MainWindow(FramelessWindow):
         from .pages.artists import ArtistPage, ArtistsPage
         from .pages.collection import FavoritesPage, PlaylistPage, RecentPage
         from .pages.home import HomePage
+        from .pages.downloads import DownloadsPage
         from .pages.search import SearchPage
         from .pages.songs import SongsPage
 
@@ -161,6 +163,7 @@ class MainWindow(FramelessWindow):
             "recent": RecentPage,
             "playlist": PlaylistPage,
             "search": SearchPage,
+            "downloads": DownloadsPage,
         }
         if route == "lyrics":
             from .pages.lyrics import LyricsPage
@@ -349,6 +352,10 @@ class MainWindow(FramelessWindow):
                     "favorites": str(stats.favorite_count) if stats.favorite_count else "",
                 }
             )
+            downloads = ctx().downloads
+            if downloads is not None:
+                active = len(downloads.active())
+                self.sidebar.set_count("downloads", str(active) if active else "")
         except Exception as exc:  # noqa: BLE001
             log_exception("刷新侧边栏失败", exc)
 
