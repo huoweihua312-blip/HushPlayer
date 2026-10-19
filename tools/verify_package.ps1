@@ -8,7 +8,7 @@ New-Item -ItemType Directory -Force $data | Out-Null
 # lets this verification run alongside it.
 
 function Start-App {
-    $cmd = "cmd.exe /c set HUSHPLAYER_DATA_DIR=$data&& set HUSH_CONSOLE=0&& set HUSHPLAYER_MUTEX_SUFFIX=-verify&& `"$exe`""
+    $cmd = "cmd.exe /c set HUSHPLAYER_DATA_DIR=$data&& set HUSH_CONSOLE=0&& set HUSHPLAYER_MUTEX_SUFFIX=-verify&& set HUSHPLAYER_NO_CLOSE_PROMPT=1&& `"$exe`""
     $r = Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{ CommandLine = $cmd }
     return $r.ProcessId
 }
