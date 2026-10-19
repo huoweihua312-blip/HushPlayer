@@ -193,12 +193,38 @@ class HushApp(QObject):
         if signature == getattr(self, "_theme_signature", None):
             return
         window = self.window
+        animate_theme = bool(self.settings.get("appearance.theme_animation", True))
+        overlay = None
         snapshot = None
-        if animate and window is not None and window.isVisible() and not window.isMinimized():
+        previous_mode = self._resolved_mode
+        if (
+            animate
+            and animate_theme
+            and not reduce_motion
+            and window is not None
+            and window.isVisible()
+            and not window.isMinimized()
+        ):
             try:
                 snapshot = window.grab()
             except Exception:  # noqa: BLE001
                 snapshot = None
+            if snapshot is not None and not snapshot.isNull():
+                from .ui.widgets.transition import ThemeReveal
+
+                host = getattr(window, "container", None) or window
+                overlay = ThemeReveal(
+                    host,
+                    snapshot,
+                    snapshot,
+                    self._theme_origin(window, host),
+                    to_dark=previous_mode == "light",
+                )
+                # Freeze the old frame *before* the palette changes; otherwise a
+                # frame of the new theme can be presented under the overlay.
+                overlay.freeze()
+                self.app.processEvents()
+
         self._theme_signature = signature
         actual = apply_theme_to_app(
             self.app,
@@ -213,42 +239,30 @@ class HushApp(QObject):
         self.app.setStyleSheet(theme().qss())
         if window is not None:
             window.refresh_theme()
-            if snapshot is not None and not snapshot.isNull():
-                self._play_theme_transition(window, snapshot, actual)
+        if overlay is not None:
+            if previous_mode is not None and previous_mode != actual:
+                overlay.hide()
+                try:
+                    latest = window.grab()
+                except Exception:  # noqa: BLE001
+                    latest = None
+                overlay.resume_with(latest if latest is not None else snapshot)
+            else:
+                from .ui.widgets.transition import FadeOverlay
 
-    def _play_theme_transition(self, window, snapshot, resolved_mode: str) -> None:
-        """Animate the palette change: sunrise/sunset reveal, else a fade."""
+                overlay.close()
+                if snapshot is not None:
+                    host = getattr(window, "container", None) or window
+                    FadeOverlay(host, snapshot).start()
+        self._resolved_mode = actual
+
+    def _theme_origin(self, window, host):
         from PySide6.QtCore import QPointF
 
-        from .ui.widgets.transition import FadeOverlay, ThemeReveal
-
-        host = getattr(window, "container", None) or window
-        previous = getattr(self, "_resolved_mode", None)
-        self._resolved_mode = resolved_mode
-        enabled = bool(self.settings.get("appearance.theme_animation", True))
-        if enabled and previous is not None and previous != resolved_mode:
-            try:
-                self.app.processEvents()
-                latest = window.grab()
-            except Exception:  # noqa: BLE001
-                latest = None
-            if latest is not None and not latest.isNull():
-                button = getattr(getattr(window, "titlebar", None), "theme_button", None)
-                if button is not None:
-                    point = button.mapTo(host, button.rect().center())
-                    origin = QPointF(point)
-                else:
-                    origin = QPointF(host.width() / 2.0, 0.0)
-                reveal = ThemeReveal(
-                    host,
-                    snapshot,
-                    latest,
-                    origin,
-                    to_dark=resolved_mode == "dark",
-                )
-                reveal.start()
-                return
-        FadeOverlay(host, snapshot).start()
+        button = getattr(getattr(window, "titlebar", None), "theme_button", None)
+        if button is not None:
+            return QPointF(button.mapTo(host, button.rect().center()))
+        return QPointF(host.width() / 2.0, 0.0)
 
     # ------------------------------------------------------------------- start
     def start(self) -> None:

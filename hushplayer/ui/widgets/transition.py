@@ -125,6 +125,22 @@ class ThemeReveal(QWidget):
             return
         self._animation.start()
 
+    def freeze(self) -> None:
+        """Show the old frame only, so the palette change cannot leak a frame."""
+        self.set_reveal_progress(0.0)
+        self.show()
+        self.raise_()
+
+    def resume_with(self, new: QPixmap) -> None:
+        """Swap in the freshly themed frame and start the wipe."""
+        self._new = new
+        self.show()
+        self.raise_()
+        if theme().reduce_motion:
+            self.close()
+            return
+        self._animation.start()
+
     def _radius_max(self) -> float:
         x, y = self._origin.x(), self._origin.y()
         corners = [

@@ -1,5 +1,20 @@
 # Changelog
 
+## v1.0.34 — 2026-10-11
+
+主题转场不再闪一帧新界面；最小化到托盘不会“找不回来”。
+
+### 修复
+- `HushPlayer.apply_theme` 改为「先冻结旧画面、再换调色板」：换主题前先把旧截图铺满窗口并让它完成一次绘制，再应用新主题，随后隐藏遮罩抓取新画面并开始日出/日落转场。原先的顺序会先呈现一帧完整的新主题，观感即闪烁。
+- `ThemeReveal` 新增 `freeze()` / `resume_with()`，供上述两步式转场使用；仅进入设置页时的旧→新淡入路径改为同一套流程（非深浅色切换时用 `FadeOverlay`）。
+- 托盘图标健壮性：`_build_tray` 校验 `QIcon.isNull()` 并在为空时回退到耳机图形，同时记录 `托盘图标：null=… visible=…`；`changeEvent` 只有在托盘**确实可见**时才隐藏窗口。
+- 新增首次最小化到托盘的说明弹窗（`general.tray_hint_shown` 记忆）：告知 Windows 11 会把新图标放进 `^` 隐藏区、可拖到常显区，并提示可在设置里改回直接退出。`_hide_to_tray` 在托盘不可用时保持窗口打开并提示，避免窗口消失却无处恢复。
+
+### 验证
+- `pytest -q`：183 passed / 0 failed。
+- 转场逐帧抓取（`tools/probe_r39_frames.py`）：第 1 帧（60ms）仍是旧深色画面 + 右上角小圆，第 2 帧（160ms）为光照边界推进，第 3 帧（900ms）完成浅色，全程没有整屏新主题的过渡帧。
+- 托盘探针（`tools/probe_r39_theme_tray.py`）：`tray_visible=True icon_null=False`；`_hide_to_tray()` 后窗口不可见、`_restore_from_tray()` 恢复；把 `_tray` 置空后 `_hide_to_tray()` 会保持窗口可见（守卫生效）。
+
 ## v1.0.33 — 2026-10-09
 
 退出询问默认启用，主题切换加入「日出 / 日落」转场。

@@ -14,6 +14,7 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLineEdit,
     QMenu,
+    QMessageBox,
     QStackedWidget,
     QSystemTrayIcon,
     QVBoxLayout,
@@ -459,9 +460,17 @@ class MainWindow(FramelessWindow):
     # ------------------------------------------------------------------- tray
     def _build_tray(self) -> None:
         if not QSystemTrayIcon.isSystemTrayAvailable():
+            log.info("系统托盘不可用，关闭/最小化将保持窗口可见")
             return
         self._tray = QSystemTrayIcon(self)
-        self._tray.setIcon(brand.app_icon())
+        icon = brand.app_icon()
+        if icon.isNull():
+            from ..core import icons
+
+            icon = icons.icon("headphones", "#C95770")
+        icon = QIcon(icon.pixmap(32)) if icon.isNull() else icon
+        self._tray.setIcon(icon)
+        self._tray_null_icon = icon.isNull()
         self._tray.setToolTip("HushPlayer")
         menu = QMenu()
         show_action = QAction("显示 HushPlayer", self)
@@ -494,6 +503,12 @@ class MainWindow(FramelessWindow):
         self._tray.setContextMenu(menu)
         self._tray.activated.connect(self._on_tray_activated)
         self._tray.show()
+        log.info(
+            "托盘图标：null=%s visible=%s available=%s",
+            getattr(self, "_tray_null_icon", True),
+            self._tray.isVisible(),
+            QSystemTrayIcon.isSystemTrayAvailable(),
+        )
 
     def toggle_desktop_lyrics(self) -> None:
         from .desktop_lyrics import ensure_desktop_lyrics
@@ -656,11 +671,34 @@ class MainWindow(FramelessWindow):
                 minimize_to_tray = bool(ctx().settings.get("general.minimize_to_tray", False))
             except Exception:  # noqa: BLE001
                 minimize_to_tray = False
-            if minimize_to_tray and self.isMinimized() and self._tray is not None:
+            tray_ready = self._tray is not None and self._tray.isVisible()
+            if minimize_to_tray and self.isMinimized() and tray_ready:
                 QTimer.singleShot(0, self._hide_to_tray)
         super().changeEvent(event)
 
     def _hide_to_tray(self) -> None:
+        if (
+            self._tray is None
+            or not QSystemTrayIcon.isSystemTrayAvailable()
+            or not self._tray.isVisible()
+        ):
+            # Never lose the window: without a tray icon there is no way back.
+            self.showNormal()
+            self.toast("系统托盘不可用，窗口保持打开", "warning")
+            return
+        if not bool(ctx().settings.get("general.tray_hint_shown", False)):
+            # First time: explain where the icon went, otherwise the window can
+            # look like it vanished (Windows 11 keeps new icons in the overflow).
+            QMessageBox.information(
+                self,
+                "已最小化到系统托盘",
+                "HushPlayer 仍在后台播放。\n\n"
+                "Windows 11 默认把新图标放进任务栏的隐藏区：点击任务栏右下角的"
+                "「^」（或按 Win+B 后右方向键）即可看到 HushPlayer。\n"
+                "你可以把它拖到常显区域，或用「设置 → 常规 → 关闭窗口时」改成直接退出。",
+            )
+            ctx().settings.set("general.tray_hint_shown", True)
+            ctx().settings.save()
         self.hide()
         if self._tray is not None:
             self._tray.showMessage(
