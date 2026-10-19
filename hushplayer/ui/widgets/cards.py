@@ -61,7 +61,16 @@ class _CardBase(QWidget):
         self.setMouseTracking(True)
         self.setCursor(Qt.PointingHandCursor)
         self.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
-        self.setFixedSize(self._size, self._size + 50)
+        title = QFontMetrics(theme().font(9.6, 600))
+        sub = QFontMetrics(theme().font(8.6, 400))
+        self._text_top = 8
+        self._title_h = title.height()
+        self._sub_h = sub.height()
+        self._text_gap = 2
+        self.setFixedSize(
+            self._size,
+            self._size + self._text_top + self._title_h + self._text_gap + self._sub_h + 6,
+        )
 
     # ------------------------------------------------------------------ data
     def set_text(self, title: str, subtitle: str = "") -> None:
@@ -135,7 +144,7 @@ class _CardBase(QWidget):
         painter.setPen(QPen(rgba(palette.text, 0.96)))
         metrics = QFontMetrics(font)
         painter.drawText(
-            QRectF(0, self._size + 9, self._size, 19),
+            QRectF(0, self._size + self._text_top, self._size, self._title_h),
             int(Qt.AlignLeft | Qt.AlignVCenter),
             metrics.elidedText(self._title or "—", Qt.ElideRight, int(self._size)),
         )
@@ -144,7 +153,12 @@ class _CardBase(QWidget):
             painter.setFont(sub)
             painter.setPen(QPen(rgba(palette.text, 0.52)))
             painter.drawText(
-                QRectF(0, self._size + 27, self._size, 18),
+                QRectF(
+                    0,
+                    self._size + self._text_top + self._title_h + self._text_gap,
+                    self._size,
+                    self._sub_h,
+                ),
                 int(Qt.AlignLeft | Qt.AlignVCenter),
                 QFontMetrics(sub).elidedText(self._subtitle, Qt.ElideRight, int(self._size)),
             )

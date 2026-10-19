@@ -237,9 +237,14 @@ class Theme(QObject):
         scale = 1.0 + (self.type_scale - 1.0) * factor
         return int(round(float(value) * scale))
 
+    def px(self, size: float) -> int:
+        """Final pixel size for both QSS and QPainter text."""
+        scaled = (size + self.FONT_LEGIBILITY_BONUS) * self.type_scale * self.TEXT_LEGIBILITY
+        return max(12, round(scaled))
+
     def pt(self, size: float) -> float:
-        """Point size scaled with both UI density and the user font slider."""
-        return size * self.type_scale
+        """Point equivalent of :meth:`px`, so QSS text matches painted text."""
+        return self.px(size) * 0.75
 
     @property
     def accent(self) -> str:
@@ -300,13 +305,16 @@ class Theme(QObject):
     #: Small UI text looked washed out on high-DPI screens: a slight floor plus
     #: full hinting keeps glyph stems on whole device pixels.
     FONT_LEGIBILITY_BONUS = 1.0
+    # Qt draws QSS text and QPainter text through different paths; keeping one
+    # multiplier here is what stops the sidebar from looking bolder/smaller than
+    # the search field (they now resolve to the same pixel size).
+    TEXT_LEGIBILITY = 1.27
 
     def font(self, size: float, weight: int = 400, *, display: bool = False) -> QFont:
         families = self._families
         font = QFont()
         font.setFamilies(families)
-        scaled = (size + self.FONT_LEGIBILITY_BONUS) * self.type_scale
-        font.setPixelSize(max(11, round(scaled)))
+        font.setPixelSize(self.px(size))
         font.setWeight(QFont.Weight(weight))
         font.setHintingPreference(QFont.HintingPreference.PreferFullHinting)
         font.setStyleStrategy(QFont.StyleStrategy.PreferAntialias)
@@ -316,8 +324,7 @@ class Theme(QObject):
     def mono_font(self, size: float, weight: int = 400) -> QFont:
         font = QFont()
         font.setFamilies(["Cascadia Mono", "Consolas", "Segoe UI"])
-        scaled = (size + self.FONT_LEGIBILITY_BONUS) * self.type_scale
-        font.setPixelSize(max(11, round(scaled)))
+        font.setPixelSize(self.px(size))
         font.setWeight(QFont.Weight(weight))
         font.setHintingPreference(QFont.HintingPreference.PreferFullHinting)
         return font
@@ -545,7 +552,7 @@ def apply_theme_to_app(app, *, preference: str | None = None, accent: str | None
     t.apply(mode=mode, accent=accent or BRAND_ACCENT, **kwargs)
     app.setStyleSheet(t.qss())
     app.setPalette(t.window_palette())
-    base = t.font(13)
+    base = t.font(10)
     app.setFont(base)
     return mode
 

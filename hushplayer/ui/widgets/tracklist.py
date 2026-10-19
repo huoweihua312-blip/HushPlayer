@@ -645,7 +645,8 @@ class TrackDelegate(QStyledItemDelegate):
 
     # ---------------------------------------------------------------- sizing
     def sizeHint(self, option: QStyleOptionViewItem, index: QModelIndex) -> QSize:  # noqa: N802
-        height = 44 if self.view.model().compact else 54
+        base = 44 if self.view.model().compact else 54
+        height = theme().scaled(base, factor=0.8)
         return QSize(100, height)
 
 
@@ -835,7 +836,9 @@ class TrackTable(QTableView):
                 continue
             if column.key == COLUMN_FAVORITE and width < 360:
                 continue
-            column_width = column.width
+            # Fixed column widths follow the type scale, otherwise enlarged
+            # text gets elided while the column keeps its 1.0-era width.
+            column_width = theme().scaled(column.width, factor=0.55) if column.width else 0
             if column.key == COLUMN_INDEX and width < 360:
                 column_width = 30
             if column.key == COLUMN_DURATION and width < 360:

@@ -32,7 +32,16 @@ class TrackInfo(QWidget):
         self.setMaximumWidth(520)
         self.setCursor(Qt.PointingHandCursor)
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-        self.setFixedHeight(46)
+        self._fit_height()
+
+    def _fit_height(self) -> None:
+        title = QFontMetrics(theme().font(10.2, 600))
+        artist = QFontMetrics(theme().font(8.8, 500))
+        self.setFixedHeight(title.height() + artist.height() + 10)
+
+    def showEvent(self, event) -> None:  # noqa: N802
+        super().showEvent(event)
+        self._fit_height()
 
     def set_track(self, track: Track | None, *, subtitle: str = "") -> None:
         if track is None:
@@ -139,7 +148,7 @@ class PlayerBar(QWidget):
         self._duration = 0
         self._seeking = False
         self._loading = False
-        self.setFixedHeight(Metrics.player_h)
+        self.setMinimumHeight(1)
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         self.setAttribute(Qt.WA_StyledBackground, False)
 
@@ -387,6 +396,9 @@ class PlayerBar(QWidget):
 
     def resizeEvent(self, event) -> None:  # noqa: N802
         super().resizeEvent(event)
+        wanted = theme().scaled(Metrics.player_h, factor=0.8)
+        if self.height() != wanted:
+            self.setFixedHeight(wanted)
         width = self.width()
         self.volume.setVisible(width >= 860)
         self.mute.setVisible(width >= 860)

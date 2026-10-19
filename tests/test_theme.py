@@ -41,4 +41,8 @@ def test_ui_scale_enlarges_type_without_changing_dpr(qapp) -> None:
     scaled = theme().font(10.5).pixelSize()
     theme().apply(ui_scale=1.0)
     assert scaled > base
-    assert theme().pt(9) == pytest.approx(9.0)
+    # QSS text (pt) and QPainter text (px) must resolve to the same pixel size,
+    # otherwise the sidebar and the search field render at different weights.
+    for size in (8.0, 9.0, 10.5, 13.0):
+        assert theme().pt(size) * 96.0 / 72.0 == pytest.approx(theme().px(size), abs=0.51)
+    assert theme().px(9) > 9
