@@ -6,6 +6,10 @@
 
 from __future__ import annotations
 
+import time
+
+import os
+
 from PySide6.QtCore import (
     QEasingCurve,
     QEvent,
@@ -178,6 +182,10 @@ class LyricsBody(QWidget):
     @property
     def active_index(self) -> int:
         return self._index
+
+    @property
+    def position(self) -> int:
+        return self._position
 
     def row_center(self, index: int) -> float:
         if 0 <= index < len(self._rows):
@@ -372,20 +380,48 @@ class LyricsView(QWidget):
         self._scroll_anim.valueChanged.connect(self._apply_scroll)
         self._programmatic = False
         self._last_value = 0
-        self.scroll.verticalScrollBar().valueChanged.connect(self._on_scroll_value)
+        self._hold_scroll_until = 0.0
+        bar = self.scroll.verticalScrollBar()
+        bar.valueChanged.connect(self._on_scroll_value)
         self.body.installEventFilter(self)
 
     # ------------------------------------------------------------------ 数据
-    def set_document(self, document: LyricDocument | None) -> None:
+    def set_document(self, document: LyricDocument | None, *, keep_position: bool = False) -> None:
+        """Replace the document.
+
+        ``keep_position`` is used when the same song is re-parsed (lyrics
+        offset calibration, translation toggle, font change): jumping back to
+        the first line there looks like a glitch, so the view keeps the current
+        playback position and scrolls straight to the active line.
+        """
+        position = self.body.position if keep_position else 0
+        bar = self.scroll.verticalScrollBar()
+        previous_value = bar.value()
+        previous_max = bar.maximum()
+        self._scroll_anim.stop()
         self._ensure_padding()
         self.body.set_document(document)
         self.body.setMinimumHeight(max(120, self.body.content_height()))
-        self.scroll.verticalScrollBar().setValue(0)
-        self._last_value = 0
         self._follow = True
         self._pad_top_ratio = 0.42
         self._pad_bottom_ratio = 0.55
         self._follow_timer.stop()
+        if keep_position and document is not None and document.lines:
+            self.body.set_position(position)
+            self._ensure_padding()
+            # The rebuilt content needs a fresh layout before it has a usable
+            # scroll range; hold the previous range and offset so Qt cannot
+            # clamp the view to 0 (which looked like "jump to the first line").
+            bar.setRange(0, max(previous_max, bar.maximum()))
+            bar.setValue(min(previous_value, bar.maximum()))
+            self._last_value = bar.value()
+            # Calibrating the offset is read in place: keep the viewport still
+            # for a moment instead of re-centring on the (shifted) active line.
+            self._hold_scroll_until = time.monotonic() + 1.5
+        else:
+            bar.setValue(0)
+            self._last_value = 0
+            self._hold_scroll_until = 0.0
 
     def document(self) -> LyricDocument | None:
         return self.body.document()
@@ -397,6 +433,8 @@ class LyricsView(QWidget):
         if not had_lines:
             return
         index = self.body.active_index
+        if time.monotonic() < self._hold_scroll_until:
+            return
         if index != previous:
             self._follow = True
             self._scroll_to_index(index, animate=True)
@@ -503,4 +541,8 @@ class LyricsView(QWidget):
         super().resizeEvent(event)
         height = max(200, self.scroll.viewport().height())
         self.body.set_vertical_padding(height * 0.42, height * 0.55)
+        # While the user calibrates the lyrics offset the viewport is held in
+        # place; re-centring here is what made the list snap back mid-edit.
+        if time.monotonic() < self._hold_scroll_until:
+            return
         self._scroll_to_index(self.body.active_index, animate=False)

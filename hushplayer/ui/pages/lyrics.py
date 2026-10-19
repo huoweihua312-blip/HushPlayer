@@ -236,12 +236,15 @@ class LyricsPage(Page):
         self._apply_result(result)
 
     def _apply_result(self, result: LyricsResult) -> None:
+        # Re-parsing the *same* track (offset calibration, translation, font
+        # change) must not reset the scroll position to the first line.
+        same_track = self._result is not None and self._result.track_id == result.track_id
         self._result = result
         document = result.document
         provider = PROVIDER_LABELS.get(result.provider, result.provider or result.status)
         self.provider_label.setText(f"歌词来源 · {provider}" if result.status == STATUS_OK else "")
         if result.status == STATUS_OK and document is not None and not document.is_empty():
-            self.view.set_document(document)
+            self.view.set_document(document, keep_position=same_track)
             self._update_translate_button(document.has_translation)
             self.translate_button.setChecked(
                 bool(ctx().settings.get("lyrics.translate", True)) and document.has_translation
@@ -342,7 +345,7 @@ class LyricsPage(Page):
         self._offset_label()
         if document is not None and self._result is not None:
             self._result.document = document
-            self.view.set_document(document)
+            self.view.set_document(document, keep_position=True)
             self.view.set_position(ctx().player.position)
 
     def scale_font(self, delta: float) -> None:
