@@ -199,3 +199,13 @@ $ .venv\Scripts\python.exe -m pytest -q
 | 新增测试 | `tests/test_source_registry.py`：插件元数据解析、安装/去重/删除、错误类型与 2 MB 上限 |
 | 真实 GUI | `tools/probe_r8_source.py`：安装 MusicFree 风格插件 → 列表出现「本地测试源」→ 运行时 `search()` 返回 1 条，`errors 0`；截图 `docs/screenshots/settings_installed_source.png` |
 | 打包产物 | 1.0.8 onedir + zip，`tools/verify_package.ps1` 验证 |
+
+
+## 13. 批量导入音源（v1.0.9）
+
+| 项目 | 结果 |
+| --- | --- |
+| 全量自动化测试 | **135 passed / 0 failed / 0 skipped**，31.5 s（`artifacts/junit_round9.xml`） |
+| 新增测试 | `tests/test_source_registry.py` 增加 `collect_plugin_files` 与 `install_many`（含重复、坏文件） |
+| 真实 GUI | `tools/probe_r9_batch.py`：文件夹内 3 插件 + 1 txt → 安装 2、跳过 1 重复、`errors 0`；截图 `docs/screenshots/settings_batch_import.png` |
+| 打包产物 | 1.0.9 onedir + zip，`tools/verify_package.ps1` 启动/单实例/退出验证 |

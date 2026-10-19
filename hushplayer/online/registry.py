@@ -16,6 +16,7 @@ import os
 import re
 import shutil
 import time
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -27,6 +28,8 @@ __all__ = [
     "registry",
     "MAX_SOURCE_BYTES",
     "RegistryError",
+    "InstallReport",
+    "collect_plugin_files",
 ]
 
 log = get_logger(__name__)
@@ -38,6 +41,53 @@ _USER_DIR = "user_sources"
 
 class RegistryError(RuntimeError):
     """Raised when a source file cannot be installed or removed."""
+
+
+@dataclass
+class InstallReport:
+    """Outcome of a batch install (multi-select or folder import)."""
+
+    installed: list[dict[str, Any]] = field(default_factory=list)
+    duplicates: list[str] = field(default_factory=list)
+    failed: list[tuple[str, str]] = field(default_factory=list)
+
+    @property
+    def total(self) -> int:
+        return len(self.installed) + len(self.duplicates) + len(self.failed)
+
+    def summary(self) -> str:
+        parts = [f"已安装 {len(self.installed)} 个音源"]
+        if self.duplicates:
+            parts.append(f"跳过 {len(self.duplicates)} 个重复")
+        if self.failed:
+            parts.append(f"失败 {len(self.failed)} 个")
+        return "，".join(parts)
+
+    def failure_text(self, limit: int = 8) -> str:
+        lines = [f"{Path(name).name}：{reason}" for name, reason in self.failed[:limit]]
+        if len(self.failed) > limit:
+            lines.append(f"…另有 {len(self.failed) - limit} 个失败")
+        return "\n".join(lines)
+
+
+_PLUGIN_SUFFIXES = {".js", ".json"}
+
+
+def collect_plugin_files(folder: str | Path, *, recursive: bool = False) -> list[Path]:
+    """List installable MusicFree plugins in ``folder`` (newest first)."""
+    root = Path(folder)
+    if not root.is_dir():
+        return []
+    iterator = root.rglob("*") if recursive else root.glob("*")
+    files = [
+        path
+        for path in iterator
+        if path.is_file()
+        and path.suffix.lower() in _PLUGIN_SUFFIXES
+        and "node_modules" not in path.parts
+    ]
+    files.sort(key=lambda path: path.name.lower())
+    return files
 
 
 def _read_json(path: Path) -> dict[str, Any]:
@@ -304,6 +354,38 @@ class SourceRegistry:
                 Path(temp_path).unlink(missing_ok=True)
             except OSError:
                 pass
+
+    def install_many(self, paths: list[str | Path]) -> InstallReport:
+        """Install several plugins, collecting per-file errors instead of aborting."""
+        report = InstallReport()
+        seen: set[str] = set()
+        for raw in paths:
+            path = Path(raw)
+            key = str(path.resolve()).lower()
+            if key in seen:
+                report.duplicates.append(path.name)
+                continue
+            seen.add(key)
+            try:
+                entry = self.install_file(path)
+            except RegistryError as exc:
+                message = str(exc)
+                if "已经安装" in message:
+                    report.duplicates.append(path.name)
+                else:
+                    report.failed.append((path.name, message))
+            except Exception as exc:  # noqa: BLE001 - keep the batch going
+                log_exception(f"安装音源失败：{path}", exc)
+                report.failed.append((path.name, str(exc)))
+            else:
+                report.installed.append(entry)
+        log.info(
+            "批量安装音源：%s / 重复 %s / 失败 %s",
+            len(report.installed),
+            len(report.duplicates),
+            len(report.failed),
+        )
+        return report
 
     def set_enabled(self, identifier: str, enabled: bool) -> bool:
         data = _read_json(self.registry_path)

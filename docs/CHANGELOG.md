@@ -1,5 +1,21 @@
 # Changelog
 
+## v1.0.9 — 2026-10-19
+
+新增：批量导入音源插件。
+
+### 新增
+- 设置 → 在线音源 → 「添加音源…」现在支持**多选** `.js / .json` 插件。
+- 新增「批量导入 / 选择文件夹…」：扫描所选文件夹（不递归子目录，自动跳过 `node_modules`），一次性安装全部插件。
+- `SourceRegistry.install_many()` + `InstallReport`：逐个安装、重复与失败分别统计，单个文件出错不会中断整批。
+- 导入结束后提示「已安装 N 个音源，跳过 M 个重复，失败 K 个」；有失败时用对话框列出文件名与原因。
+
+### 验证
+- `tests/test_source_registry.py` 新增：`collect_plugin_files`、批量安装（含重复与坏文件）。
+- 真实 GUI：`tools/probe_r9_batch.py` 扫描含 3 个插件 + 1 个 txt 的文件夹，安装 2 个、跳过 1 个重复；
+  截图 `docs/screenshots/settings_batch_import.png`。
+- 打包 1.0.9：`packaging/out/HushPlayer-1.0.9-win64.zip`。
+
 ## v1.0.8 — 2026-10-19
 
 第七轮反馈：设置 → 在线音源 → 「添加音源…」报错。

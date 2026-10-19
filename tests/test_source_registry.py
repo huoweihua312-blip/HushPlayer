@@ -75,3 +75,38 @@ def test_rejects_oversized_or_wrong_type(registry: SourceRegistry, tmp_path: Pat
     big.write_bytes(b"x" * (2 * 1024 * 1024 + 1))
     with pytest.raises(Exception):
         registry.install_file(big)
+
+
+def test_collect_plugin_files_skips_other_types(tmp_path: Path) -> None:
+    from hushplayer.online.registry import collect_plugin_files
+
+    (tmp_path / "a.js").write_text("module.exports = {}", encoding="utf-8")
+    (tmp_path / "b.json").write_text("{}", encoding="utf-8")
+    (tmp_path / "notes.txt").write_text("x", encoding="utf-8")
+    modules = tmp_path / "node_modules"
+    modules.mkdir()
+    (modules / "dep.js").write_text("module.exports = {}", encoding="utf-8")
+
+    names = [path.name for path in collect_plugin_files(tmp_path)]
+    assert names == ["a.js", "b.json"]
+
+
+def test_install_many_reports_and_continues(registry: SourceRegistry, tmp_path: Path) -> None:
+    first = tmp_path / "one.js"
+    first.write_text(PLUGIN.replace("测试音乐", "源一"), encoding="utf-8")
+    second = tmp_path / "two.js"
+    second.write_text(PLUGIN.replace("测试音乐", "源二").replace("0.1.2", "0.2.0"), encoding="utf-8")
+    broken = tmp_path / "broken.txt"
+    broken.write_text("not a plugin", encoding="utf-8")
+
+    report = registry.install_many([first, second, first, broken])
+
+    assert [entry["name"] for entry in report.installed] == ["源一", "源二"]
+    assert report.duplicates == ["one.js"]
+    assert report.failed and report.failed[0][0] == "broken.txt"
+    assert report.total == 4
+    assert "已安装 2 个音源" in report.summary()
+
+    stored = json.loads(registry.registry_path.read_text(encoding="utf-8"))
+    user_ids = [item["id"] for item in stored["sources"] if str(item["id"]).startswith("user_source_")]
+    assert len(user_ids) == 2

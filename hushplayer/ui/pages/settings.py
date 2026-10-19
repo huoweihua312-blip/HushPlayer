@@ -607,6 +607,11 @@ class SettingsPage(Page):
             self._action_button("从链接…", "cloud", self._add_source_url),
         ))
         card.add_row(self._row(
+            "批量导入",
+            "选择一个文件夹，把它里面的 .js / .json 插件一次性安装（不递归子目录）",
+            self._action_button("选择文件夹…", "folder", self._import_source_folder),
+        ))
+        card.add_row(self._row(
             "恢复内置音源",
             "把删除过的内置音源重新加回列表",
             self._action_button("恢复", "refresh", self._restore_sources),
@@ -698,11 +703,40 @@ class SettingsPage(Page):
             self._source_rows.addWidget(SettingRow(label, detail, control=holder))
 
     def _add_source(self) -> None:
-        path, _ = QFileDialog.getOpenFileName(
-            self, "选择音源插件", "", "MusicFree 插件 (*.js *.json)"
+        paths, _ = QFileDialog.getOpenFileNames(
+            self, "选择音源插件（可多选）", "", "MusicFree 插件 (*.js *.json)"
         )
-        if path:
-            self._install_source_file(path)
+        if paths:
+            self._install_source_files(paths)
+
+    def _import_source_folder(self) -> None:
+        folder = QFileDialog.getExistingDirectory(self, "选择插件文件夹", "")
+        if not folder:
+            return
+        from ...online.registry import collect_plugin_files
+
+        files = collect_plugin_files(folder)
+        if not files:
+            self._toast("该文件夹里没有 .js / .json 插件", "warning")
+            return
+        self._install_source_files([str(path) for path in files])
+
+    def _install_source_files(self, paths: list[str]) -> None:
+        from ...online.registry import registry
+
+        try:
+            report = registry().install_many(paths)
+        except Exception as exc:  # noqa: BLE001
+            log_exception("批量安装音源失败", exc)
+            self._toast("批量安装音源失败，请查看日志", "error")
+            return
+        if report.installed:
+            self._toast(report.summary(), "success")
+        elif report.duplicates and not report.failed:
+            self._toast("这些音源已经安装过了", "info")
+        if report.failed:
+            QMessageBox.warning(self, "部分音源安装失败", report.failure_text())
+        self._reload_sources()
 
     def _install_source_file(self, path: str) -> None:
         """Install a MusicFree-compatible plugin the user picked from disk."""
