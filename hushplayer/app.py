@@ -179,6 +179,14 @@ class HushApp(QObject):
         context = ctx()
         if context is not None:
             context.window = self.window
+        # Windows shell integration needs the real HWND, so it is created here
+        # rather than in _build_services().
+        from .services.integration import MediaIntegration
+
+        self.integration = MediaIntegration(self.player, self.settings, self)
+        self.integration.attach_window(self.window)
+        if context is not None:
+            context.integration = self.integration
         self._configure_player()
         self._restore_session()
 
@@ -277,7 +285,17 @@ class HushApp(QObject):
             self.keeper.flush()
         except Exception:  # noqa: BLE001
             pass
-        for name in ("player", "lyrics", "downloads", "updater", "library", "cache", "client", "proxy"):
+        for name in (
+            "integration",
+            "player",
+            "lyrics",
+            "downloads",
+            "updater",
+            "library",
+            "cache",
+            "client",
+            "proxy",
+        ):
             service = getattr(self, name, None)
             if service is None:
                 continue

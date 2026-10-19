@@ -31,7 +31,7 @@ def step(key):
     print("saved", key, flush=True)
 
 def run():
-    for key in ("appearance", "online", "cache", "about"):
+    for key in ("appearance", "online", "cache", "about", "general"):
         step(key)
     print("done", flush=True)
     hush.shutdown(); app.quit()

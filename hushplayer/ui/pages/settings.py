@@ -283,6 +283,24 @@ class SettingsPage(Page):
         card.add_row(self._row("开机时自动启动", "登录 Windows 后自动运行（可在系统设置中撤销）", self._toggle("general.launch_at_startup", False)))
         column.addWidget(card)
 
+        card = SettingsCard("系统集成", "与 Windows 桌面和系统媒体的协作方式")
+        card.add_row(self._row(
+            "系统媒体控制",
+            "在系统媒体面板、锁屏与硬件媒体键上控制播放",
+            self._toggle("general.system_media_controls", True),
+        ))
+        card.add_row(self._row(
+            "任务栏播放进度",
+            "在任务栏按钮上显示当前播放进度",
+            self._toggle("general.taskbar_progress", True),
+        ))
+        card.add_row(self._row(
+            "全局快捷键",
+            "Ctrl+Alt+Space 播放/暂停，Ctrl+Alt+←/→ 上一首/下一首，Ctrl+Alt+M 静音",
+            self._toggle("general.global_hotkeys", True),
+        ))
+        column.addWidget(card)
+
         card = SettingsCard("更新", "")
         card.add_row(self._row("启动时检查更新", "连接发布服务器检查新版本，不会自动安装", self._toggle("general.check_updates_on_start", True)))
         column.addWidget(card)

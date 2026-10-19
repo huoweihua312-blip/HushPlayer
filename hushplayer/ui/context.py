@@ -39,6 +39,7 @@ class AppContext:
     window: Any = None
     downloads: "DownloadService | None" = None
     updater: "UpdateService | None" = None
+    integration: Any = None
     desktop_lyrics: Any = None
     immersive: Any = None
 
