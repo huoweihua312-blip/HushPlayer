@@ -45,6 +45,17 @@ from .page import Page, PageHeader
 
 log = get_logger(__name__)
 
+#: How many online sources stay visible while the list is collapsed.
+SOURCES_COLLAPSED_VISIBLE = 4
+
+
+def source_window(total: int, expanded: bool, limit: int = SOURCES_COLLAPSED_VISIBLE) -> tuple[int, int]:
+    """Return ``(visible, hidden)`` for the collapsible source list."""
+    if expanded or total <= limit:
+        return total, 0
+    return limit, total - limit
+
+
 SECTIONS = [
     ("general", "常规", "settings"),
     ("appearance", "外观与主题", "palette"),
@@ -652,6 +663,11 @@ class SettingsPage(Page):
             item = self._source_rows.takeAt(0)
             widget = item.widget()
             if widget is not None:
+                # deleteLater() alone leaves the old rows painted until the
+                # event loop catches up, so collapsing looked like a flicker of
+                # both lists at once.
+                widget.hide()
+                widget.setParent(None)
                 widget.deleteLater()
         try:
             sources = build_sources(ctx().client.sources)
@@ -671,7 +687,9 @@ class SettingsPage(Page):
         label_counts: dict[str, int] = {}
         for source in sources:
             label_counts[source.label] = label_counts.get(source.label, 0) + 1
-        for source in sources:
+        expanded = bool(self.settings.get("online.sources_expanded", False))
+        visible, hidden = source_window(len(sources), expanded)
+        for source in sources[:visible]:
             label = source.label
             if label_counts.get(label, 0) > 1:
                 label = f"{label} · {source.id[-4:]}"
@@ -701,6 +719,26 @@ class SettingsPage(Page):
             row.addWidget(switch)
             row.addWidget(remove)
             self._source_rows.addWidget(SettingRow(label, detail, control=holder))
+
+        if hidden > 0 or expanded:
+            label = "收起音源列表" if expanded else f"展开全部音源（还有 {hidden} 个）"
+            hint = (
+                "只显示前 %d 个，展开后可逐个启用或删除" % SOURCES_COLLAPSED_VISIBLE
+                if not expanded
+                else f"共 {len(sources)} 个音源"
+            )
+            toggle = TextButton(
+                "收起" if expanded else "展开全部",
+                icon_name="chevron_up" if expanded else "chevron_down",
+                size=28,
+            )
+            toggle.clicked.connect(self._toggle_sources_expanded)
+            self._source_rows.addWidget(SettingRow(label, hint, control=toggle))
+
+    def _toggle_sources_expanded(self) -> None:
+        expanded = bool(self.settings.get("online.sources_expanded", False))
+        self.settings.set("online.sources_expanded", not expanded)
+        self._fill_sources()
 
     def _add_source(self) -> None:
         paths, _ = QFileDialog.getOpenFileNames(

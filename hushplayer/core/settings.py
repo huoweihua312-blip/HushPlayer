@@ -89,6 +89,7 @@ DEFAULTS: dict[str, Any] = {
         "cover_from_folder": True,
     },
     "online": {
+        "sources_expanded": False,
         "enabled_sources": {},
         "preferred_source": "",
         "search_all": True,
