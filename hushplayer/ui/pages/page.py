@@ -284,6 +284,40 @@ class EmptyState(QWidget):
         painter.end()
 
 
+class CenteredBox(QWidget):
+    """Keeps a child at a comfortable measure and centres it.
+
+    On a maximised 1440p window a full-width settings card or song table looks
+    sparse and makes the type read as tiny; Apple Music constrains the content
+    column instead. The child still shrinks freely on narrow windows.
+    """
+
+    def __init__(
+        self,
+        child: QWidget,
+        *,
+        max_width: int,
+        align: str = "center",
+        parent: QWidget | None = None,
+    ) -> None:
+        super().__init__(parent)
+        self._child = child
+        self._max_width = max(360, int(max_width))
+        self._align = align
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
+        alignment = Qt.AlignLeft if align == "left" else Qt.AlignHCenter
+        layout.addWidget(child, 1, alignment)
+        self._layout = layout
+
+    def resizeEvent(self, event) -> None:  # noqa: N802
+        super().resizeEvent(event)
+        width = max(320, min(self._max_width, self.width()))
+        if self._child.width() != width:
+            self._child.setFixedWidth(width)
+
+
 class Card(QFrame):
     """Rounded surface used by settings groups and detail panels."""
 

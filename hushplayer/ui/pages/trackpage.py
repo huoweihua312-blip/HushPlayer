@@ -5,12 +5,12 @@ from __future__ import annotations
 from PySide6.QtCore import QTimer, Qt
 from PySide6.QtWidgets import QHBoxLayout, QVBoxLayout, QWidget
 
-from ...core.theme import Metrics
+from ...core.theme import Metrics, theme
 from ...model.track import Track, format_duration
 from ..context import ctx
 from ..menus import track_menu
 from ..widgets.tracklist import TrackListWidget
-from .page import Page, PageHeader
+from .page import CenteredBox, Page, PageHeader
 
 
 class TrackListPage(Page):
@@ -35,15 +35,25 @@ class TrackListPage(Page):
         layout = self.content_layout
         layout.setContentsMargins(Metrics.page_pad, 14, Metrics.page_pad, 8)
         layout.setSpacing(8)
+        # Header and table share one constrained column so the title lines up
+        # with the table's left edge instead of floating at the page margin.
+        column = QWidget()
+        column.setStyleSheet("background:transparent;")
+        column_layout = QVBoxLayout(column)
+        column_layout.setContentsMargins(0, 0, 0, 0)
+        column_layout.setSpacing(8)
         self.header = PageHeader(self.title, self.subtitle)
-        layout.addWidget(self.header)
+        column_layout.addWidget(self.header)
 
         spacer = QWidget()
         spacer.setFixedHeight(6)
-        layout.addWidget(spacer)
+        column_layout.addWidget(spacer)
 
         self.list = TrackListWidget()
-        layout.addWidget(self.list, 1)
+        column_layout.addWidget(self.list, 1)
+        layout.addWidget(
+            CenteredBox(column, max_width=theme().scaled(1180, factor=1.0)), 1
+        )
 
         self.list.play_requested.connect(self._on_play)
         self.list.menu_requested.connect(self._on_menu)

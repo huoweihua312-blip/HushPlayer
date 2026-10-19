@@ -41,7 +41,7 @@ from ..widgets.settings_widgets import (
     ThemePicker,
     ToggleSwitch,
 )
-from .page import Page, PageHeader
+from .page import CenteredBox, Page, PageHeader
 
 log = get_logger(__name__)
 
@@ -216,12 +216,20 @@ class SettingsPage(Page):
         scroll.setStyleSheet("QScrollArea{background:transparent;border:none;}")
         host = QWidget()
         host.setStyleSheet("background:transparent;")
-        column = QVBoxLayout(host)
+        host_layout = QVBoxLayout(host)
+        host_layout.setContentsMargins(0, 0, 0, 0)
+        host_layout.setSpacing(0)
+        column_host = QWidget()
+        column_host.setStyleSheet("background:transparent;")
+        column = QVBoxLayout(column_host)
         column.setContentsMargins(0, 0, 12, 18)
         column.setSpacing(theme().scaled(14, factor=0.8))
         builder = self._builders[key]
         builder(column)
         column.addStretch(1)
+        host_layout.addWidget(
+            CenteredBox(column_host, max_width=theme().scaled(1040, factor=1.0), align="left"), 1
+        )
         scroll.setWidget(host)
         self._sections[key] = scroll
         self._stack.addWidget(scroll)
