@@ -13,6 +13,8 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+import time
+
 from ...core.logging_setup import get_logger
 from ...core.theme import css_rgba, rgba, theme
 from ...model.track import Track
@@ -28,6 +30,14 @@ from .page import EmptyState, Page
 
 log = get_logger(__name__)
 
+#: A 64-source search must not wait for the slowest plugin: results stream in,
+#: each request is capped, and the whole sweep has a hard deadline.
+SEARCH_PER_SOURCE_TIMEOUT_MS = 9000
+SEARCH_CONCURRENCY = 12
+SEARCH_DEADLINE_MS = 12000
+SEARCH_CACHE_TTL_S = 300
+SEARCH_RENDER_INTERVAL_MS = 60
+
 
 class SearchPage(Page):
     route = "search"
@@ -41,6 +51,25 @@ class SearchPage(Page):
         self._pending: set[str] = set()
         self._errors: list[str] = []
         self._local_tracks: list[Track] = []
+        self._queue: list = []
+        self._active = 0
+        self._done = 0
+        self._online_total = 0
+        self._timed_out = 0
+        self._finished = False
+        self._query = ""
+        self._request_ids: list[int] = []
+        self._source_speed: dict[str, float] = {}
+        self._dispatch_at: dict[str, float] = {}
+        self._search_cache: dict[tuple[str, str], tuple[float, list[Track]]] = {}
+        self._render_timer = QTimer(self)
+        self._render_timer.setSingleShot(True)
+        self._render_timer.setInterval(SEARCH_RENDER_INTERVAL_MS)
+        self._render_timer.timeout.connect(self._render_online)
+        self._deadline_timer = QTimer(self)
+        self._deadline_timer.setSingleShot(True)
+        self._deadline_timer.setInterval(SEARCH_DEADLINE_MS)
+        self._deadline_timer.timeout.connect(self._on_deadline)
 
         root = self.content_layout
         root.setContentsMargins(30, 12, 30, 12)
@@ -288,23 +317,34 @@ class SearchPage(Page):
             self.online_list.set_tracks([])
             self.online_list.setVisible(False)
             self.online_empty.setVisible(True)
-            self.online_empty.set_text("搜索在线音乐", "结果来自已启用的音源，播放时会自动解析真实资源")
-            self.online_status.setText(f"{len(getattr(self, '_sources', []))} 个音源可用")
+            self.online_empty.set_text("搜索在线音乐", "输入关键词后常用的音源会自动并行搜索")
+            self.online_status.setText(f"{len(getattr(self, '_sources', []))} 个音源就绪")
             self.play_all_button.setEnabled(False)
             return
         client = ctx().client
         if client is None or not self._sources:
             self.online_empty.setVisible(True)
             self.online_list.setVisible(False)
-            self.online_empty.set_text("在线音源不可用", "请检查 Node.js 运行时与音源配置")
+            self.online_empty.set_text("在线音源未就绪", "正在启动 Node.js 运行时与音源插件")
             return
+
+        for request_id in getattr(self, "_request_ids", []):
+            try:
+                ctx().client.cancel(request_id)
+            except Exception:  # noqa: BLE001
+                pass
         self._token += 1
         token = self._token
+        self._query = text
         chosen = self.source_filter.current() or ""
         targets = [s for s in self._sources if not chosen or s.id == chosen]
         self._online_tracks = []
-        self._pending = {s.id for s in targets}
         self._errors = []
+        self._online_total = len(targets)
+        self._done = 0
+        self._active = 0
+        self._finished = False
+        self._request_ids = []
         self.online_list.set_tracks([])
         self.online_list.setVisible(False)
         self.online_empty.setVisible(True)
@@ -312,19 +352,61 @@ class SearchPage(Page):
         self.online_status.setText(f"正在搜索 {len(targets)} 个音源…")
         self.play_all_button.setEnabled(False)
         client.ensure_started()
+
+        # Repeat searches are served from a short-lived cache so the very common
+        # "same song again" case renders instantly.
+        now = time.monotonic()
+        pending: list = []
         for source in targets:
-            client.search(
+            cached = self._search_cache.get((text, source.id))
+            if cached and not force and (now - cached[0]) < SEARCH_CACHE_TTL_S:
+                self._online_tracks.extend(cached[1])
+                self._done += 1
+            else:
+                pending.append(source)
+        if self._online_tracks:
+            self._render_online()
+        if not pending:
+            self._finish_online("")
+            return
+
+        pending.sort(key=lambda s: self._source_speed.get(s.id, 1.0))
+        self._queue = pending
+        self._dispatch(token)
+        self._render_timer.start()
+        self._deadline_timer.start()
+
+    def _dispatch(self, token: int) -> None:
+        client = ctx().client
+        while (
+            self._active < SEARCH_CONCURRENCY
+            and self._queue
+            and token == self._token
+            and not self._finished
+        ):
+            source = self._queue.pop(0)
+            self._active += 1
+            self._dispatch_at[source.id] = time.monotonic()
+            request_id = client.search(
                 source.id,
-                text,
+                self._query,
                 1,
                 lambda response, sid=source.id, tok=token: self._on_source_results(sid, tok, response),
-                timeout=25000,
+                timeout=SEARCH_PER_SOURCE_TIMEOUT_MS,
             )
+            if isinstance(request_id, int) and request_id > 0:
+                self._request_ids.append(request_id)
 
     def _on_source_results(self, source_id: str, token: int, response: dict) -> None:
-        if token != self._token:
+        if token != self._token or self._finished:
             return
-        self._pending.discard(source_id)
+        self._active = max(0, self._active - 1)
+        self._done += 1
+        started = self._dispatch_at.pop(source_id, None)
+        if started is not None:
+            elapsed = max(0.05, time.monotonic() - started)
+            previous = self._source_speed.get(source_id)
+            self._source_speed[source_id] = elapsed if previous is None else (previous * 0.7 + elapsed * 0.3)
         source = next((s for s in self._sources if s.id == source_id), None)
         if not response.get("ok"):
             error = response.get("error") or "未知错误"
@@ -335,38 +417,78 @@ class SearchPage(Page):
                 items = items.get("items") or items.get("songs") or []
             tracks = tracks_from_items(items, source=source)
             self._online_tracks.extend(tracks)
-        if self._pending:
-            self.online_status.setText(
-                f"正在搜索… 已完成 {len(self._sources) - len(self._pending) + 1} 个音源"
-            )
+            self._search_cache[(self._query, source_id)] = (time.monotonic(), tracks)
+        self._dispatch(token)
+        # Throttled repaint after every batch: results must appear while the
+        # slower plugins are still working, not after the last one answers.
+        if not self._finished:
+            self._render_timer.start()
+        if self._queue or self._active:
             return
         self._finish_online(source_id)
 
-    def _finish_online(self, last_source: str) -> None:
+    def _render_online(self) -> None:
         tracks = self._online_tracks
-        covers = ctx().covers
-        for item in tracks[:60]:
-            covers.prefetch(item)
-        self.online_list.set_tracks(tracks)
-        self.online_list.set_favorites(self._favorites_of(tracks))
-        self.online_list.setVisible(bool(tracks))
-        self.online_empty.setVisible(not tracks)
-        if not tracks:
-            self.online_empty.set_text(
-                "没有找到在线结果",
-                "；".join(self._errors[:2]) if self._errors else "换个关键词，或切换音源再试",
+        if not self._finished:
+            # Show partial results while slower plugins are still answering; the
+            # previous implementation waited for every source and only then
+            # painted, which is what made a 64-source search feel frozen.
+            self.online_status.setText(
+                f"已找到 {len(tracks)} 首 · 正在搜索 {self._done}/{self._online_total} 个音源…"
             )
-        failed = len(self._errors)
-        parts = [f"{len(tracks)} 首结果", f"{len(self._sources)} 个音源"]
-        if failed:
-            parts.append(f"{failed} 个失败")
-        self.online_status.setText(" · ".join(parts))
+            if tracks:
+                self.online_empty.setVisible(False)
+                self.online_list.setVisible(True)
+        self.online_list.set_tracks(list(tracks))
+        self.online_list.set_favorites(self._favorites_of(tracks))
         counts: dict[str, int] = {}
         for item in tracks:
             counts[item.source_id] = counts.get(item.source_id, 0) + 1
         counts[""] = len(tracks)
         self.source_filter.set_counts(counts)
         self.play_all_button.setEnabled(bool(tracks))
+
+    def _on_deadline(self) -> None:
+        if self._finished:
+            return
+        for request_id in self._request_ids:
+            try:
+                ctx().client.cancel(request_id)
+            except Exception:  # noqa: BLE001
+                pass
+        timed_out = self._active + len(self._queue)
+        self._queue.clear()
+        self._active = 0
+        self._done = self._online_total
+        self._timed_out = timed_out
+        self._finish_online("")
+
+    def _finish_online(self, last_source: str) -> None:
+        if self._finished:
+            return
+        self._finished = True
+        self._deadline_timer.stop()
+        self._render_timer.stop()
+        tracks = self._online_tracks
+        covers = ctx().covers
+        for item in tracks[:80]:
+            covers.prefetch(item)
+        self._render_online()
+        self.online_list.setVisible(bool(tracks))
+        self.online_empty.setVisible(not tracks)
+        if not tracks:
+            self.online_empty.set_text(
+                "没有找到结果",
+                "；".join(self._errors[:2]) if self._errors else "换个关键词，或检查音源设置",
+            )
+        failed = len(self._errors)
+        timed_out = getattr(self, "_timed_out", 0)
+        parts = [f"{len(tracks)} 首结果", f"{self._online_total} 个音源"]
+        if failed:
+            parts.append(f"{failed} 个失败")
+        if timed_out:
+            parts.append(f"{timed_out} 个超时")
+        self.online_status.setText(" · ".join(parts))
         if self._errors:
             log.info("在线搜索部分失败: %s", self._errors)
         self._remember_query(self.field.text().strip())

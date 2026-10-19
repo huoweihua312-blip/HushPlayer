@@ -219,3 +219,13 @@ $ .venv\Scripts\python.exe -m pytest -q
 | 新增测试 | `tests/test_source_window.py`（短列表全显示、长列表折叠到 4、展开后全显示） |
 | 真实 GUI | `tools/probe_r10_collapse.py`：折叠态 4 条 + 「展开全部音源（还有 3 个）」，展开态 7 条 + 「收起音源列表」；`errors 0` |
 | 截图 | `docs/screenshots/sources_collapsed.png`、`sources_expanded.png` |
+
+
+## 15. 在线搜索提速（v1.0.11）
+
+| 项目 | 结果 |
+| --- | --- |
+| 全量自动化测试 | **141 passed / 0 failed / 0 skipped**，33.6 s（`artifacts/junit_round11.xml`） |
+| 新增测试 | `tests/test_search_incremental.py`（首个结果先渲染、超时收尾与取消、重复查询走缓存） |
+| 性能探针 | `tools/probe_r11_search_perf.py`（8/64 音源）、`tools/probe_r11_gui.py`（真实窗口首帧）、`tools/probe_r11_slow.py`（含 5 秒慢插件） |
+| 实测 | 64 音源：首个结果 0.57 s、全部完成 2.19 s；慢插件场景：0.49 s 先出结果、5.39 s 全部收尾 |

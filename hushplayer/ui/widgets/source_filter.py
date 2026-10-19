@@ -8,7 +8,14 @@ muted suffix after a search completes.
 from __future__ import annotations
 
 from PySide6.QtCore import QSize, Qt, Signal
-from PySide6.QtWidgets import QHBoxLayout, QPushButton, QScrollArea, QSizePolicy, QWidget
+from PySide6.QtWidgets import (
+    QHBoxLayout,
+    QMenu,
+    QPushButton,
+    QScrollArea,
+    QSizePolicy,
+    QWidget,
+)
 
 from ...core.theme import css_rgba, theme
 
@@ -63,12 +70,16 @@ class SourceFilterBar(QWidget):
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self._pills: dict[str, _Pill] = {}
+        self._labels: dict[str, str] = {}
+        self._counts: dict[str, int] = {}
         self._current = ""
         outer = QHBoxLayout(self)
         outer.setContentsMargins(0, 0, 0, 0)
         outer.setSpacing(0)
         self._scroll = QScrollArea(self)
-        self._scroll.setWidgetResizable(True)
+        # Keep the natural width: with dozens of sources the pills must scroll
+        # horizontally instead of being squeezed into unreadable slivers.
+        self._scroll.setWidgetResizable(False)
         self._scroll.setFrameShape(QScrollArea.NoFrame)
         self._scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self._scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
@@ -82,7 +93,15 @@ class SourceFilterBar(QWidget):
         self._row.setSpacing(8)
         self._row.addStretch(1)
         self._scroll.setWidget(self._holder)
-        outer.addWidget(self._scroll)
+        outer.addWidget(self._scroll, 1)
+        # With dozens of plugins the pill row alone is not discoverable: this
+        # menu always lists every source (with its result count) for filtering.
+        from .common import TextButton
+
+        self._more = TextButton("更多音源", icon_name="chevron_down", size=30)
+        self._more.setToolTip("按音源筛选（全部音源都在这里）")
+        self._more.clicked.connect(self._show_all_sources_menu)
+        outer.addWidget(self._more, 0, Qt.AlignVCenter)
 
     # ------------------------------------------------------------------ api
     def set_sources(self, sources: list[tuple[str, str]]) -> None:
@@ -98,6 +117,7 @@ class SourceFilterBar(QWidget):
             widget = item.widget()
             if widget is not None:
                 widget.deleteLater()
+        self._labels = {key: label for key, label in wanted}
         for key, label in wanted:
             pill = _Pill(key, label)
             pill.setProperty("baseLabel", label)
@@ -107,14 +127,47 @@ class SourceFilterBar(QWidget):
         self._row.addStretch(1)
         self.set_counts({})
         self.set_current(self._current if self._current in self._pills else "", emit=False)
+        self._holder.adjustSize()
+
+    def wheelEvent(self, event) -> None:  # noqa: N802
+        bar = self._scroll.horizontalScrollBar()
+        if bar.maximum() > 0:
+            bar.setValue(bar.value() - event.angleDelta().y())
+            event.accept()
+            return
+        super().wheelEvent(event)
 
     def set_counts(self, counts: dict[str, int]) -> None:
+        self._counts = dict(counts)
         for key, pill in self._pills.items():
             pill.set_count(counts.get(key, 0))
+        # Hide sources that returned nothing, so a 64-plugin setup stays short;
+        # the "more" menu still exposes every source.
+        any_results = any(value > 0 for key, value in counts.items() if key)
+        for index, (key, pill) in enumerate(self._pills.items()):
+            if not any_results:
+                pill.setVisible(index < 12 or key == self._current)
+                continue
+            pill.setVisible(key == "" or key == self._current or counts.get(key, 0) > 0)
+        if hasattr(self, "_holder"):
+            self._holder.adjustSize()
+
+    def _show_all_sources_menu(self) -> None:
+        menu = QMenu(self)
+        for key, label in self._labels.items():
+            count = self._counts.get(key, 0)
+            text = f"{label}（{count}）" if count else label
+            action = menu.addAction(text)
+            action.setCheckable(True)
+            action.setChecked(key == self._current)
+            action.triggered.connect(lambda _=False, k=key: self.set_current(k, emit=True))
+        menu.exec(self._more.mapToGlobal(self._more.rect().bottomLeft()))
 
     def set_current(self, key: str, *, emit: bool = False) -> None:
         if key not in self._pills:
             key = ""
+        if key in self._pills:
+            self._pills[key].setVisible(True)
         self._current = key
         for pill_key, pill in self._pills.items():
             pill.setChecked(pill_key == key)
