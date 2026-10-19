@@ -50,6 +50,12 @@ class TrackListPage(Page):
         self.list.favorite_clicked.connect(self._on_favorite)
         self.list.sort_requested.connect(self._on_sort)
         self.list.remove_requested.connect(self._on_remove)
+        self.list.play_selected_requested.connect(self._play_selected)
+        self.list.play_next_requested.connect(self._play_next_selected)
+        self.list.enqueue_requested.connect(self._enqueue_selected)
+        self.list.favorite_selected_requested.connect(self._favorite_selected)
+        self.list.playlist_requested.connect(self._playlist_selected)
+        self.list.remove_selected_requested.connect(self._remove_tracks)
 
         actions = QHBoxLayout()
         actions.setContentsMargins(0, 0, 0, 0)
@@ -90,6 +96,7 @@ class TrackListPage(Page):
         self.reload()
 
     def reload(self) -> None:
+        self.list.set_can_remove_selected(self._playlist_id() is not None)
         try:
             tracks = self.load_tracks()
         except Exception as exc:  # noqa: BLE001 - keep the UI alive
@@ -170,6 +177,90 @@ class TrackListPage(Page):
 
     def _play(self, tracks: list, index: int) -> None:
         ctx().player.play_tracks(tracks, index, context=self.context_label())
+
+    # ---------------------------------------------------------- multi-selection
+    def _play_selected(self, tracks: list) -> None:
+        if tracks:
+            self._on_play(tracks, 0)
+
+    def _play_next_selected(self, tracks: list) -> None:
+        if not tracks:
+            return
+        try:
+            count = ctx().player.play_next_in_queue(tracks)
+        except Exception as exc:  # noqa: BLE001
+            from ...core.logging_setup import log_exception
+
+            log_exception("下一首播放失败", exc)
+            return
+        window = ctx().window
+        if window is not None and count:
+            window.toast(f"已把 {count} 首歌曲插到下一首", "info")
+
+    def _enqueue_selected(self, tracks: list) -> None:
+        if not tracks:
+            return
+        try:
+            count = ctx().player.enqueue(tracks)
+        except Exception as exc:  # noqa: BLE001
+            from ...core.logging_setup import log_exception
+
+            log_exception("加入队列失败", exc)
+            return
+        window = ctx().window
+        if window is not None and count:
+            window.toast(f"已加入播放队列：{count} 首", "info")
+
+    def _favorite_selected(self, tracks: list) -> None:
+        if not tracks:
+            return
+        library = ctx().library
+        added = 0
+        for track in tracks:
+            if not library.is_favorite(track):
+                library.set_favorite(track, True)
+                added += 1
+        self._apply_favorites()
+        if self._playlist_id() == library.favorites_playlist_id():
+            self._schedule_reload()
+        window = ctx().window
+        if window is not None:
+            window.toast(
+                f"已收藏 {added} 首歌曲" if added else "所选歌曲已在「我喜欢」中",
+                "success" if added else "info",
+            )
+
+    def _playlist_selected(self, tracks: list) -> None:
+        if not tracks:
+            return
+        from PySide6.QtWidgets import QInputDialog, QMenu
+
+        library = ctx().library
+        playlists = library.playlists_all()
+        if not playlists:
+            text, ok = QInputDialog.getText(self, "新建歌单", "歌单名称：")
+            name = (text or "").strip()
+            if ok and name:
+                playlist_id = library.create_playlist(name)
+                count = library.add_to_playlist(playlist_id, tracks)
+                window = ctx().window
+                if window is not None and count:
+                    window.toast(f"已新建歌单并添加 {count} 首歌曲", "success")
+            return
+        menu = QMenu(self)
+        for playlist in playlists:
+            action = menu.addAction(f"{playlist.name}（{playlist.track_count} 首）")
+            action.triggered.connect(
+                lambda _=False, pid=playlist.id: self._add_selected_to_playlist(pid, tracks)
+            )
+        menu.exec(self.mapToGlobal(self.rect().center()))
+
+    def _add_selected_to_playlist(self, playlist_id: int, tracks: list) -> None:
+        library = ctx().library
+        count = library.add_to_playlist(playlist_id, tracks)
+        window = ctx().window
+        if window is not None and count:
+            window.toast(f"已添加 {count} 首歌曲到歌单", "success")
 
     def _on_favorite(self, track: Track) -> None:
         library = ctx().library

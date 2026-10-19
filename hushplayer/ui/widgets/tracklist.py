@@ -984,9 +984,17 @@ class TrackListWidget(QWidget):
     selection_changed = Signal(object)
     reordered = Signal(int, int)  # from row, to row
 
+    play_selected_requested = Signal(object)
+    play_next_requested = Signal(object)
+    enqueue_requested = Signal(object)
+    favorite_selected_requested = Signal(object)
+    playlist_requested = Signal(object)
+    remove_selected_requested = Signal(object)
+
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.table = TrackTable(self)
+        self._can_remove_rows = False
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
@@ -1000,11 +1008,62 @@ class TrackListWidget(QWidget):
         self.table.rows_moved.connect(self.reordered)
         self.table.selectionModel().selectionChanged.connect(self._on_selection)
 
+        from .selectionbar import SelectionBar
+
+        self.selection_bar = SelectionBar(self)
+        self.selection_bar.play_requested.connect(
+            lambda: self.play_selected_requested.emit(self.selected_tracks())
+        )
+        self.selection_bar.next_requested.connect(
+            lambda: self.play_next_requested.emit(self.selected_tracks())
+        )
+        self.selection_bar.queue_requested.connect(
+            lambda: self.enqueue_requested.emit(self.selected_tracks())
+        )
+        self.selection_bar.favorite_requested.connect(
+            lambda: self.favorite_selected_requested.emit(self.selected_tracks())
+        )
+        self.selection_bar.playlist_requested.connect(
+            lambda: self.playlist_requested.emit(self.selected_tracks())
+        )
+        self.selection_bar.remove_requested.connect(
+            lambda: self.remove_selected_requested.emit(self.selected_tracks())
+        )
+        self.selection_bar.clear_requested.connect(self.clear_selection)
+
     def set_drag_reorder(self, enabled: bool) -> None:
         self.table.set_drag_reorder(enabled)
 
     def _on_selection(self, *_args) -> None:
-        self.selection_changed.emit(self.table.selected_tracks())
+        tracks = self.table.selected_tracks()
+        self.selection_changed.emit(tracks)
+        self.selection_bar.set_selection(len(tracks), can_remove=self._can_remove_rows)
+        self._place_selection_bar()
+
+    def set_can_remove_selected(self, allowed: bool) -> None:
+        self._can_remove_rows = bool(allowed)
+        self.selection_bar.set_selection(len(self.selected_tracks()), can_remove=allowed)
+
+    def clear_selection(self) -> None:
+        self.table.clearSelection()
+        self.table.setCurrentIndex(self.table.model().index(-1, -1))
+
+    def _place_selection_bar(self) -> None:
+        bar = getattr(self, "selection_bar", None)
+        if bar is None or not bar.isVisible():
+            return
+        margin = 16
+        bar.setGeometry(
+            margin,
+            max(0, self.height() - bar.height() - margin),
+            max(240, self.width() - margin * 2),
+            bar.height(),
+        )
+        bar.raise_()
+
+    def resizeEvent(self, event) -> None:  # noqa: N802
+        super().resizeEvent(event)
+        self._place_selection_bar()
 
     # convenience passthroughs
     def set_tracks(self, tracks: Sequence[Track]) -> None:
