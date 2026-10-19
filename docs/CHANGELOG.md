@@ -1,5 +1,17 @@
 # Changelog
 
+## v1.0.17 — 2026-10-19
+
+第四轮优化（音源可观测性与可维护性）。
+
+### 新增
+- **音源健康度**：`hushplayer/online/health.py` 记录每个音源的解析成功/失败次数，写在 `source_health.json`；设置页的音源行显示「解析成功率 87%」「最近解析全部失败」等摘要，方便判断哪个插件该换。
+- **订阅更新检查**：`SourceRegistry.preview_subscription(url)` 只读取订阅、比对已安装插件的 sha256，报告新增数量；设置页新增「检查订阅更新」按钮，导入过订阅后点一下即可发现新音源并按需安装。
+
+### 测试
+- 新增 `tests/test_source_health.py`（3 例）与订阅预检用例；全量 **163 passed / 0 failed / 0 skipped**（39.1 s，`artifacts/junit_round20.xml`）。
+- 真实 GUI：`docs/screenshots/settings_health.png`。
+
 ## v1.0.16 — 2026-10-19
 
 第四轮优化（续）：播放地址缓存、搜索去重、睡眠定时。

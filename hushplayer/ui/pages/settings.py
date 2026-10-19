@@ -648,6 +648,11 @@ class SettingsPage(Page):
             self._action_button("导入订阅…", "cloud", self._import_subscription),
         ))
         card.add_row(self._row(
+            "检查订阅更新",
+            "重新读取已导入的订阅，只安装新增的音源",
+            self._action_button("检查更新", "refresh", self._check_subscription),
+        ))
+        card.add_row(self._row(
             "批量导入",
             "选择一个文件夹，把它里面的 .js / .json 插件一次性安装（不递归子目录）",
             self._action_button("选择文件夹…", "folder", self._import_source_folder),
@@ -734,6 +739,12 @@ class SettingsPage(Page):
             detail = " · ".join(state) if state else "仅搜索"
             if source.problem:
                 detail = source.problem
+            else:
+                from ...online import health
+
+                health_text = health.summary(source.id)
+                if health_text:
+                    detail = f"{detail} · {health_text}"
             switch = ToggleSwitch(enabled)
             def apply(value: bool, sid: str = source.id) -> None:
                 mapping = dict(self.settings.get("online.enabled_sources", {}) or {})
@@ -789,6 +800,40 @@ class SettingsPage(Page):
             return
         self._install_source_files([str(path) for path in files])
 
+    def _check_subscription(self) -> None:
+        url = str(self.settings.get("online.subscription_url", "") or "").strip()
+        if not url:
+            QInputDialog_msg = "先用「导入订阅」添加一次订阅，之后就能在这里检查更新"
+            self._toast(QInputDialog_msg, "info")
+            return
+        self._toast("正在检查订阅更新…", "info")
+        QApplication.setOverrideCursor(Qt.WaitCursor)
+        try:
+            result = registry().preview_subscription(url)
+        except RegistryError as exc:
+            QApplication.restoreOverrideCursor()
+            self._toast(str(exc), "error")
+            return
+        except Exception as exc:  # noqa: BLE001
+            QApplication.restoreOverrideCursor()
+            log_exception("检查订阅失败", exc)
+            self._toast("检查订阅失败，请查看日志", "error")
+            return
+        QApplication.restoreOverrideCursor()
+        new = int(result.get("new", 0))
+        if new <= 0:
+            self._toast(f"订阅里的 {result.get('total', 0)} 个音源都已安装", "success")
+            return
+        names = "、".join(result.get("names", [])[:4])
+        answer = QMessageBox.question(
+            self,
+            "发现订阅更新",
+            f"订阅中有 {new} 个新音源（共 {result.get('total', 0)} 个）：\n{names}\n\n现在安装？",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+        )
+        if answer == QMessageBox.StandardButton.Yes:
+            self._import_subscription_url(url)
+
     def _install_source_files(self, paths: list[str]) -> None:
         from ...online.registry import registry
 
@@ -835,9 +880,18 @@ class SettingsPage(Page):
         if not ok or not url:
             return
         self._last_subscription = url
+        self._import_subscription_url(url)
+
+    def _import_subscription_url(self, url: str) -> None:
+        from ...online.registry import RegistryError, registry
+
+        url = (url or "").strip()
+        if not url:
+            return
         QApplication.setOverrideCursor(Qt.WaitCursor)
         try:
             report = registry().install_subscription(url)
+            self.settings.set("online.subscription_url", url)
         except RegistryError as exc:
             QMessageBox.warning(self, "导入订阅失败", str(exc))
             return

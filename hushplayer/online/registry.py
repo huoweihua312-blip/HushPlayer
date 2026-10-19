@@ -370,6 +370,53 @@ class SourceRegistry:
             log.info("已恢复 %d 个内置音源", added)
         return added
 
+    def preview_subscription(self, url: str) -> dict[str, Any]:
+        """Fetch a subscription and report how many plugins are new.
+
+        Nothing is installed here: the settings page uses this to tell the user
+        whether an update is worth applying before downloading every plugin.
+        """
+        url = (url or "").strip()
+        if not url.lower().startswith(("http://", "https://")):
+            raise RegistryError("请填写 http(s) 订阅地址")
+        try:
+            payload = requests.get(
+                url,
+                timeout=(8, 20),
+                headers={"User-Agent": "HushPlayer/1.0 (source subscription)"},
+            )
+        except Exception as exc:  # noqa: BLE001
+            raise RegistryError(f"下载订阅失败：{exc}") from exc
+        if payload.status_code >= 400:
+            raise RegistryError(f"订阅返回 HTTP {payload.status_code}")
+        if len(payload.content) > MAX_SUBSCRIPTION_BYTES:
+            raise RegistryError("订阅文件超过 2 MB 限制")
+        try:
+            document = payload.json()
+        except ValueError as exc:
+            raise RegistryError("订阅内容不是合法 JSON") from exc
+        entries = subscription_entries(document)
+        if not entries:
+            raise RegistryError("订阅里没有可用的音源")
+        known = {
+            str(entry.get("sha256") or "")
+            for entry in self.entries()
+            if entry.get("sha256")
+        }
+        missing: list[str] = []
+        for item in entries:
+            link = str(item.get("url") or item.get("src") or item.get("link") or "").strip()
+            label = str(item.get("name") or item.get("title") or link.rsplit("/", 1)[-1])
+            if not link.lower().startswith(("http://", "https://")):
+                continue
+            try:
+                raw = download_plugin_bytes(link)
+            except Exception:  # noqa: BLE001
+                continue
+            if hashlib.sha256(raw).hexdigest() not in known:
+                missing.append(label)
+        return {"total": len(entries), "new": len(missing), "names": missing[:10]}
+
     def install_subscription(self, url: str, *, content_policy: str = "user_owned") -> "InstallReport":
         """Install every plugin listed by a MusicFree subscription URL.
 

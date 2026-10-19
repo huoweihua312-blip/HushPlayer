@@ -173,3 +173,50 @@ def test_install_subscription_downloads_and_keeps_going(registry) -> None:
     assert report.installed[0]["version"] == "9.9"
     saved = registry.entries()
     assert sum(1 for entry in saved if entry.get("userInstalled")) >= 2
+
+
+def test_preview_subscription_counts_new_plugins(tmp_path, monkeypatch):
+    import http.server
+    import json
+    import threading
+
+    monkeypatch.setenv("HUSHPLAYER_DATA_DIR", str(tmp_path / "data"))
+    from hushplayer.core import paths
+
+    monkeypatch.setattr(paths, "data_dir", lambda: tmp_path / "data")
+
+    plugin = "module.exports = { platform: '预览源', search() { return [] } }".encode("utf-8")
+
+    class Handler(http.server.BaseHTTPRequestHandler):
+        def log_message(self, *args):
+            return
+
+        def do_GET(self):  # noqa: N802
+            if self.path.endswith(".js"):
+                body = plugin
+                self.send_response(200)
+                self.send_header("Content-Type", "application/javascript")
+            else:
+                body = json.dumps({"plugins": [{"name": "预览源", "url": f"http://127.0.0.1:{self.server.server_address[1]}/p.js"}]}).encode()
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+    httpd = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    thread = threading.Thread(target=httpd.serve_forever, daemon=True)
+    thread.start()
+    try:
+        from hushplayer.online.registry import SourceRegistry
+
+        reg = SourceRegistry()
+        url = f"http://127.0.0.1:{httpd.server_address[1]}/mf.json"
+        first = reg.preview_subscription(url)
+        assert first["new"] == 1
+        reg.install_subscription(url)
+        second = reg.preview_subscription(url)
+        assert second["new"] == 0
+    finally:
+        httpd.shutdown()
+        thread.join(timeout=3)

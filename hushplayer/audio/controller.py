@@ -26,6 +26,7 @@ from PySide6.QtCore import QObject, QTimer, Signal
 from ..core.logging_setup import get_logger
 from ..model.track import Track
 from ..online.client import OnlineSourceClient
+from ..online import health
 from ..online.matching import (
     AUTO_MARGIN,
     AUTO_MIN_SCORE,
@@ -596,6 +597,7 @@ class PlayerController(QObject):
             log.exception("proxy register failed")
             self._online_failed(track, f"本地缓存服务不可用：{exc}", tried, autoplay)
             return
+        health.record_ok(track.source_id or "")
         self.engine.load(stream_url, duration_hint=track.duration_ms, autoplay=autoplay)
         self._apply_pending_position()
         if was_playing and not autoplay:
@@ -603,6 +605,7 @@ class PlayerController(QObject):
 
     def _online_failed(self, track: Track, error: str, tried: set[str], autoplay: bool) -> None:
         self._set_busy(False)
+        health.record_fail(track.source_id or "", error)
         log.info("resolve failed for %s: %s", track.title, error)
         tried.add(track.source_id)
         if self._online_fallback and len(tried) <= FALLBACK_MAX:
