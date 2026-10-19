@@ -239,3 +239,14 @@ $ .venv\Scripts\python.exe -m pytest -q
 | 新增用例 | `test_idle_state_shows_intro_not_results`（空闲态隐藏工具栏/状态、搜索切到结果页）、`test_local_search_switches_between_intro_and_results`（本地空/无结果切到引导页） |
 | 真实 GUI | `tools/probe_r13_layout.py`：本地空闲、在线空闲、在线结果三态截图（125%，1600×1025） |
 | 截图 | `docs/screenshots/search_local_empty.png`、`search_online_idle.png`、`search_online_results.png` |
+
+
+## 17. 第五轮反馈（v1.0.23）
+
+| 项目 | 结果 |
+| --- | --- |
+| 全量自动化测试 | **179 passed / 0 failed / 0 skipped**，42.60 s（`artifacts/junit_round26_final.xml`） |
+| 关闭方式询问 | 设置 → 常规 → 「关闭窗口时」新增「每次询问」；真实对话框截图 `docs/screenshots/close_dialog.png`（直接退出 / 最小化到托盘 / 取消 + 记住选择） |
+| 文字清晰度 | 界面默认缩放 1440p 及以下改为 100%；同一文本的边缘梯度 3.08（125%）→ **3.43（100%）**；字号下限 +0.6px 补偿视觉大小 |
+| 设置侧栏对齐 | 图标固定 20px 列（18px 字形 + 0.5px 光学校正），文字左边距 42px；`artifacts/qa/settings_general.png` 复核 |
+| 打包产物 | `HushPlayer-1.0.23-win64.zip`，SHA256 `21D8ED7DE3A5C4C59892809C2532C6DF8DD82F0EC5C14D20A9F02D2BC11B536E`；verify 日志 `启动 HushPlayer 1.0.23`、`界面缩放：100%`、单实例、干净退出 |
