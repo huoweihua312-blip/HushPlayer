@@ -511,8 +511,11 @@ class MainWindow(FramelessWindow):
             QSystemTrayIcon.isSystemTrayAvailable(),
             [s.width() for s in icon.availableSizes()],
         )
-        # Explorer occasionally ignores the first registration; re-assert once.
+        # Explorer occasionally ignores the first registration; re-assert once,
+        # then verify that the shell really owns an icon for us.
+        self._tray_ok = True
         QTimer.singleShot(1200, self._reassert_tray_icon)
+        QTimer.singleShot(2600, self._verify_tray_registration)
 
     def toggle_desktop_lyrics(self) -> None:
         from .desktop_lyrics import ensure_desktop_lyrics
@@ -531,6 +534,30 @@ class MainWindow(FramelessWindow):
             QSystemTrayIcon.ActivationReason.DoubleClick,
         ):
             self._restore_from_tray()
+
+    def _verify_tray_registration(self) -> None:
+        tray = getattr(self, "_tray", None)
+        if tray is None:
+            return
+        geometry = tray.geometry()
+        registered = geometry.isValid() and geometry.width() > 0
+        if not registered and not tray.isVisible():
+            registered = False
+        self._tray_ok = bool(registered)
+        if not registered:
+            log.warning(
+                "托盘图标未注册（geometry=%s visible=%s）；将退回任务栏最小化，避免窗口丢失",
+                geometry,
+                tray.isVisible(),
+            )
+
+    def _tray_available(self) -> bool:
+        return bool(
+            self._tray is not None
+            and QSystemTrayIcon.isSystemTrayAvailable()
+            and self._tray.isVisible()
+            and getattr(self, "_tray_ok", True)
+        )
 
     def _reassert_tray_icon(self) -> None:
         tray = getattr(self, "_tray", None)
@@ -630,7 +657,7 @@ class MainWindow(FramelessWindow):
         hide = TextButton("最小化到托盘", size=30)
         quit_button = TextButton("直接退出", size=30, accent=True)
         buttons.addWidget(cancel)
-        if self._tray is not None and self._tray.isVisible():
+        if self._tray_available():
             buttons.addWidget(hide)
         buttons.addWidget(quit_button)
         layout.addLayout(buttons)
@@ -672,8 +699,8 @@ class MainWindow(FramelessWindow):
             if action == "cancel":
                 event.ignore()
                 return
-        prefer_tray = action == "tray"
-        if prefer_tray and self._tray is not None and self._tray.isVisible():
+        prefer_tray = action == "tray" and self._tray_available()
+        if prefer_tray:
             event.ignore()
             self.hide()
             self._tray.showMessage(
@@ -696,17 +723,13 @@ class MainWindow(FramelessWindow):
                 minimize_to_tray = bool(ctx().settings.get("general.minimize_to_tray", False))
             except Exception:  # noqa: BLE001
                 minimize_to_tray = False
-            tray_ready = self._tray is not None and self._tray.isVisible()
+            tray_ready = self._tray_available()
             if minimize_to_tray and self.isMinimized() and tray_ready:
                 QTimer.singleShot(0, self._hide_to_tray)
         super().changeEvent(event)
 
     def _hide_to_tray(self) -> None:
-        if (
-            self._tray is None
-            or not QSystemTrayIcon.isSystemTrayAvailable()
-            or not self._tray.isVisible()
-        ):
+        if not self._tray_available():
             # Never lose the window: without a tray icon there is no way back.
             self.showNormal()
             self.toast("系统托盘不可用，窗口保持打开", "warning")
