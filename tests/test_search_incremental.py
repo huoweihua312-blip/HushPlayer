@@ -112,3 +112,30 @@ def test_repeat_query_is_served_from_cache(qapp, ui_context) -> None:
     page._run_online("晴天")  # noqa: SLF001
     assert client.calls == []
     assert page.online_list.table.model().rowCount() >= 1
+
+
+def test_idle_state_shows_intro_not_results(qapp, ui_context) -> None:
+    client = FakeClient()
+    page = make_page(qapp, client)
+
+    page._run_online("")  # noqa: SLF001
+    assert page.online_stack.currentWidget() is page._online_empty_page  # noqa: SLF001
+    assert page.online_toolbar.isHidden()
+    assert page.online_status.isHidden()
+
+    page._run_online("晴天")  # noqa: SLF001
+    assert page.online_stack.currentWidget() is page.online_list  # noqa: SLF001
+    assert not page.online_toolbar.isHidden()
+    assert not page.online_status.isHidden()
+    assert page.online_list.table.model().rowCount() == 0
+
+
+def test_local_search_switches_between_intro_and_results(qapp, ui_context) -> None:
+    client = FakeClient()
+    page = make_page(qapp, client)
+
+    page._run_local("")  # noqa: SLF001
+    assert page.local_stack.currentWidget() is page._local_intro  # noqa: SLF001
+
+    page._run_local("不存在的东西")  # noqa: SLF001
+    assert page.local_stack.currentWidget() is page._local_intro  # noqa: SLF001

@@ -107,14 +107,24 @@ class SearchPage(Page):
         page = QWidget()
         layout = QVBoxLayout(page)
         layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(18)
+        layout.setSpacing(0)
 
+        self.local_stack = QStackedWidget()
+        layout.addWidget(self.local_stack, 1)
+
+        intro = QWidget()
+        intro_layout = QVBoxLayout(intro)
+        intro_layout.setContentsMargins(0, 0, 0, 0)
+        intro_layout.addStretch(1)
         self.local_empty = EmptyState(
             "搜索你的音乐库",
-            "输入歌曲、专辑或歌手的名字开始查找",
+            "输入歌曲、专辑或歌手的名字；想听网络音乐请切换到「在线」",
             icon_name="search",
         )
-        layout.addWidget(self.local_empty)
+        intro_layout.addWidget(self.local_empty)
+        intro_layout.addStretch(2)
+        self.local_stack.addWidget(intro)
+        self._local_intro = intro
 
         self.local_scroll = QScrollArea()
         self.local_scroll.setWidgetResizable(True)
@@ -128,14 +138,7 @@ class SearchPage(Page):
         holder_layout.setContentsMargins(0, 0, 4, 12)
         holder_layout.setSpacing(18)
 
-        self._album_title = _MiniTitle("专辑")
-        holder_layout.addWidget(self._album_title)
-        self.album_grid = CardGrid()
-        holder_layout.addWidget(self.album_grid)
-        self._artist_title = _MiniTitle("歌手")
-        holder_layout.addWidget(self._artist_title)
-        self.artist_grid = CardGrid()
-        holder_layout.addWidget(self.artist_grid)
+        # Songs first: a keyword search is almost always about a song.
         self._track_title = _MiniTitle("歌曲")
         holder_layout.addWidget(self._track_title)
         self.local_list = TrackListWidget()
@@ -143,52 +146,77 @@ class SearchPage(Page):
         self.local_list.menu_requested.connect(self._menu_local)
         self.local_list.favorite_clicked.connect(self._favorite)
         holder_layout.addWidget(self.local_list)
+
+        self._album_title = _MiniTitle("专辑")
+        holder_layout.addWidget(self._album_title)
+        self.album_grid = CardGrid()
+        holder_layout.addWidget(self.album_grid)
+
+        self._artist_title = _MiniTitle("歌手")
+        holder_layout.addWidget(self._artist_title)
+        self.artist_grid = CardGrid()
+        holder_layout.addWidget(self.artist_grid)
+
         holder_layout.addStretch(1)
         self.local_scroll.setWidget(holder)
-        layout.addWidget(self.local_scroll, 1)
+        self.local_stack.addWidget(self.local_scroll)
         return page
 
     def _build_online(self) -> QWidget:
         page = QWidget()
         layout = QVBoxLayout(page)
         layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(12)
+        layout.setSpacing(10)
 
+        self.online_toolbar = QWidget()
+        toolbar = QHBoxLayout(self.online_toolbar)
+        toolbar.setContentsMargins(0, 0, 0, 0)
+        toolbar.setSpacing(10)
         self.source_filter = SourceFilterBar()
         self.source_filter.changed.connect(lambda _sid: self._run_online(self.field.text()))
-        layout.addWidget(self.source_filter)
+        toolbar.addWidget(self.source_filter, 1)
+        self.manage_button = TextButton("管理音源", icon_name="cloud", size=30)
+        self.manage_button.clicked.connect(self._manage_sources)
+        toolbar.addWidget(self.manage_button)
+        self.play_all_button = TextButton("全部播放", icon_name="play", accent=True)
+        self.play_all_button.clicked.connect(self._play_all_online)
+        self.play_all_button.setEnabled(False)
+        toolbar.addWidget(self.play_all_button)
+        layout.addWidget(self.online_toolbar)
 
-        bar = QHBoxLayout()
-        bar.setSpacing(10)
         self.online_status = QLabel("")
         self.online_status.setStyleSheet(
             f"font-size:9pt; color:{css_rgba(theme().palette.text, 0.5)};"
         )
-        bar.addWidget(self.online_status, 1)
-        self.manage_button = TextButton("管理音源", icon_name="cloud", size=30)
-        self.manage_button.clicked.connect(self._manage_sources)
-        bar.addWidget(self.manage_button)
-        self.play_all_button = TextButton("全部播放", icon_name="play", accent=True)
-        self.play_all_button.clicked.connect(self._play_all_online)
-        self.play_all_button.setEnabled(False)
-        bar.addWidget(self.play_all_button)
-        layout.addLayout(bar)
+        layout.addWidget(self.online_status)
 
-        self.history = HistoryChips()
-        self.history.requested.connect(self._search_history)
-        layout.addWidget(self.history)
+        self.online_stack = QStackedWidget()
+        layout.addWidget(self.online_stack, 1)
 
+        empty_page = QWidget()
+        empty_layout = QVBoxLayout(empty_page)
+        empty_layout.setContentsMargins(0, 0, 0, 0)
+        empty_layout.setSpacing(4)
+        empty_layout.addStretch(1)
         self.online_empty = EmptyState(
             "搜索在线音乐",
             "结果来自已启用的音源，播放时会自动解析真实资源",
             icon_name="globe",
         )
-        layout.addWidget(self.online_empty)
+        self.online_empty.setMinimumHeight(210)
+        empty_layout.addWidget(self.online_empty)
+        self.history = HistoryChips()
+        self.history.requested.connect(self._search_history)
+        empty_layout.addWidget(self.history, 0, Qt.AlignHCenter)
+        empty_layout.addStretch(3)
+        self.online_stack.addWidget(empty_page)
+        self._online_empty_page = empty_page
+
         self.online_list = TrackListWidget()
         self.online_list.play_requested.connect(self._play_online)
         self.online_list.menu_requested.connect(self._menu_online)
         self.online_list.favorite_clicked.connect(self._favorite)
-        layout.addWidget(self.online_list, 1)
+        self.online_stack.addWidget(self.online_list)
         return page
 
     # ------------------------------------------------------------------- state
@@ -214,8 +242,6 @@ class SearchPage(Page):
             self._run_local(self.field.text())
 
     def _on_text(self, text: str) -> None:
-        if hasattr(self, "history"):
-            self.history.setVisible(self._mode == 1 and not text.strip())
         if self._mode == 0:
             self._run_local(text)
         else:
@@ -240,9 +266,11 @@ class SearchPage(Page):
             self.local_list.set_tracks([])
             self.album_grid.set_cards([])
             self.artist_grid.set_cards([])
-            self.local_scroll.setVisible(False)
-            self.local_empty.setVisible(True)
-            self.local_empty.set_text("搜索你的音乐库", "输入歌曲、专辑或歌手的名字开始查找")
+            self.local_stack.setCurrentWidget(self._local_intro)
+            self.local_empty.set_text(
+                "搜索你的音乐库",
+                "输入歌曲、专辑或歌手的名字；想听网络音乐请切换到「在线」",
+            )
             return
         tracks = library.search_local(text, limit=200)
         albums = library.albums(search=text, limit=8)
@@ -269,14 +297,17 @@ class SearchPage(Page):
         self._artist_title.setVisible(bool(artist_cards))
         self._track_title.setVisible(bool(tracks))
         has_any = bool(tracks or cards or artist_cards)
-        self.local_scroll.setVisible(has_any)
-        self.local_empty.setVisible(not has_any)
-        if not has_any:
+        if has_any:
+            self.local_stack.setCurrentWidget(self.local_scroll)
+            self.local_list.setFixedHeight(min(420, 56 * max(1, len(self.local_list.tracks())) + 44))
+        else:
+            self.local_stack.setCurrentWidget(self._local_intro)
             self.local_empty.set_text("没有找到结果", f"音乐库中没有与「{text}」匹配的内容")
         self.local_list.set_empty_text("没有找到歌曲", "")
-        current = ctx().player.current_track
+        player = ctx().player
+        current = player.current_track if player is not None else None
         if current is not None:
-            self.local_list.set_current(current.id, ctx().player.state == "playing")
+            self.local_list.set_current(current.id, player.state == "playing")
 
     def _play_local(self, tracks: list, index: int) -> None:
         if tracks:
@@ -305,26 +336,38 @@ class SearchPage(Page):
         self.source_filter.set_sources([(s.id, s.label or s.name) for s in self._sources])
         self.source_filter.set_current(current or "", emit=False)
         self.source_filter.blockSignals(False)
-        if not self._sources:
-            self.online_status.setText("没有可用的在线音源")
-        elif not self.field.text().strip():
-            self.online_status.setText(f"{len(self._sources)} 个音源可用")
+        if not self.field.text().strip():
+            if not self._sources:
+                self.online_status.setText("没有可用的在线音源")
+            else:
+                self.online_status.setText(f"{len(self._sources)} 个音源可用")
+            self.online_status.setVisible(bool(self._sources))
 
     def _run_online(self, text: str, *, force: bool = False) -> None:
         text = text.strip()
         if not text:
             self._online_tracks = []
             self.online_list.set_tracks([])
-            self.online_list.setVisible(False)
-            self.online_empty.setVisible(True)
-            self.online_empty.set_text("搜索在线音乐", "输入关键词后常用的音源会自动并行搜索")
-            self.online_status.setText(f"{len(getattr(self, '_sources', []))} 个音源就绪")
+            self.online_toolbar.setVisible(False)
+            self.online_status.setVisible(False)
+            self.online_stack.setCurrentWidget(self._online_empty_page)
+            ready = len(getattr(self, "_sources", []))
+            self.online_empty.set_text(
+                "搜索在线音乐",
+                f"{ready} 个音源已就绪 · 输入关键词后自动并行搜索并即时显示结果"
+                if ready
+                else "还没有可用的音源，请先在设置中启用或导入",
+            )
             self.play_all_button.setEnabled(False)
+            self.history.set_history(self._history_items())
+            self.history.setVisible(bool(self.history.items()))
             return
         client = ctx().client
         if client is None or not self._sources:
-            self.online_empty.setVisible(True)
-            self.online_list.setVisible(False)
+            self.online_toolbar.setVisible(False)
+            self.online_status.setVisible(False)
+            self.online_stack.setCurrentWidget(self._online_empty_page)
+            self.history.setVisible(True)
             self.online_empty.set_text("在线音源未就绪", "正在启动 Node.js 运行时与音源插件")
             return
 
@@ -346,9 +389,10 @@ class SearchPage(Page):
         self._finished = False
         self._request_ids = []
         self.online_list.set_tracks([])
-        self.online_list.setVisible(False)
-        self.online_empty.setVisible(True)
-        self.online_empty.set_text("正在搜索…", text)
+        self.online_list.set_empty_text("正在搜索…", "结果会在音源返回后即时出现")
+        self.online_toolbar.setVisible(True)
+        self.online_status.setVisible(True)
+        self.online_stack.setCurrentWidget(self.online_list)
         self.online_status.setText(f"正在搜索 {len(targets)} 个音源…")
         self.play_all_button.setEnabled(False)
         client.ensure_started()
@@ -437,8 +481,7 @@ class SearchPage(Page):
                 f"已找到 {len(tracks)} 首 · 正在搜索 {self._done}/{self._online_total} 个音源…"
             )
             if tracks:
-                self.online_empty.setVisible(False)
-                self.online_list.setVisible(True)
+                self.online_stack.setCurrentWidget(self.online_list)
         self.online_list.set_tracks(list(tracks))
         self.online_list.set_favorites(self._favorites_of(tracks))
         counts: dict[str, int] = {}
@@ -474,9 +517,12 @@ class SearchPage(Page):
         for item in tracks[:80]:
             covers.prefetch(item)
         self._render_online()
-        self.online_list.setVisible(bool(tracks))
-        self.online_empty.setVisible(not tracks)
-        if not tracks:
+        if tracks:
+            self.online_stack.setCurrentWidget(self.online_list)
+            self.online_list.set_empty_text("没有找到歌曲", "")
+        else:
+            self.online_stack.setCurrentWidget(self._online_empty_page)
+            self.history.setVisible(False)
             self.online_empty.set_text(
                 "没有找到结果",
                 "；".join(self._errors[:2]) if self._errors else "换个关键词，或检查音源设置",

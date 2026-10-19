@@ -149,6 +149,10 @@ class SourceFilterBar(QWidget):
                 pill.setVisible(index < 12 or key == self._current)
                 continue
             pill.setVisible(key == "" or key == self._current or counts.get(key, 0) > 0)
+        if hasattr(self, "_more"):
+            # The overflow menu is pointless when every source already fits.
+            hidden = [key for key, pill in self._pills.items() if not pill.isVisible()]
+            self._more.setVisible(bool(hidden) or len(self._pills) > 9)
         if hasattr(self, "_holder"):
             self._holder.adjustSize()
 
@@ -195,6 +199,10 @@ class HistoryChips(QWidget):
         self._row.setSpacing(8)
         self._row.addStretch(1)
         self._label = None
+        self._items: list[str] = []
+
+    def items(self) -> list[str]:
+        return list(self._items)
 
     def set_history(self, items: list[str]) -> None:
         while self._row.count():
@@ -202,6 +210,7 @@ class HistoryChips(QWidget):
             widget = item.widget()
             if widget is not None:
                 widget.deleteLater()
+        self._items = list(items)
         if not items:
             self.setVisible(False)
             return

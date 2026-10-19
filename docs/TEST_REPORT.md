@@ -229,3 +229,13 @@ $ .venv\Scripts\python.exe -m pytest -q
 | 新增测试 | `tests/test_search_incremental.py`（首个结果先渲染、超时收尾与取消、重复查询走缓存） |
 | 性能探针 | `tools/probe_r11_search_perf.py`（8/64 音源）、`tools/probe_r11_gui.py`（真实窗口首帧）、`tools/probe_r11_slow.py`（含 5 秒慢插件） |
 | 实测 | 64 音源：首个结果 0.57 s、全部完成 2.19 s；慢插件场景：0.49 s 先出结果、5.39 s 全部收尾 |
+
+
+## 17. 搜索页布局重设计（v1.0.13）
+
+| 项目 | 结果 |
+| --- | --- |
+| 全量自动化测试 | **145 passed / 0 failed / 0 skipped**，35.1 s（`artifacts/junit_round13.xml`） |
+| 新增用例 | `test_idle_state_shows_intro_not_results`（空闲态隐藏工具栏/状态、搜索切到结果页）、`test_local_search_switches_between_intro_and_results`（本地空/无结果切到引导页） |
+| 真实 GUI | `tools/probe_r13_layout.py`：本地空闲、在线空闲、在线结果三态截图（125%，1600×1025） |
+| 截图 | `docs/screenshots/search_local_empty.png`、`search_online_idle.png`、`search_online_results.png` |
