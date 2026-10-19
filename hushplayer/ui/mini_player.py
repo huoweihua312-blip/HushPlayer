@@ -23,43 +23,62 @@ class MiniPlayer(QWidget):
     def __init__(self) -> None:
         super().__init__(None, Qt.Window | Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.Tool)
         self.setAttribute(Qt.WA_StyledBackground, False)
-        self.setFixedSize(380, 118)
+        self.setFixedSize(424, 140)
         self._drag: QPoint | None = None
-
         layout = QHBoxLayout(self)
-        layout.setContentsMargins(14, 12, 14, 14)
-        layout.setSpacing(12)
-        self.cover = CoverWidget(64, radius=9)
-        layout.addWidget(self.cover, 0, Qt.AlignTop)
+        layout.setContentsMargins(16, 14, 14, 14)
+        layout.setSpacing(14)
+        self.cover = CoverWidget(80, radius=12)
+        layout.addWidget(self.cover, 0, Qt.AlignVCenter)
 
         right = QVBoxLayout()
-        right.setContentsMargins(0, 2, 0, 0)
+        right.setContentsMargins(0, 1, 0, 0)
         right.setSpacing(2)
+
+        head = QHBoxLayout()
+        head.setSpacing(6)
+        titles = QVBoxLayout()
+        titles.setSpacing(1)
         self.title = QLabel("未在播放")
-        self.title.setFont(theme().font(9.8, 600))
+        self.title.setFont(theme().font(10.2, 600))
         self.artist = QLabel("")
-        self.artist.setFont(theme().font(8.4))
-        right.addWidget(self.title)
-        right.addWidget(self.artist)
+        self.artist.setFont(theme().font(8.8))
+        titles.addWidget(self.title)
+        titles.addWidget(self.artist)
+        head.addLayout(titles, 1)
+
+        self.restore = IconButton("restore", size=24, icon_size=12, tooltip="返回主界面")
+        self.close_button = IconButton("close", size=24, icon_size=12, tooltip="关闭迷你播放器")
+        head.addWidget(self.restore, 0, Qt.AlignTop)
+        head.addWidget(self.close_button, 0, Qt.AlignTop)
+        right.addLayout(head)
+        right.addSpacing(4)
+
+        seek_row = QHBoxLayout()
+        seek_row.setSpacing(8)
+        self.seek = SeekBar()
+        self.seek.setFixedHeight(16)
+        self.total = QLabel("0:00")
+        self.total.setFont(theme().font(8.2))
+        seek_row.addWidget(self.seek, 1)
+        seek_row.addWidget(self.total, 0)
+        right.addLayout(seek_row)
         right.addSpacing(2)
 
         controls = QHBoxLayout()
-        controls.setSpacing(4)
-        self.previous = IconButton("prev", size=26, icon_size=14, tooltip="上一首")
-        self.play = PlayButton(32)
-        self.next = IconButton("next", size=26, icon_size=14, tooltip="下一首")
-        self.restore = IconButton("restore", size=26, icon_size=13, tooltip="返回主界面")
-        self.close_button = IconButton("close", size=26, icon_size=13, tooltip="关闭迷你播放器")
-        for button in (self.previous, self.play, self.next):
-            controls.addWidget(button)
+        controls.setSpacing(6)
+        self.previous = IconButton("prev", size=28, icon_size=15, tooltip="上一首")
+        self.play = PlayButton(38)
+        self.next = IconButton("next", size=28, icon_size=15, tooltip="下一首")
+        self.elapsed = QLabel("0:00")
+        self.elapsed.setFont(theme().font(8.2))
+        controls.addWidget(self.previous)
+        controls.addWidget(self.play)
+        controls.addWidget(self.next)
+        controls.addSpacing(6)
+        controls.addWidget(self.elapsed)
         controls.addStretch(1)
-        controls.addWidget(self.restore)
-        controls.addWidget(self.close_button)
         right.addLayout(controls)
-
-        self.seek = SeekBar()
-        self.seek.setFixedHeight(14)
-        right.addWidget(self.seek)
         layout.addLayout(right, 1)
 
         self.previous.clicked.connect(lambda: ctx().player.previous())
@@ -87,6 +106,8 @@ class MiniPlayer(QWidget):
         self.title.setToolTip(self.title.text())
         self.seek.set_duration(track.duration_ms if track else 0)
         self.seek.set_position(0)
+        self.elapsed.setText("0:00")
+        self.total.setText(format_duration(track.duration_ms if track else 0))
         self._restyle()
 
     def _on_state(self, state: str) -> None:
@@ -95,11 +116,14 @@ class MiniPlayer(QWidget):
     def _on_position(self, position: int) -> None:
         if not self.seek._dragging:
             self.seek.set_position(position)
+        self.elapsed.setText(format_duration(position))
 
     def _restyle(self) -> None:
         palette = theme().palette
         self.title.setStyleSheet(f"color:{css_rgba(palette.text, 0.96)};")
-        self.artist.setStyleSheet(f"color:{css_rgba(palette.text, 0.55)};")
+        self.artist.setStyleSheet(f"color:{css_rgba(palette.text, 0.58)};")
+        self.elapsed.setStyleSheet(f"color:{css_rgba(palette.text, 0.45)};")
+        self.total.setStyleSheet(f"color:{css_rgba(palette.text, 0.45)};")
 
     # ------------------------------------------------------------------ window
     def show_player(self) -> None:
@@ -135,9 +159,9 @@ class MiniPlayer(QWidget):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.Antialiasing, True)
         rect = QRectF(self.rect()).adjusted(0.5, 0.5, -0.5, -0.5)
-        painter.setPen(rgba(palette.border_strong, 0.7))
-        painter.setBrush(rgba(palette.elevated, 0.98))
-        painter.drawRoundedRect(rect, Metrics.radius_lg, Metrics.radius_lg)
+        painter.setPen(rgba(palette.border_strong, 0.55))
+        painter.setBrush(rgba(palette.elevated, 0.99))
+        painter.drawRoundedRect(rect, 18, 18)
         painter.end()
 
     def mousePressEvent(self, event) -> None:  # noqa: N802

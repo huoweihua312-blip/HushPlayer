@@ -545,16 +545,15 @@ class MainWindow(FramelessWindow):
         if tray is None:
             return
         geometry = tray.geometry()
-        registered = geometry.isValid() and geometry.width() > 0
-        if not registered and not tray.isVisible():
-            registered = False
-        self._tray_ok = bool(registered)
-        if not registered:
-            log.warning(
-                "托盘图标未注册（geometry=%s visible=%s）；将退回任务栏最小化，避免窗口丢失",
-                geometry,
-                tray.isVisible(),
-            )
+        # Windows 11 reports an empty geometry for icons that live in the
+        # overflow panel, so geometry cannot decide whether the icon exists.
+        # Only a missing system tray is fatal; otherwise trust the shell.
+        available = QSystemTrayIcon.isSystemTrayAvailable()
+        self._tray_ok = bool(available)
+        if not available:
+            log.warning("系统托盘不可用；后台播放将使用迷你播放器")
+        else:
+            log.info("托盘图标已注册（geometry=%s，溢出区图标同样有效）", geometry)
 
     def _tray_available(self) -> bool:
         return bool(
