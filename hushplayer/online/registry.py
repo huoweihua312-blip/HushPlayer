@@ -13,6 +13,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 import shutil
 import time
 from pathlib import Path
@@ -48,6 +49,30 @@ def _read_json(path: Path) -> dict[str, Any]:
         raise RegistryError("音源注册表格式不受支持")
     return data
 
+
+
+_PLATFORM_RE = re.compile(r"""platform\s*:\s*["'`]([^"'`\r\n]{1,60})["'`]""")
+_VERSION_RE = re.compile(r"""version\s*:\s*["'`]([^"'`\r\n]{1,30})["'`]""")
+_AUTHOR_RE = re.compile(r"""author\s*:\s*["'`]([^"'`\r\n]{1,60})["'`]""")
+
+
+def peek_plugin_metadata(raw: bytes) -> dict[str, str]:
+    """Best-effort metadata for MusicFree plugins without executing them.
+
+    Plugins declare ``platform``/``version``/``author`` as plain string
+    literals in ``module.exports``; reading those keeps ``install_file``
+    offline and side-effect free (loading is the plugin host's job).
+    """
+    try:
+        head = raw[: 8192].decode("utf-8", "ignore")
+    except Exception:  # noqa: BLE001 - never fail an install over metadata
+        return {}
+    found: dict[str, str] = {}
+    for key, pattern in (("platform", _PLATFORM_RE), ("version", _VERSION_RE), ("author", _AUTHOR_RE)):
+        match = pattern.search(head)
+        if match:
+            found[key] = match.group(1).strip()
+    return found
 
 class SourceRegistry:
     """Manage the writable registry copy plus the user-installed plugins."""
@@ -135,12 +160,13 @@ class SourceRegistry:
         destination = self.home / filename
         destination.parent.mkdir(parents=True, exist_ok=True)
         destination.write_bytes(raw)
+        meta = peek_plugin_metadata(raw)
         entry = {
             "id": identifier,
-            "name": source.stem,
+            "name": meta.get("platform") or source.stem,
             "platform": "custom",
-            "author": "",
-            "version": time.strftime("%Y.%m.%d"),
+            "author": meta.get("author", ""),
+            "version": meta.get("version") or time.strftime("%Y.%m.%d"),
             "filename": filename,
             "sourceUrl": "",
             "enabled": True,

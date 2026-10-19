@@ -1,5 +1,24 @@
 # Changelog
 
+## v1.0.8 — 2026-10-19
+
+第七轮反馈：设置 → 在线音源 → 「添加音源…」报错。
+
+### 修复
+- `hushplayer/ui/pages/settings.py` 使用了 `QFileDialog` 却没有导入，点击「添加音源…」直接
+  `NameError: name 'QFileDialog' is not defined`（异常在按钮槽中，被 excepthook 弹窗）。
+  现在统一在文件顶部导入 `QFileDialog / QInputDialog / QMessageBox`。
+- 安装逻辑抽成 `_install_source_file(path)`，文件选择与「从链接添加」共用同一套错误处理与刷新流程。
+- `hushplayer/online/registry.py`：新增 `peek_plugin_metadata()`，安装 MusicFree 插件时**不执行插件代码**，
+  只从文件头部解析 `platform / version / author` 字面量，用它作为显示名与版本；解析不到时回退文件名。
+- 安装后会立即刷新音源列表并提示「已安装音源：<名称>」。
+
+### 验证
+- 新增 `tests/test_source_registry.py`（元数据解析、安装/去重/删除、拒绝错误类型与超大文件）。
+- 真实 GUI 探针 `tools/probe_r8_source.py`：安装一个 MusicFree 风格插件 → 列表出现「本地测试源」→
+  通过运行时 `search()` 返回 1 条结果，`errors 0`，截图 `docs/screenshots/settings_installed_source.png`。
+- 打包 1.0.8：`packaging/out/HushPlayer-1.0.8-win64.zip`。
+
 ## v1.0.7 — 2026-10-19
 
 第六轮反馈：点击「喜欢」按钮弹出未处理异常。

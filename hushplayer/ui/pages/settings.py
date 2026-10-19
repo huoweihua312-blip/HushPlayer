@@ -10,7 +10,10 @@ from PySide6.QtCore import QSize, Qt, Signal
 from PySide6.QtGui import QColor, QFontMetrics, QPainter, QPen
 from PySide6.QtWidgets import (
     QApplication,
+    QFileDialog,
     QHBoxLayout,
+    QInputDialog,
+    QMessageBox,
     QLabel,
     QScrollArea,
     QStackedWidget,
@@ -695,9 +698,14 @@ class SettingsPage(Page):
             self._source_rows.addWidget(SettingRow(label, detail, control=holder))
 
     def _add_source(self) -> None:
-        path, _ = QFileDialog.getOpenFileName(self, "选择音源插件", "", "MusicFree 插件 (*.js *.json)")
-        if not path:
-            return
+        path, _ = QFileDialog.getOpenFileName(
+            self, "选择音源插件", "", "MusicFree 插件 (*.js *.json)"
+        )
+        if path:
+            self._install_source_file(path)
+
+    def _install_source_file(self, path: str) -> None:
+        """Install a MusicFree-compatible plugin the user picked from disk."""
         try:
             from ...online.registry import RegistryError, registry
 

@@ -189,3 +189,13 @@ $ .venv\Scripts\python.exe -m pytest -q
 | 测试隔离 | 单实例用例改用 `HUSHPLAYER_MUTEX_SUFFIX`，可与用户正在运行的正式版并存 |
 | 真实窗口 | `tools/probe_r7_favorite.py`：`state=playing`、`favorites rows 1`、`errors 0`、PASS；截图 `docs/screenshots/favorites_playing.png` |
 | 打包产物 | 1.0.7 onedir + zip；`tools/verify_package.ps1` 改为只操作自己启动的进程，并验证单实例拦截 |
+
+
+## 12. 第七轮反馈整改（v1.0.8）
+
+| 项目 | 结果 |
+| --- | --- |
+| 全量自动化测试 | **133 passed / 0 failed / 0 skipped**，32.3 s（`artifacts/junit_round8.xml`） |
+| 新增测试 | `tests/test_source_registry.py`：插件元数据解析、安装/去重/删除、错误类型与 2 MB 上限 |
+| 真实 GUI | `tools/probe_r8_source.py`：安装 MusicFree 风格插件 → 列表出现「本地测试源」→ 运行时 `search()` 返回 1 条，`errors 0`；截图 `docs/screenshots/settings_installed_source.png` |
+| 打包产物 | 1.0.8 onedir + zip，`tools/verify_package.ps1` 验证 |
