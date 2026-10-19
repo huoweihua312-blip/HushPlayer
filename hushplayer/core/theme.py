@@ -271,7 +271,7 @@ class Theme(QObject):
     # ------------------------------------------------------------------ 字体
     #: Small UI text looked washed out on high-DPI screens: a slight floor plus
     #: full hinting keeps glyph stems on whole device pixels.
-    FONT_LEGIBILITY_BONUS = 0.4
+    FONT_LEGIBILITY_BONUS = 1.0
 
     def font(self, size: float, weight: int = 400, *, display: bool = False) -> QFont:
         families = self._families

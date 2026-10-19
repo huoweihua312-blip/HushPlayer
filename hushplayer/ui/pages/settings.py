@@ -136,11 +136,12 @@ class _SectionList(QWidget):
                 painter.setPen(Qt.NoPen)
                 painter.setBrush(rgba(palette.text, 0.05))
                 painter.drawRoundedRect(rect, 7, 7)
-            icon_rect = rect.adjusted(10, 0, 0, 0)
             from PySide6.QtCore import QRectF
 
-            target = QRectF(0, 0, 16, 16)
-            target.moveCenter(QRectF(icon_rect.left() + 8, rect.center().y(), 16, 16).center())
+            # A fixed 20px icon column keeps every glyph on the same optical
+            # axis as the label; the previous 16px box sat half a pixel high.
+            target = QRectF(0, 0, 18, 18)
+            target.moveCenter(QRectF(rect.left() + 14 + 9, rect.center().y() + 0.5, 18, 18).center())
             icons.draw(
                 painter,
                 icon_name,
@@ -150,7 +151,7 @@ class _SectionList(QWidget):
             painter.setFont(theme().font(9.6, 600 if selected else 500))
             painter.setPen(QPen(qcolor(palette.accent) if selected else rgba(palette.text, 0.86)))
             painter.drawText(
-                rect.adjusted(34, 0, -10, 0),
+                rect.adjusted(46, 0, -10, 0),
                 int(Qt.AlignLeft | Qt.AlignVCenter),
                 label,
             )
@@ -277,7 +278,9 @@ class SettingsPage(Page):
         card.add_row(self._row(
             "关闭窗口时",
             "选择退出应用，或收起到系统托盘继续播放",
-            self._combo("general.close_action", [("退出应用", "quit"), ("最小化到托盘", "tray")]),
+            self._combo("general.close_action", [
+                    ("每次询问", "ask"), ("退出应用", "quit"), ("最小化到托盘", "tray"),
+                ]),
         ))
         card.add_row(self._row("最小化到托盘", "最小化时隐藏任务栏按钮", self._toggle("general.minimize_to_tray", False)))
         card.add_row(self._row("开机时自动启动", "登录 Windows 后自动运行（可在系统设置中撤销）", self._toggle("general.launch_at_startup", False)))

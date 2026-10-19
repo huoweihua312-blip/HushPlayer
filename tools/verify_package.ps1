@@ -49,6 +49,13 @@ public class W {
 "@
 Add-Type -AssemblyName System.Drawing
 
+# The close dialog defaults to "ask"; make the automated check deterministic.
+$settingsPath = Join-Path $data "settings.json"
+if (-not (Test-Path $settingsPath)) {
+    New-Item -ItemType Directory -Force -Path $data | Out-Null
+    '{"general":{"close_action":"quit"}}' | Set-Content -Path $settingsPath -Encoding UTF8
+}
+
 Write-Host "==> 启动第一个实例"
 $pid1 = Start-App
 Start-Sleep -Seconds 3

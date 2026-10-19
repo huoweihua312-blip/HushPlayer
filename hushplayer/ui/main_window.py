@@ -23,6 +23,7 @@ from ..core.theme import apply_theme_to_app, theme
 from ..core import brand, icons
 from .context import ctx
 from .menus import playlist_menu
+from .widgets.common import TextButton
 from .widgets.frameless import FramelessWindow, center_on_screen, ensure_on_screen
 from .widgets.playerbar import PlayerBar
 from .widgets.queue_panel import QueuePanel
@@ -576,12 +577,56 @@ class MainWindow(FramelessWindow):
             )
         self._toasts.setGeometry(0, 0, self.container.width(), self.container.height())
 
+    def _ask_close_action(self) -> str:
+        """Ask whether closing quits or hides to the tray. Returns quit/tray/cancel."""
+        from PySide6.QtWidgets import QCheckBox, QDialog, QHBoxLayout, QLabel, QVBoxLayout
+
+        dialog = QDialog(self)
+        dialog.setWindowTitle("关闭 HushPlayer")
+        dialog.setModal(True)
+        layout = QVBoxLayout(dialog)
+        layout.setContentsMargins(24, 20, 24, 16)
+        layout.setSpacing(14)
+        title = QLabel("要退出 HushPlayer，还是最小化到系统托盘继续播放？")
+        title.setWordWrap(True)
+        title.setFont(theme().font(10.4, 600))
+        layout.addWidget(title)
+        remember = QCheckBox("记住我的选择（可在 设置 → 常规 中修改）")
+        layout.addWidget(remember)
+
+        buttons = QHBoxLayout()
+        buttons.setSpacing(8)
+        buttons.addStretch(1)
+        cancel = TextButton("取消", size=30)
+        hide = TextButton("最小化到托盘", size=30)
+        quit_button = TextButton("直接退出", size=30, accent=True)
+        buttons.addWidget(cancel)
+        buttons.addWidget(hide)
+        buttons.addWidget(quit_button)
+        layout.addLayout(buttons)
+
+        choice = {"value": "cancel"}
+        quit_button.clicked.connect(lambda: (choice.update(value="quit"), dialog.accept()))
+        hide.clicked.connect(lambda: (choice.update(value="tray"), dialog.accept()))
+        cancel.clicked.connect(dialog.reject)
+        if dialog.exec() != QDialog.Accepted:
+            return "cancel"
+        if remember.isChecked() and choice["value"] in ("quit", "tray"):
+            ctx().settings.set("general.close_action", choice["value"])
+        return choice["value"]
+
     def closeEvent(self, event) -> None:  # noqa: N802
         if getattr(self, "_force_quit", False):
             super().closeEvent(event)
             return
         self._save_geometry()
-        prefer_tray = str(ctx().settings.get("general.close_action", "quit")) == "tray"
+        action = str(ctx().settings.get("general.close_action", "ask"))
+        if action == "ask" and self._tray is not None and self._tray.isVisible():
+            action = self._ask_close_action()
+            if action == "cancel":
+                event.ignore()
+                return
+        prefer_tray = action == "tray"
         if prefer_tray and self._tray is not None and self._tray.isVisible():
             event.ignore()
             self.hide()

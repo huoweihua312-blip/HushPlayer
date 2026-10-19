@@ -29,7 +29,7 @@ def settings_file(tmp_path, monkeypatch):
 
 def test_recommended_scale_thresholds():
     assert display.recommended_scale(1920) == "1.0"
-    assert display.recommended_scale(2560) == "1.25"
+    assert display.recommended_scale(2560) == "1.0"
     assert display.recommended_scale(3440) == "1.25"
     assert display.recommended_scale(3840) == "1.5"
 
@@ -37,7 +37,10 @@ def test_recommended_scale_thresholds():
 def test_auto_follows_physical_screen(settings_file, monkeypatch):
     settings_file("auto")
     monkeypatch.setattr(display, "physical_screen_size", lambda: (2560, 1440))
-    assert display.resolve_scale() == pytest.approx(1.25)
+    assert display.resolve_scale() == pytest.approx(1.0)
+
+    monkeypatch.setattr(display, "physical_screen_size", lambda: (3840, 2160))
+    assert display.resolve_scale() == pytest.approx(1.5)
 
     monkeypatch.setattr(display, "physical_screen_size", lambda: (1920, 1080))
     assert display.resolve_scale() == pytest.approx(1.0)
@@ -52,7 +55,7 @@ def test_explicit_preference_wins(settings_file, monkeypatch):
 def test_invalid_preference_falls_back_to_auto(settings_file, monkeypatch):
     settings_file("banana")
     monkeypatch.setattr(display, "physical_screen_size", lambda: (2560, 1440))
-    assert display.resolve_scale() == pytest.approx(1.25)
+    assert display.resolve_scale() == pytest.approx(1.0)
 
 
 def test_apply_scale_environment_sets_qt_factor(settings_file, monkeypatch):

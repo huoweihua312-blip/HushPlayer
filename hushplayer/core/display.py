@@ -47,17 +47,17 @@ def physical_screen_size() -> tuple[int, int]:
 def recommended_scale(physical_width: int) -> str:
     """Pick a comfortable UI scale for the given physical width.
 
-    1080p and below stay at 100%; 2K/1440p gets 125%; 4K gets 150%.
+    Everything up to 2560x1440 stays at 100%: fractional scale factors make
+    text noticeably softer (glyphs land on half pixels), and users who want a
+    larger UI can raise "appearance.ui_scale" explicitly. 4K gets 150%.
     The values are product decisions, not a generic DPI formula: the goal is
     "comfortable to read at normal viewing distance", which we validated on a
     2560×1440 panel.
     """
     if physical_width >= 3600:
         return "1.5"
-    if physical_width >= 2400:
+    if physical_width >= 3200:
         return "1.25"
-    if physical_width >= 2000:
-        return "1.15"
     return "1.0"
 
 
