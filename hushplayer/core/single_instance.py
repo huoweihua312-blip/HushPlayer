@@ -25,6 +25,18 @@ from ..version import APP_ID
 log = get_logger("core.single_instance")
 
 MUTEX_NAME = f"Local\\{APP_ID}.mutex"
+
+
+def mutex_name() -> str:
+    """Mutex used to detect a running instance.
+
+    ``HUSHPLAYER_MUTEX_SUFFIX`` lets packaging/QA runs exercise the guard while
+    the user's own HushPlayer is open, without hijacking their window.
+    """
+    suffix = os.environ.get("HUSHPLAYER_MUTEX_SUFFIX", "").strip()
+    if not suffix:
+        return MUTEX_NAME
+    return f"Local\\{APP_ID}{suffix}.mutex"
 REQUEST_NAME = "activate.request"
 _POLL_MS = 400
 _ERROR_ALREADY_EXISTS = 183
@@ -60,7 +72,7 @@ class SingleInstance(QObject):
         kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
         kernel32.CreateMutexW.argtypes = [wintypes.LPVOID, wintypes.BOOL, wintypes.LPCWSTR]
         kernel32.CreateMutexW.restype = wintypes.HANDLE
-        handle = kernel32.CreateMutexW(None, False, MUTEX_NAME)
+        handle = kernel32.CreateMutexW(None, False, mutex_name())
         if not handle:
             log.warning("创建单实例互斥体失败，本轮允许多开")
             return True

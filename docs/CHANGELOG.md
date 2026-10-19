@@ -1,5 +1,15 @@
 # Changelog
 
+## v1.0.7 — 2026-10-19
+
+第六轮反馈：点击「喜欢」按钮弹出未处理异常。
+
+### 修复
+- `TrackListWidget`（页面实际嵌入的复合控件）缺少 `ensure_current_visible` 透传方法，`FavoritesPage._sync_current()` 在**播放中**刷新时会抛 `AttributeError`；异常发生在 Qt 定时器槽里，于是表现为「点喜欢弹出 HushPlayer 遇到了问题」。
+- 补齐透传，并审计了所有页面对 `self.list.*` 的调用，确认没有其它缺失方法。
+- 新增 `tests/test_gui_smoke.py::test_favorite_heart_does_not_break_favorites_page`：导入夹具、播放、切换到「我喜欢」、点喜欢并强制同步，断言没有经 `sys.excepthook` 泄漏的异常且列表出现该曲目。
+- 单实例测试改为按 `HUSHPLAYER_MUTEX_SUFFIX` 隔离互斥体：用户开着正式版时跑测试不再互相干扰；`tools/verify_package.ps1` 同样使用隔离后缀，并且只操作自己启动的进程（不再结束用户正在运行的窗口）。
+
 ## v1.0.6 — 2026-10-19
 
 第五轮反馈：歌词偏移调整时，歌词会先跳到顶端再回到当前行。

@@ -1019,6 +1019,9 @@ class TrackListWidget(QWidget):
     def set_current(self, track_id: str, playing: bool) -> None:
         self.table.set_current(track_id, playing)
 
+    def ensure_current_visible(self) -> None:
+        self.table.ensure_current_visible()
+
     def set_compact(self, compact: bool) -> None:
         self.table.set_compact(compact)
 

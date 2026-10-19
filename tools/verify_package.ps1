@@ -4,14 +4,25 @@ $root = "F:\Projects\HushPlayer-Reimagined"
 $exe = Join-Path $root "packaging\out\HushPlayer\HushPlayer.exe"
 $data = Join-Path $root "artifacts\packaged_run"
 New-Item -ItemType Directory -Force $data | Out-Null
-Get-Process HushPlayer -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
-Start-Sleep -Milliseconds 500
+# Never kill a HushPlayer the user may have open; the isolated mutex below
+# lets this verification run alongside it.
 
 function Start-App {
-    $cmd = "cmd.exe /c set HUSHPLAYER_DATA_DIR=$data&& set HUSH_CONSOLE=0&& `"$exe`""
+    $cmd = "cmd.exe /c set HUSHPLAYER_DATA_DIR=$data&& set HUSH_CONSOLE=0&& set HUSHPLAYER_MUTEX_SUFFIX=-verify&& `"$exe`""
     $r = Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{ CommandLine = $cmd }
     return $r.ProcessId
 }
+function Get-AppProcess($launcherPid, $timeout = 20) {
+    $deadline = (Get-Date).AddSeconds($timeout)
+    while ((Get-Date) -lt $deadline) {
+        $child = Get-CimInstance Win32_Process -Filter "ParentProcessId=$launcherPid" |
+            Where-Object { $_.Name -eq "HushPlayer.exe" } | Select-Object -First 1
+        if ($child) { return Get-Process -Id $child.ProcessId }
+        Start-Sleep -Milliseconds 400
+    }
+    return $null
+}
+
 function Wait-Process2($name, $timeout = 30) {
     $deadline = (Get-Date).AddSeconds($timeout)
     while ((Get-Date) -lt $deadline) {
@@ -40,8 +51,8 @@ Add-Type -AssemblyName System.Drawing
 
 Write-Host "==> 启动第一个实例"
 $pid1 = Start-App
-Start-Sleep -Seconds 9
-$proc = Get-Process HushPlayer -ErrorAction SilentlyContinue | Select-Object -First 1
+Start-Sleep -Seconds 3
+$proc = Get-AppProcess $pid1
 if (-not $proc) { throw "第一个实例没有启动" }
 $proc.Refresh()
 $hwnd = $proc.MainWindowHandle
@@ -82,17 +93,17 @@ Write-Host "screenshot=$shot"
 Write-Host "==> 启动第二个实例（应立刻退出并把第一个窗口置前）"
 $pid2 = Start-App
 Start-Sleep -Seconds 5
-$count = (Get-Process HushPlayer -ErrorAction SilentlyContinue | Measure-Object).Count
-$secondAlive = Get-Process -Id $pid2 -ErrorAction SilentlyContinue
+$firstAlive = Get-Process -Id $proc.Id -ErrorAction SilentlyContinue
+$secondAlive = Get-AppProcess $pid2 3
+$count = [int][bool]$firstAlive + [int][bool]$secondAlive
 Write-Host "instances=$count second_cmd_pid_alive=$([bool]$secondAlive)"
 $req = Join-Path $data "activate.request"
 Write-Host "activate_request_exists=$(Test-Path $req)"
 
-$proc = Get-Process HushPlayer -ErrorAction SilentlyContinue | Select-Object -First 1
 Write-Host "==> 发送 WM_CLOSE 关闭"
 [void][W]::PostMessage($proc.MainWindowHandle, 0x0010, [IntPtr]::Zero, [IntPtr]::Zero)
 Start-Sleep -Seconds 4
-$still = Get-Process HushPlayer -ErrorAction SilentlyContinue
+$still = Get-Process -Id $proc.Id -ErrorAction SilentlyContinue
 Write-Host "alive_after_close=$([bool]$still)"
 if ($still) { $still | Stop-Process -Force }
 if (Test-Path $log) {

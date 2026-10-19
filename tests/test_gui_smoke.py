@@ -6,7 +6,9 @@
 
 from __future__ import annotations
 
+import sys
 import time
+from pathlib import Path
 
 import pytest
 
@@ -199,3 +201,53 @@ def test_playerbar_controls_reach_controller(app_bundle) -> None:
     bar.repeat.click()
     pump(application)
     assert player.repeat != before_repeat
+
+
+FIXTURE_AUDIO = Path(__file__).parent / "fixtures" / "audio"
+
+
+def _import_fixtures(library) -> None:
+    files = [
+        str(path)
+        for path in FIXTURE_AUDIO.rglob("*")
+        if path.suffix.lower() in {".mp3", ".flac", ".wav", ".ogg", ".m4a", ".aac"}
+    ]
+    library.import_files(files)
+
+
+def test_favorite_heart_does_not_break_favorites_page(app_bundle) -> None:
+    """R6: clicking the heart on 我喜欢 raised AttributeError in _sync_current.
+
+    ``TrackListWidget`` is a thin composite around ``TrackTable`` and had lost
+    the ``ensure_current_visible`` passthrough, so reloading the page while a
+    track is playing crashed in a Qt slot (silently, via the excepthook).
+    """
+    application, window, library, player = app_bundle
+    _import_fixtures(library)
+    window.navigate("favorites")
+    pump(application)
+
+
+    page = window._pages["favorites"]
+    tracks = library.search_local("夜航", limit=1) or library.recent(1)
+    assert tracks, "fixtures should provide at least one track"
+    track = tracks[0]
+
+    captured: list = []
+    previous = sys.excepthook
+    sys.excepthook = lambda *args: captured.append(args)
+    try:
+        library.toggle_favorite(track)
+        pump(application, 0.3)
+        page._sync_current()
+        page.list.ensure_current_visible()
+    finally:
+        sys.excepthook = previous
+
+    assert not captured, captured
+    assert library.is_favorite(track)
+    assert page.list.tracks(), "favorites page should list the toggled track"
+
+    # undo so later tests in this module see the same state
+    library.toggle_favorite(track)
+    pump(application, 0.2)

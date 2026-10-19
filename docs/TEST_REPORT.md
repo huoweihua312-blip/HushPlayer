@@ -178,3 +178,14 @@ $ .venv\Scripts\python.exe -m pytest -q
 
 结论：第三轮 3 项可修反馈全部修复并验证；酷狗/QQ海棠的 404 与小米搜索异常属于插件依赖的第三方接口，
 通过跨源回退保证同一首歌仍可播放，已在 UI 标明实际来源。
+
+
+## 11. 第六轮反馈整改（v1.0.7）
+
+| 项目 | 结果 |
+| --- | --- |
+| 全量自动化测试 | **130 passed / 0 failed / 0 skipped**，32.8 s（`artifacts/junit_round7_final.xml`） |
+| 新增回归 | `tests/test_gui_smoke.py::test_favorite_heart_does_not_break_favorites_page`（播放中在「我喜欢」点喜欢，捕获 Qt 槽内异常） |
+| 测试隔离 | 单实例用例改用 `HUSHPLAYER_MUTEX_SUFFIX`，可与用户正在运行的正式版并存 |
+| 真实窗口 | `tools/probe_r7_favorite.py`：`state=playing`、`favorites rows 1`、`errors 0`、PASS；截图 `docs/screenshots/favorites_playing.png` |
+| 打包产物 | 1.0.7 onedir + zip；`tools/verify_package.ps1` 改为只操作自己启动的进程，并验证单实例拦截 |

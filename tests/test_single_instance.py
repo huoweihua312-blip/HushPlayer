@@ -3,10 +3,28 @@
 from __future__ import annotations
 
 import os
+import uuid
 
+import pytest
 from PySide6.QtCore import QEventLoop, QTimer
 
+from hushplayer.core import single_instance
 from hushplayer.core.single_instance import SingleInstance
+
+
+@pytest.fixture(autouse=True)
+def isolated_single_instance(monkeypatch, tmp_path):
+    """Do not fight a real HushPlayer that the user has open right now.
+
+    The guard keys off a machine-wide named mutex; without isolation, running
+    the app while the test suite executes makes ``try_lock()`` fail for the
+    first test instance. Each test gets its own mutex and request file.
+    """
+    token = uuid.uuid4().hex
+    monkeypatch.setenv("HUSHPLAYER_MUTEX_SUFFIX", f"-test-{token}")
+    monkeypatch.setattr(single_instance, "REQUEST_NAME", f"activate-{token}.request")
+    monkeypatch.setattr(single_instance, "request_file", lambda: tmp_path / "activate.request")
+    yield
 
 
 def _pump(ms: int) -> None:
