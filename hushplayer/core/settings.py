@@ -55,7 +55,8 @@ DEFAULTS: dict[str, Any] = {
         "muted": False,
         "repeat": "off",  # off | all | one
         "shuffle": False,
-        "quality": "higher",  # standard | higher | exhigh | lossless
+        "quality": "higher",
+        "replaygain": "off",  # standard | higher | exhigh | lossless
         "resume_on_start": True,
         "audio_device": "",
         "fade_ms": 180,

@@ -146,6 +146,8 @@ class HushApp(QObject):
             self.player.set_repeat(str(value))
         elif key == "playback.quality":
             self.player.configure(quality=str(value))
+        elif key == "playback.replaygain":
+            self.player.configure(replaygain=str(value))
         elif key.startswith("general."):
             if key == "general.launch_at_startup":
                 from .services.startup import set_enabled
@@ -268,6 +270,7 @@ class HushApp(QObject):
             "online_fallback": bool(self.settings.get("online.cross_source_fallback", True)),
             "shuffle": bool(self.settings.get("playback.shuffle", False)),
             "repeat": str(self.settings.get("playback.repeat", "off")),
+            "replaygain": str(self.settings.get("playback.replaygain", "off")),
         }
         self.player.configure(**playback)
 

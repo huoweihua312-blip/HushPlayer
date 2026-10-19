@@ -25,6 +25,7 @@ from PySide6.QtCore import QObject, QTimer, Signal
 
 from ..core.logging_setup import get_logger
 from ..model.track import Track
+from ..online import models
 from ..online.client import OnlineSourceClient
 from ..online import health
 from ..online.matching import (
@@ -37,6 +38,7 @@ from ..online.matching import (
 )
 from ..online.models import SourceInfo, build_sources, runtime_track, tracks_from_items
 from ..online.proxy import AudioProxy
+from . import replaygain
 from .engine import PlaybackEngine
 from .queue import PlayQueue
 
@@ -113,6 +115,9 @@ class PlayerController(QObject):
         self._quality = "standard"
         self._quality_index = 0
         self._resolve_cache: dict[str, tuple[float, dict]] = {}
+        self._preloaded: dict[str, dict] = {}
+        self._preload_requests: dict[str, int] = {}
+        self._replaygain: str = "off"
         self._online_fallback = True
 
         self.engine.set_volume(self._volume)
@@ -211,7 +216,9 @@ class PlayerController(QObject):
     # -------------------------------------------------------------- settings
     def configure(self, *, volume: float | None = None, quality: str = "standard",
                   online_fallback: bool = True, shuffle: bool | None = None,
-                  repeat: str | None = None) -> None:
+                  repeat: str | None = None, replaygain: str | None = None) -> None:
+        if replaygain is not None:
+            self._replaygain = str(replaygain or "off")
         if volume is not None:
             self.set_volume(volume, emit=True)
         self._quality = quality or "standard"
@@ -458,6 +465,43 @@ class PlayerController(QObject):
             self._last_repeat = self.queue.repeat
             self.repeat_changed.emit(self._last_repeat)
 
+    def preload_next(self, *, delay_ms: int = 2500) -> None:
+        """Resolve the upcoming online track ahead of time (no UI impact)."""
+        if not self._online_fallback and not self.client:
+            return
+        upcoming = self.queue.upcoming(1)
+        if not upcoming:
+            return
+        nxt = upcoming[0]
+        if nxt.kind != "online" or not nxt.source_id or nxt.id in self._preloaded:
+            return
+        source = next((item for item in self._sources if item.id == nxt.source_id), None)
+        if source is None or not source.can_play:
+            return
+        payload = models.runtime_track(nxt)
+        quality = self._quality or "standard"
+        request_id = self.client.resolve_playback(
+            nxt.source_id, payload,
+            lambda response, tid=nxt.id: self._on_preloaded(tid, response),
+            quality=quality,
+        )
+        if request_id:
+            self._preload_requests[nxt.id] = request_id
+
+    def _on_preloaded(self, track_id: str, response: dict[str, Any]) -> None:
+        if not response.get("ok"):
+            return
+        data = response.get("data") or {}
+        if isinstance(data, dict) and data.get("url"):
+            self._preloaded[track_id] = data
+
+    def _apply_replaygain(self, track: Track, source: str) -> None:
+        mode = str(self._replaygain or "off")
+        if mode == "off" or track.kind != "local" or not track.path or source.startswith("http"):
+            self.engine.set_gain(1.0)
+            return
+        self.engine.set_gain(replaygain.scale_for(track.path, mode))
+
     def _load(self, track: Track, *, position: int = 0, autoplay: bool = True,
               force_resolve: bool = False) -> None:
         if track is None:
@@ -478,11 +522,13 @@ class PlayerController(QObject):
             if not path or not os.path.isfile(path):
                 self._handle_missing_local(track)
                 return
+            self._apply_replaygain(track, path)
             self.engine.load(path, duration_hint=track.duration_ms, autoplay=autoplay)
             self._apply_pending_position()
             return
 
         self._active_online = track
+        self.engine.set_gain(1.0)
         self._resolve_online(track, autoplay=autoplay, force=force_resolve, tried=set(), was_playing=was_playing)
 
     def _apply_pending_position(self) -> None:
@@ -504,6 +550,7 @@ class PlayerController(QObject):
 
     def _resolve_online(self, track: Track, *, autoplay: bool, force: bool,
                         tried: set[str], was_playing: bool) -> None:
+        preloaded = None if force else self._preloaded.pop(track.id, None)
         source_id = track.source_id
         if not source_id:
             self._online_failed(track, "该在线歌曲缺少音源信息", tried, autoplay)
@@ -511,6 +558,10 @@ class PlayerController(QObject):
         self._resolve_generation += 1
         generation = self._resolve_generation
         self._quality_index = 0
+        if preloaded is not None:
+            self._on_resolved(track, {"ok": True, "data": preloaded}, generation,
+                              autoplay, tried, was_playing)
+            return
         cache_key = self._resolve_cache_key(track)
         cached = self._resolve_cache.get(cache_key)
         if cached is not None and not force:
@@ -863,6 +914,7 @@ class PlayerController(QObject):
             self._failures = 0
             self._paused_at = 0.0
             self.track_started.emit(self._track)
+            QTimer.singleShot(2500, self.preload_next)
         self.state_changed.emit(state)
 
     def _on_buffering(self, percent: int) -> None:

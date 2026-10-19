@@ -1,5 +1,15 @@
 # Changelog
 
+## v1.0.22 — 2026-10-19
+
+### 新增
+- **ReplayGain 音量归一化**：读取本地文件 `REPLAYGAIN_TRACK_GAIN` / `REPLAYGAIN_ALBUM_GAIN`，按「关闭 / 按曲目 / 按专辑」修正输出增益（±12 dB 上限），不改变音量滑块与系统音量；在线流不处理。
+- **切歌预加载**：播放开始 2.5s 后提前解析队列下一首在线歌曲，切换时直接使用解析结果，省掉解析往返；预加载失败的曲目在切换时自动回退到正常解析。
+
+### 验证
+- `tests/test_replaygain.py`（标签解析、album 回落、无标签/缺失文件回退 1.0、引擎增益不影响滑块音量）、`tests/test_preload.py`（提前解析下一首、切歌复用结果）。
+- 全量 **178 passed / 0 failed / 0 skipped**（`artifacts/junit_round25.xml`）。
+
 ## v1.0.21 — 2026-10-19
 
 ### 新增

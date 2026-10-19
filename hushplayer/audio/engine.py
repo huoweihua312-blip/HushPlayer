@@ -66,6 +66,7 @@ class PlaybackEngine(QObject):
         self._source: str = ""
         self._state: str = STATE_STOPPED
         self._volume: float = 0.72
+        self._gain: float = 1.0  # ReplayGain multiplier, independent of the slider
         self._muted: bool = False
         self._ended: bool = False
         self._duration_hint: int = 0
@@ -78,7 +79,7 @@ class PlaybackEngine(QObject):
         self._player.errorOccurred.connect(self._on_error)
         self._player.bufferProgressChanged.connect(self._on_buffer)
 
-        self._output.setVolume(_convert_volume(self._volume))
+        self._output.setVolume(_convert_volume(self._volume * self._gain))
         self._output.setMuted(False)
 
     # ------------------------------------------------------------- properties
@@ -97,6 +98,11 @@ class PlaybackEngine(QObject):
     @property
     def volume(self) -> float:
         return self._volume
+
+    @property
+    def output(self):
+        """Underlying QAudioOutput (exposed for tests/diagnostics)."""
+        return self._output
 
     @property
     def muted(self) -> bool:
@@ -196,10 +202,18 @@ class PlaybackEngine(QObject):
         self._player.setPosition(target)
         self.position_changed.emit(target)
 
+    def set_gain(self, gain: float) -> None:
+        """Apply a ReplayGain multiplier without touching the user volume."""
+        gain = max(0.05, min(4.0, float(gain)))
+        if abs(gain - self._gain) < 1e-4:
+            return
+        self._gain = gain
+        self._output.setVolume(_convert_volume(self._volume * self._gain))
+
     def set_volume(self, value: float) -> None:
         self._volume = max(0.0, min(1.0, float(value)))
         if not self._muted:
-            self._output.setVolume(_convert_volume(self._volume))
+            self._output.setVolume(_convert_volume(self._volume * self._gain))
         self._player.setAudioOutput(self._output)
 
     def set_muted(self, muted: bool) -> None:

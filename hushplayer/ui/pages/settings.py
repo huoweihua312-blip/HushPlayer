@@ -375,6 +375,13 @@ class SettingsPage(Page):
         card.add_row(self._row("启动时恢复播放", "恢复上次退出时的歌曲与进度", self._toggle("playback.resume_on_start", True)))
         card.add_row(self._row("自动跳过无法播放的歌曲", "连续失败时提示并跳到下一首", self._toggle("playback.skip_unavailable", True)))
         card.add_row(self._row(
+            "音量归一化",
+            "按本地文件的 ReplayGain 标签自动修正音量（不改变音量滑块）",
+            self._combo("playback.replaygain", [
+                ("关闭", "off"), ("按曲目", "track"), ("按专辑", "album"),
+            ], "off"),
+        ))
+        card.add_row(self._row(
             "睡眠定时",
             "到时间后自动暂停播放（下次启动不会保留）",
             self._combo("playback.sleep_timer_minutes", [
