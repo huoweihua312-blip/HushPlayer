@@ -435,6 +435,11 @@ class MainWindow(FramelessWindow):
         if page is not None and hasattr(page, "field"):
             page.field.focus()  # type: ignore[attr-defined]
 
+    def _background_without_tray(self) -> None:
+        """No usable tray icon: keep playback reachable through the mini player."""
+        self.toggle_mini_player()
+        self.toast("托盘图标不可用，已切换到迷你播放器", "warning")
+
     def toggle_mini_player(self) -> None:
         from .mini_player import MiniPlayer
 
@@ -654,11 +659,12 @@ class MainWindow(FramelessWindow):
         buttons.setSpacing(8)
         buttons.addStretch(1)
         cancel = TextButton("取消", size=30)
-        hide = TextButton("最小化到托盘", size=30)
+        hide = TextButton(
+            "最小化到托盘" if self._tray_available() else "隐藏到迷你播放器", size=30
+        )
         quit_button = TextButton("直接退出", size=30, accent=True)
         buttons.addWidget(cancel)
-        if self._tray_available():
-            buttons.addWidget(hide)
+        buttons.addWidget(hide)
         buttons.addWidget(quit_button)
         layout.addLayout(buttons)
 
@@ -700,6 +706,10 @@ class MainWindow(FramelessWindow):
                 event.ignore()
                 return
         prefer_tray = action == "tray" and self._tray_available()
+        if action == "tray" and not prefer_tray:
+            event.ignore()
+            self._background_without_tray()
+            return
         if prefer_tray:
             event.ignore()
             self.hide()
@@ -730,9 +740,7 @@ class MainWindow(FramelessWindow):
 
     def _hide_to_tray(self) -> None:
         if not self._tray_available():
-            # Never lose the window: without a tray icon there is no way back.
-            self.showNormal()
-            self.toast("系统托盘不可用，窗口保持打开", "warning")
+            self._background_without_tray()
             return
         if not bool(ctx().settings.get("general.tray_hint_shown", False)):
             # First time: explain where the icon went, otherwise the window can

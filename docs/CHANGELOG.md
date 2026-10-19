@@ -1,5 +1,22 @@
 # Changelog
 
+## v1.0.37 — 2026-10-11
+
+托盘不可用时，用迷你播放器接管“后台”。
+
+### 背景
+用独立的原生探针（不加载 HushPlayer 代码）验证：`Shell_NotifyIconW(NIM_ADD)` 直接返回 `FALSE`，`GetLastError()=5`（拒绝访问）；最小 PySide6 托盘程序（纯红块图标 + 系统标准图标）同样不出现，`geometry()` 为 `0,0,0,0`。同会话窗口站为 `WinSta0/Default`，进程未提权。结论：这台机器的任务栏/托盘环境拒绝新进程注册托盘图标，与原版实现（同为 `QSystemTrayIcon` + `show()`）无关。
+
+### 修复
+- 托盘不可用时，`_hide_to_tray()` 改为 `_background_without_tray()`：切到迷你播放器并隐藏主窗口，播放控制始终可达；提示「托盘图标不可用，已切换到迷你播放器」。
+- 关闭询问的中间按钮按可用性变成「最小化到托盘」或「隐藏到迷你播放器」；选择「隐藏到迷你播放器」与 `minimize_to_tray` 设置走同一条后台路径。
+- 首次托盘说明弹窗只在托盘可用时出现，避免对不可用环境做无效指引。
+
+### 验证
+- `pytest -q`：183 passed / 0 failed。
+- 探针 `tools/probe_r40_fallback.py`：强制 `_tray_ok=False` 后 `_hide_to_tray()` → `main_visible=False mini=True`。
+- 原生证据脚本 `tools/probe_tray_native.py`：`Shell_NotifyIconW add 0 err 5`。
+
 ## v1.0.36 — 2026-10-11
 
 不再依赖托盘图标，窗口不会“消失”。
