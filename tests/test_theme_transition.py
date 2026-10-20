@@ -110,3 +110,28 @@ def test_sun_moon_reveal_pops_icon_then_fades(qapp):
     mid = dusk.new_frame_alpha()
     dusk.set_reveal_progress(0.9)
     assert dusk.new_frame_alpha() > mid
+
+
+def test_sun_moon_timeline_honours_settings(qapp):
+    from hushplayer.ui.widgets.transition import SunMoonReveal
+
+    host = QWidget()
+    host.resize(600, 400)
+    frame = QPixmap(600, 400)
+
+    slow = SunMoonReveal(
+        host, frame, frame, QPointF(0, 0), to_dark=False, pop_ms=800, hold_ms=400, icon_scale=1.5
+    )
+    fast = SunMoonReveal(
+        host, frame, frame, QPointF(0, 0), to_dark=False, pop_ms=200, hold_ms=100, icon_scale=0.8
+    )
+    assert slow.total_ms() > fast.total_ms()
+    assert slow._icon_scale == 1.5 and fast._icon_scale == 0.8
+
+    # The icon only holds full size once its own pop window has elapsed.
+    slow.set_reveal_progress(0.2)  # 0.2 * 1770ms = 354ms < 800ms pop
+    assert slow.stage() == "pop"
+    assert slow.icon_scale() < 1.0
+    slow.set_reveal_progress(0.5)  # past the pop, well inside the wash/hold
+    assert slow.stage() in {"wash", "hold"}
+    assert slow.icon_scale() == 1.0

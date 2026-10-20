@@ -235,14 +235,27 @@ class HushApp(QObject):
                 from .ui.widgets.transition import SunMoonReveal, ThemeReveal
 
                 host = getattr(window, "container", None) or window
-                overlay_class = SunMoonReveal if animation_mode == "sunrise" else ThemeReveal
-                overlay = overlay_class(
-                    host,
-                    snapshot,
-                    snapshot,
-                    self._theme_origin(window, host),
-                    to_dark=previous_mode == "light",
-                )
+                origin = self._theme_origin(window, host)
+                to_dark = previous_mode == "light"
+                if animation_mode == "sunrise":
+                    overlay = SunMoonReveal(
+                        host,
+                        snapshot,
+                        snapshot,
+                        origin,
+                        to_dark=to_dark,
+                        pop_ms=float(self.settings.get("appearance.theme_anim_pop_ms", 420.0) or 420.0),
+                        hold_ms=float(self.settings.get("appearance.theme_anim_hold_ms", 260.0) or 0.0),
+                        icon_scale=float(self.settings.get("appearance.theme_anim_icon_scale", 1.0) or 1.0),
+                    )
+                else:
+                    overlay = ThemeReveal(
+                        host,
+                        snapshot,
+                        snapshot,
+                        origin,
+                        to_dark=to_dark,
+                    )
                 # Freeze the old frame *before* the palette changes; otherwise a
                 # frame of the new theme can be presented under the overlay.
                 overlay.freeze()

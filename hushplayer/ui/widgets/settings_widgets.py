@@ -10,6 +10,7 @@ from __future__ import annotations
 import os
 from typing import Callable
 
+from PySide6.QtGui import QFontMetrics
 from PySide6.QtCore import (
     QEasingCurve,
     QPointF,
@@ -309,7 +310,12 @@ class SettingSlider(QWidget):
         self.slider.setCursor(Qt.PointingHandCursor)
         self.slider.setFixedWidth(170)
         self.value_label = _label("", size=9.2, weight=500, alpha=0.7)
-        self.value_label.setFixedWidth(52)
+        self.value_label.setWordWrap(False)
+        # Wide enough for "1200 ms" so the suffix never wraps to a second line.
+        self.value_label.setFixedWidth(
+            QFontMetrics(self.value_label.font()).horizontalAdvance("0000 ms")
+            + theme().scaled(12, factor=0.0)
+        )
         self.value_label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
         layout.addWidget(self.slider)
         layout.addWidget(self.value_label)

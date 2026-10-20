@@ -1,5 +1,25 @@
 # Changelog
 
+## v1.0.47 — 2026-10-20
+
+日月动画可调：弹出时长、图标大小、黑白定格时长都进设置。
+
+### 新增
+- `SunMoonReveal` 改为毫秒时间线：`pop_ms`（图标弹出）、`wash_ms`（旧帧覆盖）、`hold_ms`（黑白定格）、`fade_ms`（新配色淡入），`total_ms()` 求和、`stage()` 返回 `pop|wash|hold|fade`，所有取值都由时长推导。
+- 设置 → 外观 → 动效与密度 新增三项（仅在「全屏日月动画」下生效）：
+  - 日月图标弹出时长 150–1200 ms，默认 420 ms（比上一版 213 ms 明显更长）；
+  - 日月图标大小 60%–160%，默认 100%；
+  - 黑白定格时长 0–900 ms，默认 260 ms。
+- 存储键：`appearance.theme_anim_pop_ms`、`appearance.theme_anim_icon_scale`、`appearance.theme_anim_hold_ms`。
+
+### 修复
+- 设置数值标签不再折行（按 `QFontMetrics` 计算宽度，容纳 "1200 ms"）。
+- `QSlider` 补上品牌样式（莓果红滑轨与圆柄）；此前在设置里显示为系统蓝色。
+
+### 验证
+- `pytest -q`：189 passed / 0 failed（新增 `test_sun_moon_timeline_honours_settings`）。
+- 截图：`docs/screenshots/theme_animation_settings.png`、`docs/screenshots/theme_sun_pop.png`、`theme_moon_pop.png`。
+
 ## v1.0.46 — 2026-10-20
 
 全屏主题动画改为「中央弹出太阳/月亮 + 黑白过渡」。

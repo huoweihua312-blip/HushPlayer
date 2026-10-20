@@ -201,19 +201,20 @@ class ThemeReveal(QWidget):
 
 
 class SunMoonReveal(QWidget):
-    """Centre sun / moon pops in, then the whole window cross-fades.
+    """Centre sun / moon pops in, the frame washes to black or white, then the
+    new theme fades up out of that neutral.
 
-    Two cheap passes only — the old snapshot, then the new one at a uniform
-    opacity — so the animation stays smooth at 2560px. The icon is pure white on
-    dark backgrounds and pure black on light ones: no accent colours anywhere.
+    Every stage is timed in milliseconds so the settings page can expose them:
+    ``pop_ms`` (icon), ``wash_ms`` (old frame to neutral), ``hold_ms`` (fully
+    covered) and ``fade_ms`` (neutral to new theme). Only black and white are
+    drawn — no accent colours — and the widget never blends two UI frames on top
+    of each other, which is what made the earlier cross-fade look muddy.
     """
 
-    DURATION_MS = 820
-    POP_END = 0.26  # icon growth finishes here
-    ICON_HOLD = 0.30
-    ICON_GONE = 0.54  # icon is gone before the wash fully covers the frame
-    DIP_IN = 0.24  # wash starts while the icon is still visible
-    DIP_HOLD = 0.58  # wash peaks here; the new frame then fades in underneath
+    DEFAULT_POP_MS = 360.0
+    DEFAULT_WASH_MS = 150.0
+    DEFAULT_HOLD_MS = 260.0
+    DEFAULT_FADE_MS = 420.0
 
     def __init__(
         self,
@@ -223,22 +224,51 @@ class SunMoonReveal(QWidget):
         origin: object = None,
         *,
         to_dark: bool,
+        pop_ms: float | None = None,
+        hold_ms: float | None = None,
+        icon_scale: float | None = None,
+        wash_ms: float | None = None,
+        fade_ms: float | None = None,
     ) -> None:
         super().__init__(parent)
         self._old = old
         self._new = new
         self._to_dark = to_dark
+        self._pop_ms = max(60.0, float(pop_ms or self.DEFAULT_POP_MS))
+        self._wash_ms = max(40.0, float(wash_ms or self.DEFAULT_WASH_MS))
+        self._hold_ms = max(0.0, float(hold_ms if hold_ms is not None else self.DEFAULT_HOLD_MS))
+        self._fade_ms = max(120.0, float(fade_ms or self.DEFAULT_FADE_MS))
+        self._icon_scale = max(0.4, min(2.0, float(icon_scale or 1.0)))
         self._progress = 0.0
         self.setAttribute(Qt.WA_TransparentForMouseEvents, True)
         self.setAttribute(Qt.WA_NoSystemBackground, True)
         self.setAttribute(Qt.WA_DeleteOnClose, True)
         self.setGeometry(parent.rect())
         self._animation = QPropertyAnimation(self, b"revealProgress", self)
-        self._animation.setDuration(theme().duration(self.DURATION_MS))
+        self._animation.setDuration(theme().duration(int(self.total_ms())))
         self._animation.setStartValue(0.0)
         self._animation.setEndValue(1.0)
-        self._animation.setEasingCurve(QEasingCurve.OutCubic)
+        self._animation.setEasingCurve(QEasingCurve.Linear)
         self._animation.finished.connect(self.close)
+
+    # ------------------------------------------------------------------ 时间线
+    def total_ms(self) -> float:
+        return self._pop_ms + self._wash_ms + self._hold_ms + self._fade_ms
+
+    def _elapsed(self) -> float:
+        return self._progress * self.total_ms()
+
+    def stage(self) -> str:
+        elapsed = self._elapsed()
+        if elapsed < self._pop_ms:
+            return "pop"
+        elapsed -= self._pop_ms
+        if elapsed < self._wash_ms:
+            return "wash"
+        elapsed -= self._wash_ms
+        if elapsed < self._hold_ms:
+            return "hold"
+        return "fade"
 
     def get_reveal_progress(self) -> float:
         return self._progress
@@ -279,43 +309,45 @@ class SunMoonReveal(QWidget):
 
     # ------------------------------------------------------------------ 取值
     @staticmethod
+    def _ease_out(value: float) -> float:
+        x = max(0.0, min(1.0, value))
+        return 1.0 - (1.0 - x) ** 3
+
+    @staticmethod
     def _smoothstep(value: float) -> float:
         x = max(0.0, min(1.0, value))
         return x * x * (3.0 - 2.0 * x)
 
-    def dip_alpha(self) -> float:
-        """Solid black/white wash: rises after the icon, then yields to the new frame."""
-        if self._progress <= self.DIP_IN:
+    def wash_alpha(self) -> float:
+        """Neutral cover: 0 during the pop, rises over ``wash_ms``, then holds."""
+        stage = self.stage()
+        if stage == "pop":
             return 0.0
-        if self._progress <= self.DIP_HOLD:
-            span = max(1e-6, self.DIP_HOLD - self.DIP_IN)
-            return self._smoothstep((self._progress - self.DIP_IN) / span)
-        # Stay fully covered: the new frame fades in on top, so the wash must
-        # not drop to zero or the old frame flashes back for a few frames.
+        if stage == "wash":
+            elapsed = self._elapsed() - self._pop_ms
+            return self._smoothstep(elapsed / max(1e-6, self._wash_ms))
         return 1.0
 
     def new_frame_alpha(self) -> float:
-        """The new theme only appears after the wash has fully covered the old one."""
-        if self._progress <= self.DIP_HOLD:
+        """New theme fades up only after the hold finishes."""
+        if self.stage() != "fade":
             return 0.0
-        span = max(1e-6, 1.0 - self.DIP_HOLD)
-        return self._smoothstep((self._progress - self.DIP_HOLD) / span)
+        elapsed = self._elapsed() - self._pop_ms - self._wash_ms - self._hold_ms
+        return self._smoothstep(elapsed / max(1e-6, self._fade_ms))
 
     def icon_scale(self) -> float:
-        """Icon grows from 0.55 to 1.0 while it pops, then holds."""
-        if self._progress >= self.POP_END:
+        if self._elapsed() >= self._pop_ms:
             return 1.0
-        t = self._progress / max(1e-6, self.POP_END)
-        return 0.55 + 0.45 * (1.0 - (1.0 - t) ** 3)
+        return 0.55 + 0.45 * self._ease_out(self._elapsed() / max(1e-6, self._pop_ms))
 
     def icon_alpha(self) -> float:
-        """Fade the icon in quickly, then out before the wash peaks."""
-        if self._progress < 0.10:
-            return self._progress / 0.10
-        if self._progress <= self.ICON_HOLD:
-            return 1.0
-        span = max(1e-6, self.ICON_GONE - self.ICON_HOLD)
-        return max(0.0, 1.0 - (self._progress - self.ICON_HOLD) / span)
+        stage = self.stage()
+        if stage == "pop":
+            return min(1.0, self._elapsed() / max(1e-6, self._pop_ms * 0.45))
+        if stage == "wash":
+            elapsed = self._elapsed() - self._pop_ms
+            return max(0.0, 1.0 - elapsed / max(1e-6, self._wash_ms))
+        return 0.0
 
     # ------------------------------------------------------------------ 绘制
     def paintEvent(self, event) -> None:  # noqa: N802
@@ -323,7 +355,7 @@ class SunMoonReveal(QWidget):
         painter.setRenderHint(QPainter.Antialiasing, True)
         if not self._old.isNull():
             painter.drawPixmap(self.rect(), self._old)
-        wash = self.dip_alpha()
+        wash = self.wash_alpha()
         if wash > 0.0:
             colour = QColor("#FFFFFF") if not self._to_dark else QColor("#000000")
             colour.setAlphaF(min(1.0, wash))
@@ -340,7 +372,7 @@ class SunMoonReveal(QWidget):
 
     def _paint_icon(self, painter: QPainter, alpha: float) -> None:
         size = min(self.width(), self.height())
-        radius = max(18.0, size * 0.055) * self.icon_scale()
+        radius = max(14.0, size * 0.055 * self._icon_scale) * self.icon_scale()
         centre = QPointF(self.width() / 2.0, self.height() / 2.0)
         # Contrast against the frame we are coming *from*; both pure B/W.
         colour = QColor("#000000") if self._to_dark else QColor("#FFFFFF")

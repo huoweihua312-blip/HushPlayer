@@ -47,6 +47,9 @@ DEFAULTS: dict[str, Any] = {
         "ui_scale": "auto",  # auto | 1.0 | 1.15 | 1.25 | 1.5（需重启）
         "sidebar_visible": True,
         "theme_animation_mode": "reveal",  # reveal | sunrise | off
+        "theme_anim_pop_ms": 420.0,  # 日月图标弹出时长
+        "theme_anim_hold_ms": 260.0,  # 黑白定格时长
+        "theme_anim_icon_scale": 1.0,  # 日月图标大小（1.0 = 默认）
         "density": "comfortable",  # comfortable | compact
         "show_source_badge": True,
     },

@@ -364,6 +364,33 @@ class SettingsPage(Page):
                 ),
             )
         )
+        card.add_row(
+            self._row(
+                "日月图标弹出时长",
+                "太阳/月亮放大出现的时间，只在「全屏日月动画」下生效",
+                self._slider("appearance.theme_anim_pop_ms", 150, 1200, default=420, suffix=" ms"),
+            )
+        )
+        card.add_row(
+            self._row(
+                "日月图标大小",
+                "1.0 为默认大小，可放大到 160%",
+                self._slider(
+                    "appearance.theme_anim_icon_scale",
+                    0.6,
+                    1.6,
+                    default=1.0,
+                    formatter=lambda value: f"{value * 100:.0f}%",
+                ),
+            )
+        )
+        card.add_row(
+            self._row(
+                "黑白定格时长",
+                "整窗被纯白/纯黑盖住、暂时看不到界面的时间",
+                self._slider("appearance.theme_anim_hold_ms", 0, 900, default=260, suffix=" ms"),
+            )
+        )
         card.add_row(self._row(
             "界面密度",
             "紧凑模式会缩小列表行高，一屏显示更多歌曲",

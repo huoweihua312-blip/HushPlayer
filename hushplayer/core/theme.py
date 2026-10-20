@@ -438,6 +438,26 @@ QTabBar::tab {{
 }}
 QTabBar::tab:selected {{ background: {p.accent_soft}; color: {p.accent}; }}
 QSplitter::handle {{ background: transparent; }}
+QSlider::groove:horizontal {{
+    height: 4px;
+    border-radius: 2px;
+    background: {css_rgba(p.text, 0.14)};
+}}
+QSlider::sub-page:horizontal {{
+    height: 4px;
+    border-radius: 2px;
+    background: {p.accent};
+}}
+QSlider::handle:horizontal {{
+    width: 14px;
+    height: 14px;
+    margin: -6px 0;
+    border-radius: 7px;
+    background: {p.accent};
+    border: 2px solid {p.surface};
+}}
+QSlider::handle:horizontal:hover {{ background: {p.accent_hover}; }}
+QSlider::handle:horizontal:disabled {{ background: {css_rgba(p.text, 0.35)}; }}
 QListView {{ background: transparent; border: none; outline: none; }}
 /* BUG-10: the global QWidget selection colour painted a solid berry block
    behind selected rows, and the "now playing" title was berry too -> red on
