@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import pytest
+
 from PySide6.QtCore import QPointF
 from PySide6.QtGui import QPixmap
 from PySide6.QtWidgets import QWidget
@@ -135,3 +137,19 @@ def test_sun_moon_timeline_honours_settings(qapp):
     slow.set_reveal_progress(0.5)  # past the pop, well inside the wash/hold
     assert slow.stage() in {"wash", "hold"}
     assert slow.icon_scale() == 1.0
+
+
+def test_overlays_expose_animation_ms(qapp):
+    """apply_theme divides by the animation length for the cooldown window; both
+    overlays must answer it (a missing attribute crashed the theme toggle)."""
+    from hushplayer.ui.widgets.transition import SunMoonReveal, ThemeReveal
+
+    host = QWidget()
+    host.resize(400, 300)
+    frame = QPixmap(400, 300)
+    reveal = ThemeReveal(host, frame, frame, QPointF(10, 10), to_dark=True)
+    assert reveal.animation_ms() > 0
+
+    sun = SunMoonReveal(host, frame, frame, QPointF(0, 0), to_dark=False, pop_ms=500, hold_ms=0)
+    assert sun.animation_ms() == pytest.approx(sun.total_ms(), rel=0.02)
+    assert sun.animation_ms() >= 500

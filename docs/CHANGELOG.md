@@ -1,5 +1,17 @@
 # Changelog
 
+## v1.0.48 — 2026-10-20
+
+修复切到「全屏日月动画」后切换主题崩溃。
+
+### 修复
+- `AttributeError: 'SunMoonReveal' object has no attribute 'DURATION_MS'`：`apply_theme()` 用 `overlay.DURATION_MS` 计算冷却窗口，但日月动画改成毫秒时间线后已无该常量。两个遮罩类统一提供 `animation_ms()`，应用侧改用它。
+- 新增回归测试 `test_overlays_expose_animation_ms`，确保两种遮罩都回答动画时长；探针连续切三次主题不再抛异常。
+
+### 验证
+- `pytest -q`：190 passed / 0 failed。
+- 构建验收：`window=1280x820`、`instances=1`、`alive_after_close=False`。
+
 ## v1.0.47 — 2026-10-20
 
 日月动画可调：弹出时长、图标大小、黑白定格时长都进设置。

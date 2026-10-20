@@ -167,6 +167,9 @@ class ThemeReveal(QWidget):
         self.hide()
         self.close()
 
+    def animation_ms(self) -> float:
+        return float(self._animation.duration())
+
     def _radius_max(self) -> float:
         x, y = self._origin.x(), self._origin.y()
         corners = [
@@ -306,6 +309,9 @@ class SunMoonReveal(QWidget):
         self._progress = 1.0
         self.hide()
         self.close()
+
+    def animation_ms(self) -> float:
+        return float(self._animation.duration())
 
     # ------------------------------------------------------------------ 取值
     @staticmethod

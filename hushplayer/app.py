@@ -261,7 +261,7 @@ class HushApp(QObject):
                 overlay.freeze()
                 self._theme_reveal = overlay
                 overlay.destroyed.connect(lambda *_: setattr(self, "_theme_reveal", None))
-                self._theme_cooldown_until = now + overlay.DURATION_MS / 1000.0 + 0.15
+                self._theme_cooldown_until = now + overlay.animation_ms() / 1000.0 + 0.15
                 self.app.processEvents()
 
         self._theme_signature = signature
