@@ -1,9 +1,20 @@
-﻿# 启动打包版、验证单实例与截图，然后优雅关闭。
+# 启动打包版、验证单实例与截图，然后优雅关闭。
 $ErrorActionPreference = "Stop"
 $root = "F:\Projects\HushPlayer-Reimagined"
-$exe = Join-Path $root "packaging\out\HushPlayer\HushPlayer.exe"
+# The repo folder inherits a Low integrity label, and Windows refuses tray-icon
+# registration from low-integrity processes.  Verify from a normal (Medium)
+# folder so the run matches what users get after extracting the zip.
+$medium = Join-Path $env:LOCALAPPDATA "HushPlayerVerify"
+if (Test-Path $medium) { Remove-Item $medium -Recurse -Force }
+New-Item -ItemType Directory -Force $medium | Out-Null
+Copy-Item (Join-Path $root "packaging\out\HushPlayer\*") $medium -Recurse -Force
+$exe = Join-Path $medium "HushPlayer.exe"
 $data = Join-Path $root "artifacts\packaged_run"
+if (Test-Path $data) { Remove-Item $data -Recurse -Force }
 New-Item -ItemType Directory -Force $data | Out-Null
+# Deterministic close behaviour for automation: quit on close, no dialog.
+$settingsJson = '{"general": {"close_action": "quit", "close_prompt_migrated": true}}'
+Set-Content -Path (Join-Path $data "settings.json") -Value $settingsJson -Encoding UTF8
 # Never kill a HushPlayer the user may have open; the isolated mutex below
 # lets this verification run alongside it.
 
