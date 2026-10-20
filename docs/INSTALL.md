@@ -90,3 +90,21 @@ HushPlayer 是绿色版：把 `HushPlayer` 目录放在任意位置（例如 `D:
 | 在线播放 404 | 该音源解析失败（见 KNOWN_ISSUES），尝试其他音源或本地文件 |
 | 歌词不显示 | 确认歌曲有 `.lrc` 同名文件或内嵌歌词；设置 → 歌词 里开启在线获取 |
 | 界面文字发虚 | 确认 Windows 缩放与显示器设置；HushPlayer 使用 Per-Monitor V2 DPI |
+
+## 安装包（推荐）
+
+运行 `HushPlayer-1.1.1-setup.exe`：
+
+- 默认安装到 `%LOCALAPPDATA%\Programs\HushPlayer`，无需管理员权限；
+- 安装向导为英文（Inno Setup 不附带简体中文语言文件，避免依赖非官方翻译）；
+- 可选「桌面快捷方式」与「登录时自动启动」；
+- 卸载：设置 → 应用 → HushPlayer（或开始菜单「卸载 HushPlayer」）。
+
+卸载**不会**删除 `%LOCALAPPDATA%\HushPlayerReimagined`（音乐库、歌单、设置、缓存）。要彻底清空，卸载后手动删除该目录。
+
+校验安装包：
+
+```powershell
+Get-FileHash HushPlayer-1.1.1-setup.exe -Algorithm SHA256
+# E55B97FFC0391E9DADAB617190D8564A7821CDCFA3759C7BDE143ED397319407
+```

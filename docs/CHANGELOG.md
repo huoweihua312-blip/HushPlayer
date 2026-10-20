@@ -1,5 +1,22 @@
 # Changelog
 
+## v1.1.1 — 2026-10-20
+
+安装包。
+
+### 新增
+- `packaging/installer.iss`（Inno Setup 6）：生成 `HushPlayer-1.1.1-setup.exe`（82.4 MB）。
+  - 按用户安装到 `%LOCALAPPDATA%\Programs\HushPlayer`，**不需要管理员权限**；
+  - 开始菜单快捷方式 + 卸载入口，可选桌面图标、可选登录自启（`{userstartup}`）；
+  - 升级覆盖安装沿用同一 `AppId`，会先关闭正在运行的实例；
+  - 卸载只删程序目录，`%LOCALAPPDATA%\HushPlayerReimagined`（音乐库、歌单、设置、缓存）保留，重装后数据仍在；
+  - 安装目录位于 Medium 完整性目录，托盘图标注册可正常通过（实测 `托盘图标注册成功（系统已接受）`）。
+
+### 验证
+- 静默安装 → 文件/版本 1.1.1、HKCU 卸载项、开始菜单快捷方式均正确；启动后托盘注册成功。
+- 静默卸载 → 程序目录、开始菜单、`HKCU\Software\HushPlayer`、卸载项全部清除；用户数据 160 个文件保持不动。
+- `pytest`：191 passed / 0 failed（`artifacts/junit_1_1_1.xml`）。
+
 ## v1.1.0 — 2026-10-20
 
 1.1.0 是「可交付候选」：不改主功能，收口可靠性、文档与发布流程。
