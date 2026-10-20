@@ -141,6 +141,13 @@ class ThemeReveal(QWidget):
             return
         self._animation.start()
 
+    def finish(self) -> None:
+        """Stop right now (used when another theme change supersedes this one)."""
+        self._animation.stop()
+        self._progress = 1.0
+        self.hide()
+        self.close()
+
     def _radius_max(self) -> float:
         x, y = self._origin.x(), self._origin.y()
         corners = [

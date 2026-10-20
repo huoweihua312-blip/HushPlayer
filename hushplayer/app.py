@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import sys
+import time
 import traceback
 
 from PySide6.QtCore import QObject, Qt, QTimer, Signal
@@ -183,6 +184,19 @@ class HushApp(QObject):
             return 1.0
         return display.recommended_type_scale(width)
 
+    def _end_theme_transition(self) -> None:
+        """Retire any running reveal so a new one starts from a clean frame."""
+        overlay = getattr(self, "_theme_reveal", None)
+        self._theme_reveal = None
+        if overlay is None:
+            return
+        try:
+            overlay.finish()
+        except Exception:  # noqa: BLE001
+            pass
+        if self.window is not None:
+            self.app.processEvents()
+
     def apply_theme(self, *, animate: bool = True) -> None:
         preference = str(self.settings.get("appearance.theme", "system"))
         accent = str(self.settings.get("appearance.accent", "#C95770"))
@@ -194,6 +208,13 @@ class HushApp(QObject):
             return
         window = self.window
         animate_theme = bool(self.settings.get("appearance.theme_animation", True))
+        # Rapid toggling: retire the running wipe first, and skip animating the
+        # follow-up switches so overlays can never pile up (a frozen leftover
+        # also ends up baked into the next snapshot, which looked "stuck").
+        self._end_theme_transition()
+        now = time.monotonic()
+        if now < getattr(self, "_theme_cooldown_until", 0.0):
+            animate = False
         overlay = None
         snapshot = None
         previous_mode = self._resolved_mode
@@ -223,6 +244,9 @@ class HushApp(QObject):
                 # Freeze the old frame *before* the palette changes; otherwise a
                 # frame of the new theme can be presented under the overlay.
                 overlay.freeze()
+                self._theme_reveal = overlay
+                overlay.destroyed.connect(lambda *_: setattr(self, "_theme_reveal", None))
+                self._theme_cooldown_until = now + overlay.DURATION_MS / 1000.0 + 0.15
                 self.app.processEvents()
 
         self._theme_signature = signature

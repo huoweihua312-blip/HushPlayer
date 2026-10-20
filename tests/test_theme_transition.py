@@ -31,3 +31,37 @@ def test_theme_reveal_progress_and_radius(qapp):
     assert reveal.revealProgress == 0.0
     # the wipe must be able to cover the far corner whatever the origin is
     assert reveal._radius_max() >= (380 ** 2 + 280 ** 2) ** 0.5 - 1
+
+
+def test_reveal_finish_retires_overlay(qapp):
+    host = QWidget()
+    host.resize(300, 200)
+    frame = QPixmap(300, 200)
+    reveal = ThemeReveal(host, frame, frame, QPointF(280, 20), to_dark=True)
+    reveal.freeze()
+    assert reveal.revealProgress == 0.0
+    reveal.finish()
+    assert reveal.revealProgress == 1.0
+    assert reveal.isVisible() is False
+
+
+class _StubOverlay:
+    def __init__(self) -> None:
+        self.finished = 0
+
+    def finish(self) -> None:
+        self.finished += 1
+
+
+def test_app_retires_previous_reveal_before_next(qapp):
+    from hushplayer.app import HushApp
+
+    app = HushApp(qapp)
+    stub = _StubOverlay()
+    app._theme_reveal = stub
+    app._end_theme_transition()
+    assert stub.finished == 1
+    assert app._theme_reveal is None
+    # a second call with nothing pending must stay a no-op
+    app._end_theme_transition()
+    assert stub.finished == 1

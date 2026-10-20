@@ -628,7 +628,10 @@ class MainWindow(FramelessWindow):
         settings = ctx().settings
         settings.set("appearance.theme", target)
         toast = getattr(self, "_toasts", None)
-        if toast is not None:
+        # Burst-clicking the toggle should not stack a pile of identical toasts.
+        now = time.monotonic()
+        if toast is not None and now >= getattr(self, "_theme_toast_at", 0.0) + 1.2:
+            self._theme_toast_at = now
             self.toast("已切换到浅色模式" if target == "light" else "已切换到深色模式")
 
     def apply_theme(self, mode: str = "system") -> None:

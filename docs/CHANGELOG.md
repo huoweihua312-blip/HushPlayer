@@ -1,5 +1,21 @@
 # Changelog
 
+## v1.0.44 — 2026-10-20
+
+修复快速连点主题按钮时揭示动画卡住。
+
+### 修复
+- 每次切换都会新建一层 `ThemeReveal`，旧的那层从不收尾；多层遮罩叠在一起就是"卡住"的残留圆弧，下一次快照还会把圆弧拍进去，永久留在画面上。
+- `ThemeReveal.finish()`：立即停表、`progress=1`、隐藏并关闭。
+- `HushApp._end_theme_transition()`：开始新切换前先收尾旧遮罩并清空引用；`destroyed` 信号也会清引用，避免持有已销毁的包装对象。
+- 连点保护：`_theme_cooldown_until`（动画时长 + 0.15s）内的再次切换直接换色、不再播放动画，避免遮罩层层堆叠。
+- 提示去重：`MainWindow.toggle_theme_mode()` 1.2s 内不再重复弹「已切换到浅色/深色模式」。
+
+### 验证
+- 新增测试 `tests/test_theme_transition.py::test_reveal_finish_retires_overlay`、`::test_app_retires_previous_reveal_before_next`。
+- `pytest -q`：186 passed / 0 failed。
+- 离屏连点探针 `tools/probe_r49_theme2.py`：连点 6 次后 `overlay_alive=False`、无异常、最终模式正确。
+
 ## v1.0.43 — 2026-10-20
 
 构建产物移回本机 F: 盘（不写入 C:）。
