@@ -1,5 +1,19 @@
 # Changelog
 
+## v1.0.45 — 2026-10-20
+
+主题切换新增「全屏日出日落」动画，并可在设置中选择动画方式。
+
+### 新增
+- `hushplayer/ui/widgets/transition.py:SunriseReveal`：整窗铺满的日光转场，900ms、`InOutCubic`。切到浅色时新画面自下而上"日出"，切到深色时自上而下"日落"；过渡带用 `QImage + CompositionMode_DestinationIn` 做逐像素渐变遮罩（48 步条带会有明显横纹，已改掉），边缘带一条随行暖色光晕与低悬日轮。
+- 设置 → 外观 → 动效与密度 →「主题切换动画」改为下拉选择：过渡动画（从标题栏按钮扩散，原有效果）/ 全屏日出日落 / 关闭。设置项 `appearance.theme_animation_mode`（`reveal` | `sunrise` | `off`），默认 `reveal`。
+- 旧布尔设置 `appearance.theme_animation` 自动迁移：`true → reveal`、`false → off`，迁移后从配置里移除旧键，不丢用户意图。
+- 连点保护与旧遮罩收尾对两种动画共用（`_end_theme_transition` / `_theme_cooldown_until`），快速点按钮仍不会叠层。
+
+### 验证
+- `pytest -q`：188 passed / 0 failed（新增动画模式默认/迁移、`SunriseReveal` 边缘方向与 `finish()` 三项测试）。
+- 逐帧截图：`docs/screenshots/theme_sunrise.png`、`docs/screenshots/theme_sunset.png`（1600×1000，progress≈0.45，无横纹）。
+
 ## v1.0.44 — 2026-10-20
 
 修复快速连点主题按钮时揭示动画卡住。

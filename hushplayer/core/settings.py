@@ -46,6 +46,7 @@ DEFAULTS: dict[str, Any] = {
         "font_scale": 1.0,
         "ui_scale": "auto",  # auto | 1.0 | 1.15 | 1.25 | 1.5（需重启）
         "sidebar_visible": True,
+        "theme_animation_mode": "reveal",  # reveal | sunrise | off
         "density": "comfortable",  # comfortable | compact
         "show_source_badge": True,
     },
@@ -157,7 +158,17 @@ class Settings(QObject):
         if not isinstance(data, dict):
             data = {}
         self._data = _deep_merge(copy.deepcopy(DEFAULTS), data)
+        self._migrate(data)
         self._dirty = False
+
+    def _migrate(self, raw: dict[str, Any]) -> None:
+        """Map retired keys onto their replacements (never drops user intent)."""
+        appearance = raw.get("appearance") if isinstance(raw, dict) else None
+        if isinstance(appearance, dict) and "theme_animation_mode" not in appearance:
+            legacy = appearance.get("theme_animation")
+            if isinstance(legacy, bool):
+                self._data["appearance"]["theme_animation_mode"] = "reveal" if legacy else "off"
+        self._data.get("appearance", {}).pop("theme_animation", None)
 
     def flush(self) -> None:
         if not self._dirty:

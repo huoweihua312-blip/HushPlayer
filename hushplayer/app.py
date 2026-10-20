@@ -207,7 +207,8 @@ class HushApp(QObject):
         if signature == getattr(self, "_theme_signature", None):
             return
         window = self.window
-        animate_theme = bool(self.settings.get("appearance.theme_animation", True))
+        animation_mode = str(self.settings.get("appearance.theme_animation_mode", "reveal"))
+        animate_theme = animation_mode in ("reveal", "sunrise")
         # Rapid toggling: retire the running wipe first, and skip animating the
         # follow-up switches so overlays can never pile up (a frozen leftover
         # also ends up baked into the next snapshot, which looked "stuck").
@@ -231,10 +232,11 @@ class HushApp(QObject):
             except Exception:  # noqa: BLE001
                 snapshot = None
             if snapshot is not None and not snapshot.isNull():
-                from .ui.widgets.transition import ThemeReveal
+                from .ui.widgets.transition import SunriseReveal, ThemeReveal
 
                 host = getattr(window, "container", None) or window
-                overlay = ThemeReveal(
+                overlay_class = SunriseReveal if animation_mode == "sunrise" else ThemeReveal
+                overlay = overlay_class(
                     host,
                     snapshot,
                     snapshot,
