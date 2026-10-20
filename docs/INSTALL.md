@@ -8,12 +8,12 @@
 
 ## 2. 获取发布包
 
-发布产物位于 `packaging/out/`：
+发布产物位于 `F:\HushPlayerBuild\out\`（脚本默认输出到 F 盘，避免 C 盘/受管目录的完整性标签干扰托盘注册）：
 
 | 文件 | 说明 |
 | --- | --- |
 | `HushPlayer/` | 解压即用目录（onedir），含 `HushPlayer.exe` 与 `_internal/` |
-| `HushPlayer-1.0.0-win64.zip` | 上者的压缩包 |
+| `HushPlayer-<版本>-win64.zip` | 上者的压缩包（当前 1.1.0） |
 | `SHA256SUMS.txt` | 压缩包校验值 |
 
 自行构建：
@@ -24,6 +24,16 @@ powershell -ExecutionPolicy Bypass -File packaging\build.ps1 -Zip
 ```
 
 脚本会生成版本信息、跑测试、必要时下载内置 Node、调用 PyInstaller，并可选打 zip。首次构建需下载 Node（约 35 MB）。
+
+### 校验与回滚
+
+1. 下载 zip 后先核对 `SHA256SUMS.txt`：
+   ```powershell
+   Get-FileHash .\HushPlayer-1.1.0-win64.zip -Algorithm SHA256
+   ```
+2. 升级时保留旧目录（例如把 `HushPlayer` 改名为 `HushPlayer.old`），再解压新包；确认无误后再删除旧目录。
+3. 回滚：删除新目录、把 `HushPlayer.old` 改回 `HushPlayer` 即可——用户数据在独立目录，不受影响。
+4. 版本号查看：`HushPlayer.exe` 属性 → 详细信息 → 产品版本；或运行后在「设置 → 关于」查看。
 
 ## 3. 安装
 

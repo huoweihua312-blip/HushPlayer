@@ -510,7 +510,9 @@ class MainWindow(FramelessWindow):
         )
         # Explorer occasionally ignores the first registration; re-assert once,
         # then verify that the shell really owns an icon for us.
-        self._tray_ok = True
+        # Pessimistic until proven: a failed Shell_NotifyIcon leaves no icon at
+        # all, and hiding the window then makes the app look crashed/lost.
+        self._tray_ok = False
         QTimer.singleShot(1200, self._reassert_tray_icon)
         QTimer.singleShot(2600, self._verify_tray_registration)
 
@@ -756,6 +758,16 @@ class MainWindow(FramelessWindow):
         super().changeEvent(event)
 
     def _hide_to_tray(self) -> None:
+        # Re-check at the moment of hiding: Explorer can revoke an icon later
+        # (shell restart, security tooling), and a probe is a few milliseconds.
+        if self._tray is not None and QSystemTrayIcon.isSystemTrayAvailable():
+            from ..services.tray_probe import probe_registration
+
+            try:
+                ok, _error = probe_registration(int(self.winId()), brand.tray_icon_path())
+            except Exception:  # noqa: BLE001
+                ok = False
+            self._tray_ok = bool(ok)
         if not self._tray_available():
             self._background_without_tray()
             return

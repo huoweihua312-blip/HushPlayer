@@ -284,3 +284,18 @@ def test_window_state_changes_survive_tray_state(app_bundle) -> None:
     window.setWindowState(window.windowState() & ~Qt.WindowMaximized)
     application.processEvents()
     assert not window.isMinimized()
+
+
+@pytest.mark.integration
+def test_tray_failure_keeps_window_reachable(app_bundle, monkeypatch):
+    """A refused Shell_NotifyIcon must never leave a hidden, unreachable window."""
+    application, window, _library, _player = app_bundle
+    window.show()
+    monkeypatch.setattr(window, "_tray_ok", False, raising=False)
+    assert window._tray_available() is False
+
+    window._hide_to_tray()
+    application.processEvents()
+    # Falls back to the taskbar instead of hiding with no icon to click.
+    assert window.isVisible()
+    assert window.isMinimized()

@@ -16,7 +16,7 @@
 
 > 所有截图均来自真实运行的程序（`tools/shot_app.py`），不是设计稿。
 >
-> 当前版本 **1.0.13**：第一轮 10 项与第二轮 9 项反馈均已整改，逐项证据见 [docs/qa/REIMAGINED_FIX_ROUND1.md](docs/qa/REIMAGINED_FIX_ROUND1.md) 与 [docs/qa/REIMAGINED_FIX_ROUND2.md](docs/qa/REIMAGINED_FIX_ROUND2.md)，变更摘要见 [docs/CHANGELOG.md](docs/CHANGELOG.md)。
+> 当前版本 **1.1.0**：功能收口 + 文档/发布校验，逐项证据见 [docs/qa/REIMAGINED_FIX_ROUND1.md](docs/qa/REIMAGINED_FIX_ROUND1.md) 与 [docs/qa/REIMAGINED_FIX_ROUND2.md](docs/qa/REIMAGINED_FIX_ROUND2.md)，变更摘要见 [docs/CHANGELOG.md](docs/CHANGELOG.md)。
 
 ## 功能
 
@@ -64,7 +64,7 @@ powershell -ExecutionPolicy Bypass -File packaging\build.ps1 -Zip
 产物：
 
 - `packaging/out/HushPlayer/HushPlayer.exe`（onedir，约 245 MB，自带 Node 与音源运行时）
-- `packaging/out/HushPlayer-1.0.0-win64.zip` + `SHA256SUMS.txt`（使用 `-Zip` 时）
+- `F:\HushPlayerBuild\out\HushPlayer-<版本>-win64.zip` + `SHA256SUMS.txt`（使用 `-Zip` 时）
 
 安装/卸载说明见 [docs/INSTALL.md](docs/INSTALL.md)；更新机制见 [docs/UPDATES.md](docs/UPDATES.md)。
 
