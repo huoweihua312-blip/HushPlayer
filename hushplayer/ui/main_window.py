@@ -554,28 +554,37 @@ class MainWindow(FramelessWindow):
         tray = getattr(self, "_tray", None)
         if tray is None:
             return
-        geometry = tray.geometry()
-        # Windows 11 reports an empty geometry for icons that live in the
-        # overflow panel, so geometry cannot decide whether the icon exists.
-        # Only a missing system tray is fatal; otherwise trust the shell.
-        available = QSystemTrayIcon.isSystemTrayAvailable()
-        self._tray_ok = bool(available)
-        if not available:
+        from ..services.tray_probe import describe, probe_registration
+
+        try:
+            hwnd = int(self.winId())
+        except Exception:
+            hwnd = 0
+        ok, error = probe_registration(hwnd, brand.tray_icon_path())
+        self._tray_ok = bool(ok and QSystemTrayIcon.isSystemTrayAvailable())
+        if not ok:
+            message = describe(error)
+            log.warning("托盘图标注册失败：%s", message)
+            if error == 5:
+                # Do not claim success (and do not lie to the user): tell them how
+                # to fix it, then keep the window reachable through the taskbar.
+                self._tray_ok = False
+                try:
+                    self.toast("托盘图标不可用：请把程序移到桌面等普通目录运行", "warning")
+                except Exception:
+                    pass
+        elif not self._tray_ok:
             log.warning("系统托盘不可用；后台播放将使用迷你播放器")
         else:
-            log.info("托盘图标已注册（geometry=%s，溢出区图标同样有效）", geometry)
+            log.info("托盘图标注册成功（系统已接受）")
+        self._restyle_tray_menu()
 
-    def _tray_available(self) -> bool:
-        return bool(
-            self._tray is not None
-            and QSystemTrayIcon.isSystemTrayAvailable()
-            and self._tray.isVisible()
-            and getattr(self, "_tray_ok", True)
-        )
+    def _restyle_tray_menu(self) -> None:
+        return
 
     def _reassert_tray_icon(self) -> None:
         tray = getattr(self, "_tray", None)
-        if tray is None:
+        if tray is None or not getattr(self, "_tray_ok", True):
             return
         tray.setIcon(brand.tray_icon())
         tray.show()

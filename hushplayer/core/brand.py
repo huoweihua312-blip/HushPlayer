@@ -219,6 +219,10 @@ def tray_icon() -> QIcon:
     return icon
 
 
+def tray_icon_path() -> str | None:
+    return _ico_path()
+
+
 def _ico_path() -> str | None:
     path = Path(__file__).resolve().parents[2] / "assets" / "brand" / "HushPlayer.ico"
     return str(path) if path.exists() else None

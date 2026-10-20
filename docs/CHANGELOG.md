@@ -1,5 +1,19 @@
 # Changelog
 
+## v1.0.40 — 2026-10-20
+
+托盘图标：改成真实注册探测，并如实提示低完整性目录问题。
+
+### 修复
+- 新增 `hushplayer/services/tray_probe.py`：直接调用 `Shell_NotifyIconW(NIM_ADD/NIM_DELETE)` 判断**本程序**图标是否被外壳接受，返回真实 Win32 错误码，不再用 `geometry()`、也不再把「系统托盘可用」当成「本程序注册成功」。
+- 托盘诊断日志改为「托盘图标注册成功（系统已接受）」/「托盘图标注册失败：<原因>」；失败且 `WinError 5` 时提示「请把程序移到桌面等普通目录运行」，并保持窗口可用（不隐藏到不可见的托盘）。
+- 根因（用户对照实验确认）：项目目录带 `Low Mandatory Level` 标签，`python.exe` 与构建出的 exe 继承 Low，低完整性进程注册托盘图标会被系统拒绝（错误 5）；原版项目目录是 Medium，因此同样代码在原版正常。`icacls /setintegritylevel` 无法提升标签（需要 `SeRelabelPrivilege`），所以交付验收改为在普通目录（桌面/AppData/下载）解压运行。
+
+### 验证
+- 项目目录内探测：`probe False 5`（预期，Low 环境）。
+- 复制发布包到 `%LOCALAPPDATA%\HushTrayVerify`（Medium）运行：日志 `托盘图标注册成功（系统已接受）`，通知区可见品牌图标。
+- `pytest -q`：183 passed / 0 failed。
+
 ## v1.0.39 — 2026-10-12
 
 托盘图标改用随包 `.ico`，并加一个一定能用的“找回来”快捷键。
