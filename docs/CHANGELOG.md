@@ -1,5 +1,18 @@
 # Changelog
 
+## v1.0.42 — 2026-10-20
+
+移除迷你播放器；托盘不可用时改为最小化到任务栏；构建输出移到普通目录。
+
+### 变更
+- 删除 `hushplayer/ui/mini_player.py` 及全部入口（Ctrl+Shift+M、托盘菜单项、关闭对话框第三项）。
+- 托盘图标不可用时不再打开迷你播放器：关闭/最小化一律**最小化到任务栏**并提示「并未退出」，窗口始终可从任务栏找回；关闭对话框第三项按可用性显示「最小化到托盘」或「最小化到任务栏」。
+- 构建输出改到 `%LOCALAPPDATA%\HushPlayerBuild\out`（Medium 完整性），仓库 `packaging\out` 只保留 zip 副本。原因：仓库目录带 Low 标签，在其中构建出的 exe 会被 Windows 拒绝注册托盘图标。
+
+### 验证
+- `pytest`：184 passed / 0 failed（迷你播放器用例替换为「无托盘时最小化到任务栏」）。
+- 新构建产物路径 `%LOCALAPPDATA%\HushPlayerBuild\out\HushPlayer\HushPlayer.exe`（无 Low 标签），运行日志 `托盘图标注册成功（系统已接受）`。
+
 ## v1.0.41 — 2026-10-20
 
 修复最大化/还原时的崩溃（托盘改写遗留）。

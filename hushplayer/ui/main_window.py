@@ -407,7 +407,6 @@ class MainWindow(FramelessWindow):
         add("Ctrl+M", lambda: ctx().player.toggle_mute())
         add("Ctrl+L", lambda: self.navigate("lyrics"))
         add("Ctrl+Shift+L", self.toggle_desktop_lyrics)
-        add("Ctrl+Shift+M", self.toggle_mini_player)
         add("F11", self.open_immersive)
         add("Ctrl+Q", self.close_window)
         add("Alt+1", lambda: self.navigate("home"))
@@ -435,37 +434,21 @@ class MainWindow(FramelessWindow):
         if page is not None and hasattr(page, "field"):
             page.field.focus()  # type: ignore[attr-defined]
 
+    def _minimize_to_taskbar(self, *, reason: str | None = None) -> None:
+        """Keep the app reachable when the tray cannot be used."""
+        self.showMinimized()
+        if reason:
+            self.toast(reason, "warning")
+
     def _background_without_tray(self) -> None:
-        """No usable tray icon: keep playback reachable through the mini player."""
-        self.toggle_mini_player()
-        self.toast("托盘图标不可用，已切换到迷你播放器", "warning")
-
-    def toggle_mini_player(self) -> None:
-        from .mini_player import MiniPlayer
-
-        window = getattr(self, "_mini", None)
-        if window is not None and window.isVisible():
-            window.close_to_main()
-            return
-        if window is None:
-            window = MiniPlayer()
-            window.closed.connect(self._on_mini_closed)
-            self._mini = window
-        self.hide()
-        window.show_player()
+        """No usable tray icon: minimise to the taskbar instead of vanishing."""
+        self._minimize_to_taskbar(
+            reason="系统未接受托盘图标，已最小化到任务栏（并未退出）"
+        )
 
     def show_from_background(self) -> None:
-        """Bring the player back after it was hidden to tray or mini player."""
-        mini = getattr(self, "_mini", None)
-        if mini is not None and mini.isVisible():
-            mini.close_to_main()
-            return
+        """Bring the player back after it was hidden to tray."""
         self.showNormal()
-        self.raise_()
-        self.activateWindow()
-
-    def _on_mini_closed(self) -> None:
-        self.show()
         self.raise_()
         self.activateWindow()
 
@@ -509,9 +492,6 @@ class MainWindow(FramelessWindow):
         immersive_action = QAction("沉浸模式", self)
         immersive_action.triggered.connect(self.open_immersive)
         menu.addAction(immersive_action)
-        mini_action = QAction("迷你播放器", self)
-        mini_action.triggered.connect(self.toggle_mini_player)
-        menu.addAction(mini_action)
         menu.addSeparator()
         quit_action = QAction("退出", self)
         quit_action.triggered.connect(self._quit)
@@ -585,7 +565,7 @@ class MainWindow(FramelessWindow):
                 except Exception:
                     pass
         elif not self._tray_ok:
-            log.warning("系统托盘不可用；后台播放将使用迷你播放器")
+            log.warning("系统托盘不可用；关闭/最小化将改为最小化到任务栏")
         else:
             log.info("托盘图标注册成功（系统已接受）")
         self._restyle_tray_menu()
@@ -688,9 +668,8 @@ class MainWindow(FramelessWindow):
         buttons.setSpacing(8)
         buttons.addStretch(1)
         cancel = TextButton("取消", size=30)
-        hide = TextButton(
-            "最小化到托盘" if self._tray_available() else "隐藏到迷你播放器", size=30
-        )
+        tray_ok = self._tray_available()
+        hide = TextButton("最小化到托盘" if tray_ok else "最小化到任务栏", size=30)
         quit_button = TextButton("直接退出", size=30, accent=True)
         buttons.addWidget(cancel)
         buttons.addWidget(hide)
@@ -699,11 +678,14 @@ class MainWindow(FramelessWindow):
 
         choice = {"value": "cancel"}
         quit_button.clicked.connect(lambda: (choice.update(value="quit"), dialog.accept()))
-        hide.clicked.connect(lambda: (choice.update(value="tray"), dialog.accept()))
+        hide_target = "tray" if tray_ok else "minimize"
+        hide.clicked.connect(
+            lambda: (choice.update(value=hide_target), dialog.accept())
+        )
         cancel.clicked.connect(dialog.reject)
         if dialog.exec() != QDialog.Accepted:
             return "cancel"
-        if remember.isChecked() and choice["value"] in ("quit", "tray"):
+        if remember.isChecked() and choice["value"] in ("quit", "tray", "minimize"):
             ctx().settings.set("general.close_action", choice["value"])
         return choice["value"]
 
@@ -734,11 +716,11 @@ class MainWindow(FramelessWindow):
             if action == "cancel":
                 event.ignore()
                 return
-        prefer_tray = action == "tray" and self._tray_available()
-        if action == "tray" and not prefer_tray:
+        if action == "minimize" or (action == "tray" and not self._tray_available()):
             event.ignore()
             self._background_without_tray()
             return
+        prefer_tray = action == "tray" and self._tray_available()
         if prefer_tray:
             event.ignore()
             self.hide()

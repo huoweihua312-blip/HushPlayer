@@ -253,17 +253,16 @@ def test_favorite_heart_does_not_break_favorites_page(app_bundle) -> None:
     pump(application, 0.2)
 
 
-def test_mini_player_round_trip(app_bundle) -> None:
-    """迷你播放器：主窗隐藏 → 迷你窗显示 → 关闭后主窗恢复。"""
+def test_no_tray_falls_back_to_taskbar(app_bundle) -> None:
+    """没有托盘图标时最小化到任务栏，窗口不会消失到找不到。"""
     _application, window, _library, _player = app_bundle
-    window.toggle_mini_player()
-    mini = window._mini  # noqa: SLF001 - GUI smoke seam
-    assert mini.isVisible()
-    assert not window.isVisible()
-    assert mini.title.text()
-    window.toggle_mini_player()
+    window.show()
+    window._tray_ok = False
+    window._background_without_tray()
+    assert window.isMinimized()
     assert window.isVisible()
-    assert not mini.isVisible()
+    window.showNormal()
+
 
 def test_window_state_changes_survive_tray_state(app_bundle) -> None:
     """Maximise / minimise must not depend on tray attributes existing.
