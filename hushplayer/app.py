@@ -232,10 +232,10 @@ class HushApp(QObject):
             except Exception:  # noqa: BLE001
                 snapshot = None
             if snapshot is not None and not snapshot.isNull():
-                from .ui.widgets.transition import SunriseReveal, ThemeReveal
+                from .ui.widgets.transition import SunMoonReveal, ThemeReveal
 
                 host = getattr(window, "container", None) or window
-                overlay_class = SunriseReveal if animation_mode == "sunrise" else ThemeReveal
+                overlay_class = SunMoonReveal if animation_mode == "sunrise" else ThemeReveal
                 overlay = overlay_class(
                     host,
                     snapshot,

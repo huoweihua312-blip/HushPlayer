@@ -21,6 +21,7 @@ from PySide6.QtCore import (
 )
 from PySide6.QtGui import (
     QColor,
+    QPen,
     QImage,
     QLinearGradient,
     QPainter,
@@ -186,7 +187,9 @@ class ThemeReveal(QWidget):
             painter.setClipPath(path)
             painter.drawPixmap(self.rect(), self._new)
             painter.setClipping(False)
-            rim = QColor(255, 186, 120) if not self._to_dark else QColor(120, 60, 84)
+            # Pure black / white rim only: white against a dark frame, black
+            # against a light one.
+            rim = QColor("#FFFFFF") if self._to_dark else QColor("#000000")
             rim.setAlphaF(0.45 * (1.0 - self._progress) ** 1.5)
             gradient = QRadialGradient(self._origin, max(radius, 1.0))
             gradient.setColorAt(max(0.0, 1.0 - 46.0 / max(radius, 46.0)), QColor(0, 0, 0, 0))
@@ -197,18 +200,20 @@ class ThemeReveal(QWidget):
         painter.end()
 
 
-class SunriseReveal(QWidget):
-    """Full-window sunrise / sunset wipe between two theme snapshots.
+class SunMoonReveal(QWidget):
+    """Centre sun / moon pops in, then the whole window cross-fades.
 
-    Going light the new frame rises from the bottom edge like a sunrise; going
-    dark it descends from the top like a sunset. A soft warm band travels with
-    the edge and fades out, so the switch reads as daylight changing rather than
-    a UI repaint.
+    Two cheap passes only — the old snapshot, then the new one at a uniform
+    opacity — so the animation stays smooth at 2560px. The icon is pure white on
+    dark backgrounds and pure black on light ones: no accent colours anywhere.
     """
 
-    DURATION_MS = 900
-    BAND_RATIO = 0.20
-    STEPS = 48
+    DURATION_MS = 820
+    POP_END = 0.26  # icon growth finishes here
+    ICON_HOLD = 0.30
+    ICON_GONE = 0.54  # icon is gone before the wash fully covers the frame
+    DIP_IN = 0.24  # wash starts while the icon is still visible
+    DIP_HOLD = 0.58  # wash peaks here; the new frame then fades in underneath
 
     def __init__(
         self,
@@ -232,7 +237,7 @@ class SunriseReveal(QWidget):
         self._animation.setDuration(theme().duration(self.DURATION_MS))
         self._animation.setStartValue(0.0)
         self._animation.setEndValue(1.0)
-        self._animation.setEasingCurve(QEasingCurve.InOutCubic)
+        self._animation.setEasingCurve(QEasingCurve.OutCubic)
         self._animation.finished.connect(self.close)
 
     def get_reveal_progress(self) -> float:
@@ -272,83 +277,106 @@ class SunriseReveal(QWidget):
         self.hide()
         self.close()
 
-    def _edge(self) -> float:
-        height = float(self.height())
-        band = max(48.0, height * self.BAND_RATIO)
-        span = height + band
-        if self._to_dark:
-            return self._progress * span - band  # new frame descends from the top
-        return height - self._progress * span  # new frame rises from the bottom
+    # ------------------------------------------------------------------ 取值
+    @staticmethod
+    def _smoothstep(value: float) -> float:
+        x = max(0.0, min(1.0, value))
+        return x * x * (3.0 - 2.0 * x)
 
+    def dip_alpha(self) -> float:
+        """Solid black/white wash: rises after the icon, then yields to the new frame."""
+        if self._progress <= self.DIP_IN:
+            return 0.0
+        if self._progress <= self.DIP_HOLD:
+            span = max(1e-6, self.DIP_HOLD - self.DIP_IN)
+            return self._smoothstep((self._progress - self.DIP_IN) / span)
+        # Stay fully covered: the new frame fades in on top, so the wash must
+        # not drop to zero or the old frame flashes back for a few frames.
+        return 1.0
+
+    def new_frame_alpha(self) -> float:
+        """The new theme only appears after the wash has fully covered the old one."""
+        if self._progress <= self.DIP_HOLD:
+            return 0.0
+        span = max(1e-6, 1.0 - self.DIP_HOLD)
+        return self._smoothstep((self._progress - self.DIP_HOLD) / span)
+
+    def icon_scale(self) -> float:
+        """Icon grows from 0.55 to 1.0 while it pops, then holds."""
+        if self._progress >= self.POP_END:
+            return 1.0
+        t = self._progress / max(1e-6, self.POP_END)
+        return 0.55 + 0.45 * (1.0 - (1.0 - t) ** 3)
+
+    def icon_alpha(self) -> float:
+        """Fade the icon in quickly, then out before the wash peaks."""
+        if self._progress < 0.10:
+            return self._progress / 0.10
+        if self._progress <= self.ICON_HOLD:
+            return 1.0
+        span = max(1e-6, self.ICON_GONE - self.ICON_HOLD)
+        return max(0.0, 1.0 - (self._progress - self.ICON_HOLD) / span)
+
+    # ------------------------------------------------------------------ 绘制
     def paintEvent(self, event) -> None:  # noqa: N802
         painter = QPainter(self)
         painter.setRenderHint(QPainter.Antialiasing, True)
-        width = int(self.width())
-        height = int(self.height())
-        if width <= 0 or height <= 0:
-            painter.end()
-            return
         if not self._old.isNull():
             painter.drawPixmap(self.rect(), self._old)
-        if self._new.isNull():
-            painter.end()
-            return
-
-        band = int(max(48.0, height * self.BAND_RATIO))
-        edge = int(round(self._edge()))
-        if self._to_dark:
-            band_top = max(0, edge - band)
-            solid = QRect(0, 0, width, band_top)
-        else:
-            band_top = min(height - band, edge)
-            solid = QRect(0, band_top + band, width, max(0, height - band_top - band))
-        if solid.height() > 0:
-            painter.drawPixmap(solid, self._new, solid)
-
-        visible = min(band, height - max(0, band_top))
-        if visible > 0:
-            strip = QImage(width, visible, QImage.Format.Format_ARGB32_Premultiplied)
-            strip.fill(Qt.GlobalColor.transparent)
-            brush = QPainter(strip)
-            source = QRect(0, max(0, band_top), width, visible)
-            brush.drawPixmap(QRect(0, 0, width, visible), self._new, source)
-            gradient = QLinearGradient(0.0, 0.0, 0.0, float(visible))
-            if self._to_dark:
-                gradient.setColorAt(0.0, QColor(0, 0, 0, 255))
-                gradient.setColorAt(1.0, QColor(0, 0, 0, 0))
-            else:
-                gradient.setColorAt(0.0, QColor(0, 0, 0, 0))
-                gradient.setColorAt(1.0, QColor(0, 0, 0, 255))
-            brush.setCompositionMode(QPainter.CompositionMode.CompositionMode_DestinationIn)
-            brush.fillRect(strip.rect(), gradient)
-            brush.end()
-            painter.drawImage(QPoint(0, max(0, band_top)), strip)
-
-        # Warm rim travelling with the edge, plus a low sun glow.
-        fade = max(0.0, 1.0 - abs(self._progress - 0.5) * 0.7)
-        glow = QColor(255, 183, 105) if not self._to_dark else QColor(201, 87, 112)
-        gradient = QLinearGradient(0.0, edge - band, 0.0, edge + band)
-        transparent = QColor(glow)
-        transparent.setAlpha(0)
-        centre = QColor(glow)
-        centre.setAlphaF(0.42 * fade)
-        gradient.setColorAt(0.0, transparent)
-        gradient.setColorAt(0.5, centre)
-        gradient.setColorAt(1.0, transparent)
-        painter.setPen(Qt.NoPen)
-        painter.setBrush(gradient)
-        painter.drawRect(QRectF(0.0, edge - band, float(width), float(band * 2)))
-
-        sun_radius = max(40.0, min(width, height) * 0.07)
-        sun_centre = QPointF(width * 0.5, float(edge))
-        radial = QRadialGradient(sun_centre, sun_radius * 2.4)
-        core = QColor(255, 214, 160) if not self._to_dark else QColor(232, 140, 160)
-        core.setAlphaF(0.55 * fade)
-        halo = QColor(core)
-        halo.setAlpha(0)
-        radial.setColorAt(0.0, core)
-        radial.setColorAt(0.55, halo)
-        radial.setColorAt(1.0, halo)
-        painter.setBrush(radial)
-        painter.drawEllipse(sun_centre, sun_radius * 2.4, sun_radius * 2.4)
+        wash = self.dip_alpha()
+        if wash > 0.0:
+            colour = QColor("#FFFFFF") if not self._to_dark else QColor("#000000")
+            colour.setAlphaF(min(1.0, wash))
+            painter.fillRect(self.rect(), colour)
+        alpha = self.new_frame_alpha()
+        if not self._new.isNull() and alpha > 0.0:
+            painter.setOpacity(alpha)
+            painter.drawPixmap(self.rect(), self._new)
+            painter.setOpacity(1.0)
+        icon_alpha = self.icon_alpha()
+        if icon_alpha > 0.0:
+            self._paint_icon(painter, icon_alpha)
         painter.end()
+
+    def _paint_icon(self, painter: QPainter, alpha: float) -> None:
+        size = min(self.width(), self.height())
+        radius = max(18.0, size * 0.055) * self.icon_scale()
+        centre = QPointF(self.width() / 2.0, self.height() / 2.0)
+        # Contrast against the frame we are coming *from*; both pure B/W.
+        colour = QColor("#000000") if self._to_dark else QColor("#FFFFFF")
+        colour.setAlphaF(min(1.0, alpha))
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(colour)
+        if self._to_dark:
+            # Crescent: big disc, offset counter-disc knocked out with the frame.
+            painter.save()
+            path = QPainterPath()
+            path.addEllipse(centre, radius, radius)
+            bite = QPainterPath()
+            bite.addEllipse(
+                QPointF(centre.x() + radius * 0.55, centre.y() - radius * 0.35),
+                radius * 0.92,
+                radius * 0.92,
+            )
+            painter.setClipPath(path.subtracted(bite))
+            painter.drawEllipse(centre, radius, radius)
+            painter.restore()
+        else:
+            painter.drawEllipse(centre, radius, radius)
+            painter.save()
+            painter.setBrush(Qt.BrushStyle.NoBrush)
+            pen = QPen(colour)
+            pen.setWidthF(max(1.5, radius * 0.14))
+            pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+            painter.setPen(pen)
+            rays = 8
+            inner = radius * 1.42
+            outer = radius * 1.92
+            for index in range(rays):
+                angle = index * (360.0 / rays)
+                painter.save()
+                painter.translate(centre)
+                painter.rotate(angle)
+                painter.drawLine(QPointF(0.0, -inner), QPointF(0.0, -outer))
+                painter.restore()
+            painter.restore()

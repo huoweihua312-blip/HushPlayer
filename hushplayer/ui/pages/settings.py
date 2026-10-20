@@ -352,12 +352,12 @@ class SettingsPage(Page):
         card.add_row(
             self._row(
                 "主题切换动画",
-                "全屏日出日落会铺满整个窗口；过渡动画只从标题栏按钮扩散",
+                "全屏日月动画：中央弹出太阳或月亮，再用黑白全屏过渡切到新配色；过渡动画只从标题栏按钮扩散",
                 self._combo(
                     "appearance.theme_animation_mode",
                     [
                         ("过渡动画（从标题栏按钮扩散）", "reveal"),
-                        ("全屏日出日落", "sunrise"),
+                        ("全屏日月动画", "sunrise"),
                         ("关闭", "off"),
                     ],
                     "reveal",
