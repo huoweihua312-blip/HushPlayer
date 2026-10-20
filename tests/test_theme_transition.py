@@ -107,11 +107,19 @@ def test_sun_moon_reveal_pops_icon_then_fades(qapp):
     dawn.finish()
     assert dawn.isVisible() is False
 
+    # The veil never blanks the window and always clears by the end.
     dusk = SunMoonReveal(host, frame, frame, QPointF(0, 0), to_dark=True)
-    dusk.set_reveal_progress(0.5)
-    mid = dusk.new_frame_alpha()
-    dusk.set_reveal_progress(0.9)
-    assert dusk.new_frame_alpha() > mid
+    veils = []
+    for step in range(21):
+        dusk.set_reveal_progress(step / 20)
+        veils.append(dusk.veil_alpha())
+    assert max(veils) < 1.0, "veil must keep the interface visible"
+    assert max(veils) > 0.5, "veil should still read as a black/white wash"
+    assert veils[-1] == 0.0
+    # Once the swap happens the new UI is fully drawn; the hold is visible.
+    dusk.set_reveal_progress(0.55)
+    assert dusk.new_frame_alpha() == 1.0
+    assert dusk.icon_alpha() == 1.0
 
 
 def test_sun_moon_timeline_honours_settings(qapp):

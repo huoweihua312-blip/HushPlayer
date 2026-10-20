@@ -218,6 +218,9 @@ class SunMoonReveal(QWidget):
     DEFAULT_WASH_MS = 150.0
     DEFAULT_HOLD_MS = 260.0
     DEFAULT_FADE_MS = 420.0
+    # Never fully blank the window: the veil peaks just below opaque, so the
+    # interface stays faintly visible while the frame is swapped underneath.
+    VEIL_PEAK = 0.92
 
     def __init__(
         self,
@@ -324,22 +327,38 @@ class SunMoonReveal(QWidget):
         x = max(0.0, min(1.0, value))
         return x * x * (3.0 - 2.0 * x)
 
-    def wash_alpha(self) -> float:
-        """Neutral cover: 0 during the pop, rises over ``wash_ms``, then holds."""
+    def _hold_reveal_ms(self) -> float:
+        """How long the veil takes to clear once the new theme is in place."""
+        if self._hold_ms <= 0.0:
+            return min(200.0, self._wash_ms)
+        return min(self._hold_ms, 220.0)
+
+    def veil_alpha(self) -> float:
+        """Veil that never reaches full opacity: the UI stays faintly visible.
+
+        It rises during ``wash``, swaps the frame underneath at the peak, then
+        clears early in ``hold`` so the user watches the new theme appear.
+        """
         stage = self.stage()
         if stage == "pop":
             return 0.0
         if stage == "wash":
             elapsed = self._elapsed() - self._pop_ms
-            return self._smoothstep(elapsed / max(1e-6, self._wash_ms))
-        return 1.0
+            return self.VEIL_PEAK * self._smoothstep(elapsed / max(1e-6, self._wash_ms))
+        if stage == "hold":
+            elapsed = self._elapsed() - self._pop_ms - self._wash_ms
+            span = max(1e-6, self._hold_reveal_ms())
+            return self.VEIL_PEAK * (1.0 - self._smoothstep(elapsed / span))
+        return 0.0
+
+    def wash_alpha(self) -> float:  # kept for the earlier API / tests
+        return self.veil_alpha()
 
     def new_frame_alpha(self) -> float:
-        """New theme fades up only after the hold finishes."""
-        if self.stage() != "fade":
+        """Swap in the new frame as soon as the veil has covered the old one."""
+        if self._elapsed() < self._pop_ms + self._wash_ms:
             return 0.0
-        elapsed = self._elapsed() - self._pop_ms - self._wash_ms - self._hold_ms
-        return self._smoothstep(elapsed / max(1e-6, self._fade_ms))
+        return 1.0
 
     def icon_scale(self) -> float:
         if self._elapsed() >= self._pop_ms:
@@ -347,13 +366,15 @@ class SunMoonReveal(QWidget):
         return 0.55 + 0.45 * self._ease_out(self._elapsed() / max(1e-6, self._pop_ms))
 
     def icon_alpha(self) -> float:
-        stage = self.stage()
-        if stage == "pop":
-            return min(1.0, self._elapsed() / max(1e-6, self._pop_ms * 0.45))
-        if stage == "wash":
-            elapsed = self._elapsed() - self._pop_ms
-            return max(0.0, 1.0 - elapsed / max(1e-6, self._wash_ms))
-        return 0.0
+        """Icon fades in with the pop, stays through the hold, leaves last."""
+        elapsed = self._elapsed()
+        if elapsed < self._pop_ms:
+            return min(1.0, elapsed / max(1e-6, self._pop_ms * 0.45))
+        if self.stage() != "fade":
+            return 1.0
+        fade_elapsed = elapsed - self._pop_ms - self._wash_ms - self._hold_ms
+        span = max(1e-6, self._fade_ms * 0.6)
+        return max(0.0, 1.0 - self._smoothstep(fade_elapsed / span))
 
     # ------------------------------------------------------------------ 绘制
     def paintEvent(self, event) -> None:  # noqa: N802
@@ -361,16 +382,16 @@ class SunMoonReveal(QWidget):
         painter.setRenderHint(QPainter.Antialiasing, True)
         if not self._old.isNull():
             painter.drawPixmap(self.rect(), self._old)
-        wash = self.wash_alpha()
-        if wash > 0.0:
-            colour = QColor("#FFFFFF") if not self._to_dark else QColor("#000000")
-            colour.setAlphaF(min(1.0, wash))
-            painter.fillRect(self.rect(), colour)
-        alpha = self.new_frame_alpha()
-        if not self._new.isNull() and alpha > 0.0:
-            painter.setOpacity(alpha)
+        new_alpha = self.new_frame_alpha()
+        if not self._new.isNull() and new_alpha > 0.0:
+            painter.setOpacity(new_alpha)
             painter.drawPixmap(self.rect(), self._new)
             painter.setOpacity(1.0)
+        veil = self.veil_alpha()
+        if veil > 0.0:
+            colour = QColor("#FFFFFF") if not self._to_dark else QColor("#000000")
+            colour.setAlphaF(min(1.0, veil))
+            painter.fillRect(self.rect(), colour)
         icon_alpha = self.icon_alpha()
         if icon_alpha > 0.0:
             self._paint_icon(painter, icon_alpha)

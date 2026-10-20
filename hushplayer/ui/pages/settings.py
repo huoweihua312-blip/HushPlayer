@@ -386,8 +386,8 @@ class SettingsPage(Page):
         )
         card.add_row(
             self._row(
-                "黑白定格时长",
-                "整窗被纯白/纯黑盖住、暂时看不到界面的时间",
+                "定格时长",
+                "界面已经切到新配色后，太阳/月亮在中央停留的时间（界面始终可见）",
                 self._slider("appearance.theme_anim_hold_ms", 0, 900, default=260, suffix=" ms"),
             )
         )
