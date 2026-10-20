@@ -1,5 +1,20 @@
 # Changelog
 
+## v1.0.43 — 2026-10-20
+
+构建产物移回本机 F: 盘（不写入 C:）。
+
+### 变更
+- 打包输出改到 `F:\HushPlayerBuild\out\HushPlayer`（该目录无 Low 完整性标签，exe 以正常 Medium 完整性运行，托盘图标可被系统接受）。
+- 仓库内 `packaging\out` 只保留 zip 副本与 `SHA256SUMS.txt`；PyInstaller 的中间产物仍在 `packaging\build`。
+- `tools/verify_package.ps1` 同样从 `F:\HushPlayerBuild\out\HushPlayer` 复制到 `F:\HushPlayerBuild\verify` 后验收，不再使用 `%LOCALAPPDATA%`。
+- 清理了此前在 `%LOCALAPPDATA%` 下生成的 HushPlayerBuild / HushPlayerVerify / HushTrayTest / HushTrayVerify / HushV42 目录。
+
+### 验证
+- `pytest`：184 passed / 0 failed。
+- 构建日志：`完整性：no mandatory label (Medium)`、`（输出固定在本机 F: 盘，不写入 C:）`。
+- 运行 `F:\HushPlayerBuild\out\HushPlayer\HushPlayer.exe`：日志 `托盘图标注册成功（系统已接受）`。
+
 ## v1.0.42 — 2026-10-20
 
 移除迷你播放器；托盘不可用时改为最小化到任务栏；构建输出移到普通目录。

@@ -50,7 +50,10 @@ Write-Host "==> PyInstaller" -ForegroundColor Cyan
 if ($LASTEXITCODE -ne 0) { throw "PyInstaller 构建失败。" }
 
 $staged = Join-Path $root "packaging\out\HushPlayer"
-$buildRoot = Join-Path $env:LOCALAPPDATA "HushPlayerBuild"
+# Stage on the repo's own drive (never the system drive): this folder has no
+# Low integrity label, so the produced exe is a normal Medium process and the
+# shell accepts its tray icon.
+$buildRoot = "F:\HushPlayerBuild"
 $buildOut = Join-Path $buildRoot "out"
 $dist = Join-Path $buildOut "HushPlayer"
 New-Item -ItemType Directory -Force $buildOut | Out-Null
@@ -61,6 +64,7 @@ $labelText = if ($label) { $label.Line.Trim() } else { "no mandatory label (Medi
 $sizeMb = [math]::Round(((Get-ChildItem $dist -Recurse -File | Measure-Object Length -Sum).Sum / 1MB), 1)
 Write-Host "==> 完成：$dist（$sizeMb MB）" -ForegroundColor Green
 Write-Host "    完整性：$labelText" -ForegroundColor DarkGray
+Write-Host "    （输出固定在本机 F: 盘，不写入 C:）" -ForegroundColor DarkGray
 
 if ($Zip) {
     $version = (& $python -c "import sys; sys.path.insert(0,'.'); from hushplayer.version import VERSION; print(VERSION)").Trim()

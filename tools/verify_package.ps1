@@ -4,13 +4,13 @@ $root = "F:\Projects\HushPlayer-Reimagined"
 # The repo folder inherits a Low integrity label, and Windows refuses tray-icon
 # registration from low-integrity processes.  Verify from a normal (Medium)
 # folder so the run matches what users get after extracting the zip.
-$mediumOutput = Join-Path $env:LOCALAPPDATA "HushPlayerBuild\out\HushPlayer"
+$mediumOutput = "F:\HushPlayerBuild\out\HushPlayer"
 $sourceDir = if (Test-Path $mediumOutput) {
     $mediumOutput
 } else {
     Join-Path $root "packaging\out\HushPlayer"
 }
-$medium = Join-Path $env:LOCALAPPDATA "HushPlayerVerify"
+$medium = "F:\HushPlayerBuild\verify"
 if (Test-Path $medium) { Remove-Item $medium -Recurse -Force }
 New-Item -ItemType Directory -Force $medium | Out-Null
 Copy-Item (Join-Path $sourceDir "*") $medium -Recurse -Force
