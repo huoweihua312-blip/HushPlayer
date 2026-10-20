@@ -100,7 +100,7 @@ def run() -> int:
     hush = HushApp(app)
     hush.start()
     window = hush.window
-    window.resize(1280, 820)
+    window.resize(int(os.environ.get("SHOT_W", 1280)), int(os.environ.get("SHOT_H", 820)))
     window.show()
 
     prepare_library()

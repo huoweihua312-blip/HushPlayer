@@ -4,7 +4,7 @@ from __future__ import annotations
 
 APP_NAME = "HushPlayer"
 APP_ID = "com.hushplayer.desktop"
-VERSION = "1.0.49"
+VERSION = "1.0.50"
 BUILD_CHANNEL = "stable"
 VERSION_TUPLE = tuple(int(part) for part in VERSION.split("."))
 

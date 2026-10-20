@@ -101,9 +101,11 @@ class MainWindow(FramelessWindow):
         content_layout.setSpacing(0)
         background = QWidget()
         background.setObjectName("HushPageBackground")
+        # Square corner on purpose: the window itself is translucent so its
+        # rounded frame shows the wallpaper, and a rounded page corner would
+        # punch a visible notch through to the desktop (bug report: 缺口).
         background.setStyleSheet(
-            f"#HushPageBackground {{ background: {theme().palette.window};"
-            " border-top-left-radius: 12px; }"
+            f"#HushPageBackground {{ background: {theme().palette.window}; }}"
         )
         bg_layout = QVBoxLayout(background)
         bg_layout.setContentsMargins(0, 0, 0, 0)
@@ -606,8 +608,7 @@ class MainWindow(FramelessWindow):
     def refresh_theme(self) -> None:
         palette = theme().palette
         self._page_background.setStyleSheet(
-            f"#HushPageBackground {{ background: {palette.window};"
-            " border-top-left-radius: 12px; }"
+            f"#HushPageBackground {{ background: {palette.window}; }}"
         )
         self.sidebar.refresh_theme()
         self.playerbar.refresh_theme()
