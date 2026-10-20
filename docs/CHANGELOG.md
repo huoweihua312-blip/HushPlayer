@@ -1,5 +1,17 @@
 # Changelog
 
+## v1.1.3 — 2026-10-20
+
+安装时可选择安装目录。
+
+### 修复
+- 升级安装时看不到「选择目标位置」页：Inno Setup 默认 `DisableDirPage=auto`，检测到同 `AppId` 的旧安装就直接复用上次路径。现在显式 `DisableDirPage=no`，每次安装都会显示目录页与「浏览…」按钮，并保留 `UsePreviousAppDir=yes`（默认停在原目录，可直接改）。
+- 安装包 `HushPlayer-1.1.3-setup.exe`（82.4 MB），SHA256 `1579A07D94F4AC3ECEDCFA1651DF18882CC9A4AEDAF5E013A9EC4AE3CA14BE51`。
+
+### 验证
+- 目录页文本实测：`安装程序将安装 HushPlayer 到下面的文件夹中。` / `点击“下一步”继续。如果您想选择其他文件夹，点击“浏览”。` / `浏览(&R)...` / `上一步(&B)` / `下一步(&N)`。
+- 自定义目录安装：`/DIR=F:\HushPlayerDirTest` → `HushPlayer.exe` 存在、版本 `1.1.3`；卸载后目录内 exe 移除。
+
 ## v1.1.2 — 2026-10-20
 
 安装包中文界面。

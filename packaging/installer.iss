@@ -4,7 +4,7 @@
 ; intentionally left in place when uninstalling.
 
 #define AppName "HushPlayer"
-#define AppVersion "1.1.2"
+#define AppVersion "1.1.3"
 #define AppExe "HushPlayer.exe"
 #define AppId "{{6F1C2B7E-3A4D-4E5B-9C8A-2D1E0B7F4A21}"
 
@@ -19,6 +19,10 @@ VersionInfoDescription=HushPlayer 安装程序
 DefaultDirName={localappdata}\Programs\{#AppName}
 DefaultGroupName={#AppName}
 DisableProgramGroupPage=yes
+; Always show the destination page: on upgrades Inno otherwise reuses the
+; previous path silently (DisableDirPage=auto), so the user never gets to change it.
+DisableDirPage=no
+UsePreviousAppDir=yes
 PrivilegesRequired=lowest
 PrivilegesRequiredOverridesAllowed=dialog commandline
 OutputDir=F:\HushPlayerBuild\out
