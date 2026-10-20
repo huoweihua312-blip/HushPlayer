@@ -550,6 +550,17 @@ class MainWindow(FramelessWindow):
         ):
             self._restore_from_tray()
 
+    def _tray_available(self) -> bool:
+        """Whether hiding to the tray keeps the app reachable.
+
+        Uses the real registration result (see ``tray_probe``); before the probe
+        has run we optimistically assume the tray works so early minimise
+        requests behave like the user expects.
+        """
+        if getattr(self, "_tray", None) is None:
+            return False
+        return bool(getattr(self, "_tray_ok", True))
+
     def _verify_tray_registration(self) -> None:
         tray = getattr(self, "_tray", None)
         if tray is None:
@@ -748,12 +759,14 @@ class MainWindow(FramelessWindow):
     def changeEvent(self, event) -> None:  # noqa: N802
         if event.type() == QEvent.Type.WindowStateChange:
             try:
-                minimize_to_tray = bool(ctx().settings.get("general.minimize_to_tray", False))
+                minimize_to_tray = bool(
+                    ctx().settings.get("general.minimize_to_tray", False)
+                )
+                tray_ready = self._tray_available()
+                if minimize_to_tray and self.isMinimized() and tray_ready:
+                    QTimer.singleShot(0, self._hide_to_tray)
             except Exception:  # noqa: BLE001
-                minimize_to_tray = False
-            tray_ready = self._tray_available()
-            if minimize_to_tray and self.isMinimized() and tray_ready:
-                QTimer.singleShot(0, self._hide_to_tray)
+                log.debug("处理窗口状态变化失败", exc_info=True)
         super().changeEvent(event)
 
     def _hide_to_tray(self) -> None:

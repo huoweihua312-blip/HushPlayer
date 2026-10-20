@@ -264,3 +264,24 @@ def test_mini_player_round_trip(app_bundle) -> None:
     window.toggle_mini_player()
     assert window.isVisible()
     assert not mini.isVisible()
+
+def test_window_state_changes_survive_tray_state(app_bundle) -> None:
+    """Maximise / minimise must not depend on tray attributes existing.
+
+    Regression: ``changeEvent`` referenced ``_tray_available`` after the method
+    was removed during a tray rewrite, so every maximise crashed with
+    ``AttributeError`` (the window then stayed half-toggled).
+    """
+    from PySide6.QtCore import QEvent, Qt
+
+    application, window, _library, _player = app_bundle
+    assert hasattr(window, "_tray_available")
+    window.show()
+    window.toggle_maximize()
+    window.showNormal()
+    # A stray WindowStateChange event must be harmless as well.
+    window.changeEvent(QEvent(QEvent.Type.WindowStateChange))
+    window.setWindowState(window.windowState() | window.windowState().WindowMaximized)
+    window.setWindowState(window.windowState() & ~Qt.WindowMaximized)
+    application.processEvents()
+    assert not window.isMinimized()

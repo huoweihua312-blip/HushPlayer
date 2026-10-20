@@ -1,5 +1,19 @@
 # Changelog
 
+## v1.0.41 — 2026-10-20
+
+修复最大化/还原时的崩溃（托盘改写遗留）。
+
+### 修复
+- `MainWindow` 缺少 `_tray_available()`：上一轮重写托盘判定时误删该方法，而 `changeEvent`、`_hide_to_tray`、关闭对话框仍在调用，导致**点最大化即抛 AttributeError**，窗口停在半切换状态（用户截图中的 `frameless.py:140 toggle_maximize → main_window.py:754 changeEvent`）。
+- 恢复 `_tray_available()`：`_tray` 存在且 `_tray_ok` 为真时可用；探针跑完前乐观视为可用。
+- `changeEvent` 增加异常兜底，托盘状态异常不再影响窗口最大化/最小化。
+- 新增回归测试 `test_window_state_changes_survive_tray_state`：最大化→还原→再最大化、以及伪造 `WindowStateChange`，确保不再依赖缺失属性。
+
+### 验证
+- `pytest`：184 passed / 0 failed（含新回归用例）。
+- 真实窗口探针：`max=True 1920x1032 → normal=False 1280x820 → min=True → restored`，无异常。
+
 ## v1.0.40 — 2026-10-20
 
 托盘图标：改成真实注册探测，并如实提示低完整性目录问题。
