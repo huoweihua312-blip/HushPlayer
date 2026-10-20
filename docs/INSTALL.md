@@ -93,10 +93,10 @@ HushPlayer 是绿色版：把 `HushPlayer` 目录放在任意位置（例如 `D:
 
 ## 安装包（推荐）
 
-运行 `HushPlayer-1.1.1-setup.exe`：
+运行 `HushPlayer-1.1.2-setup.exe`：
 
 - 默认安装到 `%LOCALAPPDATA%\Programs\HushPlayer`，无需管理员权限；
-- 安装向导为英文（Inno Setup 不附带简体中文语言文件，避免依赖非官方翻译）；
+- 安装向导为简体中文（语言文件取自 Inno Setup 官方仓库并随包内置）；
 - 可选「桌面快捷方式」与「登录时自动启动」；
 - 卸载：设置 → 应用 → HushPlayer（或开始菜单「卸载 HushPlayer」）。
 
@@ -105,6 +105,6 @@ HushPlayer 是绿色版：把 `HushPlayer` 目录放在任意位置（例如 `D:
 校验安装包：
 
 ```powershell
-Get-FileHash HushPlayer-1.1.1-setup.exe -Algorithm SHA256
-# E55B97FFC0391E9DADAB617190D8564A7821CDCFA3759C7BDE143ED397319407
+Get-FileHash HushPlayer-1.1.2-setup.exe -Algorithm SHA256
+# D198581B46E09D8D4A6075901DA6A39361349152453C52504A9EC9F45383DFDD
 ```

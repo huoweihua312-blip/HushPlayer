@@ -1,5 +1,18 @@
 # Changelog
 
+## v1.1.2 — 2026-10-20
+
+安装包中文界面。
+
+### 变更
+- 安装向导改为**简体中文**：`packaging/languages/ChineseSimplified.isl`（取自 Inno Setup 官方仓库，含 UTF-8 BOM），`[Languages]` 只列中文，因此不再出现语言选择页。
+- 附加任务、桌面快捷方式、启动项说明全部中文（`[CustomMessages]` + `[Tasks]`）。
+- 安装包 `HushPlayer-1.1.2-setup.exe`（82.4 MB），SHA256 `D198581B46E09D8D4A6075901DA6A39361349152453C52504A9EC9F45383DFDD`。
+
+### 验证
+- 向导文本实测：`欢迎使用 HushPlayer 安装向导` / `下一步(&N)` / `取消`。
+- 静默安装后 `HushPlayer.exe` 版本与卸载项均为 `1.1.2`。
+
 ## v1.1.1 — 2026-10-20
 
 安装包。

@@ -4,7 +4,7 @@
 ; intentionally left in place when uninstalling.
 
 #define AppName "HushPlayer"
-#define AppVersion "1.1.1"
+#define AppVersion "1.1.2"
 #define AppExe "HushPlayer.exe"
 #define AppId "{{6F1C2B7E-3A4D-4E5B-9C8A-2D1E0B7F4A21}"
 
@@ -15,7 +15,7 @@ AppVersion={#AppVersion}
 AppVerName={#AppName} {#AppVersion}
 AppPublisher=HushPlayer
 VersionInfoVersion={#AppVersion}
-VersionInfoDescription=HushPlayer installer
+VersionInfoDescription=HushPlayer 安装程序
 DefaultDirName={localappdata}\Programs\{#AppName}
 DefaultGroupName={#AppName}
 DisableProgramGroupPage=yes
@@ -37,13 +37,18 @@ AllowNoIcons=yes
 DisableWelcomePage=no
 
 [Languages]
-; Inno ships no Simplified Chinese translation; keep the wizard in English so
-; the installer never depends on an unofficial .isl file.
-Name: "english"; MessagesFile: "compiler:Default.isl"
+; Vendored from the official Inno Setup repository (Files/Languages), BOM added.
+; Only Chinese is listed so the wizard never asks the user to pick a language.
+Name: "chinesesimplified"; MessagesFile: "languages\ChineseSimplified.isl"
+
+[CustomMessages]
+CreateDesktopIcon=创建桌面快捷方式(&D)
+AdditionalIcons=附加快捷方式：
+LaunchProgram=运行 %1
 
 [Tasks]
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: unchecked
-Name: "autostart"; Description: "Start HushPlayer when I sign in to Windows"; GroupDescription: "启动选项"; Flags: unchecked
+Name: "autostart"; Description: "登录 Windows 时自动启动 HushPlayer"; GroupDescription: "启动选项"; Flags: unchecked
 
 [Files]
 Source: "F:\HushPlayerBuild\out\HushPlayer\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
@@ -59,7 +64,7 @@ Root: HKCU; Subkey: "Software\HushPlayer"; ValueType: string; ValueName: "Instal
 Root: HKCU; Subkey: "Software\HushPlayer"; ValueType: string; ValueName: "Version"; ValueData: "{#AppVersion}"; Flags: uninsdeletekey
 
 [Run]
-Filename: "{app}\{#AppExe}"; Description: "{cm:LaunchProgram,{#AppName}}"; Flags: nowait postinstall skipifsilent
+Filename: "{app}\{#AppExe}"; Description: "{cm:LaunchProgram}"; Flags: nowait postinstall skipifsilent
 
 [UninstallDelete]
 ; Only the program directory; %LOCALAPPDATA%\HushPlayerReimagined (library,
