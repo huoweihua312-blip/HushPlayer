@@ -394,6 +394,30 @@ class PopupMenu(QWidget):
             return -1
         return self._submenu._item_at(int(point.y() - rect.top()))
 
+    def _in_bridge(self, point) -> bool:
+        """Keep the submenu open while the pointer crosses the gap to it.
+
+        With a visible 6 px gap between the panels the pointer briefly leaves
+        both panels; treating that as "moved away" closed the submenu before it
+        could be clicked. The bridge is the union of the parent row, the gap and
+        the submenu rect.
+        """
+        if self._submenu is None or self._sub_open < 0:
+            return False
+        rect = self._sub_rect()
+        if rect.left() <= point.x() <= rect.right() and rect.top() <= point.y() <= rect.bottom():
+            return True
+        row_top, row_h = self._rows()[self._sub_open]
+        row_right = self._base_width
+        bridge_left = min(row_right - 2, rect.left())
+        bridge_right = max(row_right, rect.left() + 2)
+        bridge_top = min(row_top, rect.top())
+        bridge_bottom = max(row_top + row_h, rect.bottom())
+        return (
+            bridge_left <= point.x() <= bridge_right
+            and bridge_top <= point.y() <= bridge_bottom
+        )
+
     def mouseMoveEvent(self, event) -> None:  # noqa: N802
         point = event.position().toPoint()
         sub_index = self._sub_item_at(point)
@@ -402,11 +426,8 @@ class PopupMenu(QWidget):
                 self._sub_hover = sub_index
                 self.update()
             return
-        if self._sub_open >= 0:
-            row_top, row_h = self._rows()[self._sub_open]
-            inside_row = row_top <= point.y() < row_top + row_h and point.x() < self._base_width
-            if not inside_row:
-                self._reset_submenu()
+        if self._sub_open >= 0 and not self._in_bridge(point):
+            self._reset_submenu()
         index = self._item_at(point.y()) if point.x() < self._base_width else -1
         if index != self._hover:
             self._hover = index

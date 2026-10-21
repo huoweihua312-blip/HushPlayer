@@ -82,8 +82,15 @@ def grab_open() -> None:
     app.primaryScreen().grabWindow(0).copy(120, 90, 640, 440).save(
         "artifacts/qa/r75/sub_open.png"
     )
-    # click "单行" inside the submenu: overlay hit-testing must reach it
+    # cross the gap first: the submenu must stay open while the pointer moves
     rect = menu._sub_rect()
+    menu.mouseMoveEvent(move_event(menu._base_width + 3, int(rect.top() + 20)))
+    app.processEvents()
+    print("GAP_STATE", "open" if menu._sub_open >= 0 else "closed", flush=True)
+    menu.mouseMoveEvent(move_event(int(rect.left() + 20), int(rect.top() + 20)))
+    app.processEvents()
+    print("OVER_STATE", "open" if menu._sub_open >= 0 else "closed", flush=True)
+    # click "单行" inside the submenu: overlay hit-testing must reach it
     pt = QPointF(rect.center().x(), rect.top() + 20)
     menu.mouseReleaseEvent(
         QMouseEvent(

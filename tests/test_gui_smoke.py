@@ -478,3 +478,25 @@ def test_playlist_context_menu_is_returned_not_shown(app_bundle):
     assert menu is not None
     assert hasattr(menu, "exec")
     assert menu._items
+
+def test_submenu_stays_open_across_gap(app_bundle):
+    """Crossing the 6 px gap between panels must not close the submenu."""
+    from PySide6.QtCore import QPoint
+
+    from hushplayer.ui.widgets.popup import PopupMenu
+
+    menu = PopupMenu()
+    menu.addAction("锁定位置")
+    sub = menu.addMenu("显示行数")
+    sub.addAction("单行")
+    sub.addAction("双行")
+    menu._submenu = sub
+    menu._sub_open = 1
+    menu._relayout()
+    rect = menu._sub_rect()
+    gap = QPoint(int(rect.left()) - 3, int(rect.top()) + 10)
+    over = QPoint(int(rect.left()) + 10, int(rect.top()) + 10)
+    away = QPoint(2, 2)
+    assert menu._in_bridge(gap)
+    assert menu._in_bridge(over)
+    assert not menu._in_bridge(away)
