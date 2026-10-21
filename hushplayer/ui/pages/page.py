@@ -310,6 +310,7 @@ class CenteredBox(QWidget):
         alignment = Qt.AlignLeft if align == "left" else Qt.AlignHCenter
         layout.addWidget(child, 1, alignment)
         self._layout = layout
+        self.setMinimumWidth(280)
 
     def resizeEvent(self, event) -> None:  # noqa: N802
         super().resizeEvent(event)

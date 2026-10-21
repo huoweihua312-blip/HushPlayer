@@ -16,6 +16,7 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QLabel,
     QScrollArea,
+    QSizePolicy,
     QStackedWidget,
     QVBoxLayout,
     QWidget,
@@ -78,7 +79,7 @@ class _SectionList(QWidget):
         self._hover = -1
         self.setMouseTracking(True)
         self.setCursor(Qt.PointingHandCursor)
-        self.setFixedWidth(196)
+        self.setFixedWidth(self.preferred_width())
         self._compact = False
 
     def set_compact(self, compact: bool) -> None:
@@ -101,8 +102,21 @@ class _SectionList(QWidget):
 
         return theme().scaled(30 if self._compact else 36)
 
+    def preferred_width(self) -> int:
+        """Widest label plus icon/padding; below this the labels would elide."""
+        from PySide6.QtGui import QFontMetrics
+
+        from ...core.theme import theme
+
+        metrics = QFontMetrics(theme().font(9.6, 500))
+        text = max(metrics.horizontalAdvance(label) for _key, label, _icon in SECTIONS)
+        pad = theme().scaled(11, factor=1.0)
+        icon = theme().scaled(18, factor=1.0)
+        gap = theme().scaled(10, factor=1.0)
+        return int(pad * 2 + icon + gap + text + theme().scaled(12, factor=1.0))
+
     def sizeHint(self) -> QSize:
-        return QSize(196, len(SECTIONS) * self._row_h() + 8)
+        return QSize(self.preferred_width(), len(SECTIONS) * self._row_h() + 8)
 
     def _rect(self, index: int):
         from PySide6.QtCore import QRectF
@@ -193,6 +207,8 @@ class SettingsPage(Page):
         super().__init__(parent)
         self.settings = settings_singleton()
         self.header = PageHeader("设置", "所有更改都会立即保存")
+        self.header.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
+        self.header.setMinimumHeight(self.header.sizeHint().height())
         layout = self.content_layout
         layout.setContentsMargins(Metrics.page_pad, 14, Metrics.page_pad, 8)
         layout.setSpacing(10)
@@ -209,7 +225,7 @@ class SettingsPage(Page):
         self._nav_scroll.setFrameShape(QScrollArea.Shape.NoFrame)
         self._nav_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self._nav_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
-        self._nav_scroll.setFixedWidth(196)
+        self._nav_scroll.setFixedWidth(self._nav.preferred_width())
         self._nav_scroll.setStyleSheet("QScrollArea{background:transparent;border:none;}")
         body.addWidget(self._nav_scroll)
         self._stack = QStackedWidget()
@@ -234,8 +250,7 @@ class SettingsPage(Page):
         super().resizeEvent(event)
         # Narrow windows give the section list less room so the content column
         # keeps a usable width instead of forcing a horizontal squeeze.
-        width = self.width()
-        target = 196 if width >= 1100 else (168 if width >= 900 else 148)
+        target = self._nav.preferred_width()
         if self._nav_scroll.width() != target:
             self._nav_scroll.setFixedWidth(target)
             self._nav.setFixedWidth(target)
@@ -256,15 +271,16 @@ class SettingsPage(Page):
         host_layout.setSpacing(0)
         column_host = QWidget()
         column_host.setStyleSheet("background:transparent;")
+        # Cap the measure on wide screens without relying on an alignment flag:
+        # an aligned child would keep its sizeHint and stop filling the page.
+        column_host.setMaximumWidth(theme().scaled(1040, factor=1.0))
         column = QVBoxLayout(column_host)
         column.setContentsMargins(0, 0, 12, 18)
         column.setSpacing(theme().scaled(14, factor=0.8))
         builder = self._builders[key]
         builder(column)
         column.addStretch(1)
-        host_layout.addWidget(
-            CenteredBox(column_host, max_width=theme().scaled(1040, factor=1.0), align="left"), 1
-        )
+        host_layout.addWidget(column_host, 1)
         scroll.setWidget(host)
         self._sections[key] = scroll
         self._stack.addWidget(scroll)
@@ -1261,6 +1277,11 @@ class SettingsPage(Page):
         text.setFont(theme().font(9.2))
         text.setStyleSheet(f"color:{css_rgba(theme().palette.text, 0.85)};")
         text.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        # A long data path must not widen the whole card; let it clip and keep
+        # the full value discoverable via the tooltip.
+        text.setToolTip(value)
+        text.setWordWrap(True)
+        text.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
         layout.addWidget(label)
         layout.addWidget(text, 1)
         return row

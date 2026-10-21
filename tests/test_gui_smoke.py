@@ -299,3 +299,54 @@ def test_tray_failure_keeps_window_reachable(app_bundle, monkeypatch):
     # Falls back to the taskbar instead of hiding with no icon to click.
     assert window.isVisible()
     assert window.isMinimized()
+
+def test_settings_page_fits_small_window(app_bundle) -> None:
+    """880×580 时设置页不应出现横向滚动，导航文字也不该被截断。"""
+    from PySide6.QtWidgets import QApplication, QScrollArea
+
+    from hushplayer.ui.pages.settings import SettingsPage
+
+    application = QApplication.instance() or QApplication([])
+    page = SettingsPage()
+    page.resize(880, 580)
+    page.show()
+    application.processEvents()
+    page.resize(880, 580)
+    application.processEvents()
+
+    assert page._nav.width() >= page._nav.preferred_width()
+    assert page.header.height() > 0
+
+    overflows = [
+        area
+        for area in page.findChildren(QScrollArea)
+        if area.horizontalScrollBar().maximum() > 0
+    ]
+    assert overflows == [], "设置页出现横向滚动"
+
+    page.close()
+
+
+def test_setting_row_stacks_control_when_narrow() -> None:
+    """窄宽度下控件换行到标题下方，宽宽度下回到同一行右侧。"""
+    from PySide6.QtWidgets import QApplication, QLabel
+
+    from hushplayer.ui.widgets.settings_widgets import SettingRow
+
+    application = QApplication.instance() or QApplication([])
+    control = QLabel("control")
+    row = SettingRow("恢复上次浏览的页面", "重新打开应用时回到上次离开的位置", control=control)
+
+    row.resize(760, 120)
+    row.show()
+    application.processEvents()
+    wide_y = control.geometry().y()
+    wide_x = control.geometry().x()
+    assert wide_x > row.title_label.geometry().x()
+
+    row.resize(320, 160)
+    application.processEvents()
+    narrow_y = control.geometry().y()
+    assert narrow_y > wide_y
+    assert control.geometry().x() > row.title_label.geometry().x()
+    row.close()

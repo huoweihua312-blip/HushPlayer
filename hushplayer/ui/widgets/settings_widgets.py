@@ -27,6 +27,7 @@ from PySide6.QtWidgets import (
     QComboBox,
     QFileDialog,
     QFrame,
+    QGridLayout,
     QHBoxLayout,
     QLabel,
     QLineEdit,
@@ -127,12 +128,14 @@ class SettingRow(QWidget):
         super().__init__(parent)
         self._title = title
         self._description = description
-        layout = QHBoxLayout(self)
+        layout = QGridLayout(self)
         # Vertical rhythm follows the type scale, otherwise enlarged labels sit
         # right on top of their description and the card feels cramped.
         pad = theme().scaled(9, factor=0.9)
         layout.setContentsMargins(0, pad, 0, pad)
-        layout.setSpacing(theme().scaled(16))
+        layout.setHorizontalSpacing(theme().scaled(16))
+        layout.setVerticalSpacing(theme().scaled(6))
+        layout.setColumnStretch(0, 1)
         text_box = QVBoxLayout()
         text_box.setContentsMargins(0, 0, 0, 0)
         text_box.setSpacing(theme().scaled(3, factor=1.0))
@@ -142,15 +145,44 @@ class SettingRow(QWidget):
         text_box.addWidget(self.title_label)
         if description:
             text_box.addWidget(self.desc_label)
-        layout.addLayout(text_box, 1)
+        self._text_box = text_box
+        layout.addLayout(text_box, 0, 0)
         self.control = control
+        self._grid = layout
+        self._compact = False
         if control is not None:
-            layout.addWidget(control, 0, Qt.AlignVCenter)
+            layout.addWidget(control, 0, 1, Qt.AlignRight | Qt.AlignVCenter)
         self._separator = description != ""
+
+    def _fit_control(self) -> None:
+        """Stack the control under the text when the row gets too narrow."""
+        if self.control is None:
+            return
+        needed = (
+            self._text_box.sizeHint().width()
+            + theme().scaled(16)
+            + max(self.control.sizeHint().width(), self.control.minimumWidth())
+        )
+        compact = self.width() < needed
+        if compact == self._compact:
+            return
+        self._compact = compact
+        self._grid.removeWidget(self.control)
+        if compact:
+            self._grid.addWidget(
+                self.control, 1, 0, 1, 2, Qt.AlignRight | Qt.AlignVCenter
+            )
+        else:
+            self._grid.addWidget(self.control, 0, 1, Qt.AlignRight | Qt.AlignVCenter)
+
+    def resizeEvent(self, event) -> None:  # noqa: N802
+        super().resizeEvent(event)
+        self._fit_control()
 
     def add_control(self, control: QWidget) -> None:
         self.control = control
-        self.layout().addWidget(control, 0, Qt.AlignVCenter)
+        self._compact = False
+        self._grid.addWidget(control, 0, 1, Qt.AlignRight | Qt.AlignVCenter)
 
     def refresh_theme(self) -> None:
         palette = theme().palette
@@ -530,7 +562,23 @@ class ThemePicker(QWidget):
         )
         self.TILE_W = theme().scaled(type(self).TILE_W, factor=0.6)
         self.GAP = theme().scaled(12, factor=0.6)
-        self.setFixedSize(3 * self.TILE_W + 2 * self.GAP, self.TILE_H)
+        self._tile_w = float(self.TILE_W)
+        # Do not reserve the full three-tile width: in a narrow settings column
+        # that forced a horizontal scrollbar. The tiles shrink instead.
+        self.setMinimumWidth(int(3 * self.TILE_W * 0.62))
+        self.setFixedHeight(self.TILE_H)
+
+    def _fit_tiles(self) -> None:
+        available = max(1.0, self.width() - 2 * self.GAP)
+        self._tile_w = max(88.0, min(float(self.TILE_W), available / 3.0))
+        self.update()
+
+    def resizeEvent(self, event) -> None:  # noqa: N802
+        super().resizeEvent(event)
+        self._fit_tiles()
+
+    def sizeHint(self) -> QSize:  # noqa: N802
+        return QSize(3 * self.TILE_W + 2 * self.GAP, self.TILE_H)
 
     # ------------------------------------------------------------------ API
     def value(self) -> str:
@@ -544,7 +592,7 @@ class ThemePicker(QWidget):
     # ------------------------------------------------------------------ 交互
     def _tiles(self) -> list[QRectF]:
         return [
-            QRectF(i * (self.TILE_W + self.GAP), 0, self.TILE_W, self.TILE_H)
+            QRectF(i * (self._tile_w + self.GAP), 0, self._tile_w, self.TILE_H)
             for i in range(len(self.OPTIONS))
         ]
 
