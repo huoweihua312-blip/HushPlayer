@@ -6,6 +6,13 @@
 
 （暂无）
 
+## 1.1.9 - 2026-10-21
+
+- 提交：本轮
+### 更新摘要
+- 修复切换「缩放比例」时弹出 `NameError: name 'SCALE_LABELS' is not defined`：该常量原先只在构建外观页的函数里临时导入，改为模块级导入，并补回归测试。
+- 打包只输出一份产物：zip 与 `SHA256SUMS.txt` 固定写入 `F:\HushPlayerBuild\out`，不再往仓库 `packaging\out` 复制副本（之前会在两处各出现一个同名 zip）。
+
 ## 1.1.8 - 2026-10-21
 
 - 提交：本轮

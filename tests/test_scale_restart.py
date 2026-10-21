@@ -72,3 +72,16 @@ def test_scale_combo_values_are_keys(qapp):
     combo.set_value("1.5")
     assert combo.value() == "1.5"
     assert combo.currentText() == SCALE_LABELS["1.5"]
+
+
+def test_scale_change_updates_hint_without_nameerror(qapp):
+    """Regression: the hint handler used a function-local import and crashed."""
+    from hushplayer.ui.pages.settings import SettingsPage
+
+    page = SettingsPage()
+    page.resize(900, 700)
+    page._show_section(1)
+    page._on_scale_changed("1.5")
+    hint = page._scale_hint.text()
+    assert "150%" in hint
+    assert "重启后生效" in hint

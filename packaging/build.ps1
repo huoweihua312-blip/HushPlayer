@@ -72,11 +72,7 @@ if ($Zip) {
     if (Test-Path $zipPath) { Remove-Item $zipPath -Force }
     Compress-Archive -Path $dist -DestinationPath $zipPath -CompressionLevel Optimal
     $hash = (Get-FileHash $zipPath -Algorithm SHA256).Hash
-    $repoOut = Join-Path $root "packaging\out"
-    New-Item -ItemType Directory -Force $repoOut | Out-Null
-    Copy-Item $zipPath (Join-Path $repoOut (Split-Path $zipPath -Leaf)) -Force
-    "$hash  HushPlayer-$version-win64.zip" | Set-Content (Join-Path $repoOut "SHA256SUMS.txt") -Encoding ascii
+    "$hash  HushPlayer-$version-win64.zip" | Set-Content (Join-Path $buildOut "SHA256SUMS.txt") -Encoding ascii
     Write-Host "==> 压缩包：$zipPath" -ForegroundColor Green
-    Write-Host "    (副本：packaging\out)" -ForegroundColor DarkGray
     Write-Host "    SHA256: $hash"
 }

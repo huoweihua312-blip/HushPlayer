@@ -27,6 +27,12 @@ from ...core.logging_setup import get_logger, log_exception
 from ...core.settings import settings as settings_singleton
 from ...core import brand
 from ...core.theme import Metrics, css_rgba, qcolor, rgba, theme
+from ...core.display import (
+    SCALE_LABELS,
+    physical_screen_size,
+    recommended_scale,
+    scale_text,
+)
 from ...model.track import format_duration
 from ...online.models import build_sources
 from ..context import ctx
@@ -441,8 +447,6 @@ class SettingsPage(Page):
         card.add_row(self._row("显示来源徽章", "在歌曲列表中标记本地或在线来源", self._toggle("appearance.show_source_badge", True)))
         card.add_row(self._row("显示侧边栏", "隐藏后可通过标题栏左侧按钮恢复", self._toggle("appearance.sidebar_visible", True)))
         column.addWidget(card)
-
-        from ...core.display import SCALE_LABELS, physical_screen_size, recommended_scale, scale_text
 
         card = SettingsCard("界面缩放", "针对 2K / 4K 显示器整体放大界面；切换后需要重启程序")
         width, height = physical_screen_size()
