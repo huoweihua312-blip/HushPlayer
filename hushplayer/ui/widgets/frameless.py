@@ -6,8 +6,8 @@ import ctypes
 import sys
 from ctypes import wintypes
 
-from PySide6.QtCore import QPoint, QRect, QSize, Qt, QTimer, Signal
-from PySide6.QtGui import QColor, QGuiApplication
+from PySide6.QtCore import QPoint, QRect, QRectF, QSize, Qt, QTimer, Signal
+from PySide6.QtGui import QColor, QGuiApplication, QPainterPath, QRegion
 from PySide6.QtWidgets import QApplication, QVBoxLayout, QWidget
 
 from ...core.logging_setup import get_logger
@@ -16,6 +16,7 @@ from ...core.theme import qcolor, theme
 log = get_logger("ui.window")
 
 BORDER = 6
+HANDLE = 5
 
 HTCLIENT = 1
 HTCAPTION = 2
@@ -70,6 +71,37 @@ def _enable_dwm_rounding(widget: QWidget, *, maximized: bool | None = None) -> N
         pass
 
 
+def _enable_native_resize_border(widget: QWidget) -> None:
+    """Give the frameless window WS_THICKFRAME so Windows resizes it natively.
+
+    Qt creates frameless windows as WS_POPUP without WS_THICKFRAME; without the
+    style DefWindowProc refuses to start a resize loop even when a hit test
+    asks for HTLEFT/HTTOP. Adding the style back keeps the custom title bar but
+    restores the native 8px resize border and the resize cursors.
+    """
+    if sys.platform != "win32":
+        return
+    try:
+        hwnd = int(widget.winId())
+        user32 = ctypes.windll.user32
+        GWL_STYLE = -16
+        WS_THICKFRAME = 0x00040000
+        SWP_NOSIZE = 0x0001
+        SWP_NOMOVE = 0x0002
+        SWP_NOZORDER = 0x0004
+        SWP_NOACTIVATE = 0x0010
+        SWP_FRAMECHANGED = 0x0020
+        style = user32.GetWindowLongW(wintypes.HWND(hwnd), GWL_STYLE)
+        if not style & WS_THICKFRAME:
+            user32.SetWindowLongW(wintypes.HWND(hwnd), GWL_STYLE, style | WS_THICKFRAME)
+            user32.SetWindowPos(
+                wintypes.HWND(hwnd), None, 0, 0, 0, 0,
+                SWP_NOSIZE | SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED,
+            )
+    except Exception:
+        pass
+
+
 def _set_app_user_model_id(app_id: str) -> None:
     if sys.platform != "win32":
         return
@@ -108,6 +140,14 @@ class FramelessWindow(QWidget):
         self._body.setSpacing(0)
         self._root.addWidget(self.container)
 
+        # Windows does not reliably start a native resize loop from a
+        # WM_NCHITTEST override on frameless windows (and Qt's synthetic hit
+        # test can be skipped entirely), so drag-resizing is driven by thin
+        # edge widgets that call QWindow.startSystemResize().
+        self._edge_handles: list[EdgeHandle] = []
+        if resizable:
+            self._build_edge_handles()
+
     # ------------------------------------------------------------------ api
     def set_titlebar(self, titlebar: QWidget) -> None:
         self._titlebar = titlebar
@@ -144,9 +184,70 @@ class FramelessWindow(QWidget):
     def _sync_maximized_ui(self) -> None:
         _enable_dwm_rounding(self, maximized=self._maximized)
         self._update_root_style()
+        self._update_round_mask()
+        self._layout_edge_handles()
         bar = self._titlebar
         if bar is not None and hasattr(bar, "set_maximized"):
             bar.set_maximized(self._maximized)  # type: ignore[attr-defined]
+
+    # -------------------------------------------------------- edge resizing
+    def _build_edge_handles(self) -> None:
+        specs = (
+            ("top", Qt.Edges.TopEdge, Qt.CursorShape.SizeVerCursor),
+            ("bottom", Qt.Edges.BottomEdge, Qt.CursorShape.SizeVerCursor),
+            ("left", Qt.Edges.LeftEdge, Qt.CursorShape.SizeHorCursor),
+            ("right", Qt.Edges.RightEdge, Qt.CursorShape.SizeHorCursor),
+            ("top-left", Qt.Edges.TopEdge | Qt.Edges.LeftEdge, Qt.CursorShape.SizeFDiagCursor),
+            ("top-right", Qt.Edges.TopEdge | Qt.Edges.RightEdge, Qt.CursorShape.SizeBDiagCursor),
+            ("bottom-left", Qt.Edges.BottomEdge | Qt.Edges.LeftEdge, Qt.CursorShape.SizeBDiagCursor),
+            ("bottom-right", Qt.Edges.BottomEdge | Qt.Edges.RightEdge, Qt.CursorShape.SizeFDiagCursor),
+        )
+        for name, edges, cursor in specs:
+            handle = EdgeHandle(self, edges, name=name)
+            handle.setCursor(cursor)
+            self._edge_handles.append(handle)
+
+    def _layout_edge_handles(self) -> None:
+        if not self._edge_handles:
+            return
+        visible = not self._maximized and not self.isFullScreen()
+        width = self.width()
+        height = self.height()
+        grip = HANDLE
+        corner = HANDLE * 2
+        rects = {
+            "top": QRect(corner, 0, max(0, width - corner * 2), grip),
+            "bottom": QRect(corner, height - grip, max(0, width - corner * 2), grip),
+            "left": QRect(0, corner, grip, max(0, height - corner * 2)),
+            "right": QRect(width - grip, corner, grip, max(0, height - corner * 2)),
+            "top-left": QRect(0, 0, corner, corner),
+            "top-right": QRect(width - corner, 0, corner, corner),
+            "bottom-left": QRect(0, height - corner, corner, corner),
+            "bottom-right": QRect(width - corner, height - corner, corner, corner),
+        }
+        for handle in self._edge_handles:
+            handle.setGeometry(rects.get(handle.edge_name, QRect()))
+            handle.setVisible(visible)
+            if visible:
+                handle.raise_()
+
+    def _update_round_mask(self) -> None:
+        """Clip the window to rounded corners on every Windows version.
+
+        Windows 11 rounds frameless windows through DWM, but Windows 10 (and
+        some 1080p machines) draws square corners, which shows the wallpaper in
+        the corners. A window region keeps the shape identical everywhere.
+        """
+        if self._maximized or self.isFullScreen():
+            self.clearMask()
+            return
+        try:
+            radius = max(8, int(theme().scaled(10, factor=0.6)))
+        except Exception:  # noqa: BLE001 - theme may not exist in tiny probes
+            radius = 10
+        path = QPainterPath()
+        path.addRoundedRect(QRectF(0.0, 0.0, float(self.width()), float(self.height())), radius, radius)
+        self.setMask(QRegion(path.toFillPolygon().toPolygon()))
 
     @staticmethod
     def _usable_normal_geometry(geometry: QRect) -> bool:
@@ -155,9 +256,8 @@ class FramelessWindow(QWidget):
         screen = QGuiApplication.screenAt(geometry.center()) or QGuiApplication.primaryScreen()
         if screen is None:
             return True
-        available = screen.availableGeometry()
-        if geometry.width() >= available.width() - 2 and geometry.height() >= available.height() - 2:
-            return False
+        # A window dragged to (almost) the whole screen is still a valid
+        # restore target; only reject sizes that look like a broken snapshot.
         return True
 
     def _restore_normal_geometry(self) -> None:
@@ -193,6 +293,8 @@ class FramelessWindow(QWidget):
     def resizeEvent(self, event) -> None:  # noqa: N802
         super().resizeEvent(event)
         self._remember_normal_geometry()
+        self._layout_edge_handles()
+        self._update_round_mask()
 
     def moveEvent(self, event) -> None:  # noqa: N802
         super().moveEvent(event)
@@ -217,8 +319,11 @@ class FramelessWindow(QWidget):
         super().showEvent(event)
         if not self._dwm_applied:
             self._dwm_applied = True
+            _enable_native_resize_border(self)
             _enable_dwm_rounding(self)
         self._update_root_style()
+        self._update_round_mask()
+        self._layout_edge_handles()
 
     def changeEvent(self, event) -> None:  # noqa: N802
         super().changeEvent(event)
@@ -313,6 +418,26 @@ def center_on_screen(widget: QWidget, *, screen_ratio: float = 0.72) -> None:
     )
 
 
+class EdgeHandle(QWidget):
+    """Thin invisible strip that starts a native resize loop on drag."""
+
+    def __init__(self, window: "FramelessWindow", edges, *, name: str) -> None:
+        super().__init__(window)
+        self._window = window
+        self._edges = edges
+        self.edge_name = name
+        self.setAttribute(Qt.WA_NoSystemBackground, True)
+        self.setAttribute(Qt.WA_TranslucentBackground, True)
+
+    def mousePressEvent(self, event) -> None:  # noqa: N802
+        if event.button() == Qt.MouseButton.LeftButton:
+            handle = self._window.windowHandle()
+            if handle is not None and handle.startSystemResize(self._edges):
+                event.accept()
+                return
+        super().mousePressEvent(event)
+
+
 class WindowDragHandle(QWidget):
     """Transparent strip that drags the window and toggles maximise on double click."""
 
@@ -372,6 +497,7 @@ def ensure_on_screen(widget: QWidget, geometry: QRect) -> QRect:
 
 
 __all__ = [
+    "EdgeHandle",
     "FramelessWindow",
     "WindowDragHandle",
     "center_on_screen",

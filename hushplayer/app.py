@@ -179,10 +179,23 @@ class HushApp(QObject):
             except ValueError:
                 pass
         try:
-            width, _height = display.physical_screen_size()
+            width, height = display.physical_screen_size()
         except Exception:  # noqa: BLE001
             return 1.0
-        return display.recommended_type_scale(width)
+        dpr = 1.0
+        try:
+            from PySide6.QtGui import QGuiApplication
+
+            screen = QGuiApplication.primaryScreen()
+            if screen is not None:
+                dpr = float(screen.devicePixelRatio() or 1.0)
+                if height <= 0:
+                    height = int(round(screen.size().height() * dpr))
+                if width <= 0:
+                    width = int(round(screen.size().width() * dpr))
+        except Exception:  # noqa: BLE001
+            pass
+        return display.recommended_type_scale(width, height, dpr)
 
     def _end_theme_transition(self) -> None:
         """Retire any running reveal so a new one starts from a clean frame."""

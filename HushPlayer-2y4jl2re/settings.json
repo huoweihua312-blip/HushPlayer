@@ -1,0 +1,116 @@
+{
+  "schema": 1,
+  "general": {
+    "language": "zh_CN",
+    "start_page": "home",
+    "restore_last_page": true,
+    "remember_queue": true,
+    "close_action": "ask",
+    "minimize_to_tray": false,
+    "launch_at_startup": false,
+    "check_updates_on_start": true,
+    "system_media_controls": true,
+    "taskbar_progress": true,
+    "global_hotkeys": true,
+    "last_page": "home",
+    "first_run_done": false,
+    "window": {
+      "x": null,
+      "y": null,
+      "w": 1280,
+      "h": 820,
+      "maximized": false
+    },
+    "close_prompt_migrated": true
+  },
+  "appearance": {
+    "theme": "system",
+    "accent": "#C95770",
+    "reduce_motion": false,
+    "font_scale": 1.0,
+    "ui_scale": "auto",
+    "sidebar_visible": true,
+    "theme_animation_mode": "reveal",
+    "theme_anim_pop_ms": 420.0,
+    "theme_anim_hold_ms": 260.0,
+    "theme_anim_icon_scale": 1.0,
+    "density": "comfortable",
+    "show_source_badge": true
+  },
+  "playback": {
+    "sleep_timer_minutes": 0,
+    "volume": 0.72,
+    "muted": false,
+    "repeat": "off",
+    "shuffle": false,
+    "quality": "higher",
+    "replaygain": "off",
+    "resume_on_start": true,
+    "audio_device": "",
+    "fade_ms": 180,
+    "skip_unavailable": true
+  },
+  "lyrics": {
+    "font_scale": 1.0,
+    "translate": true,
+    "offset_ms": 0,
+    "alignment": "center",
+    "online_enabled": true,
+    "prefer_word_timing": true,
+    "show_metadata": true
+  },
+  "desktop_lyrics": {
+    "enabled": false,
+    "locked": false,
+    "click_through": false,
+    "always_on_top": true,
+    "font_family": "",
+    "font_size": 32,
+    "color": "#FFFFFF",
+    "highlight_color": "#C95770",
+    "opacity": 0.94,
+    "lines": 2,
+    "show_translation": true,
+    "geometry": null,
+    "screen": ""
+  },
+  "library": {
+    "folders": [],
+    "auto_scan_on_start": true,
+    "watch": true,
+    "last_scan": 0,
+    "cover_from_folder": true
+  },
+  "online": {
+    "dedupe_results": true,
+    "sources_expanded": false,
+    "enabled_sources": {},
+    "preferred_source": "",
+    "search_all": true,
+    "timeout_s": 22,
+    "show_explicit": true,
+    "default_quality": "higher"
+  },
+  "cache": {
+    "enabled": true,
+    "max_mb": 2048,
+    "dir": ""
+  },
+  "downloads": {
+    "dir": "",
+    "quality": "higher",
+    "naming": "{artist} - {title}",
+    "embed_metadata": true
+  },
+  "immersive": {
+    "mode": "cover",
+    "last_mode": "cover",
+    "ambient": true,
+    "motion": true
+  },
+  "update": {
+    "manifest_url": "",
+    "last_check": 0,
+    "skipped_version": ""
+  }
+}

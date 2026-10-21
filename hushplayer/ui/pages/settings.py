@@ -79,6 +79,13 @@ class _SectionList(QWidget):
         self.setMouseTracking(True)
         self.setCursor(Qt.PointingHandCursor)
         self.setFixedWidth(196)
+        self._compact = False
+
+    def set_compact(self, compact: bool) -> None:
+        if compact != self._compact:
+            self._compact = compact
+            self.updateGeometry()
+            self.update()
 
     def current(self) -> int:
         return self._current
@@ -92,7 +99,7 @@ class _SectionList(QWidget):
     def _row_h(self) -> int:
         from ...core.theme import theme
 
-        return theme().scaled(36)
+        return theme().scaled(30 if self._compact else 36)
 
     def sizeHint(self) -> QSize:
         return QSize(196, len(SECTIONS) * self._row_h() + 8)
@@ -196,7 +203,15 @@ class SettingsPage(Page):
         body.setSpacing(22)
         self._nav = _SectionList()
         self._nav.changed.connect(self._show_section)
-        body.addWidget(self._nav)
+        self._nav_scroll = QScrollArea()
+        self._nav_scroll.setWidget(self._nav)
+        self._nav_scroll.setWidgetResizable(True)
+        self._nav_scroll.setFrameShape(QScrollArea.Shape.NoFrame)
+        self._nav_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self._nav_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        self._nav_scroll.setFixedWidth(196)
+        self._nav_scroll.setStyleSheet("QScrollArea{background:transparent;border:none;}")
+        body.addWidget(self._nav_scroll)
         self._stack = QStackedWidget()
         body.addWidget(self._stack, 1)
         layout.addLayout(body, 1)
@@ -214,6 +229,17 @@ class SettingsPage(Page):
         }
         self._sections: dict[str, QWidget] = {}
         self._initial_section = "general"
+
+    def resizeEvent(self, event) -> None:  # noqa: N802
+        super().resizeEvent(event)
+        # Narrow windows give the section list less room so the content column
+        # keeps a usable width instead of forcing a horizontal squeeze.
+        width = self.width()
+        target = 196 if width >= 1100 else (168 if width >= 900 else 148)
+        if self._nav_scroll.width() != target:
+            self._nav_scroll.setFixedWidth(target)
+            self._nav.setFixedWidth(target)
+        self._nav.set_compact(self.height() < 660)
 
     # ------------------------------------------------------------- utilities
     def _section(self, key: str) -> QWidget:

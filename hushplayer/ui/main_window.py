@@ -62,7 +62,7 @@ class MainWindow(FramelessWindow):
     def __init__(self) -> None:
         super().__init__()
         self.setWindowTitle("HushPlayer")
-        self.setMinimumSize(940, 620)
+        self.setMinimumSize(820, 540)
         self.resize(1240, 800)
         self.setWindowIcon(brand.app_icon())
 

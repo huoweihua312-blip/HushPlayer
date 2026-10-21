@@ -85,3 +85,20 @@ def test_type_scale_thresholds():
     assert display.recommended_type_scale(1920) == pytest.approx(1.0)
     assert display.recommended_type_scale(2560) == pytest.approx(1.5)
     assert display.recommended_type_scale(3840) == pytest.approx(1.0)
+
+
+def test_type_scale_follows_physical_height_and_windows_scaling():
+    # 1440p at 100% is the tuned reference.
+    assert display.recommended_type_scale(2560, 1440, 1.0) == pytest.approx(1.5)
+    # The same panel at 150% already looks big; no extra enlargement.
+    assert display.recommended_type_scale(2560, 1440, 1.5) == pytest.approx(1.0)
+    # 1080p gets a little extra, 1080p at 125% is left to Windows.
+    assert display.recommended_type_scale(1920, 1080, 1.0) == pytest.approx(1.1)
+    assert display.recommended_type_scale(1920, 1080, 1.25) == pytest.approx(1.0)
+    # 4K at 150% matches 1440p at 100% in apparent size.
+    assert display.recommended_type_scale(3840, 2160, 1.5) == pytest.approx(1.5)
+
+
+def test_type_scale_is_bounded():
+    assert display.recommended_type_scale(3840, 4320, 1.0) == pytest.approx(1.6)
+    assert display.recommended_type_scale(1280, 720, 2.0) == pytest.approx(1.0)

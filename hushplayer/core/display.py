@@ -44,12 +44,27 @@ def physical_screen_size() -> tuple[int, int]:
         return 0, 0
 
 
-def recommended_type_scale(physical_width: int) -> float:
-    """Type enlargement applied at DPR 1.0 on high-resolution panels.
+def recommended_type_scale(physical_width: int, physical_height: int = 0, dpr: float = 1.0) -> float:
+    """Type enlargement so the UI looks the same size on different panels.
 
-    1440p at 100% has very small logical text; scaling type here (instead of
-    QT_SCALE_FACTOR) keeps glyphs on whole device pixels.
+    What matters is the *apparent* size: the physical pixel height of a glyph
+    relative to the screen. Windows already enlarges everything through its
+    scale factor (``dpr``), so the extra type scale has to compensate for the
+    remaining difference in physical height:
+
+        apparent ≈ base_px × type_scale × dpr  ∝  physical_height
+
+    A 2560×1440 panel at 100% (the configuration HushPlayer was tuned on)
+    therefore maps to 1.5×, while the same panel at 150% maps to 1.0× and
+    1920×1080 at 100% maps to ~1.13×. Without the ``height``/``dpr``
+    arguments the old width-only thresholds are kept for callers that have
+    no screen information.
     """
+    if physical_height > 0 and dpr > 0:
+        ratio = (physical_height / 1440.0) / dpr
+        scale = 1.5 * ratio
+        scale = max(1.0, min(1.6, scale))
+        return round(scale * 20) / 20  # 0.05 steps keep metrics stable
     if physical_width >= 3200:
         return 1.0  # 4K normally runs at DPR 1.5
     if physical_width >= 2400:
