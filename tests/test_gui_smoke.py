@@ -391,3 +391,18 @@ def test_queue_duration_column_fits_its_text(app_bundle):
     needed = QFontMetrics(theme().font(8.4, 400)).horizontalAdvance("4:02") + 12
     assert table.columnWidth(index) >= needed
     table.deleteLater()
+
+
+def test_immersive_queue_keeps_app_palette(app_bundle):
+    """The stage queue paints dark locally and must not hijack the app theme."""
+    from hushplayer.core.theme import DARK, theme
+    from hushplayer.ui.widgets.queue_panel import QueuePanel
+
+    panel = QueuePanel(immersive=True)
+    before = theme().palette
+    panel.activate_palette()
+    assert theme().palette is before
+    assert panel.list.table.palette_override is DARK
+    panel.release_palette()
+    assert panel.list.table.palette_override is None
+    assert theme().palette is before

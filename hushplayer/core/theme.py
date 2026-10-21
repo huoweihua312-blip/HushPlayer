@@ -215,7 +215,6 @@ class Theme(QObject):
         super().__init__(parent)
         self._mode = "dark"
         self._palette = DARK
-        self._palette_stack: list[Palette] = []
         self._reduce_motion = False
         self._font_scale = 1.0
         self._ui_scale = 1.0
@@ -230,22 +229,7 @@ class Theme(QObject):
 
     @property
     def palette(self) -> Palette:
-        if self._palette_stack:
-            return self._palette_stack[-1]
         return self._palette
-
-    def push_palette(self, palette: Palette) -> None:
-        """Temporarily paint with another palette (e.g. dark overlay on stage)."""
-        self._palette_stack.append(palette)
-        self.changed.emit()
-
-    def pop_palette(self) -> None:
-        if self._palette_stack:
-            self._palette_stack.pop()
-            self.changed.emit()
-
-    def overridden(self) -> bool:
-        return bool(self._palette_stack)
 
     @property
     def metrics(self) -> Metrics:

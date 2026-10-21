@@ -257,6 +257,14 @@ class TrackHeader(QWidget):
         self.setMouseTracking(True)
         self.setCursor(Qt.ArrowCursor)
 
+    def _pal(self):
+        override = getattr(self, "_palette_override", None)
+        return override or theme().palette
+
+    def set_palette_override(self, palette) -> None:
+        self._palette_override = palette
+        self.update()
+
     def set_view(self, view) -> None:
         """Follow the table's real section geometry instead of guessing."""
         self._view = view
@@ -332,7 +340,7 @@ class TrackHeader(QWidget):
         super().mouseReleaseEvent(event)
 
     def paintEvent(self, event) -> None:  # noqa: N802
-        palette = theme().palette
+        palette = self._pal()
         painter = QPainter(self)
         painter.setRenderHint(QPainter.Antialiasing, True)
         font = theme().font(8.4, 600)
@@ -369,13 +377,17 @@ class TrackDelegate(QStyledItemDelegate):
         super().__init__(view)
         self.view = view
 
+    def _pal(self):
+        override = getattr(self.view, "palette_override", None)
+        return override or theme().palette
+
     # ----------------------------------------------------------------- paint
     def paint(self, painter: QPainter, option: QStyleOptionViewItem, index: QModelIndex) -> None:
         model = self.view.model()
         track: Track | None = index.data(TITLE_ROLE)
         if track is None:
             return
-        palette = theme().palette
+        palette = self._pal()
         painter.save()
         painter.setRenderHint(QPainter.Antialiasing, True)
 
@@ -439,7 +451,7 @@ class TrackDelegate(QStyledItemDelegate):
 
     def _paint_index(self, painter: QPainter, rect: QRectF, row: int, is_current: bool,
                      selected: bool = False) -> None:
-        palette = theme().palette
+        palette = self._pal()
         if is_current:
             self._paint_bars(painter, rect)
             return
@@ -453,7 +465,7 @@ class TrackDelegate(QStyledItemDelegate):
         )
 
     def _paint_bars(self, painter: QPainter, rect: QRectF, ) -> None:
-        palette = theme().palette
+        palette = self._pal()
         phase = self.view.bar_phase
         playing = self.view.model().playing
         heights = []
@@ -481,7 +493,7 @@ class TrackDelegate(QStyledItemDelegate):
 
     def _paint_title(self, painter: QPainter, rect: QRectF, track: Track, is_current: bool,
                      selected: bool = False) -> None:
-        palette = theme().palette
+        palette = self._pal()
         compact = self.view.model().compact
         cover_size = 36 if compact else 40
         cover_rect = QRectF(rect.left(), rect.center().y() - cover_size / 2, cover_size, cover_size)
@@ -602,7 +614,7 @@ class TrackDelegate(QStyledItemDelegate):
         *,
         secondary: bool = False,
     ) -> None:
-        palette = theme().palette
+        palette = self._pal()
         font = theme().font(size, 500)
         painter.setFont(font)
         color = palette.text
@@ -617,7 +629,7 @@ class TrackDelegate(QStyledItemDelegate):
 
     def _paint_duration(self, painter: QPainter, rect: QRectF, track: Track,
                         selected: bool = False) -> None:
-        palette = theme().palette
+        palette = self._pal()
         font = theme().font(8.6, 500)
         painter.setFont(font)
         painter.setPen(QPen(rgba(palette.text, 0.58 if selected else 0.42)))
@@ -625,7 +637,7 @@ class TrackDelegate(QStyledItemDelegate):
         painter.drawText(rect, int(Qt.AlignRight | Qt.AlignVCenter), text)
 
     def _paint_favorite(self, painter: QPainter, rect: QRectF, track: Track, row: int) -> None:
-        palette = theme().palette
+        palette = self._pal()
         favorite = self.view.model().is_favorite(track.id)
         hovered = self.view.favorite_hover_row == row
         size = 15
@@ -652,6 +664,9 @@ class TrackDelegate(QStyledItemDelegate):
 class TrackTable(QTableView):
     """Table view with a hand-drawn header and rich row delegate."""
 
+    def _pal(self):
+        return getattr(self, "palette_override", None) or theme().palette
+
     play_requested = Signal(object, int)  # list[Track], index
     menu_requested = Signal(object, QPoint)  # list[Track], global pos
     favorite_clicked = Signal(object)  # Track
@@ -663,6 +678,7 @@ class TrackTable(QTableView):
         super().__init__(parent)
         self._model = TrackTableModel(self)
         self.setModel(self._model)
+        self.palette_override = None
         self._delegate = TrackDelegate(self)
         self.setItemDelegate(self._delegate)
         self.viewport().setMouseTracking(True)
@@ -994,7 +1010,7 @@ class TrackTable(QTableView):
             self._paint_empty()
 
     def _paint_empty(self) -> None:
-        palette = theme().palette
+        palette = self._pal()
         painter = QPainter(self.viewport())
         painter.setRenderHint(QPainter.Antialiasing, True)
         rect = QRectF(self.viewport().rect())
@@ -1139,6 +1155,15 @@ class TrackListWidget(QWidget):
 
     def sort(self, key: str, ascending: bool = True) -> None:
         self.table.sort(key, ascending)
+
+    def set_palette_override(self, palette) -> None:
+        """Paint this list with a fixed palette (the immersive stage is dark)."""
+        self.table.palette_override = palette
+        header = getattr(self.table, "_header", None)
+        if header is not None:
+            header.set_palette_override(palette)
+        self.table.viewport().update()
+        self.table.update()
 
     def refresh_theme(self) -> None:
         self.table.refresh_theme()

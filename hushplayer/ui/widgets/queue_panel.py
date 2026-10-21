@@ -208,25 +208,40 @@ class QueuePanel(QWidget):
     def activate_palette(self) -> None:
         """Paint this panel in the dark palette while it floats over the stage."""
         if self._immersive and not self._palette_active:
-            theme().push_palette(DARK)
             self._palette_active = True
+            self.list.set_palette_override(DARK)
+            self.refresh_theme()
 
     def release_palette(self) -> None:
         """Undo the dark override taken for the immersive stage."""
         if self._palette_active:
-            theme().pop_palette()
             self._palette_active = False
+            self.list.set_palette_override(None)
+            self.refresh_theme()
 
     def refresh_theme(self) -> None:
-        self.setStyleSheet(
-            f"""
-            #QueuePanel {{
-                background: {theme().palette.surface};
-                border-left: 1px solid {theme().palette.border};
-            }}
-            """
-        )
-        palette = theme().palette
+        palette = DARK if self._palette_active else theme().palette
+        if self._palette_active:
+            # Translucent so the stage colour still shows through the panel.
+            self.setStyleSheet(
+                """
+                #QueuePanel {
+                    background: rgba(16, 16, 18, 0.84);
+                    border-left: 1px solid rgba(255, 255, 255, 0.08);
+                    border-top-left-radius: 14px;
+                    border-bottom-left-radius: 14px;
+                }
+                """
+            )
+        else:
+            self.setStyleSheet(
+                f"""
+                #QueuePanel {{
+                    background: {palette.surface};
+                    border-left: 1px solid {palette.border};
+                }}
+                """
+            )
         self.title.setStyleSheet(
             f"font-size:{theme().pt(13):.1f}pt; font-weight:700;"
             f" color:{css_rgba(palette.text, 0.95)};"
