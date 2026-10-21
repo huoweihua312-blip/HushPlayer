@@ -14,6 +14,7 @@ from PySide6.QtWidgets import QApplication, QMessageBox
 from .core import icons
 from .core.logging_setup import get_logger, log_exception, recent_log_text, setup_logging
 from .core import brand
+from .core import paths
 from .core.paths import data_dir, ensure_dirs, is_frozen
 from .core.settings import settings
 from .core.theme import apply_theme_to_app, theme
@@ -55,6 +56,7 @@ class HushApp(QObject):
 
         self.settings = settings()
         self.settings.load()
+        paths.remember_program_dir()
         self.db = Database()
         self.library = LibraryService(self.db)
         self.artwork = ArtworkStore()

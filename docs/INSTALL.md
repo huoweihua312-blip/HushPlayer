@@ -113,7 +113,7 @@ Get-FileHash HushPlayer-1.1.15-setup.exe -Algorithm SHA256
 ### 1.1.15 安装包
 
 - 安装包：`HushPlayer-1.1.15-setup.exe`（82.4 MB，简体中文向导，可选择安装目录）。
-- SHA256：`C7DF88F5B369DBC9B799CDB1B96D189BCD2492A3ED0F9C67D9A1CDA6A771ADDF`
+- SHA256：`CDC8F2AD9D5907C6E89063A8D75FAF3746AD08DC280F71428212CFEFDC0C3B31`
 - 免安装 zip：`HushPlayer-1.1.15-win64.zip`，SHA256 `E5CD2F70662D76BD1E95097FB98A7EEFA54678EA4518B6BB7F0B0BAC4CD72D04`
 - 卸载会删除程序目录（含 PyInstaller 的 `_internal` 与更新器），保留 `%LOCALAPPDATA%\HushPlayerReimagined` 里的音乐库、歌单与设置。
 - 升级安装时目录框默认填上次安装位置（读 `HKCU\Software\HushPlayer\InstallDir`，其次读 Inno 的卸载记录），仍可手动更改。

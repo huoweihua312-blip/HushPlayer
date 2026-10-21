@@ -65,8 +65,8 @@ Name: "{autodesktop}\{#AppName}"; Filename: "{app}\{#AppExe}"; Tasks: desktopico
 Name: "{userstartup}\{#AppName}"; Filename: "{app}\{#AppExe}"; Tasks: autostart
 
 [Registry]
-Root: HKCU; Subkey: "Software\HushPlayer"; ValueType: string; ValueName: "InstallDir"; ValueData: "{app}"; Flags: uninsdeletekey
-Root: HKCU; Subkey: "Software\HushPlayer"; ValueType: string; ValueName: "Version"; ValueData: "{#AppVersion}"; Flags: uninsdeletekey
+Root: HKCU; Subkey: "Software\HushPlayer"; ValueType: string; ValueName: "InstallDir"; ValueData: "{app}"
+Root: HKCU; Subkey: "Software\HushPlayer"; ValueType: string; ValueName: "Version"; ValueData: "{#AppVersion}"; Flags: uninsdeletevalue
 
 [Run]
 Filename: "{app}\{#AppExe}"; Description: "{cm:LaunchProgram}"; Flags: nowait postinstall skipifsilent
@@ -84,18 +84,32 @@ Type: filesandordirs; Name: "{app}\Data"
 function PreviousInstallDir(): String;
 var
   value: String;
+  marker: String;
 begin
   Result := '';
-  if RegQueryStringValue(
-       HKCU, 'Software\HushPlayer', 'InstallDir', value) and DirExists(value) then
-    Result := value
-  else if RegQueryStringValue(
-       HKCU,
-       'Software\Microsoft\Windows\CurrentVersion\Uninstall\{#SetupSetting("AppId")}_is1',
-       'InstallLocation', value) and DirExists(value) then
-    { Older builds did not write our own key; Inno's uninstall record still has
-      the folder the user actually chose. }
+  { 1) our own record, kept even after uninstall so "next install" remembers }
+  if RegQueryStringValue(HKCU, 'Software\HushPlayer', 'InstallDir', value) then
     Result := value;
+  { 2) the running app writes its folder here, which survives uninstall and
+       also works for portable copies that were never installed }
+  if Result = '' then
+  begin
+    marker := ExpandConstant('{localappdata}\HushPlayerReimagined\last_program_dir.ini');
+    if FileExists(marker) then
+      Result := GetIniString('install', 'dir', '', marker);
+  end;
+  { 3) Inno's own uninstall record for this AppId }
+  if Result = '' then
+  begin
+    if RegQueryStringValue(
+         HKCU,
+         'Software\Microsoft\Windows\CurrentVersion\Uninstall\{#SetupSetting("AppId")}_is1',
+         'InstallLocation', value) then
+      Result := value;
+  end;
+  { Do not require the folder to exist: a moved/cleaned folder is still the
+    user's last choice, and Inno recreates whatever is missing. }
+  Result := Trim(Result);
 end;
 
 function PreviousDir(Param: String): String;

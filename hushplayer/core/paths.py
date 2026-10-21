@@ -9,9 +9,12 @@
 
 from __future__ import annotations
 
+import logging
 import os
 import sys
 from pathlib import Path
+
+log = logging.getLogger(__name__)
 
 APP_DIR_NAME = "HushPlayerReimagined"
 PORTABLE_FLAG = "portable.txt"
@@ -91,6 +94,23 @@ def _writable(path: Path) -> bool:
         return True
     except OSError:
         return False
+
+
+def remember_program_dir() -> None:
+    """Record where this build actually lives.
+
+    The installer reads this file as a fallback when its own registry record is
+    missing (e.g. the app was unzipped, moved, or an older installer never wrote
+    the key), so "upgrade in place" keeps working across manual moves.
+    """
+    if not is_frozen():
+        return
+    try:
+        target = data_dir() / "last_program_dir.ini"
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text("[install]\ndir=" + str(executable_dir()) + "\n", encoding="utf-8")
+    except OSError:
+        log.debug("无法记录程序目录", exc_info=True)
 
 
 def data_dir() -> Path:
