@@ -25,3 +25,6 @@ packaging/out/
 /hush-e2e-*/
 .pytest-tmp/
 pytest-of-*/
+
+# 测试时误建在仓库根的数据目录（本地数据不进版本库）
+/HushPlayer-*/
