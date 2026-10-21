@@ -28,7 +28,8 @@ def test_scale_preference_round_trip(tmp_path, monkeypatch):
     assert display.scale_preference() == "1.5"
     assert display.resolve_scale() == pytest.approx(1.5)
     assert display.apply_scale_environment() == pytest.approx(1.5)
-    assert os.environ.get("QT_SCALE_FACTOR") == "1.50"
+    # Crispness contract: scaling must not introduce a fractional device pixel ratio.
+    assert os.environ.get("QT_SCALE_FACTOR") is None
 
 
 def test_explicit_scale_suppresses_automatic_type_scale(tmp_path, monkeypatch):
@@ -43,9 +44,8 @@ def test_explicit_scale_suppresses_automatic_type_scale(tmp_path, monkeypatch):
     settings.set("appearance.ui_scale", "1.25")
     settings.flush()
 
-    # QT_SCALE_FACTOR already enlarges everything; stacking the automatic type
-    # scale on top would double-size the UI.
-    assert HushApp._ui_type_scale(object()) == pytest.approx(1.0)
+    # The explicit choice becomes the type scale (DPR stays 1.0).
+    assert HushApp._ui_type_scale(object()) == pytest.approx(1.25)
 
 
 def test_env_type_scale_still_wins(tmp_path, monkeypatch):

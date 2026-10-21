@@ -15,7 +15,7 @@ from PySide6.QtWidgets import (
 )
 
 from ...core.icons import draw as draw_icon
-from ...core.theme import css_rgba, Metrics, qcolor, rgba, theme
+from ...core.theme import Metrics, css_rgba, draw_text, qcolor, rgba, theme
 from ..widgets.common import IconButton, TextButton, apply_shadow
 
 
@@ -96,7 +96,8 @@ class PageHeader(QWidget):
         top = max(0, int((self.height() - total) / 2) - (2 if self._large else 0))
         painter.setFont(title_font)
         painter.setPen(QPen(qcolor(palette.text)))
-        painter.drawText(
+        draw_text(
+            painter,
             QRectF(0, top, width, title_h),
             int(Qt.AlignLeft | Qt.AlignVCenter),
             title,
@@ -104,7 +105,8 @@ class PageHeader(QWidget):
         if self._subtitle:
             painter.setFont(sub_font)
             painter.setPen(QPen(rgba(palette.text, 0.5)))
-            painter.drawText(
+            draw_text(
+                painter,
                 QRectF(1, top + title_h + 2, width, sub_h),
                 int(Qt.AlignLeft | Qt.AlignVCenter),
                 QFontMetrics(sub_font).elidedText(self._subtitle, Qt.ElideRight, width),

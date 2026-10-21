@@ -123,11 +123,16 @@ def resolve_scale(preference: str | None = None) -> float:
 
 
 def apply_scale_environment(preference: str | None = None) -> float:
-    """Set ``QT_SCALE_FACTOR``; must run before QApplication is created."""
+    """Resolve the user's scale without touching Qt's device pixel ratio.
+
+    Scaling through ``QT_SCALE_FACTOR`` at 1.25/1.5 makes Windows render glyphs
+    on fractional device pixels, which visibly softens bold CJK strokes. The
+    preference is applied as a type/metric multiplier instead (DPR stays 1.0),
+    exactly like the automatic high-DPI type scale.
+    """
     scale = resolve_scale(preference)
-    if abs(scale - 1.0) > 0.001:
-        os.environ["QT_SCALE_FACTOR"] = f"{scale:.2f}"
-    else:
+    # Never inherit a stale fractional factor from a previous launch.
+    if not os.environ.get("HUSHPLAYER_KEEP_QT_SCALE"):
         os.environ.pop("QT_SCALE_FACTOR", None)
     os.environ[_APPLIED_ENV] = f"{scale:.2f}"
     return scale

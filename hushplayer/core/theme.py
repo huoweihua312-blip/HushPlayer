@@ -12,7 +12,7 @@ import math
 from dataclasses import dataclass, field
 from typing import Iterable
 
-from PySide6.QtCore import QObject, Qt, Signal
+from PySide6.QtCore import QObject, QPoint, Qt, Signal
 from PySide6.QtGui import QColor, QFont, QFontDatabase, QPalette
 
 BRAND_ACCENT = "#C95770"
@@ -22,6 +22,35 @@ def qcolor(value: str | QColor) -> QColor:
     if isinstance(value, QColor):
         return QColor(value)
     return QColor(value)
+
+
+def text_origin(painter, rect, flags: int, text: str) -> QPoint:
+    """Integer text origin so glyphs land on whole pixels (no half-pixel blur).
+
+    Qt's ``AlignVCenter`` on a fractional ``QRectF`` frequently resolves to a
+    .5 baseline, which makes bold CJK strokes look soft. We reproduce the same
+    alignment rules with integer maths.
+    """
+    metrics = painter.fontMetrics()
+    width = metrics.horizontalAdvance(text)
+    if flags & int(Qt.AlignmentFlag.AlignHCenter):
+        x = rect.x() + (rect.width() - width) / 2.0
+    elif flags & int(Qt.AlignmentFlag.AlignRight):
+        x = rect.x() + rect.width() - width
+    else:
+        x = rect.x()
+    if flags & int(Qt.AlignmentFlag.AlignVCenter):
+        y = rect.y() + (rect.height() - metrics.height()) / 2.0 + metrics.ascent()
+    elif flags & int(Qt.AlignmentFlag.AlignBottom):
+        y = rect.y() + rect.height() - metrics.descent()
+    else:
+        y = rect.y() + metrics.ascent()
+    return QPoint(int(round(x)), int(round(y)))
+
+
+def draw_text(painter, rect, flags: int, text: str) -> None:
+    """Crisp replacement for ``painter.drawText(QRectF, flags, text)``."""
+    painter.drawText(text_origin(painter, rect, flags, text), text)
 
 
 def rgba(value: str | QColor, alpha: float) -> QColor:

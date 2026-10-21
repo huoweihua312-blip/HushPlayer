@@ -36,7 +36,7 @@ from PySide6.QtWidgets import (
 )
 
 from ...core.icons import draw as draw_icon
-from ...core.theme import Metrics, mix, qcolor, rgba, theme
+from ...core.theme import Metrics, draw_text, mix, qcolor, rgba, theme
 from ...model.track import Track, format_duration
 from ..context import ctx
 from .common import elide
@@ -353,7 +353,7 @@ class TrackHeader(QWidget):
             color = rgba(palette.accent if active else palette.text, 0.92 if active else 0.42)
             painter.setPen(QPen(color))
             text_rect = rect.adjusted(12 if column.key != COLUMN_TITLE else 12, 0, -10, 0)
-            painter.drawText(text_rect, int(column.align), column.title)
+            draw_text(painter, text_rect, int(column.align), column.title)
             if active:
                 arrow_rect = QRect(
                     int(rect.right()) - (12 if column.align & Qt.AlignRight else 22),
@@ -560,26 +560,29 @@ class TrackDelegate(QStyledItemDelegate):
             sub_metrics.height(),
         )
         if compact:
-            painter.drawText(title_rect, int(Qt.AlignLeft | Qt.AlignVCenter), title)
+            draw_text(painter, title_rect, int(Qt.AlignLeft | Qt.AlignVCenter), title)
             painter.setFont(sub_font)
             painter.setPen(QPen(rgba(palette.text, 0.62 if selected else 0.5)))
-            painter.drawText(
+            draw_text(
+                painter,
                 sub_rect,
                 int(Qt.AlignLeft | Qt.AlignVCenter),
                 sub_metrics.elidedText(track.artist, Qt.ElideRight, int(max(20, available))),
             )
         else:
             if track.artist:
-                painter.drawText(title_rect, int(Qt.AlignLeft | Qt.AlignVCenter), title)
+                draw_text(painter, title_rect, int(Qt.AlignLeft | Qt.AlignVCenter), title)
                 painter.setFont(sub_font)
                 painter.setPen(QPen(rgba(palette.text, 0.62 if selected else 0.46)))
-                painter.drawText(
+                draw_text(
+                    painter,
                     sub_rect,
                     int(Qt.AlignLeft | Qt.AlignVCenter),
                     sub_metrics.elidedText(track.artist, Qt.ElideRight, int(max(20, available))),
                 )
             else:
-                painter.drawText(
+                draw_text(
+                    painter,
                     QRectF(text_left, rect.top(), max(20, available), rect.height()),
                     int(Qt.AlignLeft | Qt.AlignVCenter),
                     title,

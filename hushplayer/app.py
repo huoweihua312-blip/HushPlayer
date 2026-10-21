@@ -178,13 +178,12 @@ class HushApp(QObject):
                 return max(1.0, float(override))
             except ValueError:
                 pass
-        # When the user picked an explicit 界面缩放 (QT_SCALE_FACTOR), that choice
-        # already enlarges every logical pixel; applying the automatic type scale
-        # on top would double-size the UI.
+        # An explicit 界面缩放 replaces the automatic type scale (it is applied
+        # here rather than via QT_SCALE_FACTOR so glyphs stay on whole pixels).
         try:
-            from .core.display import scale_preference
+            from .core.display import scale_preference, resolve_scale
             if scale_preference() != "auto":
-                return 1.0
+                return max(0.8, min(2.0, resolve_scale()))
         except Exception:  # noqa: BLE001
             pass
         try:
@@ -561,7 +560,7 @@ def main(argv: list[str] | None = None) -> int:
         waited = _wait_for_pid_exit(wait_pid)
         log.info("重启：旧进程 %s 已退出（等待 %.2fs）", wait_pid, waited)
     ui_scale = apply_scale_environment()
-    log.info("界面缩放：%s（QT_SCALE_FACTOR=%s）", scale_text(), ui_scale)
+    log.info("界面缩放：%s（字体与布局 ×%.2f，DPI 1.0）", scale_text(), ui_scale)
 
     QApplication.setAttribute(Qt.AA_DontCreateNativeWidgetSiblings, True)
     app = QApplication(argv)

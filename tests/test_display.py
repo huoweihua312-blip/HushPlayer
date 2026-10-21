@@ -58,13 +58,17 @@ def test_invalid_preference_falls_back_to_auto(settings_file, monkeypatch):
     assert display.resolve_scale() == pytest.approx(1.0)
 
 
-def test_apply_scale_environment_sets_qt_factor(settings_file, monkeypatch):
+def test_apply_scale_environment_keeps_device_ratio(settings_file, monkeypatch):
+    """Scaling is applied through fonts/metrics, never a fractional DPR."""
     import os
 
     settings_file("1.15")
+    monkeypatch.delenv("QT_SCALE_FACTOR", raising=False)
     value = display.apply_scale_environment()
     assert value == pytest.approx(1.15)
-    assert os.environ["QT_SCALE_FACTOR"] == "1.15"
+    # A fractional QT_SCALE_FACTOR softens bold CJK glyphs; the preference must
+    # not leak into it.
+    assert "QT_SCALE_FACTOR" not in os.environ
     assert display.current_scale() == pytest.approx(1.15)
 
     settings_file("1.0")
