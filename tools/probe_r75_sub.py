@@ -41,7 +41,8 @@ through = menu.addAction("鼠标穿透")
 through.setCheckable(True)
 menu.addSeparator()
 sub = menu.addMenu("显示行数")
-one = sub.addAction("单行")
+clicked = {"n": 0}
+one = sub.addAction("单行", lambda: clicked.__setitem__("n", clicked["n"] + 1))
 one.setCheckable(True)
 two = sub.addAction("双行")
 two.setCheckable(True)
@@ -72,7 +73,7 @@ def open_and_grab() -> None:
 
 
 def with_sub() -> None:
-    menu._open_submenu(4)  # 字号
+    menu._open_submenu(3)  # 显示行数
     app.processEvents()
     QTimer.singleShot(250, grab_open)
 
@@ -81,6 +82,20 @@ def grab_open() -> None:
     app.primaryScreen().grabWindow(0).copy(120, 90, 640, 440).save(
         "artifacts/qa/r75/sub_open.png"
     )
+    # click "单行" inside the submenu: overlay hit-testing must reach it
+    rect = menu._sub_rect()
+    pt = QPointF(rect.center().x(), rect.top() + 20)
+    menu.mouseReleaseEvent(
+        QMouseEvent(
+            QEvent.Type.MouseButtonRelease,
+            pt,
+            menu.mapToGlobal(pt),
+            Qt.MouseButton.LeftButton,
+            Qt.MouseButton.LeftButton,
+            Qt.KeyboardModifier.NoModifier,
+        )
+    )
+    print("CLICK_STATE", clicked["n"], "OPEN", menu.isVisible(), flush=True)
     # hover a row that is not the submenu row -> submenu must collapse
     menu.mouseMoveEvent(move_event(60, 30))
     app.processEvents()

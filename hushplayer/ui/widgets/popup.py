@@ -1,10 +1,11 @@
-"""Self-drawn menus, list popups and in-window submenus.
+"""Menus drawn *inside* the app window, plus a masked fallback for floating windows.
 
-Why not ``QMenu``: on Windows it is an opaque native window. A stylesheet radius
-only reveals the black window fill, so corners never look clean, and submenus
-are separate windows that keep their own hover state even after the pointer
-leaves. This widget paints everything itself and keeps submenus *inside the same
-window*, which also makes hover and dismissal exact.
+Native popup windows (``QMenu`` or a frameless ``Qt.Popup``) are rectangles owned
+by Windows: DWM draws a rectangular shadow, corners depend on compositing, and
+changing the window size while it is open breaks input hit-testing (submenus
+became unclickable). Menus therefore render as a child overlay of the app window
+whenever they fit there; only menus that must float outside a small window (the
+desktop lyrics) fall back to a masked native popup.
 """
 
 from __future__ import annotations
@@ -12,9 +13,9 @@ from __future__ import annotations
 import ctypes
 from typing import Callable
 
-from PySide6.QtCore import QEventLoop, QObject, QPoint, QRectF, QSize, Qt, Signal
-from PySide6.QtGui import QColor, QFontMetrics, QPainter, QPainterPath, QPen
-from PySide6.QtWidgets import QWidget
+from PySide6.QtCore import QEvent, QEventLoop, QObject, QPoint, QRectF, QSize, Qt, Signal
+from PySide6.QtGui import QColor, QFontMetrics, QPainter, QPainterPath, QPen, QRegion
+from PySide6.QtWidgets import QApplication, QWidget
 
 from ...core import icons
 from ...core.theme import rgba, theme
@@ -83,12 +84,13 @@ class PopupAction(QObject):
 
 
 class PopupMenu(QWidget):
-    """Rounded, self-painted popup menu with in-window submenus."""
+    """Rounded menu that prefers rendering as a child overlay of the app window."""
 
     def __init__(self, parent: QWidget | None = None) -> None:
-        super().__init__(parent, Qt.WindowType.Popup | Qt.WindowType.FramelessWindowHint)
-        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
+        super().__init__(parent)
+        self._host_hint = parent
         self.setAttribute(Qt.WidgetAttribute.WA_NoSystemBackground, True)
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
         self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose, False)
         self.setMouseTracking(True)
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
@@ -104,6 +106,8 @@ class PopupMenu(QWidget):
         self._row_font = theme().font(9.4, 400)
         self._font = theme().font(9.4, 500)
         self._base_width = 0
+        self._overlay = False
+        self._host: QWidget | None = None
 
     # ---------------------------------------------------------------- building
     def addAction(self, text, callback=None) -> PopupAction:  # noqa: N802
@@ -202,8 +206,63 @@ class PopupMenu(QWidget):
         self.setFixedSize(int(total_width), int(total_height))
 
     # ------------------------------------------------------------------ showing
+    def _host_window(self) -> QWidget | None:
+        parent = self._host_hint
+        if parent is None:
+            return None
+        window = parent.window()
+        return window if window is not parent or parent.isWindow() else None
+
+    def _fits_overlay(self, host: QWidget) -> bool:
+        if host is None or not host.isVisible():
+            return False
+        width, height = self._intrinsic_size()
+        child_w = 0
+        if self._sub_open >= 0 and self._submenu is not None:
+            child_w = self._submenu._intrinsic_size()[0] - 14
+        return host.width() >= width + child_w + 8 and host.height() >= height + 8
+
+    def popup(self, position: QPoint) -> None:  # noqa: N802
+        host = self._host_window()
+        if self._fits_overlay(host):
+            self._show_overlay(host, position)
+        else:
+            self._show_native(position)
+
+    def _show_overlay(self, host: QWidget, global_position: QPoint) -> None:
+        self._overlay = True
+        self._host = host
+        self.setParent(host)
+        self.setWindowFlags(Qt.WindowType.Widget)
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
+        self._relayout()
+        local = host.mapFromGlobal(global_position)
+        local.setX(max(4, min(local.x(), host.width() - self.width() - 4)))
+        local.setY(max(4, min(local.y(), host.height() - self.height() - 4)))
+        self.move(local)
+        self.show()
+        self.raise_()
+        self.setFocus(Qt.FocusReason.PopupFocusReason)
+        QApplication.instance().installEventFilter(self)
+
+    def _show_native(self, position: QPoint) -> None:
+        self._overlay = False
+        self._host = None
+        self.setParent(None)
+        self.setWindowFlags(
+            Qt.WindowType.Popup
+            | Qt.WindowType.FramelessWindowHint
+            | Qt.WindowType.NoDropShadowWindowHint
+        )
+        self._apply_native_corners()
+        self._relayout()
+        self._apply_round_mask()
+        self._place(position)
+        self.show()
+        self.raise_()
+        self.setFocus(Qt.FocusReason.PopupFocusReason)
+
     def _apply_native_corners(self) -> None:
-        """Ask DWM not to round this window: its 8px radius fights ours."""
         try:
             hwnd = int(self.winId())
             value = ctypes.c_int(_DWMWCP_DONOTROUND)
@@ -216,15 +275,15 @@ class PopupMenu(QWidget):
         except Exception:  # pragma: no cover - non-Windows
             pass
 
-    def showEvent(self, event) -> None:  # noqa: N802
-        super().showEvent(event)
-        self._apply_native_corners()
-
-    def popup(self, position: QPoint) -> None:  # noqa: N802
-        self._place(position)
-        self.show()
-        self.raise_()
-        self.setFocus(Qt.FocusReason.PopupFocusReason)
+    def _apply_round_mask(self) -> None:
+        """Physical clipping: shadows and hit-testing follow the mask, not a rect."""
+        path = QPainterPath()
+        width, height = self._intrinsic_size()
+        path.addRoundedRect(QRectF(0, 0, width, height), self._radius, self._radius)
+        if self._submenu is not None and self._sub_open >= 0:
+            sub = self._sub_rect()
+            path.addRoundedRect(sub, self._radius, self._radius)
+        self.setMask(QRegion(path.toFillPolygon().toPolygon()))
 
     def _place(self, position: QPoint) -> None:
         screen = self.screen()
@@ -245,11 +304,17 @@ class PopupMenu(QWidget):
         loop.exec()
         return self._active
 
-    def closeEvent(self, event) -> None:  # noqa: N802
+    # ------------------------------------------------------------------- closing
+    def _release(self) -> None:
         self._reset_submenu()
+        QApplication.instance().removeEventFilter(self)
         if self._loop is not None:
             self._loop.quit()
             self._loop = None
+        self.hide()
+
+    def closeEvent(self, event) -> None:  # noqa: N802
+        self._release()
         super().closeEvent(event)
 
     def hideEvent(self, event) -> None:  # noqa: N802
@@ -257,6 +322,22 @@ class PopupMenu(QWidget):
             self._loop.quit()
             self._loop = None
         super().hideEvent(event)
+
+    def eventFilter(self, obj, event) -> bool:  # noqa: N802
+        if self._overlay and self.isVisible():
+            if event.type() == QEvent.Type.MouseButtonPress:
+                global_pos = event.globalPosition().toPoint()
+                local = self.mapFromGlobal(global_pos)
+                if not self.rect().contains(local):
+                    self._release()
+                elif self._submenu is None and local.x() >= self._base_width:
+                    self._release()
+            elif event.type() in (
+                QEvent.Type.WindowDeactivate,
+                QEvent.Type.ApplicationDeactivate,
+            ):
+                self._release()
+        return False
 
     # ------------------------------------------------------------- submenu state
     def _reset_submenu(self) -> None:
@@ -277,7 +358,14 @@ class PopupMenu(QWidget):
         self._sub_open = index
         self._sub_hover = -1
         self._relayout()
-        self._place(self.pos())
+        if self._overlay and self._host is not None:
+            local = self.pos()
+            local.setX(max(4, min(local.x(), self._host.width() - self.width() - 4)))
+            local.setY(max(4, min(local.y(), self._host.height() - self.height() - 4)))
+            self.move(local)
+        else:
+            self._apply_round_mask()
+            self._place(self.pos())
 
     def _sub_rect(self) -> QRectF:
         if self._submenu is None or self._sub_open < 0:
@@ -297,7 +385,11 @@ class PopupMenu(QWidget):
         if self._submenu is None:
             return -1
         rect = self._sub_rect()
-        if not rect.contains(QRectF(point, point)):
+        inside = (
+            rect.left() <= point.x() <= rect.right()
+            and rect.top() <= point.y() <= rect.bottom()
+        )
+        if not inside:
             return -1
         return self._submenu._item_at(int(point.y() - rect.top()))
 
@@ -331,10 +423,10 @@ class PopupMenu(QWidget):
                     item.setChecked(not item.isChecked())
                 self._active = item
                 item.triggered.emit()
-                self.close()
+                self._release()
             return
         if point.x() >= self._base_width:
-            self.close()
+            self._release()
             return
         index = self._item_at(point.y())
         if index < 0:
@@ -348,11 +440,11 @@ class PopupMenu(QWidget):
                 item.setChecked(not item.isChecked())
             self._active = item
             item.triggered.emit()
-            self.close()
+            self._release()
 
     def keyPressEvent(self, event) -> None:  # noqa: N802
         if event.key() == Qt.Key.Key_Escape:
-            self.close()
+            self._release()
             return
         super().keyPressEvent(event)
 
@@ -471,13 +563,18 @@ class PopupMenu(QWidget):
         return QSize(self.width(), self.height())
 
 
-def list_popup(items: list[str], current: int, on_pick: Callable[[int], None]) -> PopupMenu:
-    """Rounded popup used by combo boxes (non-blocking)."""
-    menu = PopupMenu()
+def list_popup(
+    items: list[str],
+    current: int,
+    on_pick: Callable[[int], None],
+    parent: QWidget | None = None,
+) -> PopupMenu:
+    """Rounded list popup used by combo boxes (overlay when it fits)."""
+    menu = PopupMenu(parent)
 
     def choose(index: int) -> None:
         on_pick(index)
-        menu.close()
+        menu._release()
 
     for index, label in enumerate(items):
         action = PopupAction(label, checkable=True, checked=index == current)

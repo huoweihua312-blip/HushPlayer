@@ -420,7 +420,7 @@ class SettingCombo(QComboBox):
         def pick(index: int) -> None:
             self.setCurrentIndex(index)
 
-        menu = list_popup(labels, self.currentIndex(), pick)
+        menu = list_popup(labels, self.currentIndex(), pick, self)
         # Open on the next event-loop turn: this method is called from the
         # combo's mouse press, and opening synchronously makes the following
         # release land on the popup and close it instantly.
