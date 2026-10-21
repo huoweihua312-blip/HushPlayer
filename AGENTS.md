@@ -146,6 +146,10 @@ HushPlayer-<ver>-setup.exe /VERYSILENT /LOG=...
 3. **执行纪律**：每次开始改动前，先在回复里说明「读了 §X」；改完把结论写进 §6/§9。
    要给规则加新条款，加到 §4（不变量）或 §6（方案索引），不要散落在别处。
 
+> 工具链小坑：本机 `.venv` 的 Python 以 Low 完整性运行，而 DSH 写入的 `AGENTS.md` 是 Medium，
+> 直接 `write_text` 会 `PermissionError`。改这个文件用 PowerShell（Medium 进程）写：
+> `Set-Content AGENTS.md $text -Encoding UTF8`。
+
 ## 8. 已知问题 / 待办
 
 - **安装包默认目录仍可能不对（用户 1.1.26 报告，本轮不修）**。
