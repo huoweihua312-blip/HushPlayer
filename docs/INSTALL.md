@@ -29,7 +29,7 @@ powershell -ExecutionPolicy Bypass -File packaging\build.ps1 -Zip
 
 1. 下载 zip 后先核对 `SHA256SUMS.txt`：
    ```powershell
-   Get-FileHash .\HushPlayer-1.1.6-win64.zip -Algorithm SHA256
+   Get-FileHash .\HushPlayer-1.1.7-win64.zip -Algorithm SHA256
    ```
 2. 升级时保留旧目录（例如把 `HushPlayer` 改名为 `HushPlayer.old`），再解压新包；确认无误后再删除旧目录。
 3. 回滚：删除新目录、把 `HushPlayer.old` 改回 `HushPlayer` 即可——用户数据在独立目录，不受影响。
@@ -93,11 +93,11 @@ HushPlayer 是绿色版：把 `HushPlayer` 目录放在任意位置（例如 `D:
 
 ## 安装包（推荐）
 
-运行 `HushPlayer-1.1.6-setup.exe`：
+运行 `HushPlayer-1.1.7-setup.exe`：
 
 - 默认安装到 `%LOCALAPPDATA%\Programs\HushPlayer`，无需管理员权限；
 - 安装向导为简体中文（语言文件取自 Inno Setup 官方仓库并随包内置）；
-- 安装位置可自选：向导会显示「选择目标位置」页，默认沿用上次安装目录（欢迎页会写明具体路径），直接下一步即原地覆盖升级；点「浏览…」可改到任意文件夹。
+- 安装位置可自选：向导会显示「选择目标位置」页，默认沿用上次安装目录（欢迎页会写明具体路径；自定义目录也会被带出），直接下一步即原地覆盖升级；点「浏览…」可改到任意文件夹。
 - 可选「桌面快捷方式」与「登录时自动启动」；
 - 卸载：设置 → 应用 → HushPlayer（或开始菜单「卸载 HushPlayer」）。
 
@@ -106,6 +106,6 @@ HushPlayer 是绿色版：把 `HushPlayer` 目录放在任意位置（例如 `D:
 校验安装包：
 
 ```powershell
-Get-FileHash HushPlayer-1.1.6-setup.exe -Algorithm SHA256
-# 0D7FFF165C20795FF6D9C5C4421423A5C1DB8F2CA615AC3F01093EA9F770EDC1
+Get-FileHash HushPlayer-1.1.7-setup.exe -Algorithm SHA256
+# 0C6B7D4B3A355BB8183A22DB56CE1FFCCA347C83A431E515C0914783BE98CFEF
 ```

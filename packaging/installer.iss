@@ -4,7 +4,7 @@
 ; intentionally left in place when uninstalling.
 
 #define AppName "HushPlayer"
-#define AppVersion "1.1.6"
+#define AppVersion "1.1.7"
 #define AppExe "HushPlayer.exe"
 #define AppId "{{6F1C2B7E-3A4D-4E5B-9C8A-2D1E0B7F4A21}"
 
@@ -92,11 +92,15 @@ procedure InitializeWizard();
 var
   previous: String;
 begin
-  { Tell upgraders what the Next button will do; the destination page that
-    follows is prefilled with this same folder and can still be changed. }
+  { Inno only remembers folders it installed itself; force the destination box
+    to our last recorded folder so a moved/custom install still upgrades in
+    place, and tell the user on the welcome page what Next will do. }
   previous := PreviousInstallDir();
   if previous <> '' then
+  begin
+    WizardForm.DirEdit.Text := previous;
     WizardForm.WelcomeLabel2.Caption :=
       WizardForm.WelcomeLabel2.Caption + #13#10 + #13#10 +
       '升级安装：将覆盖到上次目录 ' + previous + '；如需更换，可在下一步修改。';
+  end;
 end;
