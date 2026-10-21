@@ -12,7 +12,9 @@ def test_font_pixel_sizes_are_integers(qapp) -> None:
     font = theme().font(9.4, 500)
     assert isinstance(font, QFont)
     assert font.pixelSize() > 0
-    assert font.hintingPreference() == QFont.HintingPreference.PreferFullHinting
+    # No hinting: DirectWrite's natural outlines keep CJK semibold stems even;
+    # full hinting made bold labels look chunky at fractional sizes.
+    assert font.hintingPreference() == QFont.HintingPreference.PreferNoHinting
     assert font.kerning() is True
 
 

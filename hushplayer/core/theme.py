@@ -345,7 +345,7 @@ class Theme(QObject):
         font.setFamilies(families)
         font.setPixelSize(self.px(size))
         font.setWeight(QFont.Weight(weight))
-        font.setHintingPreference(QFont.HintingPreference.PreferFullHinting)
+        font.setHintingPreference(QFont.HintingPreference.PreferNoHinting)
         font.setStyleStrategy(QFont.StyleStrategy.PreferAntialias)
         font.setKerning(True)
         return font
@@ -372,8 +372,8 @@ class Theme(QObject):
 QWidget {{
     color: {p.text};
     background: transparent;
-    selection-background-color: {p.accent};
-    selection-color: {p.accent_text};
+    selection-background-color: {css_rgba(p.accent, 0.20)};
+    selection-color: {p.text};
 }}
 QWidget#RootWindow {{ background: {p.window}; }}
 QWidget#ContentHost {{ background: {p.window}; }}
@@ -441,11 +441,51 @@ QComboBox::drop-down {{ border: none; width: 22px; }}
 QComboBox QAbstractItemView {{
     background: {p.elevated};
     border: 1px solid {p.border};
-    border-radius: 10px;
-    padding: 4px;
+    border-radius: 12px;
+    padding: 6px;
     outline: none;
-    selection-background-color: {p.accent};
+    selection-background-color: {css_rgba(p.accent, 0.20)};
+    selection-color: {p.text};
 }}
+QComboBox QAbstractItemView::item {{
+    min-height: 28px;
+    padding: 2px 8px;
+    border-radius: 8px;
+}}
+QComboBox QAbstractItemView::item:hover {{
+    background: {css_rgba(p.accent, 0.12)};
+}}
+QMenu {{
+    background: {p.elevated};
+    border: 1px solid {p.border};
+    border-radius: 10px;
+    padding: 6px;
+}}
+QMenu::item {{
+    padding: 7px 18px 7px 12px;
+    margin: 1px 4px;
+    border-radius: 8px;
+    color: {p.text};
+}}
+QMenu::item:selected {{
+    background: {css_rgba(p.accent, 0.16)};
+    color: {p.text};
+}}
+QMenu::item:disabled {{ color: {css_rgba(p.text, 0.35)}; }}
+QMenu::separator {{
+    height: 1px;
+    background: {p.border};
+    margin: 5px 12px;
+}}
+QMenu::icon {{ padding-left: 6px; }}
+QPushButton#LinkButton {{
+    background: transparent;
+    border: none;
+    padding: 4px 2px;
+    color: {css_rgba(p.text, 0.55)};
+    text-align: left;
+}}
+QPushButton#LinkButton:hover {{ color: {p.accent}; }}
 QPushButton {{
     background: {p.surface_alt};
     border: 1px solid {p.border};

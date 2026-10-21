@@ -10,7 +10,6 @@ from __future__ import annotations
 import os
 from typing import Callable
 
-from PySide6.QtGui import QFontMetrics
 from PySide6.QtCore import (
     QEasingCurve,
     QPointF,
@@ -21,7 +20,7 @@ from PySide6.QtCore import (
     QVariantAnimation,
     Signal,
 )
-from PySide6.QtGui import QColor, QFontMetrics, QPainter, QPen
+from PySide6.QtGui import QColor, QFontMetrics, QPainter, QPainterPath, QPen
 from PySide6.QtWidgets import (
     QAbstractButton,
     QComboBox,
@@ -38,6 +37,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from ...core import icons
 from ...core.theme import Metrics, css_rgba, qcolor, rgba, theme
 from .common import IconButton, TextButton
 
@@ -112,6 +112,82 @@ class SettingsCard(QFrame):
         )
         self._title_label.setStyleSheet(f"color: {palette.text};")
         self._desc_label.setStyleSheet(f"color: {css_rgba(palette.text, 0.55)};")
+
+
+class ActionCard(QWidget):
+    """A full-width action row: icon, title, one-line hint, click anywhere."""
+
+    clicked = Signal()
+
+    def __init__(self, icon_name: str, title: str, hint: str, action, parent=None) -> None:
+        super().__init__(parent)
+        self._icon = icon_name
+        self._title = title
+        self._hint = hint
+        self._action = action
+        self._hover = False
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.setFixedHeight(theme().scaled(58, factor=0.8))
+        self.setMinimumWidth(theme().scaled(240, factor=0.8))
+        self.setAccessibleName(title)
+        self.setToolTip(hint)
+
+    def mouseReleaseEvent(self, event) -> None:  # noqa: N802
+        if event.button() == Qt.MouseButton.LeftButton and self.rect().contains(event.position().toPoint()):
+            self.clicked.emit()
+            if callable(self._action):
+                self._action()
+        super().mouseReleaseEvent(event)
+
+    def enterEvent(self, event) -> None:  # noqa: N802
+        self._hover = True
+        self.update()
+        super().enterEvent(event)
+
+    def leaveEvent(self, event) -> None:  # noqa: N802
+        self._hover = False
+        self.update()
+        super().leaveEvent(event)
+
+    def paintEvent(self, event) -> None:  # noqa: N802
+        p = theme().palette
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        rect = QRectF(self.rect()).adjusted(0.5, 0.5, -0.5, -0.5)
+        radius = theme().scaled(10, factor=0.6)
+        path = QPainterPath()
+        path.addRoundedRect(rect, radius, radius)
+        painter.fillPath(path, rgba(p.text, 0.055 if self._hover else 0.028))
+        painter.setPen(QPen(rgba(p.text, 0.13 if self._hover else 0.07), 1))
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+        painter.drawPath(path)
+
+        pad = theme().scaled(14, factor=0.7)
+        icon_size = theme().scaled(18, factor=0.6)
+        icon_rect = QRectF(rect.left() + pad, rect.center().y() - icon_size / 2, icon_size, icon_size)
+        icons.draw(painter, self._icon, icon_rect, rgba(p.text, 0.62))
+
+        text_left = icon_rect.right() + theme().scaled(12, factor=0.6)
+        available = rect.right() - text_left - pad
+        title_font = theme().font(9.4, 600)
+        hint_font = theme().font(8.2, 400)
+        painter.setFont(title_font)
+        painter.setPen(QPen(p.text))
+        title_rect = QRectF(text_left, rect.top() + theme().scaled(9, factor=0.7), available, title_font.pixelSize() + 4)
+        painter.drawText(
+            title_rect,
+            int(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter),
+            QFontMetrics(title_font).elidedText(self._title, Qt.TextElideMode.ElideRight, int(available)),
+        )
+        painter.setFont(hint_font)
+        painter.setPen(QPen(rgba(p.text, 0.5)))
+        hint_rect = QRectF(text_left, title_rect.bottom() + 2, available, hint_font.pixelSize() + 4)
+        painter.drawText(
+            hint_rect,
+            int(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter),
+            QFontMetrics(hint_font).elidedText(self._hint, Qt.TextElideMode.ElideRight, int(available)),
+        )
+        painter.end()
 
 
 class SettingRow(QWidget):
@@ -285,6 +361,12 @@ class SettingCombo(QComboBox):
         for label, value in items:
             self.addItem(label, value)
         self.setFont(theme().font(9.4, 500))
+        # The popup follows the combo width and would elide long labels such as
+        # "过渡动画（从标题栏按钮扩散）"; give it room for the widest entry.
+        metrics = QFontMetrics(self.font())
+        widest = max((metrics.horizontalAdvance(label) for label, _ in items), default=0)
+        self.view().setMinimumWidth(widest + theme().scaled(64, factor=0.6))
+        self.view().setTextElideMode(Qt.TextElideMode.ElideNone)
 
     def set_value(self, value: object) -> None:
         index = self.findData(value)

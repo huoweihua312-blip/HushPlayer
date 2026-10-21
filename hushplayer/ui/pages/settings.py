@@ -9,6 +9,7 @@ import sys
 from PySide6.QtCore import QSize, Qt, Signal
 from PySide6.QtGui import QColor, QFontMetrics, QPainter, QPen
 from PySide6.QtWidgets import (
+    QPushButton,
     QApplication,
     QFileDialog,
     QHBoxLayout,
@@ -38,6 +39,7 @@ from ...online.models import build_sources
 from ..context import ctx
 from ..widgets.common import IconButton, TextButton
 from ..widgets.settings_widgets import (
+    ActionCard,
     FolderEditor,
     SegmentedPicker,
     SettingCombo,
@@ -214,7 +216,9 @@ class SettingsPage(Page):
         self.settings = settings_singleton()
         self.header = PageHeader("设置", "所有更改都会立即保存")
         self.header.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
-        self.header.setMinimumHeight(self.header.sizeHint().height())
+        # PageHeader paints itself without a layout, so sizeHint() is invalid;
+        # keep the height it computed instead of feeding -1 to Qt.
+        self.header.setMinimumHeight(self.header.height())
         layout = self.content_layout
         layout.setContentsMargins(Metrics.page_pad, 14, Metrics.page_pad, 8)
         layout.setSpacing(10)
@@ -824,37 +828,24 @@ class SettingsPage(Page):
         self._source_rows.setContentsMargins(0, 0, 0, 0)
         self._source_rows.setSpacing(2)
         card.add(self._source_container())
-        card.add_row(self._row(
-            "添加音源",
-            "安装社区 MusicFree 兼容插件（.js 文件），只保存在用户数据目录",
-            self._action_button("添加音源…", "plus", self._add_source),
-        ))
-        card.add_row(self._row(
-            "从链接添加",
-            "粘贴 MusicFree 兼容插件的 http(s) 地址，程序会下载并校验大小",
-            self._action_button("从链接…", "cloud", self._add_source_url),
-        ))
-        card.add_row(self._row(
-            "导入订阅",
-            "粘贴 MusicFree 订阅地址（mf.json），一次导入订阅里的全部音源",
-            self._action_button("导入订阅…", "cloud", self._import_subscription),
-        ))
-        card.add_row(self._row(
-            "检查订阅更新",
-            "重新读取已导入的订阅，只安装新增的音源",
-            self._action_button("检查更新", "refresh", self._check_subscription),
-        ))
-        card.add_row(self._row(
-            "批量导入",
-            "选择一个文件夹，把它里面的 .js / .json 插件一次性安装（不递归子目录）",
-            self._action_button("选择文件夹…", "folder", self._import_source_folder),
-        ))
-        card.add_row(self._row(
-            "恢复内置音源",
-            "把删除过的内置音源重新加回列表",
-            self._action_button("恢复", "refresh", self._restore_sources),
-        ))
         column.addWidget(card)
+
+        manager = SettingsCard("音源管理", "安装 MusicFree 兼容插件、订阅或批量导入")
+        for icon_name, title, hint, handler in (
+            ("plus", "添加音源", "安装本地的 .js / .json 插件，只保存在用户数据目录", self._add_source),
+            ("cloud", "从链接添加", "粘贴插件地址，程序会下载并校验大小", self._add_source_url),
+            ("download", "导入订阅", "粘贴 MusicFree 订阅地址，一次导入其中的全部音源", self._import_subscription),
+            ("refresh", "检查订阅更新", "重新读取已导入的订阅，只安装新增的音源", self._check_subscription),
+            ("folder", "批量导入", "选择文件夹，一次性安装里面的插件（不递归子目录）", self._import_source_folder),
+        ):
+            manager.add(ActionCard(icon_name, title, hint, handler))
+        restore = QPushButton("恢复内置音源")
+        restore.setObjectName("LinkButton")
+        restore.setCursor(Qt.CursorShape.PointingHandCursor)
+        restore.setFixedHeight(theme().scaled(30, factor=0.6))
+        restore.clicked.connect(self._restore_sources)
+        manager.add(restore)
+        column.addWidget(manager)
 
         card = SettingsCard("网络", "")
         card.add_row(self._row(
