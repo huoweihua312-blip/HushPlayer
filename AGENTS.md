@@ -169,3 +169,4 @@ HushPlayer-<ver>-setup.exe /VERYSILENT /LOG=...
 - 2026-10-22：首次创建。汇总用户要求、技术不变量、安装/菜单/字体/队列等既有方案，记录安装包默认目录的待排查项。
 - 2026-10-22：新增 §0「每次改动的固定流程」与 §7.1「三层生效机制」；新增提交门禁
   `.githooks/pre-commit` + `tools/agents_guard.py` + `tools/install_git_hooks.ps1`（说明见 `docs/GIT_HOOKS.md`）。
+- 2026-10-22：补充编辑方式说明——`.venv` 的 Python 是 Low 完整性，写 Medium 的 `AGENTS.md` 会 `PermissionError`，改用 PowerShell 写。
