@@ -8,6 +8,7 @@
 
 ## 1.1.15 - 2026-10-21
 
+- 安装包修正：升级时目录框默认填上次安装的位置。此前把「上次目录」写进目录框是在向导初始化阶段，Inno 在目标位置页显示时又用自己的记录覆盖了它（没有记录时回到默认 `%LOCALAPPDATA%\Programs\HushPlayer`），所以看起来「没记住上次目录」。现在默认目录由脚本常量提供（先读 `HKCU\Software\HushPlayer\InstallDir`，其次读 Inno 卸载记录的 `InstallLocation`），并在目标位置页显示时再兜底写一次；用户仍可点击「浏览」改到别处。
 - 提交：e74ba1a
 ### 更新摘要
 - 歌单区「+」菜单新增「从文件导入歌单…」：支持 iTunes / Apple Music、foobar2000、MusicBee、VLC 导出的 `.m3u/.m3u8/.pls`，以及 `.csv`（标题,歌手,专辑）与「歌手 - 歌名」纯文本 `.txt`。

@@ -16,7 +16,7 @@ AppVerName={#AppName} {#AppVersion}
 AppPublisher=HushPlayer
 VersionInfoVersion={#AppVersion}
 VersionInfoDescription=HushPlayer 安装程序
-DefaultDirName={localappdata}\Programs\{#AppName}
+DefaultDirName={code:PreviousDir}
 DefaultGroupName={#AppName}
 DisableProgramGroupPage=yes
 ; The page exists on every run, but ShouldSkipPage() hides it on upgrades
@@ -85,26 +85,54 @@ function PreviousInstallDir(): String;
 var
   value: String;
 begin
+  Result := '';
   if RegQueryStringValue(
        HKCU, 'Software\HushPlayer', 'InstallDir', value) and DirExists(value) then
     Result := value
-  else
-    Result := '';
+  else if RegQueryStringValue(
+       HKCU,
+       'Software\Microsoft\Windows\CurrentVersion\Uninstall\{#SetupSetting("AppId")}_is1',
+       'InstallLocation', value) and DirExists(value) then
+    { Older builds did not write our own key; Inno's uninstall record still has
+      the folder the user actually chose. }
+    Result := value;
+end;
+
+function PreviousDir(Param: String): String;
+var
+  remembered: String;
+begin
+  remembered := PreviousInstallDir();
+  if remembered = '' then
+    remembered := ExpandConstant('{localappdata}\Programs\{#AppName}');
+  Result := remembered;
 end;
 
 procedure InitializeWizard();
 var
   previous: String;
 begin
-  { Inno only remembers folders it installed itself; force the destination box
-    to our last recorded folder so a moved/custom install still upgrades in
-    place, and tell the user on the welcome page what Next will do. }
+  { Tell the user on the welcome page what Next will do. }
   previous := PreviousInstallDir();
   if previous <> '' then
   begin
-    WizardForm.DirEdit.Text := previous;
     WizardForm.WelcomeLabel2.Caption :=
       WizardForm.WelcomeLabel2.Caption + #13#10 + #13#10 +
       '升级安装：将覆盖到上次目录 ' + previous + '；如需更换，可在下一步修改。';
+  end;
+end;
+
+procedure CurPageChanged(CurPageID: Integer);
+var
+  previous: String;
+begin
+  { Inno fills the destination box with its own record (or the default) when the
+    page is shown, which would overwrite anything set in InitializeWizard.
+    Re-apply our remembered folder after the page has been prepared. }
+  if CurPageID = wpSelectDir then
+  begin
+    previous := PreviousInstallDir();
+    if previous <> '' then
+      WizardForm.DirEdit.Text := previous;
   end;
 end;
