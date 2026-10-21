@@ -322,7 +322,12 @@ class TrackRepository:
         return [Track.from_row(row) for row in rows]
 
     def albums(self, *, search: str = "", limit: int = -1) -> list[Album]:
-        clauses = ["kind='local'", "album_id != ''"]
+        # Favourited online tracks join the album view so saved streaming music
+        # is browsable next to local files instead of only in 我喜欢.
+        clauses = [
+            "(kind='local' OR (kind='online' AND favorite=1))",
+            "album_id != ''",
+        ]
         params: list[Any] = []
         if search.strip():
             clauses.append("(album LIKE ? OR album_artist LIKE ?)")
@@ -354,7 +359,7 @@ class TrackRepository:
         ]
 
     def artists(self, *, search: str = "", limit: int = -1) -> list[Artist]:
-        clauses = ["t.kind='local'"]
+        clauses = ["(t.kind='local' OR (t.kind='online' AND t.favorite=1))"]
         params: list[Any] = []
         if search.strip():
             clauses.append("a.name LIKE ?")

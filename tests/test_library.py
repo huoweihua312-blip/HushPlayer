@@ -148,3 +148,33 @@ def test_format_duration() -> None:
     assert format_duration(0) == "0:00"
     assert format_duration(65_000) == "1:05"
     assert format_duration(3_725_000) == "1:02:05"
+
+def test_favourited_online_track_shows_in_albums_and_artists(library):
+    """Saved streaming tracks should be browsable, not only listed in 我喜欢."""
+    from hushplayer.model.track import Track
+
+    online = Track(
+        id="kw:1", title="家书", artist="加木", album="羲和",
+        duration_ms=242000, source_id="kw", kind="online",
+    )
+    library.toggle_favorite(online)
+
+    albums = library.albums()
+    artists = library.artists()
+    assert any(album.name == "羲和" for album in albums)
+    assert any(artist.name == "加木" for artist in artists)
+
+    library.toggle_favorite(online)  # un-favourite
+    assert not any(album.name == "羲和" for album in library.albums())
+
+
+def test_record_play_persists_online_track_for_recent(library):
+    from hushplayer.model.track import Track
+
+    online = Track(
+        id="kw:2", title="家书（现场）", artist="加木", album="羲和",
+        duration_ms=242000, source_id="kw", kind="online",
+    )
+    library.record_play(online)
+    recent = library.recent()
+    assert any(track.id == "kw:2" for track in recent)

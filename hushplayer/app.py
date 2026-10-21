@@ -67,6 +67,9 @@ class HushApp(QObject):
         )
         self.cache = CacheService(self.proxy, self.library.covers.store, self)
         self.clock = PlaybackClock(self)
+        # Play history powers 最近播放 and the play counts on cards; it must
+        # cover online tracks too, not just the local library.
+        self.player.track_started.connect(self._record_play)
         self.player.position_changed.connect(self.clock.set_position)
         self.player.duration_changed.connect(self.clock.set_duration)
         self.player.state_changed.connect(
@@ -433,6 +436,12 @@ class HushApp(QObject):
         self.client.ready.connect(lambda info: log.info("在线音源运行时就绪：%s", info))
         if self.runtime_ok:
             QTimer.singleShot(400, self.client.ensure_started)
+
+    def _record_play(self, track) -> None:
+        try:
+            self.library.record_play(track)
+        except Exception as exc:  # noqa: BLE001
+            log_exception("记录播放历史失败", exc)
 
     def _on_client_failure(self, message: str) -> None:
         log.warning("在线音源不可用：%s", message)

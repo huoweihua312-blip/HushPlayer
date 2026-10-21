@@ -18,7 +18,7 @@ from PySide6.QtCore import QObject, Signal
 from ..core.logging_setup import get_logger
 from ..library.artwork import CoverProvider
 from ..library.scanner import ScanResult, Scanner
-from ..model.track import Track
+from ..model.track import Track, album_key
 from ..store.db import Database
 from ..store.repository import (
     LibraryStats,
@@ -171,6 +171,7 @@ class LibraryService(QObject):
     def toggle_favorite(self, track: Track) -> bool:
         """Add/remove ``track`` from 我喜欢, persisting online tracks as needed."""
         if track.kind == "online":
+            self._ensure_online_album(track)
             stored = self.tracks.get(track.id)
             if stored is None:
                 self.tracks.upsert(track)
@@ -248,9 +249,21 @@ class LibraryService(QObject):
         return self.playlists.containing(track_id)
 
     # ------------------------------------------------------------------ misc
+
+    @staticmethod
+    def _ensure_online_album(track: Track) -> None:
+        """Online tracks arrive without album ids; derive one so the album and
+        artist browsers can group them like local files."""
+        if not track.album_id and track.album:
+            track.album_id = album_key(track.album, track.album_artist or track.artist)
+        if not track.album_artist and track.artist:
+            track.album_artist = track.artist
+
     def record_play(self, track: Track, context: str = "") -> None:
-        if track.kind == "online" and self.tracks.get(track.id) is None:
-            self.tracks.upsert(track)
+        if track.kind == "online":
+            self._ensure_online_album(track)
+            if self.tracks.get(track.id) is None:
+                self.tracks.upsert(track)
         self.tracks.record_play(track.id, context)
         self.track_updated.emit(track.id)
 
