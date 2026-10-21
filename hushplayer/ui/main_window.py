@@ -502,7 +502,7 @@ class MainWindow(FramelessWindow):
         self._tray.setIcon(icon)
         self._tray_null_icon = icon.isNull()
         self._tray.setToolTip("HushPlayer")
-        menu = themed_menu()
+        menu = QMenu()
         show_action = QAction("显示 HushPlayer", self)
         show_action.triggered.connect(self._restore_from_tray)
         menu.addAction(show_action)

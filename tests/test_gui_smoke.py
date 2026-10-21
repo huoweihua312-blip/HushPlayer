@@ -420,3 +420,21 @@ def test_popup_menus_and_combos_use_rounded_theme(app_bundle):
     combo = SettingCombo([("过渡动画（从标题栏按钮扩散）", "reveal"), ("关闭", "off")])
     assert isinstance(combo.view().itemDelegate(), _RoundedRowDelegate)
     assert combo.view().window().testAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+
+def test_combo_popup_uses_rounded_menu(app_bundle, monkeypatch):
+    """The combo dropdown must use our rounded popup, not the native list window."""
+    import hushplayer.ui.widgets.popup as popup
+    from hushplayer.ui.widgets.settings_widgets import SettingCombo
+
+    seen: dict[str, object] = {}
+
+    def fake_exec(self, position):  # noqa: ANN001
+        seen["kind"] = type(self).__name__
+        seen["items"] = [item.text() for item in self._items if item is not None]
+        return None
+
+    monkeypatch.setattr(popup.PopupMenu, "exec", fake_exec)
+    combo = SettingCombo([("甲", "a"), ("乙", "b")])
+    combo.showPopup()
+    assert seen["kind"] == "PopupMenu"
+    assert seen["items"] == ["甲", "乙"]

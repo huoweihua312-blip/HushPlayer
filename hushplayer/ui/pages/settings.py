@@ -831,6 +831,7 @@ class SettingsPage(Page):
         column.addWidget(card)
 
         manager = SettingsCard("音源管理", "安装 MusicFree 兼容插件、订阅或批量导入")
+        manager.set_spacing(theme().scaled(10, factor=1.0))
         for icon_name, title, hint, handler in (
             ("plus", "添加音源", "安装本地的 .js / .json 插件，只保存在用户数据目录", self._add_source),
             ("cloud", "从链接添加", "粘贴插件地址，程序会下载并校验大小", self._add_source_url),
@@ -984,6 +985,8 @@ class SettingsPage(Page):
         self._install_source_files([str(path) for path in files])
 
     def _check_subscription(self) -> None:
+        from ...online.registry import RegistryError, registry
+
         url = str(self.settings.get("online.subscription_url", "") or "").strip()
         if not url:
             QInputDialog_msg = "先用「导入订阅」添加一次订阅，之后就能在这里检查更新"

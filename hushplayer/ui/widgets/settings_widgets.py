@@ -12,6 +12,7 @@ from typing import Callable
 
 from PySide6.QtCore import (
     QEasingCurve,
+    QPoint,
     QEvent,
     QPointF,
     QRectF,
@@ -107,6 +108,8 @@ class SettingsCard(QFrame):
 
     def refresh_theme(self) -> None:
         palette = theme().palette
+        for slider in self.findChildren(SettingSlider):
+            slider.refresh_theme()
         self.setStyleSheet(
             f"""
             #SettingsCard {{
@@ -405,6 +408,19 @@ class SettingCombo(QComboBox):
         popup.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
         popup.setAttribute(Qt.WidgetAttribute.WA_NoSystemBackground, True)
 
+    def showPopup(self) -> None:  # noqa: N802
+        if self.count() == 0:
+            return
+        from .popup import list_popup
+
+        labels = [self.itemText(i) for i in range(self.count())]
+
+        def pick(index: int) -> None:
+            self.setCurrentIndex(index)
+
+        menu = list_popup(labels, self.currentIndex(), pick)
+        menu.exec(self.mapToGlobal(QPoint(0, self.height() + 2)))
+
     def set_value(self, value: object) -> None:
         index = self.findData(value)
         self.setCurrentIndex(index if index >= 0 else 0)
@@ -479,6 +495,9 @@ class SettingSlider(QWidget):
         self._commit_timer.setSingleShot(True)
         self._commit_timer.setInterval(220)
         self._commit_timer.timeout.connect(self._emit_committed)
+        self._apply_value_color()
+
+    def refresh_theme(self) -> None:
         self._apply_value_color()
 
     def _apply_value_color(self) -> None:
