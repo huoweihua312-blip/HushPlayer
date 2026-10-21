@@ -4,7 +4,7 @@
 ; intentionally left in place when uninstalling.
 
 #define AppName "HushPlayer"
-#define AppVersion "1.1.15"
+#define AppVersion "1.1.18"
 #define AppExe "HushPlayer.exe"
 #define AppId "{{6F1C2B7E-3A4D-4E5B-9C8A-2D1E0B7F4A21}"
 
@@ -128,7 +128,7 @@ var
 begin
   { Tell the user on the welcome page what Next will do. }
   previous := PreviousInstallDir();
-  if previous <> '' then
+  if (previous <> '') and (ExpandConstant('{param:DIR|}') = '') then
   begin
     WizardForm.WelcomeLabel2.Caption :=
       WizardForm.WelcomeLabel2.Caption + #13#10 + #13#10 +
@@ -145,8 +145,12 @@ begin
     Re-apply our remembered folder after the page has been prepared. }
   if CurPageID = wpSelectDir then
   begin
-    previous := PreviousInstallDir();
-    if previous <> '' then
-      WizardForm.DirEdit.Text := previous;
+    { An explicit /DIR (or a manual folder) must win over our memory. }
+    if ExpandConstant('{param:DIR|}') = '' then
+    begin
+      previous := PreviousInstallDir();
+      if previous <> '' then
+        WizardForm.DirEdit.Text := previous;
+    end;
   end;
 end;
