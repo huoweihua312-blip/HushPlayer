@@ -464,3 +464,17 @@ def test_lyrics_click_through_escape_hotkey_registered():
     assert "unlock_lyrics" in DEFAULT_HOTKEYS
     assert DEFAULT_HOTKEYS["unlock_lyrics"][2] == "Ctrl+Alt+L"
     assert GlobalHotkeys._ACTIONS["unlock_lyrics"] == "unlock_lyrics_requested"
+
+def test_playlist_context_menu_is_returned_not_shown(app_bundle):
+    """The sidebar playlist menu must be returned to the caller.
+
+    It used to call exec() itself and return None, so the caller crashed with
+    "'NoneType' object has no attribute 'exec'" right after the menu closed.
+    """
+    from hushplayer.ui.menus import playlist_menu
+
+    window = app_bundle[1]
+    menu = playlist_menu(window, 1, "测试歌单")
+    assert menu is not None
+    assert hasattr(menu, "exec")
+    assert menu._items

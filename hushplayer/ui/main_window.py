@@ -408,7 +408,7 @@ class MainWindow(FramelessWindow):
         playlist = ctx().library.playlist(playlist_id)
         if playlist is None:
             return
-        menu = playlist_menu(self, playlist_id, playlist.name, position)
+        menu = playlist_menu(self, playlist_id, playlist.name)
         menu.exec(position)
         self._refresh_sidebar()
 

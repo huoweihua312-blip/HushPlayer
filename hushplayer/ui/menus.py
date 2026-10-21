@@ -221,8 +221,8 @@ def reveal_in_explorer(path: str) -> None:
         log.exception("无法打开资源管理器")
 
 
-def playlist_menu(parent: QWidget, playlist_id: int, name: str, position: QPoint) -> None:
-    """Context menu for a sidebar playlist entry."""
+def playlist_menu(parent: QWidget, playlist_id: int, name: str):
+    """Build (but do not show) the sidebar playlist context menu."""
     app = ctx()
     menu = themed_menu(parent)
     play = menu.addAction("播放")
@@ -232,7 +232,7 @@ def playlist_menu(parent: QWidget, playlist_id: int, name: str, position: QPoint
     rename.triggered.connect(lambda: _rename_playlist(parent, playlist_id, name))
     delete = menu.addAction("删除歌单")
     delete.triggered.connect(lambda: _delete_playlist(parent, playlist_id, name))
-    menu.exec(position)
+    return menu
 
 
 def _play_playlist(playlist_id: int) -> None:

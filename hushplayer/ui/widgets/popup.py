@@ -23,6 +23,7 @@ from ...core.theme import rgba, theme
 ROW_HEIGHT = 32
 PAD_X = 12
 PAD_Y = 6
+_SUBMENU_GAP = 6
 
 _DWMWA_WINDOW_CORNER_PREFERENCE = 33
 _DWMWCP_DONOTROUND = 1
@@ -201,7 +202,7 @@ class PopupMenu(QWidget):
             child_w, child_h = self._submenu._intrinsic_size()
             top, _ = self._rows()[self._sub_open]
             child_top = max(PAD_Y, top - PAD_Y)
-            total_width = width + child_w - 14
+            total_width = width + _SUBMENU_GAP + child_w
             total_height = max(height, child_top + child_h + PAD_Y)
         self.setFixedSize(int(total_width), int(total_height))
 
@@ -372,7 +373,7 @@ class PopupMenu(QWidget):
             return QRectF()
         top, _ = self._rows()[self._sub_open]
         child_w, child_h = self._submenu._intrinsic_size()
-        return QRectF(self._base_width - 14, max(PAD_Y, top - PAD_Y), child_w, child_h)
+        return QRectF(self._base_width + _SUBMENU_GAP, max(PAD_Y, top - PAD_Y), child_w, child_h)
 
     # ------------------------------------------------------------------- events
     def _item_at(self, y: int) -> int:
