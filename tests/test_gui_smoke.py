@@ -350,3 +350,25 @@ def test_setting_row_stacks_control_when_narrow() -> None:
     assert narrow_y > wide_y
     assert control.geometry().x() > row.title_label.geometry().x()
     row.close()
+
+def test_source_badge_hides_raw_import_ids():
+    from hushplayer.model.track import Track
+    from hushplayer.ui.widgets.hover_tip import display_source, tip_text
+
+    track = Track(
+        id="online:x:1", title="Colt.45", artist="弹壳Danko", album="黄金追踪者",
+        source_id="x", source_name="user_source_540939a8398b", kind="online",
+    )
+    assert display_source(track) == "自建音源"
+    assert "user_source_" not in tip_text(track)
+    assert "自建音源" in tip_text(track)
+
+    known = Track(
+        id="online:y:1", title="家书", artist="加木", source_id="y",
+        source_name="酷我", kind="online",
+    )
+    assert display_source(known) == "酷我"
+
+    long_name = Track(id="online:z:1", title="t", source_id="z",
+                      source_name="一个非常非常长的音源名字", kind="online")
+    assert len(display_source(long_name)) <= 18

@@ -39,6 +39,7 @@ from ...core.icons import draw as draw_icon
 from ...core.theme import Metrics, draw_text, mix, qcolor, rgba, theme
 from ...model.track import Track, format_duration
 from ..context import ctx
+from .hover_tip import display_source, hide_tip, show_tip, tip_text
 from .common import elide
 
 COLUMN_INDEX = "index"
@@ -108,16 +109,7 @@ class TrackTableModel(QAbstractTableModel):
                 return str(index.row() + 1)
             return ""
         if role == Qt.ToolTipRole:
-            source = track.source_name if track.is_online else ""
-            parts = [track.title, track.artist, track.album]
-            text = " · ".join(part for part in parts if part)
-            if source:
-                text += f"\n来源：{source}"
-            if track.path:
-                text += f"\n{track.path}"
-            if track.year:
-                text += f"\n发行年份：{track.year}"
-            return text
+            return tip_text(track)
         if role == Qt.AccessibleTextRole:
             return f"{track.title} - {track.artist}"
         return None
@@ -517,13 +509,21 @@ class TrackDelegate(QStyledItemDelegate):
             draw_icon(painter, "music_note", note, rgba(palette.text, 0.35))
 
         text_left = cover_rect.right() + 12
-        badge = track.source_name if track.is_online else ""
+        badge = display_source(track) if track.is_online else ""
         badge_width = 0.0
         if badge:
             font = theme().font(7.4, 600)
             metrics = QFontMetrics(font)
-            badge_width = metrics.horizontalAdvance(badge) + 14
+            # A long source name used to run over the title and the cover on a
+            # narrow queue panel, so cap the pill and elide it instead.
+            max_badge = min(theme().scaled(96, factor=0.8), max(64.0, rect.width() * 0.28))
+            badge = metrics.elidedText(badge, Qt.ElideRight, int(max(48, max_badge - 14)))
+            badge_width = min(metrics.horizontalAdvance(badge) + 14, max_badge)
         available = rect.right() - text_left - badge_width - (8 if badge else 0)
+        if available < 90:  # no room for both: keep the title readable
+            badge = ""
+            badge_width = 0.0
+            available = rect.right() - text_left - 8
 
         title_font = theme().font(9.6 if not compact else 9.2, 600 if is_current else 500)
         painter.setFont(title_font)
@@ -674,6 +674,8 @@ class TrackTable(QTableView):
         self.setModel(self._model)
         self._delegate = TrackDelegate(self)
         self.setItemDelegate(self._delegate)
+        self.viewport().setMouseTracking(True)
+        self.viewport().installEventFilter(self)
         self.setShowGrid(False)
         self.setFrameShape(QTableView.NoFrame)
         self.setSelectionBehavior(QAbstractItemView.SelectRows)
@@ -717,6 +719,27 @@ class TrackTable(QTableView):
         self._empty_text = "这里还没有歌曲"
         self._empty_hint = ""
         self.setAccessibleName("歌曲列表")
+
+    # ------------------------------------------------------------- tooltips
+    def eventFilter(self, watched, event) -> bool:  # noqa: N802 (Qt name)
+        kind = event.type()
+        if watched is self.viewport():
+            if kind == QEvent.Type.ToolTip:
+                index = self.indexAt(event.pos())
+                if index.isValid():
+                    text = tip_text(self._model.track_at(index.row()))
+                    if text:
+                        show_tip(event.globalPos(), text)
+                        return True
+                hide_tip()
+            elif kind in (
+                QEvent.Type.Leave,
+                QEvent.Type.Wheel,
+                QEvent.Type.MouseButtonPress,
+                QEvent.Type.Hide,
+            ):
+                hide_tip()
+        return super().eventFilter(watched, event)
 
     def _neutralise_native_selection(self) -> None:
         from PySide6.QtGui import QColor as _QColor, QPalette as _QPalette
