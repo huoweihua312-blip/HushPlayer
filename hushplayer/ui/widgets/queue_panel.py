@@ -19,7 +19,9 @@ class QueuePanel(QWidget):
         super().__init__(parent)
         self.setObjectName("QueuePanel")
         self.setAttribute(Qt.WA_StyledBackground, True)
-        self.setFixedWidth(336)
+        # The duration column needs room for "4:02" plus the right
+        # padding; 336 clipped it once the type scale grew.
+        self.setFixedWidth(theme().scaled(336, factor=0.55))
         self._open = False
         self._anim = QPropertyAnimation(self, b"pos", self)
         self._anim.setDuration(220)

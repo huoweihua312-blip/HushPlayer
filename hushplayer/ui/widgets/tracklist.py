@@ -516,8 +516,8 @@ class TrackDelegate(QStyledItemDelegate):
             metrics = QFontMetrics(font)
             # A long source name used to run over the title and the cover on a
             # narrow queue panel, so cap the pill and elide it instead.
-            max_badge = min(theme().scaled(96, factor=0.8), max(64.0, rect.width() * 0.28))
-            badge = metrics.elidedText(badge, Qt.ElideRight, int(max(48, max_badge - 14)))
+            max_badge = min(theme().scaled(120, factor=0.8), max(76.0, rect.width() * 0.30))
+            badge = metrics.elidedText(badge, Qt.ElideRight, int(max(44, max_badge - 10)))
             badge_width = min(metrics.horizontalAdvance(badge) + 14, max_badge)
         available = rect.right() - text_left - badge_width - (8 if badge else 0)
         if available < 90:  # no room for both: keep the title readable
@@ -676,6 +676,15 @@ class TrackTable(QTableView):
         self.setItemDelegate(self._delegate)
         self.viewport().setMouseTracking(True)
         self.viewport().installEventFilter(self)
+        # When the scrollbar appears the viewport narrows by its width; without
+        # re-applying the columns the last one (时长) ends up clipped.
+        self._column_timer = QTimer(self)
+        self._column_timer.setSingleShot(True)
+        self._column_timer.setInterval(0)
+        self._column_timer.timeout.connect(self._apply_columns)
+        self.verticalScrollBar().rangeChanged.connect(
+            lambda *_: self._column_timer.start()
+        )
         self.setShowGrid(False)
         self.setFrameShape(QTableView.NoFrame)
         self.setSelectionBehavior(QAbstractItemView.SelectRows)
@@ -867,15 +876,23 @@ class TrackTable(QTableView):
                 continue
             if column.key == COLUMN_ARTIST and width < 620:
                 continue
-            if column.key == COLUMN_FAVORITE and width < 360:
+            if column.key == COLUMN_FAVORITE and width < 470:
+                # In the narrow queue panel the heart steals the room the
+                # source badge and title need; the menu still has 收藏.
                 continue
             # Fixed column widths follow the type scale, otherwise enlarged
             # text gets elided while the column keeps its 1.0-era width.
             column_width = theme().scaled(column.width, factor=0.55) if column.width else 0
             if column.key == COLUMN_INDEX and width < 360:
-                column_width = 30
+                # The narrow fallback must follow the type scale too: at 1.5x
+                # a 46 px duration column clipped "4:02" to ":02".
+                column_width = max(30, theme().scaled(26, factor=0.6))
             if column.key == COLUMN_DURATION and width < 360:
-                column_width = 46
+                column_width = max(
+                    46,
+                    theme().scaled(40, factor=0.6)
+                    + QFontMetrics(theme().font(8.4, 400)).horizontalAdvance("00:00") // 4,
+                )
             visible.append(column)
             widths.append(column_width)
             if column_width:

@@ -372,3 +372,22 @@ def test_source_badge_hides_raw_import_ids():
     long_name = Track(id="online:z:1", title="t", source_id="z",
                       source_name="一个非常非常长的音源名字", kind="online")
     assert len(display_source(long_name)) <= 18
+
+def test_queue_duration_column_fits_its_text(app_bundle):
+    """The duration column must hold "4:02" at the current type scale."""
+    from PySide6.QtGui import QFontMetrics
+    from PySide6.QtWidgets import QAbstractItemView
+    from hushplayer.core.theme import theme
+    from hushplayer.model.track import Track
+    from hushplayer.ui.widgets.tracklist import COLUMN_DURATION, DEFAULT_COLUMNS, TrackTable
+
+    table = TrackTable()
+    table.setVerticalScrollBarPolicy(table.verticalScrollBarPolicy())
+    table.resize(340, 420)
+    table.set_tracks([Track(id="kw:1", title="家书", artist="加木", duration_ms=242000,
+                           kind="online", source_id="x", source_name="酷我")])
+    table._apply_columns()
+    index = DEFAULT_COLUMNS.index(next(c for c in DEFAULT_COLUMNS if c.key == COLUMN_DURATION))
+    needed = QFontMetrics(theme().font(8.4, 400)).horizontalAdvance("4:02") + 12
+    assert table.columnWidth(index) >= needed
+    table.deleteLater()
