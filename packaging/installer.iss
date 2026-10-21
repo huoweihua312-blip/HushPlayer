@@ -4,7 +4,7 @@
 ; intentionally left in place when uninstalling.
 
 #define AppName "HushPlayer"
-#define AppVersion "1.1.7"
+#define AppVersion "1.1.8"
 #define AppExe "HushPlayer.exe"
 #define AppId "{{6F1C2B7E-3A4D-4E5B-9C8A-2D1E0B7F4A21}"
 

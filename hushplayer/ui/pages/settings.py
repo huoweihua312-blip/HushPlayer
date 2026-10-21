@@ -448,10 +448,19 @@ class SettingsPage(Page):
         width, height = physical_screen_size()
         recommended = SCALE_LABELS[recommended_scale(width)]
         screen_note = f"（屏幕 {width}×{height}）" if width else ""
+        self._scale_hint = QLabel(f"当前生效 {scale_text()} · 推荐 {recommended}{screen_note}")
+        self._scale_hint.setFont(theme().font(8.8))
+        self._scale_hint.setWordWrap(True)
+        self._scale_hint.setStyleSheet(f"color:{css_rgba(theme().palette.text, 0.55)};")
         card.add_row(self._row(
             "缩放比例",
-            f"当前生效 {scale_text()} · 推荐 {recommended}{screen_note}",
-            self._combo("appearance.ui_scale", list(SCALE_LABELS.items()), "auto"),
+            self._scale_hint,
+            self._combo(
+                "appearance.ui_scale",
+                [(label, key) for key, label in SCALE_LABELS.items()],
+                "auto",
+                on_change=self._on_scale_changed,
+            ),
         ))
         card.add_row(self._row(
             "立即重启",
@@ -716,6 +725,13 @@ class SettingsPage(Page):
         card.add(info)
         column.addWidget(card)
 
+    def _on_scale_changed(self, value: object) -> None:
+        """Explain that the choice only takes effect after a restart."""
+        label = SCALE_LABELS.get(str(value), str(value))
+        hint = getattr(self, "_scale_hint", None)
+        if hint is not None and isinstance(hint, QLabel):
+            hint.setText(f"已选择 {label} · 重启后生效（当前生效 {scale_text()}）")
+
     def _restart_app(self) -> None:
         """Restart so a changed QT_SCALE_FACTOR is picked up (BUG-05)."""
         from PySide6.QtCore import QProcess
@@ -724,6 +740,9 @@ class SettingsPage(Page):
 
         program = sys.executable
         args: list[str] = [] if is_frozen() else ["-m", "hushplayer"]
+        # The new process waits for us to exit before taking the single-instance
+        # mutex; otherwise it would just notify us and quit.
+        args = [*args, "--wait-pid", str(os.getpid())]
         try:
             self.settings.flush()
             QProcess.startDetached(program, args)

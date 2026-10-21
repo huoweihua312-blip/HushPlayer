@@ -178,6 +178,15 @@ class HushApp(QObject):
                 return max(1.0, float(override))
             except ValueError:
                 pass
+        # When the user picked an explicit 界面缩放 (QT_SCALE_FACTOR), that choice
+        # already enlarges every logical pixel; applying the automatic type scale
+        # on top would double-size the UI.
+        try:
+            from .core.display import scale_preference
+            if scale_preference() != "auto":
+                return 1.0
+        except Exception:  # noqa: BLE001
+            pass
         try:
             width, height = display.physical_screen_size()
         except Exception:  # noqa: BLE001
@@ -490,8 +499,55 @@ def _install_excepthook(app: QApplication) -> None:
     sys.excepthook = hook
 
 
+def _wait_for_pid_exit(pid: int, timeout_s: float = 6.0, poll_s: float = 0.1) -> float:
+    """Poll until ``pid`` is gone; returns the seconds spent waiting.
+
+    Uses ``GetExitCodeProcess`` instead of a wait handle: the old process may be
+    a different integrity level, where ``OpenProcess(SYNCHRONIZE)`` is denied,
+    and a lingering mutex holder (another HushPlayer instance) must not be
+    mistaken for our parent.
+    """
+    import time
+
+    try:
+        import ctypes
+        from ctypes import wintypes
+    except ImportError:  # pragma: no cover - non Windows
+        return 0.0
+    started = time.monotonic()
+    deadline = started + max(0.5, timeout_s)
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel32.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+    kernel32.OpenProcess.restype = wintypes.HANDLE
+    kernel32.GetExitCodeProcess.argtypes = [wintypes.HANDLE, ctypes.POINTER(wintypes.DWORD)]
+    kernel32.GetExitCodeProcess.restype = wintypes.BOOL
+    kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
+    still_active = 259
+    while time.monotonic() < deadline:
+        handle = kernel32.OpenProcess(0x1000, False, pid)  # QUERY_LIMITED_INFORMATION
+        if not handle:
+            return time.monotonic() - started  # already gone
+        code = wintypes.DWORD(0)
+        ok = kernel32.GetExitCodeProcess(handle, ctypes.byref(code))
+        kernel32.CloseHandle(handle)
+        if not ok or code.value != still_active:
+            return time.monotonic() - started
+        time.sleep(poll_s)
+    return time.monotonic() - started
+
+
 def main(argv: list[str] | None = None) -> int:
     argv = list(sys.argv if argv is None else argv)
+    # A restarted instance passes the old process id; block until it is gone so
+    # the named mutex is free and we don't bounce off our own single-instance guard.
+    wait_pid = 0
+    if "--wait-pid" in argv:
+        index = argv.index("--wait-pid")
+        try:
+            wait_pid = int(argv[index + 1])
+        except (IndexError, ValueError):
+            wait_pid = 0
+        del argv[index:index + 2]
     ensure_dirs()
     default_console = "0" if is_frozen() else "1"
     setup_logging(console=os.environ.get("HUSH_CONSOLE", default_console) != "0")
@@ -501,6 +557,9 @@ def main(argv: list[str] | None = None) -> int:
     # before QApplication exists, otherwise the factor is ignored.
     from .core.display import apply_scale_environment, scale_text
 
+    if wait_pid:
+        waited = _wait_for_pid_exit(wait_pid)
+        log.info("重启：旧进程 %s 已退出（等待 %.2fs）", wait_pid, waited)
     ui_scale = apply_scale_environment()
     log.info("界面缩放：%s（QT_SCALE_FACTOR=%s）", scale_text(), ui_scale)
 

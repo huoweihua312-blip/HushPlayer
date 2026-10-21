@@ -105,6 +105,11 @@ def read_ui_scale_preference() -> str:
     return SCALE_AUTO
 
 
+def scale_preference() -> str:
+    """The user's explicit choice, or ``auto`` when the app should decide."""
+    return read_ui_scale_preference()
+
+
 def resolve_scale(preference: str | None = None) -> float:
     preference = preference or read_ui_scale_preference()
     if preference == SCALE_AUTO:
@@ -152,6 +157,7 @@ __all__ = [
     "physical_screen_size",
     "read_ui_scale_preference",
     "recommended_scale",
+    "scale_preference",
     "resolve_scale",
     "scale_text",
 ]
