@@ -19,11 +19,12 @@ VersionInfoDescription=HushPlayer 安装程序
 DefaultDirName={code:PreviousDir}
 DefaultGroupName={#AppName}
 DisableProgramGroupPage=yes
-; The page exists on every run, but ShouldSkipPage() hides it on upgrades
-; unless the welcome-page checkbox asks for it; DisableDirPage=auto would
-; remove the page before ShouldSkipPage() ever runs.
+; The directory page always exists so a folder can be chosen.
+; UsePreviousAppDir must stay off: with a dynamic DefaultDirName Inno
+; appends its last component (e.g. dir_override) to the folder it
+; remembered, producing <old-folder>\dir_override.
 DisableDirPage=no
-UsePreviousAppDir=yes
+UsePreviousAppDir=no
 PrivilegesRequired=lowest
 PrivilegesRequiredOverridesAllowed=dialog commandline
 OutputDir=F:\HushPlayerBuild\out
@@ -87,28 +88,33 @@ var
   marker: String;
 begin
   Result := '';
-  { 1) our own record, kept even after uninstall so "next install" remembers }
-  if RegQueryStringValue(HKCU, 'Software\HushPlayer', 'InstallDir', value) then
-    Result := value;
-  { 2) the running app writes its folder here, which survives uninstall and
-       also works for portable copies that were never installed }
+  { 1) the running app records its own folder here on every launch, so this is
+       the freshest value and also covers portable copies never installed. }
+  marker := ExpandConstant('{localappdata}\HushPlayerReimagined\last_program_dir.ini');
+  if FileExists(marker) then
+  begin
+    value := GetIniString('install', 'dir', '', marker);
+    if (value <> '') and DirExists(value) then
+      Result := value;
+  end;
+  { 2) the folder the installer used last time. The key survives uninstall on
+       purpose; a stale entry is ignored because the folder no longer exists. }
   if Result = '' then
   begin
-    marker := ExpandConstant('{localappdata}\HushPlayerReimagined\last_program_dir.ini');
-    if FileExists(marker) then
-      Result := GetIniString('install', 'dir', '', marker);
+    if RegQueryStringValue(HKCU, 'Software\HushPlayer', 'InstallDir', value) then
+      if DirExists(value) then
+        Result := value;
   end;
-  { 3) Inno's own uninstall record for this AppId }
+  { 3) Inno's own uninstall record for this AppId, as a last resort. }
   if Result = '' then
   begin
     if RegQueryStringValue(
          HKCU,
          'Software\Microsoft\Windows\CurrentVersion\Uninstall\{#SetupSetting("AppId")}_is1',
          'InstallLocation', value) then
-      Result := value;
+      if DirExists(value) then
+        Result := value;
   end;
-  { Do not require the folder to exist: a moved/cleaned folder is still the
-    user's last choice, and Inno recreates whatever is missing. }
   Result := Trim(Result);
 end;
 
