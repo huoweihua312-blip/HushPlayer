@@ -1,0 +1,14 @@
+#!/bin/sh
+# Pre-commit: keep AGENTS.md honest and keep the tree tidy.
+# Installed by: pwsh -File tools\install_git_hooks.ps1
+set -e
+
+ROOT=$(git rev-parse --show-toplevel)
+cd "$ROOT"
+
+PY="$ROOT/.venv/Scripts/python.exe"
+if [ ! -x "$PY" ]; then
+    PY="python"
+fi
+
+"$PY" tools/agents_guard.py || exit 1

@@ -3,6 +3,16 @@
 > 这份文件是给「下一次动手的人（包括 AI）」看的。**改代码、改安装包、改样式之前先读一遍**；
 > 改完如果引入了新的约定或踩到新坑，回到这里补一条。
 
+## 0. 每次改动的固定流程（先看这五步）
+
+1. 读本文件相关章节：动安装包看 §5/§6.1，动菜单看 §6.2，动字体/缩放看 §4/§6.3；
+2. 找到对应模块的「不变量」并按它写代码；
+3. 跑 `pytest -q` + 至少一张真实截图；
+4. 如果改到了易碎模块（安装包脚本、`popup.py`、`tracklist.py`、`playerbar.py`、
+   `queue_panel.py`、`settings_widgets.py`、`settings.py`、`theme.py`、`display.py`、`app.py`），
+   **必须在 §9 追加一条变更记录**——`pre-commit` 钩子会拦住不带的提交（放行：提交信息加 `[no-agents]`）；
+5. 汇报时写清「改了什么 / 为什么 / 怎么验证 / 产物哈希」。
+
 项目根目录：`F:\Projects\HushPlayer-Reimagined`
 只读参考：`F:\Projects\HushPlayer`（原版）、`F:\Projects\HushPlayer-deepseek-v2`（Aura UI 原型）。
 **不得修改这两个目录，也不要在里面建 worktree。**
@@ -126,6 +136,16 @@ HushPlayer-<ver>-setup.exe /VERYSILENT /LOG=...
 4. 涉及安装包：静默安装 → 版本/快捷方式/注册表 → 卸载 → 残留检查（见 6.1）。
 5. 汇报时写清楚「改了什么、为什么、怎么验证的、产物哈希」。
 
+### 7.1 让 AGENTS.md 真正生效的三层机制
+
+1. **自动注入**：DSH 会把仓库根的 `AGENTS.md` 作为工作区指令注入每次会话（文件变化后也会重新注入）。
+   所以它必须留在仓库根、保持简短（当前约 130 行），否则会被截断或读不完。
+2. **提交门禁**：`.githooks/pre-commit` → `tools/agents_guard.py`。
+   改到 §0 列出的易碎模块却没 `git add AGENTS.md` 时提交被拒。
+   每个新克隆执行一次 `pwsh -File tools\install_git_hooks.ps1` 启用（`core.hooksPath=.githooks`）。
+3. **执行纪律**：每次开始改动前，先在回复里说明「读了 §X」；改完把结论写进 §6/§9。
+   要给规则加新条款，加到 §4（不变量）或 §6（方案索引），不要散落在别处。
+
 ## 8. 已知问题 / 待办
 
 - **安装包默认目录仍可能不对（用户 1.1.26 报告，本轮不修）**。
@@ -143,3 +163,5 @@ HushPlayer-<ver>-setup.exe /VERYSILENT /LOG=...
 ## 9. 本文件变更记录
 
 - 2026-10-22：首次创建。汇总用户要求、技术不变量、安装/菜单/字体/队列等既有方案，记录安装包默认目录的待排查项。
+- 2026-10-22：新增 §0「每次改动的固定流程」与 §7.1「三层生效机制」；新增提交门禁
+  `.githooks/pre-commit` + `tools/agents_guard.py` + `tools/install_git_hooks.ps1`（说明见 `docs/GIT_HOOKS.md`）。
