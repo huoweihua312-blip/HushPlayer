@@ -32,6 +32,7 @@ from ...core import icons
 from ...core import brand
 from ...core.theme import css_rgba, qcolor, rgba, theme
 from ...model.track import Playlist
+from .menu import themed_menu
 
 
 @dataclass(frozen=True)
@@ -450,7 +451,7 @@ class Sidebar(QWidget):
     def _playlist_add_menu(self) -> None:
         from PySide6.QtWidgets import QMenu
 
-        menu = QMenu(self)
+        menu = themed_menu(self)
         create = menu.addAction("新建歌单")
         import_file = menu.addAction("从文件导入歌单…")
         anchor = self.add_playlist_button.mapToGlobal(

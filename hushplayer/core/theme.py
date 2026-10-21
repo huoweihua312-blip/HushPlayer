@@ -372,7 +372,7 @@ class Theme(QObject):
 QWidget {{
     color: {p.text};
     background: transparent;
-    selection-background-color: {css_rgba(p.accent, 0.20)};
+    selection-background-color: transparent;
     selection-color: {p.text};
 }}
 QWidget#RootWindow {{ background: {p.window}; }}
@@ -393,12 +393,14 @@ QMenu {{
 }}
 QMenu::item {{
     padding: 7px 28px 7px 12px;
-    border-radius: 8px;
+    margin: 1px 5px;
+    border-radius: 7px;
     color: {p.text};
     font-size: 13px;
 }}
-QMenu::item:selected {{ background: {p.accent}; color: {p.accent_text}; }}
-QMenu::item:disabled {{ color: {p.text_tertiary}; }}
+QMenu::item:selected {{ background: {css_rgba(p.accent, 0.16)}; color: {p.text}; }}
+QMenu::item:disabled {{ color: {css_rgba(p.text, 0.42)}; }}
+QLabel:disabled {{ color: {css_rgba(p.text, 0.55)}; }}
 QMenu::separator {{ height: 1px; background: {p.border}; margin: 5px 8px; }}
 QMenu::icon {{ padding-left: 8px; }}
 QScrollBar:vertical {{ background: transparent; width: 10px; margin: 2px; }}

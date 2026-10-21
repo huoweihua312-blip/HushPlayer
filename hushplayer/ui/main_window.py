@@ -35,6 +35,7 @@ from .widgets.queue_panel import QueuePanel
 from .widgets.sidebar import Sidebar
 from .widgets.titlebar import TitleBar
 from .widgets.toast import ToastHost
+from .widgets.menu import themed_menu
 
 log = get_logger(__name__)
 
@@ -501,7 +502,7 @@ class MainWindow(FramelessWindow):
         self._tray.setIcon(icon)
         self._tray_null_icon = icon.isNull()
         self._tray.setToolTip("HushPlayer")
-        menu = QMenu()
+        menu = themed_menu()
         show_action = QAction("显示 HushPlayer", self)
         show_action.triggered.connect(self._restore_from_tray)
         menu.addAction(show_action)

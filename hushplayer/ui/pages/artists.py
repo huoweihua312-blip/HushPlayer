@@ -20,6 +20,7 @@ from ..widgets.hero import HeroPanel
 from ..widgets.searchfield import SegmentedControl
 from ..widgets.tracklist import TrackListWidget
 from .page import BackButton, Page, PageHeader, ScrollPage
+from ..widgets.menu import themed_menu
 
 
 class ArtistsPage(ScrollPage):
@@ -70,7 +71,7 @@ class ArtistsPage(ScrollPage):
     def _menu(self, artist, position) -> None:
         if artist is None:
             return
-        menu = QMenu(self)
+        menu = themed_menu(self)
         menu.addAction("播放全部歌曲", lambda: self._play(artist))
         menu.addAction("查看艺术家", lambda: self._open(artist))
         menu.exec(position)
@@ -240,7 +241,7 @@ class ArtistPage(Page):
     def _hero_menu(self) -> None:
         if self._artist is None:
             return
-        menu = QMenu(self)
+        menu = themed_menu(self)
         menu.addAction("播放全部歌曲", lambda: self._play())
         menu.addAction("随机播放", lambda: self._play(shuffle=True))
         menu.exec(self.hero.more_button.mapToGlobal(self.hero.more_button.rect().bottomLeft()))

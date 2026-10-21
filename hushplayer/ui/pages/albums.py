@@ -13,6 +13,7 @@ from ..widgets.common import TextButton
 from ..widgets.hero import HeroPanel
 from ..widgets.tracklist import TrackListWidget
 from .page import BackButton, Page, PageHeader, ScrollPage
+from ..widgets.menu import themed_menu
 
 
 class AlbumsPage(ScrollPage):
@@ -66,7 +67,7 @@ class AlbumsPage(ScrollPage):
     def _menu(self, album, position) -> None:
         if album is None:
             return
-        menu = QMenu(self)
+        menu = themed_menu(self)
         menu.addAction(
             "播放专辑",
             lambda: self._play_album(album),
@@ -213,7 +214,7 @@ class AlbumPage(Page):
         album = self._album
         if album is None:
             return
-        menu = QMenu(self)
+        menu = themed_menu(self)
         menu.addAction("播放专辑", lambda: self._play())
         menu.addAction("随机播放", lambda: self._play(shuffle=True))
         menu.addAction("前往艺术家", self._go_artist)

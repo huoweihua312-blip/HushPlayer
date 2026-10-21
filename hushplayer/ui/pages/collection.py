@@ -8,6 +8,7 @@ from ...model.track import Track
 from ..context import ctx
 from ..widgets.common import IconButton, TextButton
 from .trackpage import TrackListPage
+from ..widgets.menu import themed_menu
 
 
 class FavoritesPage(TrackListPage):
@@ -141,7 +142,7 @@ class PlaylistPage(TrackListPage):
         self._play(self._tracks, 0)
 
     def _more_menu(self) -> None:
-        menu = QMenu(self)
+        menu = themed_menu(self)
         menu.addAction("重命名歌单…", self._rename)
         menu.addAction("更改封面…", self._change_cover)
         menu.addSeparator()

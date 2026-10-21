@@ -18,6 +18,7 @@ from PySide6.QtWidgets import (
 )
 
 from ...core.theme import css_rgba, theme
+from .menu import themed_menu
 
 __all__ = ["SourceFilterBar", "HistoryChips"]
 
@@ -157,7 +158,7 @@ class SourceFilterBar(QWidget):
             self._holder.adjustSize()
 
     def _show_all_sources_menu(self) -> None:
-        menu = QMenu(self)
+        menu = themed_menu(self)
         for key, label in self._labels.items():
             count = self._counts.get(key, 0)
             text = f"{label}（{count}）" if count else label

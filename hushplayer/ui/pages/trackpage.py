@@ -11,6 +11,7 @@ from ..context import ctx
 from ..menus import track_menu
 from ..widgets.tracklist import TrackListWidget
 from .page import CenteredBox, Page, PageHeader
+from ..widgets.menu import themed_menu
 
 
 class TrackListPage(Page):
@@ -257,7 +258,7 @@ class TrackListPage(Page):
                 if window is not None and count:
                     window.toast(f"已新建歌单并添加 {count} 首歌曲", "success")
             return
-        menu = QMenu(self)
+        menu = themed_menu(self)
         for playlist in playlists:
             action = menu.addAction(f"{playlist.name}（{playlist.track_count} 首）")
             action.triggered.connect(

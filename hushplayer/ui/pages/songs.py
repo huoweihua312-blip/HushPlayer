@@ -9,6 +9,7 @@ from ...model.track import Track
 from ..context import ctx
 from ..widgets.common import IconButton, TextButton
 from .trackpage import TrackListPage
+from ..widgets.menu import themed_menu
 
 
 class SongsPage(TrackListPage):
@@ -41,7 +42,7 @@ class SongsPage(TrackListPage):
         layout.addWidget(refresh)
 
     def _show_add_menu(self) -> None:
-        menu = QMenu(self)
+        menu = themed_menu(self)
         menu.addAction("添加文件…", self._add_files)
         menu.addAction("添加文件夹…", self._add_folder)
         menu.addSeparator()

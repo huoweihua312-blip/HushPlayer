@@ -19,6 +19,7 @@ from ..core.logging_setup import get_logger
 from ..core.theme import theme
 from ..model.track import Track
 from .context import ctx
+from .widgets.menu import themed_menu
 
 log = get_logger(__name__)
 
@@ -56,7 +57,7 @@ def track_menu(
 ) -> QMenu:
     """Build (but do not show) a context menu for ``tracks``."""
     app = ctx()
-    menu = QMenu(parent)
+    menu = themed_menu(parent)
     items = [track for track in tracks if track is not None]
     if not items:
         return menu
@@ -223,7 +224,7 @@ def reveal_in_explorer(path: str) -> None:
 def playlist_menu(parent: QWidget, playlist_id: int, name: str, position: QPoint) -> None:
     """Context menu for a sidebar playlist entry."""
     app = ctx()
-    menu = QMenu(parent)
+    menu = themed_menu(parent)
     play = menu.addAction("播放")
     play.triggered.connect(lambda: _play_playlist(playlist_id))
     menu.addSeparator()

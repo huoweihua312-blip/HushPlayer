@@ -12,6 +12,7 @@ from typing import Callable
 
 from PySide6.QtCore import (
     QEasingCurve,
+    QEvent,
     QPointF,
     QRectF,
     QSize,
@@ -24,6 +25,8 @@ from PySide6.QtGui import QColor, QFontMetrics, QPainter, QPainterPath, QPen
 from PySide6.QtWidgets import (
     QAbstractButton,
     QComboBox,
+    QStyledItemDelegate,
+    QStyle,
     QFileDialog,
     QFrame,
     QGridLayout,
@@ -90,6 +93,9 @@ class SettingsCard(QFrame):
 
     def add(self, widget: QWidget) -> None:
         self._body.addWidget(widget)
+
+    def set_spacing(self, spacing: int) -> None:
+        self._body.setSpacing(spacing)
 
     def add_row(self, row: "SettingRow") -> "SettingRow":
         self._body.addWidget(row)
@@ -351,6 +357,32 @@ def mix_color(color: str, lighten: float) -> str:
     ).name()
 
 
+class _RoundedRowDelegate(QStyledItemDelegate):
+    """Rounded selection rows inside combo popups.
+
+    QSS cannot round ``QAbstractItemView`` selection rectangles, so the popup
+    showed a hard coloured box inside an otherwise rounded menu.
+    """
+
+    def paint(self, painter, option, index) -> None:  # noqa: N802
+        painter.save()
+        painter.setRenderHint(QPainter.Antialiasing, True)
+        selected = bool(option.state & QStyle.StateFlag.State_Selected)
+        hovered = bool(option.state & QStyle.StateFlag.State_MouseOver)
+        rect = option.rect.adjusted(4, 1, -4, -1)
+        if selected or hovered:
+            painter.setPen(Qt.NoPen)
+            painter.setBrush(rgba(theme().palette.accent, 0.20 if selected else 0.12))
+            painter.drawRoundedRect(QRectF(rect), 7, 7)
+        painter.setPen(QColor(theme().palette.text))
+        painter.drawText(
+            rect.adjusted(8, 0, -8, 0),
+            Qt.AlignLeft | Qt.AlignVCenter,
+            str(index.data(Qt.ItemDataRole.DisplayRole) or ""),
+        )
+        painter.restore()
+
+
 class SettingCombo(QComboBox):
     """QComboBox with a sane minimum width and theme refresh."""
 
@@ -367,6 +399,11 @@ class SettingCombo(QComboBox):
         widest = max((metrics.horizontalAdvance(label) for label, _ in items), default=0)
         self.view().setMinimumWidth(widest + theme().scaled(64, factor=0.6))
         self.view().setTextElideMode(Qt.TextElideMode.ElideNone)
+        self.view().setFrameShape(QFrame.Shape.NoFrame)
+        self.view().setItemDelegate(_RoundedRowDelegate(self.view()))
+        popup = self.view().window()
+        popup.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
+        popup.setAttribute(Qt.WidgetAttribute.WA_NoSystemBackground, True)
 
     def set_value(self, value: object) -> None:
         index = self.findData(value)
@@ -442,6 +479,18 @@ class SettingSlider(QWidget):
         self._commit_timer.setSingleShot(True)
         self._commit_timer.setInterval(220)
         self._commit_timer.timeout.connect(self._emit_committed)
+        self._apply_value_color()
+
+    def _apply_value_color(self) -> None:
+        alpha = 0.62 if self.isEnabled() else 0.5
+        self.value_label.setStyleSheet(
+            f"color: {css_rgba(theme().palette.text, alpha)};"
+        )
+
+    def changeEvent(self, event) -> None:  # noqa: N802
+        super().changeEvent(event)
+        if event.type() == QEvent.Type.EnabledChange:
+            self._apply_value_color()
 
     def set_value(self, value: float) -> None:
         self._set = True

@@ -24,6 +24,7 @@ from .widgets.sweep import paint_sweep, sweep_pixels_for_line
 from ..model.lyrics import LyricDocument
 from ..model.track import Track
 from .context import ctx
+from .widgets.menu import themed_menu
 
 log = get_logger(__name__)
 
@@ -314,7 +315,7 @@ class DesktopLyricsWindow(QWidget):
         event.accept()
 
     def contextMenuEvent(self, event) -> None:  # noqa: N802
-        menu = QMenu(self)
+        menu = themed_menu(self)
         lock = menu.addAction("锁定位置" if not self._locked else "解锁位置")
         through = menu.addAction("鼠标穿透")
         through.setCheckable(True)

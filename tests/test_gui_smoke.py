@@ -406,3 +406,17 @@ def test_immersive_queue_keeps_app_palette(app_bundle):
     panel.release_palette()
     assert panel.list.table.palette_override is None
     assert theme().palette is before
+
+def test_popup_menus_and_combos_use_rounded_theme(app_bundle):
+    """Menus and combo popups must use the themed popup, not native chrome."""
+    from PySide6.QtCore import Qt
+
+    from hushplayer.ui.widgets.menu import themed_menu
+    from hushplayer.ui.widgets.settings_widgets import SettingCombo, _RoundedRowDelegate
+
+    menu = themed_menu()
+    assert menu.testAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+
+    combo = SettingCombo([("过渡动画（从标题栏按钮扩散）", "reveal"), ("关闭", "off")])
+    assert isinstance(combo.view().itemDelegate(), _RoundedRowDelegate)
+    assert combo.view().window().testAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)

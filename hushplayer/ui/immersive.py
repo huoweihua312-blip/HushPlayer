@@ -166,6 +166,7 @@ class _GlowCover(QWidget):
 
 
 from PySide6.QtGui import QRadialGradient as QRadialGradientCompat  # noqa: E402
+from .widgets.menu import themed_menu
 
 
 def _alpha(color: QColor, alpha: float) -> QColor:
@@ -840,7 +841,7 @@ class ImmersiveWindow(QWidget):
         from ..core.theme import theme
 
         settings = ctx().settings
-        menu = QMenu(self)
+        menu = themed_menu(self)
         header = menu.addAction("歌词与画面")
         header.setEnabled(False)
         menu.addSeparator()

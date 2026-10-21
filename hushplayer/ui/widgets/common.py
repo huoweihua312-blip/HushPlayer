@@ -256,6 +256,10 @@ class IconButton(QAbstractButton):
         target = QRectF(0, 0, self._icon_size, self._icon_size)
         target.moveCenter(rect.center())
         icons.draw(painter, self._icon_name, target, self._current_color())
+        if self.isCheckable() and self.isChecked():
+            painter.setPen(Qt.NoPen)
+            painter.setBrush(QColor(theme().palette.accent))
+            painter.drawEllipse(QPointF(rect.center().x(), rect.bottom() - 2.5), 2.2, 2.2)
         painter.end()
 
 
