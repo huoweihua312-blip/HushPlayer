@@ -618,7 +618,7 @@ class SettingsPage(Page):
         card = SettingsCard("桌面歌词", "独立于主窗口的悬浮歌词，可在任意应用上方显示")
         card.add_row(self._row("启用桌面歌词", "显示独立悬浮歌词窗口", self._toggle("desktop_lyrics.enabled", False, on_change=self._apply_desktop_lyrics)))
         card.add_row(self._row("总在最前", "保持在其他窗口之上", self._toggle("desktop_lyrics.always_on_top", True, on_change=self._apply_desktop_lyrics)))
-        card.add_row(self._row("鼠标穿透", "开启后无法点击歌词窗口，需在设置中关闭", self._toggle("desktop_lyrics.click_through", False, on_change=self._apply_desktop_lyrics)))
+        card.add_row(self._row("鼠标穿透", "开启后无法点击歌词；按 Ctrl+Alt+L 或托盘菜单可随时关闭", self._toggle("desktop_lyrics.click_through", False, on_change=self._apply_desktop_lyrics)))
         card.add_row(self._row("锁定位置", "防止误拖动", self._toggle("desktop_lyrics.locked", False, on_change=self._apply_desktop_lyrics)))
         column.addWidget(card)
 

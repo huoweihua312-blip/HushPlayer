@@ -57,7 +57,17 @@ class MediaIntegration(QObject):
             self.hotkeys.previous_requested.connect(self._player.previous)
             self.hotkeys.mute_requested.connect(self._player.toggle_mute)
             self.hotkeys.show_window_requested.connect(self._window_from_tray)
+        self.hotkeys.unlock_lyrics_requested.connect(self._unlock_lyrics_click_through)
         self.apply_settings()
+
+    def _unlock_lyrics_click_through(self) -> None:
+        lyrics = getattr(ctx(), "desktop_lyrics", None)
+        if lyrics is None:
+            return
+        lyrics.set_click_through(False)
+        window = getattr(ctx(), "window", None)
+        if window is not None:
+            window.toast("已关闭桌面歌词的鼠标穿透", "info")
 
     def _window_from_tray(self) -> None:
         window = getattr(self, "_window", None)

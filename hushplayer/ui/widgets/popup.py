@@ -85,6 +85,7 @@ class PopupMenu(QWidget):
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent, Qt.WindowType.Popup | Qt.WindowType.FramelessWindowHint)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
+        self.setAttribute(Qt.WidgetAttribute.WA_NoSystemBackground, True)
         self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose, False)
         self.setMouseTracking(True)
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
@@ -94,6 +95,7 @@ class PopupMenu(QWidget):
         self._loop: QEventLoop | None = None
         self._submenu: PopupMenu | None = None
         self._submenu_index = -1
+        self._radius = max(10.0, theme().scaled(12, factor=0.5))
         self._font = theme().font(9.4, 500)
         self._row_font = theme().font(9.4, 400)
 
@@ -153,6 +155,9 @@ class PopupMenu(QWidget):
             y += h
         return out
 
+    def _has_checks(self) -> bool:
+        return any(isinstance(item, PopupAction) and item.isCheckable() for item in self._items)
+
     def _content_width(self) -> int:
         metrics = QFontMetrics(self._row_font)
         widest = 0
@@ -163,9 +168,9 @@ class PopupMenu(QWidget):
                 text = getattr(item, "_owner_title", "")
             else:
                 text = item.text()
-            extra = 0
+            extra = 20 if self._has_checks() else 0
             if isinstance(item, PopupAction) and item.isCheckable():
-                extra += 20
+                extra += 0
             if isinstance(item, PopupAction) and item._shortcut:
                 extra += metrics.horizontalAdvance(item._shortcut) + 24
             if isinstance(item, PopupAction) and item._icon:
@@ -228,6 +233,11 @@ class PopupMenu(QWidget):
         return -1
 
     def mouseMoveEvent(self, event) -> None:  # noqa: N802
+        if self._submenu is not None and not self.rect().contains(event.position().toPoint()):
+            # The child popup grabbed the mouse; leaving its rect must dismiss it
+            # so the parent rows become hoverable again.
+            self.close()
+            return
         index = self._item_at(int(event.position().y()))
         if index != self._hover:
             self._hover = index
@@ -258,6 +268,9 @@ class PopupMenu(QWidget):
             self._submenu_index = -1
 
     def mouseReleaseEvent(self, event) -> None:  # noqa: N802
+        if not self.rect().contains(event.position().toPoint()):
+            self.close()
+            return
         index = self._item_at(int(event.position().y()))
         if index < 0:
             return
@@ -290,7 +303,7 @@ class PopupMenu(QWidget):
         palette = theme().palette
         rect = QRectF(self.rect()).adjusted(0.5, 0.5, -0.5, -0.5)
         path = QPainterPath()
-        path.addRoundedRect(rect, RADIUS, RADIUS)
+        path.addRoundedRect(rect, self._radius, self._radius)
         painter.fillPath(path, QColor(palette.elevated))
         painter.setPen(QPen(QColor(palette.border), 1))
         painter.setBrush(Qt.BrushStyle.NoBrush)
@@ -313,7 +326,7 @@ class PopupMenu(QWidget):
             if hovered:
                 painter.setPen(Qt.PenStyle.NoPen)
                 painter.setBrush(rgba(palette.accent, 0.16))
-                painter.drawRoundedRect(row, 7, 7)
+                painter.drawRoundedRect(row, self._radius * 0.55, self._radius * 0.55)
             if isinstance(item, PopupMenu):
                 text = getattr(item, "_owner_title", "")
                 enabled = True
@@ -324,8 +337,8 @@ class PopupMenu(QWidget):
             painter.setPen(QPen(QColor(ink)))
             painter.setFont(self._row_font)
             x = row.left() + PAD_X
-            if isinstance(item, PopupAction) and item.isCheckable():
-                if item.isChecked():
+            if self._has_checks():
+                if isinstance(item, PopupAction) and item.isCheckable() and item.isChecked():
                     box = QRectF(x, row.center().y() - 6, 12, 12)
                     icons.draw(painter, "check", box, QColor(palette.accent))
                 x += 20

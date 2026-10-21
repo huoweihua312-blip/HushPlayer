@@ -26,6 +26,9 @@ DEFAULT_HOTKEYS: dict[str, tuple[int, int, str]] = {
     "previous": (MOD_CONTROL | MOD_ALT | MOD_NOREPEAT, 0x25, "Ctrl+Alt+Left"),
     "mute": (MOD_CONTROL | MOD_ALT | MOD_NOREPEAT, 0x4D, "Ctrl+Alt+M"),
     "show_window": (MOD_CONTROL | MOD_ALT | MOD_NOREPEAT, 0x48, "Ctrl+Alt+H"),
+    # Escape hatch: desktop lyrics with mouse click-through cannot be clicked,
+    # so a global shortcut is the only reliable way back.
+    "unlock_lyrics": (MOD_CONTROL | MOD_ALT | MOD_NOREPEAT, 0x4C, "Ctrl+Alt+L"),
 }
 
 
@@ -41,6 +44,7 @@ class GlobalHotkeys(QObject, QAbstractNativeEventFilter):
     previous_requested = Signal()
     mute_requested = Signal()
     show_window_requested = Signal()
+    unlock_lyrics_requested = Signal()
 
     _ACTIONS = {
         "play_pause": "play_pause_requested",
@@ -48,6 +52,7 @@ class GlobalHotkeys(QObject, QAbstractNativeEventFilter):
         "previous": "previous_requested",
         "mute": "mute_requested",
         "show_window": "show_window_requested",
+        "unlock_lyrics": "unlock_lyrics_requested",
     }
 
     def __init__(self, hwnd: int, parent: QObject | None = None) -> None:

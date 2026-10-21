@@ -438,3 +438,27 @@ def test_combo_popup_uses_rounded_menu(app_bundle, monkeypatch):
     combo.showPopup()
     assert seen["kind"] == "PopupMenu"
     assert seen["items"] == ["甲", "乙"]
+
+def test_popup_menu_reserves_check_column_for_all_rows(app_bundle):
+    """Checkable and plain rows must share one text column (desktop lyrics menu)."""
+    from hushplayer.ui.widgets.popup import PopupMenu
+
+    menu = PopupMenu()
+    menu.addAction("锁定位置").setCheckable(True)
+    menu.addAction("鼠标穿透").setCheckable(True)
+    menu.addSeparator()
+    menu.addMenu("显示行数")
+    menu.addAction("关闭桌面歌词")
+    assert menu._has_checks() is True
+    rows = menu._rows()
+    assert len(rows) == 5
+    assert menu.width() > 80
+
+
+def test_lyrics_click_through_escape_hotkey_registered():
+    """Click-through blocks mouse input, so a global shortcut must unlock it."""
+    from hushplayer.services.hotkeys import DEFAULT_HOTKEYS, GlobalHotkeys
+
+    assert "unlock_lyrics" in DEFAULT_HOTKEYS
+    assert DEFAULT_HOTKEYS["unlock_lyrics"][2] == "Ctrl+Alt+L"
+    assert GlobalHotkeys._ACTIONS["unlock_lyrics"] == "unlock_lyrics_requested"
