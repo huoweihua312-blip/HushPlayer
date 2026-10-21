@@ -13,7 +13,7 @@
 | 文件 | 说明 |
 | --- | --- |
 | `HushPlayer/` | 解压即用目录（onedir），含 `HushPlayer.exe` 与 `_internal/` |
-| `HushPlayer-<版本>-win64.zip` | 上者的压缩包（当前 1.1.0） |
+| `HushPlayer-<版本>-win64.zip` | 上者的压缩包（当前 1.1.3） |
 | `SHA256SUMS.txt` | 压缩包校验值 |
 
 自行构建：
@@ -29,7 +29,7 @@ powershell -ExecutionPolicy Bypass -File packaging\build.ps1 -Zip
 
 1. 下载 zip 后先核对 `SHA256SUMS.txt`：
    ```powershell
-   Get-FileHash .\HushPlayer-1.1.0-win64.zip -Algorithm SHA256
+   Get-FileHash .\HushPlayer-1.1.3-win64.zip -Algorithm SHA256
    ```
 2. 升级时保留旧目录（例如把 `HushPlayer` 改名为 `HushPlayer.old`），再解压新包；确认无误后再删除旧目录。
 3. 回滚：删除新目录、把 `HushPlayer.old` 改回 `HushPlayer` 即可——用户数据在独立目录，不受影响。
