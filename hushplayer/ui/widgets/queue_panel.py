@@ -5,7 +5,7 @@ from __future__ import annotations
 from PySide6.QtCore import QEasingCurve, QPropertyAnimation, Qt, Signal
 from PySide6.QtWidgets import QHBoxLayout, QLabel, QVBoxLayout, QWidget
 
-from ...core.theme import css_rgba, rgba, theme
+from ...core.theme import DARK, css_rgba, rgba, theme
 from ..context import ctx
 from ..menus import track_menu
 from .common import IconButton, paint_badge
@@ -15,8 +15,10 @@ from .tracklist import TrackListWidget
 class QueuePanel(QWidget):
     close_requested = Signal()
 
-    def __init__(self, parent: QWidget | None = None) -> None:
+    def __init__(self, parent: QWidget | None = None, *, immersive: bool = False) -> None:
         super().__init__(parent)
+        self._immersive = immersive
+        self._palette_active = False
         self.setObjectName("QueuePanel")
         self.setAttribute(Qt.WA_StyledBackground, True)
         # The duration column needs room for "4:02" plus the right
@@ -203,6 +205,18 @@ class QueuePanel(QWidget):
         if parent is not None and self._open:
             self.move(parent.width() - self.width(), 0)
 
+    def activate_palette(self) -> None:
+        """Paint this panel in the dark palette while it floats over the stage."""
+        if self._immersive and not self._palette_active:
+            theme().push_palette(DARK)
+            self._palette_active = True
+
+    def release_palette(self) -> None:
+        """Undo the dark override taken for the immersive stage."""
+        if self._palette_active:
+            theme().pop_palette()
+            self._palette_active = False
+
     def refresh_theme(self) -> None:
         self.setStyleSheet(
             f"""
@@ -212,9 +226,14 @@ class QueuePanel(QWidget):
             }}
             """
         )
-        self.count.setStyleSheet(f"font-size:{theme().pt(9):.1f}pt; color:{css_rgba(theme().palette.text, 0.45)};")
+        palette = theme().palette
+        self.title.setStyleSheet(
+            f"font-size:{theme().pt(13):.1f}pt; font-weight:700;"
+            f" color:{css_rgba(palette.text, 0.95)};"
+        )
+        self.count.setStyleSheet(f"font-size:{theme().pt(9):.1f}pt; color:{css_rgba(palette.text, 0.45)};")
         self.context_label.setStyleSheet(
-            f"font-size:{theme().pt(9):.1f}pt; color:{css_rgba(theme().palette.text, 0.45)};"
+            f"font-size:{theme().pt(9):.1f}pt; color:{css_rgba(palette.text, 0.45)};"
         )
         self.list.refresh_theme()
 

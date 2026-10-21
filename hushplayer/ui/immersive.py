@@ -881,12 +881,14 @@ class ImmersiveWindow(QWidget):
         from .widgets.queue_panel import QueuePanel
 
         if self._queue_panel is None:
-            self._queue_panel = QueuePanel(self)
+            self._queue_panel = QueuePanel(self, immersive=True)
             self._queue_panel.close_requested.connect(self._hide_queue)
         if self._queue_panel.isVisible():
             self._hide_queue()
             return
+        self._queue_panel.activate_palette()
         self._queue_panel.refresh()
+        self._queue_panel.refresh_theme()
         self._queue_panel.setGeometry(
             self.width() - self._queue_panel.width(),
             self.topbar.height(),
@@ -899,6 +901,7 @@ class ImmersiveWindow(QWidget):
     def _hide_queue(self) -> None:
         if self._queue_panel is not None:
             self._queue_panel.hide()
+            self._queue_panel.release_palette()
 
     def resizeEvent(self, event) -> None:  # noqa: N802
         super().resizeEvent(event)
@@ -991,6 +994,8 @@ class ImmersiveWindow(QWidget):
             self.controls.translate.setChecked(enabled)
 
     def closeEvent(self, event) -> None:  # noqa: N802
+        if self._queue_panel is not None:
+            self._queue_panel.release_palette()
         self.closed.emit()
         super().closeEvent(event)
 
