@@ -226,7 +226,7 @@ class QueuePanel(QWidget):
             self.setStyleSheet(
                 """
                 #QueuePanel {
-                    background: rgba(16, 16, 18, 0.84);
+                    background: rgba(14, 14, 16, 0.68);
                     border-left: 1px solid rgba(255, 255, 255, 0.08);
                     border-top-left-radius: 14px;
                     border-bottom-left-radius: 14px;
