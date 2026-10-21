@@ -509,21 +509,11 @@ class TrackDelegate(QStyledItemDelegate):
             draw_icon(painter, "music_note", note, rgba(palette.text, 0.35))
 
         text_left = cover_rect.right() + 12
-        badge = display_source(track) if track.is_online else ""
-        badge_width = 0.0
-        if badge:
-            font = theme().font(7.4, 600)
-            metrics = QFontMetrics(font)
-            # A long source name used to run over the title and the cover on a
-            # narrow queue panel, so cap the pill and elide it instead.
-            max_badge = min(theme().scaled(120, factor=0.8), max(76.0, rect.width() * 0.30))
-            badge = metrics.elidedText(badge, Qt.ElideRight, int(max(44, max_badge - 10)))
-            badge_width = min(metrics.horizontalAdvance(badge) + 14, max_badge)
-        available = rect.right() - text_left - badge_width - (8 if badge else 0)
-        if available < 90:  # no room for both: keep the title readable
-            badge = ""
-            badge_width = 0.0
-            available = rect.right() - text_left - 8
+        # The source used to sit in a rounded pill on the right edge; with long
+        # import ids it crowded the title and read as visual noise. It is now a
+        # quiet suffix on the artist line: "加木 · 网易音乐".
+        source = display_source(track) if track.is_online else ""
+        available = rect.right() - text_left - 8
 
         title_font = theme().font(9.6 if not compact else 9.2, 600 if is_current else 500)
         painter.setFont(title_font)
@@ -559,45 +549,46 @@ class TrackDelegate(QStyledItemDelegate):
             max(20, available),
             sub_metrics.height(),
         )
+        artist_text = sub_metrics.elidedText(track.artist, Qt.ElideRight, int(max(20, available)))
+        artist_w = min(float(sub_metrics.horizontalAdvance(artist_text)), available)
+        source_text = ""
+        if source and available - artist_w > 52:
+            source_text = sub_metrics.elidedText(
+                "· " + source, Qt.ElideRight, int(max(30, available - artist_w - 16))
+            )
+
+        def draw_subtitle(alpha: float) -> None:
+            painter.setFont(sub_font)
+            painter.setPen(QPen(rgba(palette.text, alpha)))
+            draw_text(painter, sub_rect, int(Qt.AlignLeft | Qt.AlignVCenter), artist_text)
+            if source_text:
+                painter.setPen(QPen(rgba(palette.text, 0.3)))
+                draw_text(
+                    painter,
+                    QRectF(
+                        text_left + artist_w + 8,
+                        sub_rect.top(),
+                        max(24, available - artist_w - 8),
+                        sub_rect.height(),
+                    ),
+                    int(Qt.AlignLeft | Qt.AlignVCenter),
+                    source_text,
+                )
+
         if compact:
             draw_text(painter, title_rect, int(Qt.AlignLeft | Qt.AlignVCenter), title)
-            painter.setFont(sub_font)
-            painter.setPen(QPen(rgba(palette.text, 0.62 if selected else 0.5)))
+            draw_subtitle(0.62 if selected else 0.5)
+        elif track.artist:
+            draw_text(painter, title_rect, int(Qt.AlignLeft | Qt.AlignVCenter), title)
+            draw_subtitle(0.62 if selected else 0.46)
+        else:
             draw_text(
                 painter,
-                sub_rect,
+                QRectF(text_left, rect.top(), max(20, available), rect.height()),
                 int(Qt.AlignLeft | Qt.AlignVCenter),
-                sub_metrics.elidedText(track.artist, Qt.ElideRight, int(max(20, available))),
+                title,
             )
-        else:
-            if track.artist:
-                draw_text(painter, title_rect, int(Qt.AlignLeft | Qt.AlignVCenter), title)
-                painter.setFont(sub_font)
-                painter.setPen(QPen(rgba(palette.text, 0.62 if selected else 0.46)))
-                draw_text(
-                    painter,
-                    sub_rect,
-                    int(Qt.AlignLeft | Qt.AlignVCenter),
-                    sub_metrics.elidedText(track.artist, Qt.ElideRight, int(max(20, available))),
-                )
-            else:
-                draw_text(
-                    painter,
-                    QRectF(text_left, rect.top(), max(20, available), rect.height()),
-                    int(Qt.AlignLeft | Qt.AlignVCenter),
-                    title,
-                )
 
-        if badge and badge_width > 0:
-            from .common import paint_badge
-
-            badge_rect = QRectF(
-                rect.right() - badge_width,
-                rect.center().y() - 8.5,
-                badge_width,
-                17,
-            )
-            paint_badge(painter, badge_rect, badge)
 
     def _paint_text(
         self,
@@ -897,7 +888,7 @@ class TrackTable(QTableView):
             widths.append(column_width)
             if column_width:
                 fixed += column_width
-        stretch = max(110, width - fixed)
+        stretch = max(110, width - fixed - 2)
         for position, column in enumerate(DEFAULT_COLUMNS):
             hidden = column not in visible
             self.setColumnHidden(position, hidden)

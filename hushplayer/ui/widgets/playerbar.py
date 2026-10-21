@@ -10,6 +10,7 @@ from ...audio.engine import STATE_LOADING, STATE_PLAYING
 from ...core.theme import Metrics, mix, qcolor, rgba, theme
 from ...model.track import Track, format_duration
 from ..context import ctx
+from .hover_tip import display_source
 from .common import HoverAnimation, IconButton, PlayButton
 from .cover import CoverWidget
 from .sliders import SeekBar, VolumeSlider
@@ -51,7 +52,7 @@ class TrackInfo(QWidget):
         else:
             self._title = track.display_title
             self._artist = track.display_artist
-            self._badge = track.source_name if track.is_online else ""
+            self._badge = display_source(track) if track.is_online else ""
         self.setToolTip(f"{self._title}\n{self._artist}" if self._title else "")
         self.update()
 
@@ -87,7 +88,9 @@ class TrackInfo(QWidget):
         title_metrics = QFontMetrics(title_font)
         artist_font = theme().font(8.8, 500)
         artist_metrics = QFontMetrics(artist_font)
-        badge_text = self._status or self._badge
+        # Only transient status (e.g. buffering) stays a pill; the source
+        # name reads better as a quiet suffix on the artist line.
+        badge_text = self._status
         badge_width = 0.0
         if badge_text:
             font = theme().font(7.2, 600)
@@ -131,8 +134,18 @@ class TrackInfo(QWidget):
                 painter,
                 QRectF(badge_x, y + 1, badge_width, max(14, artist_metrics.height())),
                 badge_text,
-                tone="accent" if self._status else "",
+                tone="accent",
             )
+        elif self._badge:
+            room = rect.width() - artist_metrics.horizontalAdvance(artist_text) - 10
+            if room > 40:
+                painter.setPen(QPen(rgba(palette.text, 0.28)))
+                painter.drawText(
+                    QRectF(artist_metrics.horizontalAdvance(artist_text) + 8, y, room,
+                           artist_metrics.height()),
+                    int(Qt.AlignLeft | Qt.AlignVCenter),
+                    artist_metrics.elidedText("· " + self._badge, Qt.ElideRight, int(room)),
+                )
         painter.end()
 
 
