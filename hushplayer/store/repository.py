@@ -321,6 +321,17 @@ class TrackRepository:
         ).fetchall()
         return [Track.from_row(row) for row in rows]
 
+    def track_by_path(self, path: str) -> "Track | None":
+        """Exact lookup used by playlist import (m3u/pls carry file paths)."""
+        key = normalize_path(path)
+        if not key:
+            return None
+        row = self.db.connection().execute(
+            f"SELECT {_TRACK_COLUMNS} FROM tracks WHERE path_key=? AND kind='local' LIMIT 1",
+            (key,),
+        ).fetchone()
+        return Track.from_row(row) if row else None
+
     def albums(self, *, search: str = "", limit: int = -1) -> list[Album]:
         # Favourited online tracks join the album view so saved streaming music
         # is browsable next to local files instead of only in 我喜欢.

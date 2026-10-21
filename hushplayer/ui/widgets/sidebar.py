@@ -290,6 +290,7 @@ class Sidebar(QWidget):
     navigate = Signal(str)
     playlist_context_menu = Signal(int, QPoint)
     create_playlist_requested = Signal()
+    import_playlist_requested = Signal()
     collapsed_changed = Signal(bool)
 
     def __init__(self, parent: QWidget | None = None) -> None:
@@ -342,8 +343,8 @@ class Sidebar(QWidget):
         self.playlist_label.setFont(theme().font(8.6, 700))
         self.playlist_label.setStyleSheet(f"color: {css_rgba(theme().palette.text_secondary, 0.85)};")
         self.add_playlist_button = _PlusButton(playlist_header)
-        self.add_playlist_button.clicked.connect(self.create_playlist_requested)
-        self.add_playlist_button.setToolTip("新建歌单")
+        self.add_playlist_button.clicked.connect(self._playlist_add_menu)
+        self.add_playlist_button.setToolTip("新建歌单 / 导入歌单")
         header_layout_row.addWidget(self.playlist_label)
         header_layout_row.addStretch(1)
         header_layout_row.addWidget(self.add_playlist_button)
@@ -445,6 +446,21 @@ class Sidebar(QWidget):
         playlist_id = _playlist_id_from_route(route)
         for key, item in self._playlist_items.items():
             item.set_selected(key == playlist_id)
+
+    def _playlist_add_menu(self) -> None:
+        from PySide6.QtWidgets import QMenu
+
+        menu = QMenu(self)
+        create = menu.addAction("新建歌单")
+        import_file = menu.addAction("从文件导入歌单…")
+        anchor = self.add_playlist_button.mapToGlobal(
+            QPoint(0, self.add_playlist_button.height())
+        )
+        chosen = menu.exec(anchor)
+        if chosen is create:
+            self.create_playlist_requested.emit()
+        elif chosen is import_file:
+            self.import_playlist_requested.emit()
 
     def set_playlists(self, playlists: list[Playlist]) -> None:
         for item in self._playlist_items.values():
