@@ -32,6 +32,16 @@ DEFAULT_HOTKEYS: dict[str, tuple[int, int, str]] = {
 }
 
 
+FALLBACK_HOTKEYS: dict[str, list[tuple[int, int, str]]] = {
+    # Escape hatch for click-through: if the primary combo is taken by another
+    # app (IMEs like to grab Ctrl+Alt+L), try alternatives before giving up.
+    "unlock_lyrics": [
+        (MOD_CONTROL | MOD_SHIFT | MOD_NOREPEAT, 0x4C, "Ctrl+Shift+L"),
+        (MOD_ALT | MOD_SHIFT | MOD_NOREPEAT, 0x4C, "Alt+Shift+L"),
+    ],
+}
+
+
 class GlobalHotkeys(QObject, QAbstractNativeEventFilter):
     """Registers a small set of system-wide shortcuts.
 
@@ -81,11 +91,16 @@ class GlobalHotkeys(QObject, QAbstractNativeEventFilter):
 
         app = QCoreApplication.instance()
         user32 = ctypes.windll.user32
-        for index, (action, (mods, vk, _label)) in enumerate(DEFAULT_HOTKEYS.items(), start=101):
-            if user32.RegisterHotKey(wintypes.HWND(self._hwnd), index, mods, vk):
-                self._registered[index] = action
+        for offset, (action, (mods, vk, label)) in enumerate(DEFAULT_HOTKEYS.items()):
+            index = 101 + offset
+            candidates = [(mods, vk, label)] + FALLBACK_HOTKEYS.get(action, [])
+            for cand_mods, cand_vk, cand_label in candidates:
+                if user32.RegisterHotKey(wintypes.HWND(self._hwnd), index, cand_mods, cand_vk):
+                    self._registered[index] = action
+                    log.info("全局快捷键已注册：%s", cand_label)
+                    break
             else:
-                log.info("全局快捷键注册失败：%s", DEFAULT_HOTKEYS[action][2])
+                log.warning("全局快捷键注册失败：%s", label)
         if self._registered and app is not None:
             app.installNativeEventFilter(self)
         self._enabled = bool(self._registered)

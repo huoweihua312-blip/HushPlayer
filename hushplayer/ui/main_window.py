@@ -520,6 +520,9 @@ class MainWindow(FramelessWindow):
         lyrics_action = QAction("桌面歌词", self)
         lyrics_action.triggered.connect(self.toggle_desktop_lyrics)
         menu.addAction(lyrics_action)
+        unlock_action = QAction("关闭桌面歌词鼠标穿透", self)
+        unlock_action.triggered.connect(self._unlock_lyrics_click_through)
+        menu.addAction(unlock_action)
         immersive_action = QAction("沉浸模式", self)
         immersive_action.triggered.connect(self.open_immersive)
         menu.addAction(immersive_action)
@@ -555,6 +558,13 @@ class MainWindow(FramelessWindow):
         window.toggle()
         if window.isVisible():
             self.toast("桌面歌词已开启", "success")
+
+    def _unlock_lyrics_click_through(self) -> None:
+        lyrics = getattr(ctx(), "desktop_lyrics", None)
+        if lyrics is None:
+            return
+        lyrics.set_click_through(False)
+        self.toast("已关闭桌面歌词的鼠标穿透", "info")
 
     def _on_tray_activated(self, reason) -> None:
         if reason in (

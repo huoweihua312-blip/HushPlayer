@@ -422,22 +422,24 @@ def test_popup_menus_and_combos_use_rounded_theme(app_bundle):
     assert combo.view().window().testAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
 
 def test_combo_popup_uses_rounded_menu(app_bundle, monkeypatch):
-    """The combo dropdown must use our rounded popup, not the native list window."""
+    """The combo dropdown must schedule our rounded popup, not the native view."""
     import hushplayer.ui.widgets.popup as popup
     from hushplayer.ui.widgets.settings_widgets import SettingCombo
 
+    app = app_bundle[0]
     seen: dict[str, object] = {}
 
-    def fake_exec(self, position):  # noqa: ANN001
+    def fake_popup(self, position):  # noqa: ANN001
         seen["kind"] = type(self).__name__
         seen["items"] = [item.text() for item in self._items if item is not None]
-        return None
 
-    monkeypatch.setattr(popup.PopupMenu, "exec", fake_exec)
+    monkeypatch.setattr(popup.PopupMenu, "popup", fake_popup)
     combo = SettingCombo([("甲", "a"), ("乙", "b")])
     combo.showPopup()
+    app.processEvents()
     assert seen["kind"] == "PopupMenu"
     assert seen["items"] == ["甲", "乙"]
+
 
 def test_popup_menu_reserves_check_column_for_all_rows(app_bundle):
     """Checkable and plain rows must share one text column (desktop lyrics menu)."""

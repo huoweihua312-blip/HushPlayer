@@ -411,6 +411,8 @@ class SettingCombo(QComboBox):
     def showPopup(self) -> None:  # noqa: N802
         if self.count() == 0:
             return
+        from PySide6.QtCore import QTimer
+
         from .popup import list_popup
 
         labels = [self.itemText(i) for i in range(self.count())]
@@ -419,7 +421,13 @@ class SettingCombo(QComboBox):
             self.setCurrentIndex(index)
 
         menu = list_popup(labels, self.currentIndex(), pick)
-        menu.exec(self.mapToGlobal(QPoint(0, self.height() + 2)))
+        # Open on the next event-loop turn: this method is called from the
+        # combo's mouse press, and opening synchronously makes the following
+        # release land on the popup and close it instantly.
+        QTimer.singleShot(
+            0, lambda: menu.popup(self.mapToGlobal(QPoint(0, self.height() + 2)))
+        )
+        self._popup_menu = menu
 
     def set_value(self, value: object) -> None:
         index = self.findData(value)
