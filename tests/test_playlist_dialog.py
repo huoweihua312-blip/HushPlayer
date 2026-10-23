@@ -208,7 +208,7 @@ def test_setting_helper_survives_missing_context():
 
 
 def test_match_table_is_wrapped_in_themed_card(inline_context):
-    """匹配表外框用自绘卡片（圆角 + 边框），表头与表格同属该卡片。"""
+    """匹配表容器只做底色，不再画外框（用户要求去掉外框）。"""
     from hushplayer.ui.playlist_import_dialog import PlaylistImportDialog
 
     dialog = PlaylistImportDialog()
@@ -219,6 +219,7 @@ def test_match_table_is_wrapped_in_themed_card(inline_context):
         assert dialog.table.parent() is frame
         style = frame.styleSheet()
         assert "ImportTableFrame" in style
-        assert "border-radius" in style
+        assert "border: none" in style
+        assert "border-radius" not in style
     finally:
         dialog.deleteLater()

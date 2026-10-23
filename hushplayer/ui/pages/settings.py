@@ -391,7 +391,7 @@ class SettingsPage(Page):
 
     # ------------------------------------------------------------- appearance
     def _build_appearance(self, column: QVBoxLayout) -> None:
-        card = SettingsCard("主题", "选择浅色、深色，或跟随 Windows 系统设置")
+        card = SettingsCard("主题", "跟随 Windows、固定浅色/深色，或纯黑背景")
         picker = ThemePicker(str(self.settings.get("appearance.theme", "system")))
         def change_theme(value: str) -> None:
             self.settings.set("appearance.theme", value)
@@ -1404,6 +1404,11 @@ class SettingsPage(Page):
 
     def _refresh_tree(self, root) -> None:
         for child in root.findChildren(QWidget):
+            if isinstance(child, ThemePicker):
+                try:
+                    child.set_value(str(self.settings.get("appearance.theme", "system")))
+                except Exception:  # noqa: BLE001
+                    pass
             refresh = getattr(child, "refresh_theme", None)
             if callable(refresh):
                 try:

@@ -694,7 +694,12 @@ class ThemePicker(QWidget):
 
     changed = Signal(str)
 
-    OPTIONS = [("system", "跟随系统", "随 Windows 设置"), ("light", "浅色", "始终浅色"), ("dark", "深色", "始终深色")]
+    OPTIONS = [
+        ("system", "跟随系统", "随 Windows 设置"),
+        ("light", "浅色", "始终浅色"),
+        ("dark", "深色", "始终深色"),
+        ("pure", "全黑", "纯黑背景"),
+    ]
     TILE_W = 132
     GAP = 12
 
@@ -710,25 +715,31 @@ class ThemePicker(QWidget):
         # type overlaps the preview (it used to be a fixed 108 px block).
         label_metrics = QFontMetrics(theme().font(9.4, 600))
         hint_metrics = QFontMetrics(theme().font(7.8, 400))
-        self._label_h = label_metrics.height()
-        self._hint_h = hint_metrics.height()
+        self._label_h = label_metrics.height() + 2
+        self._hint_h = hint_metrics.height() + 2
         self._preview_h = theme().scaled(78, factor=0.6)
         self._label_gap = 4
         self._hint_gap = 2
         self.TILE_H = (
-            self._preview_h + self._label_gap + self._label_h + self._hint_gap + self._hint_h
+            self._preview_h
+            + self._label_gap
+            + self._label_h
+            + self._hint_gap
+            + self._hint_h
+            + theme().scaled(6, factor=0.6)
         )
         self.TILE_W = theme().scaled(type(self).TILE_W, factor=0.6)
         self.GAP = theme().scaled(12, factor=0.6)
         self._tile_w = float(self.TILE_W)
         # Do not reserve the full three-tile width: in a narrow settings column
         # that forced a horizontal scrollbar. The tiles shrink instead.
-        self.setMinimumWidth(int(3 * self.TILE_W * 0.62))
+        self.setMinimumWidth(int(len(self.OPTIONS) * self.TILE_W * 0.46))
         self.setFixedHeight(self.TILE_H)
 
     def _fit_tiles(self) -> None:
-        available = max(1.0, self.width() - 2 * self.GAP)
-        self._tile_w = max(88.0, min(float(self.TILE_W), available / 3.0))
+        count = max(1, len(self.OPTIONS))
+        available = max(1.0, self.width() - (count - 1) * self.GAP)
+        self._tile_w = max(70.0, min(float(self.TILE_W), available / count))
         self.update()
 
     def resizeEvent(self, event) -> None:  # noqa: N802
@@ -736,16 +747,20 @@ class ThemePicker(QWidget):
         self._fit_tiles()
 
     def sizeHint(self) -> QSize:  # noqa: N802
-        return QSize(3 * self.TILE_W + 2 * self.GAP, self.TILE_H)
+        return QSize(len(self.OPTIONS) * self.TILE_W + (len(self.OPTIONS) - 1) * self.GAP, self.TILE_H)
 
     # ------------------------------------------------------------------ API
+    def set_value(self, value: str) -> None:
+        keys = [option[0] for option in self.OPTIONS]
+        if value not in keys:
+            value = "system"
+        if value == self._value:
+            return
+        self._value = value
+        self.update()
+
     def value(self) -> str:
         return self._value
-
-    def set_value(self, value: str) -> None:
-        if value != self._value:
-            self._value = value
-            self.update()
 
     # ------------------------------------------------------------------ 交互
     def _tiles(self) -> list[QRectF]:
@@ -822,7 +837,7 @@ class ThemePicker(QWidget):
                     qcolor("#16161B"),
                 )
             else:
-                painter.fillRect(clip, qcolor("#F5F5F8" if key == "light" else "#16161B"))
+                painter.fillRect(clip, qcolor("#F5F5F8" if key == "light" else ("#000000" if key == "pure" else "#16161B")))
             self._paint_mock(painter, clip, light=key == "light", accent=accent)
             painter.restore()
 
@@ -864,7 +879,7 @@ class ThemePicker(QWidget):
             painter.setPen(QPen(rgba(palette.text, 0.42)))
             text = hint
             if key == "system":
-                resolved = "深色" if theme().mode == "dark" else "浅色"
+                resolved = {"dark": "深色", "pure": "全黑"}.get(theme().mode, "浅色")
                 text = f"当前 {resolved}"
             painter.drawText(
                 QRectF(

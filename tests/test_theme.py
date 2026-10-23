@@ -48,3 +48,28 @@ def test_ui_scale_enlarges_type_without_changing_dpr(qapp) -> None:
     for size in (8.0, 9.0, 10.5, 13.0):
         assert theme().pt(size) * 96.0 / 72.0 == pytest.approx(theme().px(size), abs=0.51)
     assert theme().px(9) > 9
+
+
+def test_pure_theme_is_black_and_counts_as_dark(qapp):
+    from hushplayer.core.theme import resolve_mode, theme
+
+    assert resolve_mode("pure") == "pure"
+    theme().apply(mode="pure")
+    palette = theme().palette
+    assert palette.mode == "pure"
+    assert palette.window.lower() == "#000000"
+    assert palette.sidebar.lower() == "#000000"
+    assert palette.is_dark is True
+    theme().apply(mode="dark")
+
+
+def test_theme_picker_offers_pure_and_syncs(qapp):
+    from hushplayer.ui.widgets.settings_widgets import ThemePicker
+
+    picker = ThemePicker("system")
+    keys = [option[0] for option in picker.OPTIONS]
+    assert keys == ["system", "light", "dark", "pure"]
+    picker.set_value("pure")
+    assert picker.value() == "pure"
+    picker.set_value("not-a-mode")
+    assert picker.value() == "system"

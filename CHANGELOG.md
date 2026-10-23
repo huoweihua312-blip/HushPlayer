@@ -2,6 +2,24 @@
 
 本日志依据仓库中的 Git 提交、`hushplayer/version.py` 与构建产物整理。版本按发布时间从新到旧排列；同一版本的多条提交合并为一条，只写对使用者可见的变化。版本号 1.0.14 未单独发布，相关改动并入 1.0.15。
 
+## 1.2.6 - 2026-10-23
+
+### 更新摘要
+
+- 新增「全黑」主题：窗口与侧栏为纯 `#000000`，卡片用近黑 `#0A0A0B`；全黑计入深色语义（标题栏显示月亮、切主题按钮从全黑切到浅色、日月动画按「变暗」方向播放）。主题选择器扩为四项：跟随系统 / 浅色 / 深色 / 全黑，瓦片按可用宽度自适应缩小。
+- 导入歌单的匹配表改为完全自绘表头（不再使用 `QHeaderView`），修复浅色模式下表头是一条黑色横条、深色下表头文字几乎不可见的问题；自绘取色统一走 `theme().rgba()`（`QColor("rgba(...)")` 是无效写法，会退化成纯黑）。
+- 按反馈去掉匹配表外框：容器只保留面板底色，不再画描边与圆角。
+- 设置页主题说明更新为「跟随 Windows、固定浅色/深色，或纯黑背景」。
+
+### 验证
+
+- `pytest`：249 passed / 0 failed（`artifacts/junit_1_2_6.xml`）。
+- 真实窗口截图：`docs/screenshots/theme_pure_{settings,home,songs}.png`、`import_match_{light,dark}.png`。
+- 打包验收：日志 `启动 HushPlayer 1.2.6`、`window=1280x820`、`instances=1`、`alive_after_close=False`。
+
+### 产物
+
+- `F:\HushPlayerBuild\out\HushPlayer-1.2.6-win64.zip`，SHA256 `753B0E4EEB0C5787CAB244FF0F3A8E4337678A2427C94937AEBD7DE3278699D3`。
 ## 1.2.3 - 2026-10-23
 
 - 提交：由本轮 `fix(1.2.3)`

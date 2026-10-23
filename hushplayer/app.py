@@ -17,7 +17,7 @@ from .core import brand
 from .core import paths
 from .core.paths import data_dir, ensure_dirs, is_frozen
 from .core.settings import settings
-from .core.theme import apply_theme_to_app, theme
+from .core.theme import apply_theme_to_app, resolve_mode, theme
 from .version import APP_NAME, APP_ID, VERSION
 from .ui.context import AppContext, ctx, set_context
 
@@ -245,6 +245,7 @@ class HushApp(QObject):
         overlay = None
         snapshot = None
         previous_mode = self._resolved_mode
+        target_mode = resolve_mode(preference)
         if (
             animate
             and animate_theme
@@ -262,7 +263,7 @@ class HushApp(QObject):
 
                 host = getattr(window, "container", None) or window
                 origin = self._theme_origin(window, host)
-                to_dark = previous_mode == "light"
+                to_dark = target_mode in {"dark", "pure"}
                 if animation_mode == "sunrise":
                     overlay = SunMoonReveal(
                         host,

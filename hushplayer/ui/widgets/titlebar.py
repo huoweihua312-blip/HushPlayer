@@ -116,7 +116,7 @@ class TitleBar(QWidget):
 
     def set_theme_mode(self, mode: str) -> None:
         """Show a moon in dark mode and a sun in light mode."""
-        dark = mode == "dark"
+        dark = mode in {"dark", "pure"}
         self.theme_button.set_icon("moon" if dark else "sun")
         self.theme_button.setToolTip("切换到浅色模式" if dark else "切换到深色模式")
 

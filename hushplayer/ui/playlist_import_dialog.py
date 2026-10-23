@@ -482,8 +482,7 @@ class PlaylistImportDialog(QDialog):
         self.table.setStyleSheet("QTableView { background: transparent; border: none; }")
         self.table_frame.setStyleSheet(
             f"QFrame#ImportTableFrame {{ background: {palette.surface};"
-            f" border: 1px solid {css_rgba(palette.text, 0.10)};"
-            f" border-radius: {theme().scaled(12, factor=0.6)}px; }}"
+            f" border: none; }}"
         )
         self._table_frame_inset = theme().scaled(1, factor=0.6)
         apply_native_title_bar(self)

@@ -646,7 +646,7 @@ class MainWindow(FramelessWindow):
 
     def toggle_theme_mode(self) -> None:
         """Switch between light and dark from the title bar (sun / moon)."""
-        target = "light" if theme().mode == "dark" else "dark"
+        target = "light" if theme().is_dark else "dark"
         settings = ctx().settings
         settings.set("appearance.theme", target)
         toast = getattr(self, "_toasts", None)

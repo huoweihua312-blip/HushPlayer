@@ -118,7 +118,7 @@ class Palette:
 
     @property
     def is_dark(self) -> bool:
-        return self.mode == "dark"
+        return self.mode in {"dark", "pure"}
 
     def get(self, name: str) -> str:
         return getattr(self, name)
@@ -181,6 +181,38 @@ LIGHT = Palette(
     player="#FAFAFC",
     row_alt="#00000003",
 )
+
+
+PURE = Palette(
+    mode="pure",
+    window="#000000",
+    sidebar="#000000",
+    surface="#0A0A0B",
+    surface_alt="#121214",
+    surface_hover="#1B1B1E",
+    elevated="#101012",
+    border="#1E1E22",
+    border_strong="#2C2C31",
+    text="#F5F5F7",
+    text_secondary="#9C9CA8",
+    text_tertiary="#666670",
+    accent="#C95770",
+    accent_hover="#D96C82",
+    accent_pressed="#AF4460",
+    accent_soft="#1E1014",
+    accent_text="#FFFFFF",
+    hover="#FFFFFF0D",
+    selection="#C9577026",
+    scrim="#000000B8",
+    shadow="#000000AA",
+    danger="#E06060",
+    success="#4FBF8B",
+    warning="#E0A33E",
+    player="#050506",
+    row_alt="#FFFFFF04",
+)
+
+_PALETTES = {"dark": DARK, "light": LIGHT, "pure": PURE}
 
 
 @dataclass(frozen=True)
@@ -299,7 +331,7 @@ class Theme(QObject):
         changed = False
         if mode is not None and mode != self._mode:
             self._mode = mode
-            base = DARK if mode == "dark" else LIGHT
+            base = _PALETTES.get(mode, DARK)
             self._palette = base
             changed = True
         if accent and accent.lower() != self._accent.lower():
@@ -621,7 +653,7 @@ def theme() -> Theme:
 
 
 def resolve_mode(preference: str) -> str:
-    if preference in {"light", "dark"}:
+    if preference in _PALETTES:
         return preference
     try:
         from PySide6.QtWidgets import QApplication
