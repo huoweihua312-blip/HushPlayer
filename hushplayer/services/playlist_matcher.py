@@ -1,0 +1,584 @@
+"""Cross-source playlist matching (import step 3 of 3).
+
+Local library first, then the enabled online sources, scored with the *same*
+matcher the player uses for cross-source playback fallback
+(:mod:`hushplayer.online.matching`). High-confidence hits are matched
+automatically, ambiguous ones are surfaced for review, and nothing is silently
+dropped: every source entry ends up in one of five states.
+
+Network work runs through Qt's event loop (the online client is already async),
+so the UI thread only does scoring; concurrency is capped and every stage is
+cancellable.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+
+from PySide6.QtCore import QObject, QTimer, Signal
+
+from ..model.track import Track
+from ..online.matching import (
+    AUTO_MARGIN,
+    AUTO_MIN_SCORE,
+    CANDIDATE_MIN_SCORE,
+    MatchCandidate,
+    normalize_text,
+    rank_candidates,
+    score_match,
+)
+from ..online.models import build_sources, track_from_item
+from .playlist_import import PlaylistEntry
+
+__all__ = [
+    "STATUS",
+    "MatchRow",
+    "PlaylistMatcher",
+    "ImportOutcome",
+    "apply_import",
+    "find_playlist",
+]
+
+STATUS = {
+    "local": "本地",
+    "online": "在线已匹配",
+    "unverified": "在线未验证",
+    "review": "待确认",
+    "unmatched": "未匹配",
+    "skipped": "已跳过",
+}
+
+_MAX_ROWS_IN_FLIGHT = 2
+_MAX_SOURCES = 3
+_SEARCH_TIMEOUT_MS = 8_000
+_VERIFY_TIMEOUT_MS = 8_000
+_VERSION_TOKENS = (
+    "live",
+    "现场",
+    "演唱会",
+    "remix",
+    "混音",
+    "dj",
+    "伴奏",
+    "instrumental",
+    "纯音乐",
+    "cover",
+    "翻唱",
+    "acoustic",
+    "demo",
+    "karaoke",
+    "ktv",
+)
+
+
+def _version_tokens(text: str) -> set[str]:
+    lowered = normalize_text(text)
+    return {token for token in _VERSION_TOKENS if token in lowered}
+
+
+def _adjusted_score(expected: Track, candidate: Track) -> int:
+    """Score like the player, but punish version mismatches (Live vs studio)."""
+    score = score_match(expected, candidate)
+    if score <= 0:
+        return 0
+    wanted = _version_tokens(f"{expected.title} {expected.album}")
+    found = _version_tokens(f"{candidate.title} {candidate.album}")
+    score += 6 * len(wanted & found)
+    score -= 30 * len(found - wanted)
+    return max(0, score)
+
+
+def _wanted_track(entry: PlaylistEntry) -> Track:
+    return Track(
+        id="import:wanted",
+        title=entry.title,
+        artist=entry.artist,
+        album=entry.album,
+        duration_ms=entry.duration_ms,
+        kind="local",
+    )
+
+
+@dataclass
+class MatchRow:
+    entry: PlaylistEntry
+    status: str = "unmatched"
+    track: Track | None = None
+    score: int = 0
+    candidates: list[MatchCandidate] = field(default_factory=list)
+    note: str = ""
+    verified: bool | None = None
+    skipped: bool = False
+
+    @property
+    def display_title(self) -> str:
+        return self.entry.title or self.entry.path
+
+    @property
+    def display_artist(self) -> str:
+        return self.entry.artist
+
+    @property
+    def status_label(self) -> str:
+        return STATUS.get(self.status, self.status)
+
+    @property
+    def source_name(self) -> str:
+        if self.track is None:
+            return ""
+        return self.track.source_name or ("本地" if self.track.kind == "local" else "")
+
+
+@dataclass
+class ImportOutcome:
+    playlist_id: int = 0
+    playlist_name: str = ""
+    added: int = 0
+    duplicates: int = 0
+    skipped: int = 0
+    unmatched: int = 0
+    pending: int = 0
+    mode: str = "new"
+
+
+def find_playlist(library, name: str):
+    wanted = (name or "").strip().casefold()
+    for playlist in library.playlists_all():
+        if playlist.system:
+            continue
+        if playlist.name.strip().casefold() == wanted:
+            return playlist
+    return None
+
+
+def apply_import(
+    library,
+    name: str,
+    rows: list[MatchRow],
+    *,
+    mode: str = "new",
+    playlist_id: int | None = None,
+) -> ImportOutcome:
+    """Persist confirmed rows, preserving order and never duplicating a track.
+
+    ``mode``: ``new`` (always create), ``merge`` (append into an existing one) or
+    ``replace`` (clear the existing playlist first).
+    """
+    name = (name or "").strip() or "导入的歌单"
+    outcome = ImportOutcome(playlist_name=name, mode=mode)
+
+    existing = library.playlist(playlist_id) if playlist_id else find_playlist(library, name)
+    if mode == "new" or existing is None:
+        outcome.playlist_id = library.create_playlist(name)
+    else:
+        outcome.playlist_id = existing.id
+        if mode == "replace":
+            ids = [track.id for track in library.playlist_tracks(existing.id)]
+            if ids:
+                library.remove_from_playlist(existing.id, ids)
+
+    ordered: list[Track] = []
+    seen: set[str] = set()
+    for row in rows:
+        if row.skipped or row.status == "skipped":
+            outcome.skipped += 1
+            continue
+        if row.status in ("review", "pending"):
+            outcome.pending += 1
+            continue
+        if row.status == "unmatched" or row.track is None:
+            outcome.unmatched += 1
+            continue
+        track = row.track
+        if track.id in seen:
+            outcome.duplicates += 1
+            continue
+        seen.add(track.id)
+        ordered.append(track)
+
+    unique: list[Track] = []
+    for track in ordered:
+        if track.kind == "online" and not track.album_id:
+            library._ensure_online_album(track)
+        if track.id not in {item.id for item in unique}:
+            unique.append(track)
+
+    if unique:
+        library.add_to_playlist(outcome.playlist_id, unique)
+    outcome.added = len(unique)
+    return outcome
+
+
+class PlaylistMatcher(QObject):
+    """Async matcher: local pass first, then capped online searches."""
+
+    row_changed = Signal(int)
+    progress = Signal(int, int)
+    finished = Signal()
+    failed = Signal(str)
+
+    def __init__(self, client, library, parent: QObject | None = None) -> None:
+        super().__init__(parent)
+        self._client = client
+        self._library = library
+        self.rows: list[MatchRow] = []
+        self._cache: dict[tuple[str, str], MatchRow] = {}
+        self._queue: list[int] = []
+        self._in_flight: set[int] = set()
+        self._index = 0
+        self._cancelled = False
+        self._started = False
+        self._online = True
+        self._sources: list = []
+        self._verify = True
+
+    # ------------------------------------------------------------------ control
+    @property
+    def total(self) -> int:
+        return len(self.rows)
+
+    @property
+    def done(self) -> int:
+        return sum(1 for row in self.rows if row.status != "pending")
+
+    def counts(self) -> dict[str, int]:
+        result = {"local": 0, "online": 0, "unverified": 0, "review": 0, "unmatched": 0, "skipped": 0}
+        for row in self.rows:
+            if row.status in result:
+                result[row.status] += 1
+        return result
+
+    def start(self, entries: list[PlaylistEntry], *, online: bool = True, verify: bool = True) -> None:
+        # Mutate in place: the dialog's table model keeps this list by reference.
+        self.rows[:] = [MatchRow(entry=entry, status="pending") for entry in entries]
+        self._queue = []
+        self._in_flight.clear()
+        self._cache.clear()
+        self._index = 0
+        self._cancelled = False
+        self._started = True
+        self._online = online
+        self._verify = verify
+        self._sources = self._pick_sources()
+        self.progress.emit(0, len(self.rows))
+        QTimer.singleShot(0, self._local_pass)
+
+    def cancel(self) -> None:
+        self._cancelled = True
+        self._queue.clear()
+        self._in_flight.clear()
+
+    # ------------------------------------------------------------------ local
+    def _local_pass(self) -> None:
+        if self._cancelled:
+            return
+        total = len(self.rows)
+        for index, row in enumerate(self.rows):
+            if index < self._index:
+                continue
+            self._index = index + 1
+            self._match_local(row)
+            if index % 25 == 0:
+                self.progress.emit(self.done, total)
+                QTimer.singleShot(0, lambda i=index + 1: self._continue_local(i))
+                return
+        self._index = total
+        self.progress.emit(self.done, total)
+        self._start_online()
+
+    def _continue_local(self, start: int) -> None:
+        if self._cancelled:
+            return
+        total = len(self.rows)
+        for index in range(start, total):
+            row = self.rows[index]
+            self._index = index + 1
+            self._match_local(row)
+            if index % 25 == 0:
+                self.progress.emit(self.done, total)
+                QTimer.singleShot(0, lambda i=index + 1: self._continue_local(i))
+                return
+        self._index = total
+        self.progress.emit(self.done, total)
+        self._start_online()
+
+    def _match_local(self, row: MatchRow) -> None:
+        entry = row.entry
+        if not entry.title:
+            row.status = "unmatched"
+            row.note = "没有曲名"
+            self.row_changed.emit(self.rows.index(row))
+            return
+        try:
+            candidates = [
+                track
+                for track in self._library.tracks.search_local(entry.title, limit=30)
+                if track.kind == "local"
+            ]
+        except Exception:  # noqa: BLE001 - a broken library must not abort an import
+            candidates = []
+        wanted = _wanted_track(entry)
+        scored = sorted(
+            ((candidate, _adjusted_score(wanted, candidate)) for candidate in candidates),
+            key=lambda item: item[1],
+            reverse=True,
+        )
+        best = scored[0] if scored else None
+        if best and best[1] >= AUTO_MIN_SCORE:
+            row.track = best[0]
+            row.score = best[1]
+            row.status = "local"
+            row.verified = True
+            self._emit(row)
+            return
+        if best and best[1] >= CANDIDATE_MIN_SCORE:
+            row.candidates = [MatchCandidate(track=track, score=score) for track, score in scored[:5] if score >= CANDIDATE_MIN_SCORE]
+            row.status = "review"
+            row.note = "本地有相近结果"
+            self._emit(row)
+            return
+        if self._online and self._sources:
+            self._queue.append(self.rows.index(row))
+            return
+        row.status = "unmatched"
+        row.note = "本地库没有这首歌"
+        self._emit(row)
+
+    # ----------------------------------------------------------------- online
+    def _pick_sources(self) -> list:
+        if not self._online:
+            return []
+        try:
+            sources = [
+                source
+                for source in build_sources(getattr(self._client, "sources", []) or [])
+                if source.searchable and source.can_play
+            ]
+        except Exception:  # noqa: BLE001
+            sources = []
+        return sources[:_MAX_SOURCES]
+
+    def _start_online(self) -> None:
+        if self._cancelled:
+            return
+        if not self._queue:
+            self.progress.emit(self.done, len(self.rows))
+            self._finished()
+            return
+        self._pump()
+
+    def _pump(self) -> None:
+        if self._cancelled:
+            return
+        while self._queue and len(self._in_flight) < _MAX_ROWS_IN_FLIGHT:
+            index = self._queue.pop(0)
+            row = self.rows[index]
+            key = (normalize_text(row.entry.title), normalize_text(row.entry.artist))
+            cached = self._cache.get(key)
+            if cached is not None:
+                row.status = cached.status
+                row.track = cached.track
+                row.score = cached.score
+                row.candidates = list(cached.candidates)
+                row.note = cached.note
+                row.verified = cached.verified
+                self._emit(row)
+                continue
+            self._in_flight.add(index)
+            self._search_row(index, row)
+        if not self._in_flight and not self._queue:
+            self.progress.emit(self.done, len(self.rows))
+            self._finished()
+
+    def search(self, index: int, query: str) -> None:
+        """Manual search: re-query the online sources with the user's words."""
+        row = self.rows[index]
+        row.status = "pending"
+        row.candidates = []
+        row.note = "正在搜索…"
+        self._emit(row)
+        if not self._sources:
+            row.status = "unmatched"
+            row.note = "没有可用的在线音源"
+            self._emit(row)
+            return
+        self._in_flight.add(index)
+        self._search_row(index, row, query=query.strip() or row.entry.title)
+
+    def _search_row(self, index: int, row: MatchRow, *, query: str | None = None) -> None:
+        if query is None:
+            query = " ".join(part for part in (row.entry.title, row.entry.artist) if part).strip()
+        else:
+            query = query.strip()
+        expected = _wanted_track(row.entry)
+        collected: list[Track] = []
+        pending = {"left": len(self._sources)}
+
+        def finish() -> None:
+            if self._cancelled or index not in self._in_flight:
+                return
+            self._in_flight.discard(index)
+            ranked = sorted(
+                (
+                    MatchCandidate(track=track, score=_adjusted_score(expected, track))
+                    for track in collected
+                ),
+                key=lambda item: item.score,
+                reverse=True,
+            )
+            ranked = [item for item in ranked if item.score >= CANDIDATE_MIN_SCORE]
+            row.candidates = ranked[:5]
+            if ranked and ranked[0].score >= AUTO_MIN_SCORE and (
+                len(ranked) == 1 or ranked[0].score - ranked[1].score >= AUTO_MARGIN
+            ):
+                row.track = ranked[0].track
+                row.score = ranked[0].score
+                row.status = "online"
+                row.note = ""
+                self._verify_row(index, row)
+            elif ranked:
+                row.status = "review"
+                row.score = ranked[0].score
+                row.note = "在线有相近结果"
+                self._emit(row)
+            else:
+                row.status = "unmatched"
+                row.note = "在线音源也没有找到"
+                self._emit(row)
+            self._remember(row)
+            self.progress.emit(self.done, len(self.rows))
+            QTimer.singleShot(0, self._pump)
+
+        for source in self._sources:
+            def callback(response: dict, source=source) -> None:
+                try:
+                    if response.get("ok"):
+                        for item in response.get("data") or []:
+                            try:
+                                collected.append(track_from_item(item, source=source))
+                            except Exception:  # noqa: BLE001
+                                continue
+                finally:
+                    pending["left"] -= 1
+                    if pending["left"] <= 0:
+                        finish()
+
+            try:
+                self._client.search(
+                    source.id,
+                    query,
+                    1,
+                    callback,
+                    timeout=_SEARCH_TIMEOUT_MS,
+                    kind="music",
+                )
+            except Exception:  # noqa: BLE001
+                pending["left"] -= 1
+        if pending["left"] <= 0:
+            finish()
+
+    def _verify_row(self, index: int, row: MatchRow) -> None:
+        if not self._verify or row.track is None or row.track.kind != "online":
+            row.verified = None if row.track is None or row.track.kind == "online" else True
+            self._emit(row)
+            return
+        from ..online import models as online_models
+
+        def callback(response: dict) -> None:
+            if self._cancelled:
+                return
+            if response.get("ok"):
+                row.verified = True
+                row.note = ""
+            else:
+                row.verified = False
+                row.status = "unverified"
+                row.note = "找到歌曲，但当前无法解析播放地址"
+            self._emit(row)
+            self.progress.emit(self.done, len(self.rows))
+
+        try:
+            self._client.resolve_playback(
+                row.track.source_id,
+                online_models.runtime_track(row.track),
+                callback,
+                timeout=_VERIFY_TIMEOUT_MS,
+            )
+        except Exception:  # noqa: BLE001
+            row.verified = None
+            self._emit(row)
+
+    # ------------------------------------------------------------------ manual
+    def choose(self, index: int, track: Track | None) -> None:
+        row = self.rows[index]
+        if track is None:
+            row.track = None
+            row.status = "unmatched"
+            row.note = "已清空匹配"
+            row.verified = None
+        else:
+            row.track = track
+            row.status = "local" if track.kind == "local" else "online"
+            row.verified = True if track.kind == "local" else None
+            row.note = "手动选择"
+            row.skipped = False
+        self._remember(row)
+        self._emit(row)
+        self.progress.emit(self.done, len(self.rows))
+
+    def skip(self, index: int) -> None:
+        row = self.rows[index]
+        row.skipped = True
+        row.status = "skipped"
+        row.note = "已跳过"
+        self._emit(row)
+        self.progress.emit(self.done, len(self.rows))
+
+    def unskip(self, index: int) -> None:
+        row = self.rows[index]
+        row.skipped = False
+        if row.track is None:
+            row.status = "unmatched"
+        else:
+            row.status = "local" if row.track.kind == "local" else "online"
+        self._emit(row)
+
+    def rematch(self, index: int) -> None:
+        row = self.rows[index]
+        row.status = "pending"
+        row.track = None
+        row.candidates = []
+        row.note = ""
+        row.verified = None
+        self._emit(row)
+        if self._online and self._sources and row.entry.title:
+            self._queue.append(index)
+            self._pump()
+        else:
+            self._match_local(row)
+
+    # ------------------------------------------------------------------ helpers
+    def _remember(self, row: MatchRow) -> None:
+        key = (normalize_text(row.entry.title), normalize_text(row.entry.artist))
+        self._cache[key] = MatchRow(
+            entry=row.entry,
+            status=row.status,
+            track=row.track,
+            score=row.score,
+            candidates=list(row.candidates),
+            note=row.note,
+            verified=row.verified,
+            skipped=row.skipped,
+        )
+
+    def _emit(self, row: MatchRow) -> None:
+        try:
+            self.row_changed.emit(self.rows.index(row))
+        except ValueError:
+            pass
+
+    def _finished(self) -> None:
+        if self._cancelled:
+            return
+        self._started = False
+        self.finished.emit()

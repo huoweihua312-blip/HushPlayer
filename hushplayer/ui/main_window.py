@@ -378,31 +378,11 @@ class MainWindow(FramelessWindow):
         ctx().settings.set("appearance.sidebar_visible", not collapsed)
 
     def _import_playlist(self) -> None:
-        from PySide6.QtWidgets import QFileDialog
+        """Open the import wizard (file or platform link)."""
+        from .playlist_import_dialog import PlaylistImportDialog
 
-        from ..services.playlist_import import import_playlist_file
-
-        path, _ = QFileDialog.getOpenFileName(
-            self,
-            "导入歌单",
-            "",
-            "歌单文件 (*.m3u *.m3u8 *.pls *.csv *.txt);;所有文件 (*)",
-        )
-        if not path:
-            return
-        try:
-            summary = import_playlist_file(path, ctx().library)
-        except Exception as exc:  # noqa: BLE001
-            self.toast(f"导入失败：{exc}", "error")
-            return
-        if summary.matched:
-            self.navigate("playlist", summary.playlist_id)
-            self.toast(
-                f"已导入「{summary.playlist_name}」：匹配 {summary.matched}/{summary.total} 首",
-                "success",
-            )
-        else:
-            self.toast("没有匹配到本地歌曲，歌单已创建但为空", "warning")
+        dialog = PlaylistImportDialog(self)
+        dialog.exec()
 
     def _playlist_menu(self, playlist_id: int, position: QPoint) -> None:
         playlist = ctx().library.playlist(playlist_id)
