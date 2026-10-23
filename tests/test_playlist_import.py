@@ -308,3 +308,33 @@ def test_find_playlist_skips_system(loaded_library) -> None:
     assert find_playlist(loaded_library, "我喜欢") is None
     assert any(item.system for item in loaded_library.playlists_all())
     assert find_playlist(loaded_library, "不存在") is None
+
+def test_match_strength_thresholds_and_helpers() -> None:
+    from hushplayer.model.track import Track
+    from hushplayer.services.playlist_import import PlaylistEntry
+    from hushplayer.services.playlist_matcher import (
+        MATCH_STRENGTHS,
+        MatchCandidate,
+        _dedupe_candidates,
+        _query_variants,
+    )
+
+    assert MATCH_STRENGTHS["strict"] == (80, 15)
+    assert MATCH_STRENGTHS["balanced"] == (75, 8)
+    assert MATCH_STRENGTHS["loose"] == (60, 0)
+
+    entry = PlaylistEntry(title="茶花开了 (Live)", artist="王睿卓", album="茶花开了")
+    variants = _query_variants(entry)
+    assert variants[0] == "茶花开了 (Live) 王睿卓"
+    assert "茶花开了 王睿卓" in variants
+    assert len(variants) == len(set(variants))
+
+    a = Track(id="a", title="x", source_id="s1", remote_id="r1")
+    b = Track(id="b", title="x", source_id="s1", remote_id="r1")
+    c = Track(id="c", title="x", source_id="s2", remote_id="r1")
+    deduped = _dedupe_candidates([
+        MatchCandidate(track=a, score=90),
+        MatchCandidate(track=b, score=70),
+        MatchCandidate(track=c, score=80),
+    ])
+    assert [item.track.id for item in deduped] == ["a", "c"]

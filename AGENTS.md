@@ -172,3 +172,4 @@ HushPlayer-<ver>-setup.exe /VERYSILENT /LOG=...
 - 2026-10-22：补充编辑方式说明——`.venv` 的 Python 是 Low 完整性，写 Medium 的 `AGENTS.md` 会 `PermissionError`，改用 PowerShell 写。
 - 2026-10-23：新增跨平台歌单导入（services/playlist_link.py、playlist_import.py、playlist_matcher.py + ui/playlist_import_dialog.py）。链接导入只支持网易云公开歌单，其余平台引导导出文件；匹配复用 online/matching.py 并对 Live/Remix/伴奏等版本 token 加减分；自动匹配的在线结果必须 resolve_playback 验证后才算可播放。详见 docs/PLAYLIST_IMPORT.md。
 
+- 2026-10-23：歌单导入 1.2.1 体验改进——三档匹配强度（`MATCH_STRENGTHS` strict/balanced/loose）、候选 18 个 + 变体二次搜索（`_query_variants`/`_start_variants`）、「全部采用最佳候选」、导入前确认与未导入 CSV 导出（`_export_missing`，`data_dir()/exports`）。注意：`.venv` Python 写 `CHANGELOG.md`/`AGENTS.md` 会 PermissionError，必须用 PowerShell。

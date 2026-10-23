@@ -13,6 +13,8 @@ cancellable.
 
 from __future__ import annotations
 
+import re
+
 from dataclasses import dataclass, field
 
 from PySide6.QtCore import QObject, QTimer, Signal
@@ -49,9 +51,17 @@ STATUS = {
 }
 
 _MAX_ROWS_IN_FLIGHT = 2
-_MAX_SOURCES = 3
+_MAX_SOURCES = 6
+_MAX_CANDIDATES = 18
 _SEARCH_TIMEOUT_MS = 8_000
 _VERIFY_TIMEOUT_MS = 8_000
+MATCH_STRENGTHS = {
+    "strict": (80, 15),
+    "balanced": (75, 8),
+    "loose": (60, 0),
+}
+STRENGTH_LABELS = {"strict": "严格", "balanced": "平衡", "loose": "宽松"}
+
 _VERSION_TOKENS = (
     "live",
     "现场",
@@ -86,6 +96,20 @@ def _adjusted_score(expected: Track, candidate: Track) -> int:
     score += 6 * len(wanted & found)
     score -= 30 * len(found - wanted)
     return max(0, score)
+
+
+def _dedupe_candidates(items: list[MatchCandidate]) -> list[MatchCandidate]:
+    """Drop duplicates of the same remote song, keeping the best score."""
+    seen: set[tuple[str, str]] = set()
+    result: list[MatchCandidate] = []
+    for item in items:
+        track = item.track
+        key = (track.source_id, track.remote_id or track.id)
+        if key in seen:
+            continue
+        seen.add(key)
+        result.append(item)
+    return result
 
 
 def _wanted_track(entry: PlaylistEntry) -> Track:
@@ -149,6 +173,26 @@ def find_playlist(library, name: str):
         if playlist.name.strip().casefold() == wanted:
             return playlist
     return None
+
+
+def _query_variants(entry: PlaylistEntry) -> list[str]:
+    """Alternative queries, cheapest first, for rows the first pass missed."""
+    title = (entry.title or "").strip()
+    artist = (entry.artist or "").strip()
+    cleaned = re.sub(r"[\(\[（【].*?[\)\]）】]", " ", title)
+    cleaned = re.sub(r"\b(feat|ft|featuring)\b.*$", " ", cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r"\s+", " ", cleaned).strip()
+    variants: list[str] = []
+    if title and artist:
+        variants.append(f"{title} {artist}")
+    if title:
+        variants.append(title)
+    if cleaned and cleaned != title:
+        variants.append(f"{cleaned} {artist}".strip())
+        variants.append(cleaned)
+    if artist and entry.album:
+        variants.append(f"{artist} {entry.album}")
+    return list(dict.fromkeys(variants))
 
 
 def apply_import(
@@ -226,11 +270,16 @@ class PlaylistMatcher(QObject):
         self._queue: list[int] = []
         self._in_flight: set[int] = set()
         self._index = 0
+        self._variant_pass = False
+        self._variant_queue = []
         self._cancelled = False
         self._started = False
         self._online = True
         self._sources: list = []
         self._verify = True
+        self._strength = "balanced"
+        self._variant_pass = False
+        self._variant_queue: list[int] = []
 
     # ------------------------------------------------------------------ control
     @property
@@ -248,7 +297,17 @@ class PlaylistMatcher(QObject):
                 result[row.status] += 1
         return result
 
-    def start(self, entries: list[PlaylistEntry], *, online: bool = True, verify: bool = True) -> None:
+    def _thresholds(self) -> tuple[int, int]:
+        return MATCH_STRENGTHS.get(self._strength, MATCH_STRENGTHS["balanced"])
+
+    def start(
+        self,
+        entries: list[PlaylistEntry],
+        *,
+        online: bool = True,
+        verify: bool = True,
+        strength: str = "balanced",
+    ) -> None:
         # Mutate in place: the dialog's table model keeps this list by reference.
         self.rows[:] = [MatchRow(entry=entry, status="pending") for entry in entries]
         self._queue = []
@@ -259,6 +318,7 @@ class PlaylistMatcher(QObject):
         self._started = True
         self._online = online
         self._verify = verify
+        self._strength = strength if strength in MATCH_STRENGTHS else "balanced"
         self._sources = self._pick_sources()
         self.progress.emit(0, len(self.rows))
         QTimer.singleShot(0, self._local_pass)
@@ -323,8 +383,9 @@ class PlaylistMatcher(QObject):
             key=lambda item: item[1],
             reverse=True,
         )
+        auto_min, _margin = self._thresholds()
         best = scored[0] if scored else None
-        if best and best[1] >= AUTO_MIN_SCORE:
+        if best and best[1] >= auto_min:
             row.track = best[0]
             row.score = best[1]
             row.status = "local"
@@ -332,7 +393,7 @@ class PlaylistMatcher(QObject):
             self._emit(row)
             return
         if best and best[1] >= CANDIDATE_MIN_SCORE:
-            row.candidates = [MatchCandidate(track=track, score=score) for track, score in scored[:5] if score >= CANDIDATE_MIN_SCORE]
+            row.candidates = [MatchCandidate(track=track, score=score) for track, score in scored[:_MAX_CANDIDATES] if score >= CANDIDATE_MIN_SCORE]
             row.status = "review"
             row.note = "本地有相近结果"
             self._emit(row)
@@ -362,8 +423,7 @@ class PlaylistMatcher(QObject):
         if self._cancelled:
             return
         if not self._queue:
-            self.progress.emit(self.done, len(self.rows))
-            self._finished()
+            self._start_variants()
             return
         self._pump()
 
@@ -387,8 +447,7 @@ class PlaylistMatcher(QObject):
             self._in_flight.add(index)
             self._search_row(index, row)
         if not self._in_flight and not self._queue:
-            self.progress.emit(self.done, len(self.rows))
-            self._finished()
+            self._start_variants()
 
     def search(self, index: int, query: str) -> None:
         """Manual search: re-query the online sources with the user's words."""
@@ -427,9 +486,10 @@ class PlaylistMatcher(QObject):
                 reverse=True,
             )
             ranked = [item for item in ranked if item.score >= CANDIDATE_MIN_SCORE]
-            row.candidates = ranked[:5]
-            if ranked and ranked[0].score >= AUTO_MIN_SCORE and (
-                len(ranked) == 1 or ranked[0].score - ranked[1].score >= AUTO_MARGIN
+            row.candidates = _dedupe_candidates(ranked)[:_MAX_CANDIDATES]
+            auto_min, auto_margin = self._thresholds()
+            if ranked and ranked[0].score >= auto_min and (
+                len(ranked) == 1 or ranked[0].score - ranked[1].score >= auto_margin
             ):
                 row.track = ranked[0].track
                 row.score = ranked[0].score
@@ -558,6 +618,141 @@ class PlaylistMatcher(QObject):
             self._match_local(row)
 
     # ------------------------------------------------------------------ helpers
+    # ------------------------------------------------------------- second pass
+    def _start_variants(self) -> None:
+        if self._cancelled:
+            return
+        if self._variant_pass or not self._online or not self._sources:
+            self.progress.emit(self.done, len(self.rows))
+            self._finished()
+            return
+        self._variant_pass = True
+        self._variant_queue = [
+            index for index, row in enumerate(self.rows)
+            if row.status in ("unmatched", "review")
+        ]
+        if not self._variant_queue:
+            self.progress.emit(self.done, len(self.rows))
+            self._finished()
+            return
+        self._pump_variants()
+
+    def _pump_variants(self) -> None:
+        if self._cancelled:
+            return
+        while self._variant_queue and len(self._in_flight) < _MAX_ROWS_IN_FLIGHT:
+            index = self._variant_queue.pop(0)
+            self._in_flight.add(index)
+            self._variant_row(index)
+        if not self._in_flight and not self._variant_queue:
+            self.progress.emit(self.done, len(self.rows))
+            self._finished()
+
+    def _variant_row(self, index: int) -> None:
+        row = self.rows[index]
+        variants = _query_variants(row.entry)
+        if not variants:
+            self._in_flight.discard(index)
+            QTimer.singleShot(0, self._pump_variants)
+            return
+        expected = _wanted_track(row.entry)
+        collected: list[Track] = []
+        queries = list(variants)
+
+        def next_query() -> None:
+            if self._cancelled or index not in self._in_flight:
+                return
+            if not queries:
+                self._finish_variants(index, row, expected, collected)
+                return
+            query = queries.pop(0)
+            pending = {"left": len(self._sources)}
+
+            def finish() -> None:
+                pending["left"] -= 1
+                if pending["left"] > 0:
+                    return
+                auto_min, auto_margin = self._thresholds()
+                ranked = _dedupe_candidates(
+                    sorted(
+                        (
+                            MatchCandidate(track=track, score=_adjusted_score(expected, track))
+                            for track in collected
+                        ),
+                        key=lambda item: item.score,
+                        reverse=True,
+                    )
+                )
+                ranked = [item for item in ranked if item.score >= CANDIDATE_MIN_SCORE]
+                confident = bool(ranked) and ranked[0].score >= auto_min and (
+                    len(ranked) == 1 or ranked[0].score - ranked[1].score >= auto_margin
+                )
+                if confident:
+                    row.candidates = ranked[:_MAX_CANDIDATES]
+                    row.track = ranked[0].track
+                    row.score = ranked[0].score
+                    row.status = "online"
+                    row.note = ""
+                    self._in_flight.discard(index)
+                    self._remember(row)
+                    self.progress.emit(self.done, len(self.rows))
+                    if self._verify:
+                        self._verify_row(index, row)
+                    else:
+                        self._emit(row)
+                        QTimer.singleShot(0, self._pump_variants)
+                    return
+                QTimer.singleShot(0, next_query)
+
+            for source in self._sources:
+                def callback(response: dict, source=source) -> None:
+                    try:
+                        if response.get("ok"):
+                            for item in response.get("data") or []:
+                                try:
+                                    collected.append(track_from_item(item, source=source))
+                                except Exception:  # noqa: BLE001
+                                    continue
+                    finally:
+                        finish()
+
+                self._client.search(
+                    source.id,
+                    query,
+                    1,
+                    callback,
+                    timeout=_SEARCH_TIMEOUT_MS,
+                    kind="music",
+                )
+
+        next_query()
+
+    def _finish_variants(self, index: int, row: MatchRow, expected: Track, collected: list[Track]) -> None:
+        self._in_flight.discard(index)
+        ranked = _dedupe_candidates(
+            sorted(
+                (
+                    MatchCandidate(track=track, score=_adjusted_score(expected, track))
+                    for track in collected
+                ),
+                key=lambda item: item.score,
+                reverse=True,
+            )
+        )
+        ranked = [item for item in ranked if item.score >= CANDIDATE_MIN_SCORE]
+        row.candidates = ranked[:_MAX_CANDIDATES]
+        if ranked:
+            row.status = "review"
+            row.score = ranked[0].score
+            row.note = "补充搜索后有相近结果，请确认"
+        else:
+            row.status = "unmatched"
+            row.note = "换了搜索词也没有找到"
+        self._remember(row)
+        self._emit(row)
+        self.progress.emit(self.done, len(self.rows))
+        QTimer.singleShot(0, self._pump_variants)
+
     def _remember(self, row: MatchRow) -> None:
         key = (normalize_text(row.entry.title), normalize_text(row.entry.artist))
         self._cache[key] = MatchRow(

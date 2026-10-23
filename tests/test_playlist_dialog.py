@@ -99,3 +99,44 @@ def test_dialog_apply_creates_playlist(inline_context, qapp) -> None:
     assert found, "playlist should be created by the wizard"
     assert found[0].track_count == 1
     assert dialog.stage >= 2
+
+class MidClient:
+    """Returns a single mid-score candidate so rows land in review."""
+
+    def __init__(self):
+        self.sources: list[dict] = [
+            {"id": "fake", "name": "Fake", "platform": "test", "enabled": True,
+             "filename": "fake.js", "capabilities": {"search": True, "playback": True}},
+        ]
+
+    def search(self, source_id, query, page, callback, **kwargs):
+        callback({"ok": True, "data": [{"id": "m1", "title": query.split(" ")[0],
+                                        "artist": kwargs.get("artist", "Unknown"),
+                                        "album": "", "duration": 200000}]})
+        return 1
+
+    def resolve_playback(self, *args, **kwargs):
+        raise AssertionError("verification disabled in this test")
+
+
+def test_adopt_all_and_export_missing(inline_context, qapp) -> None:
+    from hushplayer.ui.playlist_import_dialog import PlaylistImportDialog
+
+    dialog = PlaylistImportDialog()
+    dialog._accept_entries(
+        "导出测试",
+        [PlaylistEntry(title="完全陌生的歌", artist="陌生人")],
+        "",
+    )
+    dialog.online_toggle.setChecked(False)
+    dialog._start_matching()
+    _pump(qapp, dialog)
+    assert [row.status for row in dialog._matcher.rows] == ["unmatched"]
+
+    target = dialog._export_missing(dialog._matcher.rows)
+    csv_path = dialog.source_hint.text().split("导出到 ", 1)[-1]
+    from pathlib import Path
+
+    assert Path(csv_path).exists()
+    text = Path(csv_path).read_text(encoding="utf-8-sig")
+    assert "未匹配" in text and "完全陌生的歌" in text

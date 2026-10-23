@@ -112,6 +112,9 @@ DEFAULTS: dict[str, Any] = {
         "max_mb": 2048,
         "dir": "",
     },
+    "playlist": {
+        "import_strength": "balanced",
+    },
     "downloads": {
         "dir": "",
         "quality": "higher",

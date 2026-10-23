@@ -7,6 +7,8 @@ page rather than a system box.
 
 from __future__ import annotations
 
+import time
+
 from pathlib import Path
 
 from PySide6.QtCore import QAbstractTableModel, QModelIndex, QPoint, QSize, Qt, QTimer, Signal
@@ -42,6 +44,7 @@ from ..services.playlist_matcher import STATUS, MatchRow, PlaylistMatcher, apply
 from .context import ctx
 from .widgets.common import IconButton, TextButton
 from .widgets.popup import PopupMenu
+from .widgets.searchfield import SegmentedControl
 
 __all__ = ["PlaylistImportDialog"]
 
@@ -178,6 +181,17 @@ class _StepBar(QWidget):
         painter.end()
 
 
+
+def _setting(key: str, default=None):
+    settings = getattr(ctx(), "settings", None)
+    return settings.get(key, default) if settings is not None else default
+
+
+def _remember(key: str, value) -> None:
+    settings = getattr(ctx(), "settings", None)
+    if settings is not None:
+        settings.set(key, value)
+
 class PlaylistImportDialog(QDialog):
     imported = Signal(int, str)
 
@@ -236,6 +250,10 @@ class PlaylistImportDialog(QDialog):
         footer.addWidget(self.back_button)
         self.next_button = TextButton("下一步", icon_name="chevron_right", size=32, accent=True)
         self.next_button.clicked.connect(self._go_next)
+        self.adopt_all = TextButton("全部采用最佳候选", icon_name="check", size=30)
+        self.adopt_all.clicked.connect(self._adopt_all)
+        self.adopt_all.setVisible(False)
+        footer.addWidget(self.adopt_all)
         footer.addWidget(self.next_button)
         root.addLayout(footer)
 
@@ -301,6 +319,14 @@ class PlaylistImportDialog(QDialog):
         self.online_toggle.setChecked(True)
         self.online_toggle.setToolTip("本地没有的歌曲，用已启用的在线音源搜索")
         top.addWidget(self.online_toggle)
+        top.addSpacing(10)
+        self.strength = SegmentedControl(["严格", "平衡", "宽松"])
+        self.strength.setToolTip(
+            "严格：同时要求高分与明显领先；平衡：推荐；宽松：只取最高分，允许低置信导入"
+        )
+        saved = str(_setting("playlist.import_strength", "balanced"))
+        self.strength.set_current({"strict": 0, "balanced": 1, "loose": 2}.get(saved, 1))
+        top.addWidget(self.strength)
         layout.addLayout(top)
 
         self.progress = QProgressBar()
@@ -515,7 +541,14 @@ class PlaylistImportDialog(QDialog):
         self._set_stage(1)
         self.next_button.setEnabled(False)
         self._set_next("匹配中…")
-        self._matcher.start(self._entries, online=self.online_toggle.isChecked(), verify=True)
+        strength = ("strict", "balanced", "loose")[max(0, min(2, self.strength.current()))]
+        _remember("playlist.import_strength", strength)
+        self._matcher.start(
+            self._entries,
+            online=self.online_toggle.isChecked(),
+            verify=True,
+            strength=strength,
+        )
         # Bind the model only after start() has created the rows.
         self.model.set_rows(self._matcher.rows)
 
@@ -575,7 +608,7 @@ class PlaylistImportDialog(QDialog):
         row_index = index.row()
         row = self._matcher.rows[row_index]
         menu = PopupMenu(self)
-        for candidate in row.candidates[:5]:
+        for candidate in row.candidates[:18]:
             track = candidate.track
             label = f"{track.title} · {track.artist}（{candidate.score}）"
             action = menu.addAction(label)
@@ -620,20 +653,71 @@ class PlaylistImportDialog(QDialog):
         self._on_row_changed(index)
 
     # ------------------------------------------------------------------ apply
+    def _adopt_all(self) -> None:
+        matcher = self._matcher
+        if matcher is None:
+            return
+        for index, row in enumerate(matcher.rows):
+            if row.status == "review" and row.candidates:
+                matcher.choose(index, row.candidates[0].track)
+        self._refresh_counts()
+
+    def _export_missing(self, rows) -> None:
+        import csv
+        from pathlib import Path
+
+        from ..core.paths import data_dir
+
+        target_dir = Path(data_dir()) / "exports"
+        target_dir.mkdir(parents=True, exist_ok=True)
+        name = (self.name_input.text().strip() or self._playlist_name or "playlist").replace("/", "-")
+        stamp = time.strftime("%Y%m%d-%H%M%S")
+        path = target_dir / f"{name}-unmatched-{stamp}.csv"
+        with path.open("w", encoding="utf-8-sig", newline="") as handle:
+            writer = csv.writer(handle)
+            writer.writerow(["状态", "原始歌名", "歌手", "专辑", "候选数", "最佳候选", "说明"])
+            for row in rows:
+                if row.status in ("review", "unmatched", "pending", "skipped"):
+                    best = row.candidates[0].track if row.candidates else None
+                    writer.writerow([
+                        row.status_label,
+                        row.entry.title,
+                        row.entry.artist,
+                        row.entry.album,
+                        len(row.candidates),
+                        f"{best.title} - {best.artist}" if best else "",
+                        row.note,
+                    ])
+        self.source_hint.setText(f"未导入清单已导出到 {path}")
+
     def _apply(self) -> None:
         if self._matcher is None:
             return
         rows = self._matcher.rows
-        if self._matcher.counts()["review"]:
-            answer = QMessageBox.question(
-                self,
-                "还有待确认的歌曲",
-                "还有待确认的歌曲没有处理。继续导入会跳过它们，确定继续吗？",
-                QMessageBox.Yes | QMessageBox.No,
-                QMessageBox.No,
+        counts = self._matcher.counts()
+        missing = counts["review"] + counts["unmatched"] + counts.get("pending", 0) + counts["skipped"]
+        if missing:
+            box = QMessageBox(self)
+            box.setWindowTitle("还有未处理的歌曲")
+            box.setIcon(QMessageBox.Icon.Warning)
+            box.setText(
+                f"将导入 {counts['local'] + counts['online'] + counts['unverified']} 首；"
+                f"{counts['review']} 首待确认、{counts['unmatched']} 首未匹配、"
+                f"{counts['skipped']} 首已跳过不会被导入。"
             )
-            if answer != QMessageBox.Yes:
+            box.setInformativeText("可以先返回处理，也可以继续导入并导出未导入清单。")
+            back = box.addButton("返回处理", QMessageBox.ButtonRole.RejectRole)
+            export = box.addButton("导出清单并导入", QMessageBox.ButtonRole.ActionRole)
+            proceed = box.addButton("仍然导入", QMessageBox.ButtonRole.AcceptRole)
+            box.setDefaultButton(back)
+            box.exec()
+            clicked = box.clickedButton()
+            if clicked is back or clicked is None:
                 return
+            if clicked is export:
+                self._export_missing(rows)
+        if False:  # kept for readability of the original guard
+            return
         library = ctx().library
         name = self.name_input.text().strip() or self._playlist_name or "导入的歌单"
         existing = find_playlist(library, name)

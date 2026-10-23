@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Tracks</key>
+  <dict>
+    <key>1</key>
+    <dict><key>Name</key><string>晴天</string><key>Artist</key><string>周杰伦</string><key>Album</key><string>叶惠美</string><key>Total Time</key><integer>269000</integer></dict>
+    <key>2</key>
+    <dict><key>Name</key><string>家书</string><key>Artist</key><string>加木</string><key>Album</key><string>羲和</string><key>Total Time</key><integer>242000</integer></dict>
+    <key>3</key>
+    <dict><key>Name</key><string>夜航信号</string><key>Artist</key><string>Aurora Field</string><key>Album</key><string>夜航信号</string><key>Total Time</key><integer>12000</integer></dict>
+  </dict>
+  <key>Playlists</key>
+  <array>
+    <dict>
+      <key>Name</key><string>示例歌单</string>
+      <key>Playlist Items</key>
+      <array>
+        <dict><key>Track ID</key><integer>2</integer></dict>
+        <dict><key>Track ID</key><integer>1</integer></dict>
+        <dict><key>Track ID</key><integer>3</integer></dict>
+      </array>
+    </dict>
+  </array>
+</dict>
+</plist>
