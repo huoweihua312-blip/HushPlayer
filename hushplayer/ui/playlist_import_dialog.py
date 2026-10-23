@@ -520,6 +520,9 @@ class PlaylistImportDialog(QDialog):
             self._refresh_counts()
 
     def _on_progress(self, done: int, total: int) -> None:
+        if total and done >= total:
+            self.next_button.setText("开始导入")
+            self.progress.setVisible(False)
         self.progress.setMaximum(max(1, total))
         self.progress.setValue(done)
         self.progress.setVisible(done < total)
@@ -529,6 +532,12 @@ class PlaylistImportDialog(QDialog):
         if self._matcher is None:
             return
         counts = self._matcher.counts()
+        settled = bool(self._matcher.rows) and all(
+            row.status != "pending" for row in self._matcher.rows
+        )
+        if settled:
+            self.next_button.setText("开始导入")
+            self.progress.setVisible(False)
         parts = [f"{STATUS['local']} {counts['local']}"]
         parts.append(f"在线 {counts['online']}")
         if counts["unverified"]:
