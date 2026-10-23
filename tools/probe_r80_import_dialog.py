@@ -75,6 +75,10 @@ def main() -> None:
     pump(app, dialog)
     dialog._refresh_counts()
     app.processEvents()
+    print("BTN", dialog.next_button.text(), "PROG", dialog.progress.isVisible(), "STATUS", dialog.status_label.text(), flush=True)
+    app.processEvents()
+    time.sleep(0.15)
+    app.processEvents()
     dialog.grab().save(str(OUT / f"dialog_match_{mode}.png"))
 
     dialog._go_next()
