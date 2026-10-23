@@ -637,6 +637,29 @@ def resolve_mode(preference: str) -> str:
     return "dark"
 
 
+def apply_native_title_bar(widget, dark: bool | None = None) -> None:
+    """Match the Windows title bar of a native-framed window to the app theme.
+
+    QDialog windows keep their own DWM frame; without this the frame stays dark
+    while the page inside switches to light (and vice versa).
+    """
+    try:
+        import ctypes
+
+        if dark is None:
+            dark = theme().palette.is_dark
+        hwnd = int(widget.winId())
+        if not hwnd:
+            return
+        value = ctypes.c_int(1 if dark else 0)
+        for attribute in (20, 19):  # DWMWA_USE_IMMERSIVE_DARK_MODE (20) + legacy (19)
+            ctypes.windll.dwmapi.DwmSetWindowAttribute(
+                hwnd, attribute, ctypes.byref(value), ctypes.sizeof(value)
+            )
+    except Exception:  # noqa: BLE001
+        pass
+
+
 def apply_theme_to_app(app, *, preference: str | None = None, accent: str | None = None, **kwargs) -> str:
     t = theme()
     mode = resolve_mode(preference or "system")

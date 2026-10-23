@@ -162,3 +162,16 @@ def test_candidate_menu_opens_away_from_cursor(inline_context, qapp, monkeypatch
     # 菜单必须避开光标：要么在下方，要么整体翻到左侧，不能从光标位置开始
     assert anchor.y() >= 400 + 20
     assert not (580 <= anchor.x() <= 620)
+
+def test_dialog_matches_native_title_bar_to_theme(inline_context, qapp, monkeypatch) -> None:
+    import hushplayer.ui.playlist_import_dialog as module
+
+    calls: list[int] = []
+    monkeypatch.setattr(module, "apply_native_title_bar", lambda widget: calls.append(1))
+
+    dialog = module.PlaylistImportDialog()
+    dialog.show()
+    qapp.processEvents()
+    dialog.close()
+
+    assert calls, "showEvent should sync the DWM title bar with the app theme"

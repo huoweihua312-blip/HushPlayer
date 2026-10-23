@@ -35,7 +35,7 @@ from PySide6.QtWidgets import (
 )
 
 from ..core.logging_setup import log_exception
-from ..core.theme import css_rgba, qcolor, rgba, theme
+from ..core.theme import apply_native_title_bar, css_rgba, qcolor, rgba, theme
 from ..model.track import format_duration
 from ..online import matching
 from ..services.playlist_import import PlaylistEntry, parse_playlist, parse_playlist_text
@@ -387,6 +387,10 @@ class PlaylistImportDialog(QDialog):
         return page
 
     # ------------------------------------------------------------------ theme
+    def showEvent(self, event) -> None:  # noqa: N802
+        super().showEvent(event)
+        apply_native_title_bar(self)
+
     def _apply_theme(self, *_args) -> None:
         palette = theme().palette
         self.setStyleSheet(
@@ -417,6 +421,7 @@ class PlaylistImportDialog(QDialog):
             f"QProgressBar::chunk {{ background:{palette.accent}; border-radius:3px; }}"
         )
         self.table.setStyleSheet("QTableView { background: transparent; border: none; }")
+        apply_native_title_bar(self)
 
     # ------------------------------------------------------------------ flow
     @property

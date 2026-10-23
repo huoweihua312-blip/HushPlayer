@@ -176,7 +176,7 @@ class PopupMenu(QWidget):
             if item is None:
                 continue
             if isinstance(item, PopupMenu):
-                text = item._owner_title
+                text = item._owner_title or ""
             else:
                 text = item.text()
             extra = 20 if self._has_checks() else 0
@@ -434,8 +434,12 @@ class PopupMenu(QWidget):
                 self._sub_hover = sub_index
                 self.update()
             return
-        if self._sub_open >= 0 and not self._in_bridge(point):
-            self._reset_submenu()
+        if self._sub_open >= 0:
+            if self._sub_hover != -1:
+                self._sub_hover = -1
+                self.update()
+            if not self._in_bridge(point):
+                self._reset_submenu()
         index = self._item_at(point.y()) if point.x() < self._base_width else -1
         if index != self._hover:
             self._hover = index
