@@ -531,6 +531,17 @@ QPushButton:hover {{ background: {p.surface_hover}; }}
 QPushButton:pressed {{ background: {p.surface}; }}
 QPushButton:disabled {{ color: {p.text_tertiary}; }}
 QCheckBox {{ color: {p.text}; spacing: 8px; }}
+QCheckBox::indicator {{
+    width: 16px;
+    height: 16px;
+    border-radius: 5px;
+    border: 1px solid {p.border_strong};
+    background: {p.surface_alt};
+}}
+QCheckBox::indicator:hover {{ border-color: {p.accent}; }}
+QCheckBox::indicator:checked {{ background: {p.accent}; border-color: {p.accent}; }}
+QCheckBox::indicator:checked:hover {{ background: {p.accent_hover}; border-color: {p.accent_hover}; }}
+QCheckBox::indicator:disabled {{ border-color: {p.border}; background: transparent; }}
 QMessageBox, QDialog {{ background: {p.window}; }}
 QTabWidget::pane {{ border: 1px solid {p.border}; border-radius: 12px; background: {p.surface}; }}
 QTabBar::tab {{

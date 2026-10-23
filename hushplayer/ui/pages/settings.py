@@ -13,8 +13,6 @@ from PySide6.QtWidgets import (
     QApplication,
     QFileDialog,
     QHBoxLayout,
-    QInputDialog,
-    QMessageBox,
     QLabel,
     QScrollArea,
     QSizePolicy,
@@ -37,6 +35,7 @@ from ...core.display import (
 from ...model.track import format_duration
 from ...online.models import build_sources
 from ..context import ctx
+from ..dialogs import ask_text, choose, confirm, notify
 from ..widgets.common import IconButton, TextButton
 from ..widgets.settings_widgets import (
     ActionCard,
@@ -777,14 +776,13 @@ class SettingsPage(Page):
         if not missing:
             self._toast("没有发现失效文件", "success")
             return
-        answer = QMessageBox.question(
+        if not confirm(
             self,
             "修复失效文件",
             f"发现 {len(missing)} 首歌曲的文件已不存在。\n\n"
             "选择一个文件夹，程序会先按原来的相对路径寻找，再按文件名搜索并重新关联。",
-            QMessageBox.StandardButton.Ok | QMessageBox.StandardButton.Cancel,
-        )
-        if answer != QMessageBox.StandardButton.Ok:
+            ok_text="选择文件夹",
+        ):
             return
         new_root = QFileDialog.getExistingDirectory(self, "选择歌曲现在所在的文件夹")
         if not new_root:
@@ -1011,13 +1009,12 @@ class SettingsPage(Page):
             self._toast(f"订阅里的 {result.get('total', 0)} 个音源都已安装", "success")
             return
         names = "、".join(result.get("names", [])[:4])
-        answer = QMessageBox.question(
+        if confirm(
             self,
             "发现订阅更新",
             f"订阅中有 {new} 个新音源（共 {result.get('total', 0)} 个）：\n{names}\n\n现在安装？",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-        )
-        if answer == QMessageBox.StandardButton.Yes:
+            ok_text="现在安装",
+        ):
             self._import_subscription_url(url)
 
     def _install_source_files(self, paths: list[str]) -> None:
@@ -1034,7 +1031,7 @@ class SettingsPage(Page):
         elif report.duplicates and not report.failed:
             self._toast("这些音源已经安装过了", "info")
         if report.failed:
-            QMessageBox.warning(self, "部分音源安装失败", report.failure_text())
+            notify(self, "部分音源安装失败", report.failure_text(), kind="warning")
         self._reload_sources()
 
     def _install_source_file(self, path: str) -> None:
@@ -1056,11 +1053,12 @@ class SettingsPage(Page):
     def _import_subscription(self) -> None:
         from ...online.registry import RegistryError, registry
 
-        url, ok = QInputDialog.getText(
+        url, ok = ask_text(
             self,
             "导入音源订阅",
-            "MusicFree 订阅地址（通常是 mf.json）：",
+            "MusicFree 订阅地址（通常是 mf.json）",
             text=getattr(self, "_last_subscription", ""),
+            placeholder="https://…/mf.json",
         )
         url = (url or "").strip()
         if not ok or not url:
@@ -1079,24 +1077,22 @@ class SettingsPage(Page):
             report = registry().install_subscription(url)
             self.settings.set("online.subscription_url", url)
         except RegistryError as exc:
-            QMessageBox.warning(self, "导入订阅失败", str(exc))
+            notify(self, "导入订阅失败", str(exc), kind="error")
             return
         except Exception as exc:  # noqa: BLE001 - surface unexpected failures
             log_exception("导入音源订阅失败", exc)
-            QMessageBox.warning(self, "导入订阅失败", str(exc))
+            notify(self, "导入订阅失败", str(exc), kind="error")
             return
         finally:
             QApplication.restoreOverrideCursor()
 
         self._toast(report.summary(), "success" if report.installed else "info")
         if report.failed:
-            QMessageBox.warning(self, "部分音源导入失败", report.failure_text())
+            notify(self, "部分音源导入失败", report.failure_text(), kind="warning")
         self._reload_sources()
 
     def _add_source_url(self) -> None:
-        from PySide6.QtWidgets import QInputDialog
-
-        url, ok = QInputDialog.getText(self, "从链接添加音源", "音源地址（http/https）：")
+        url, ok = ask_text(self, "从链接添加音源", "音源地址（http/https）", placeholder="https://…/source.js")
         if not ok or not url.strip():
             return
         try:
@@ -1126,14 +1122,12 @@ class SettingsPage(Page):
         self._reload_sources()
 
     def _remove_source(self, source_id: str, name: str) -> None:
-        answer = QMessageBox.question(
+        if not confirm(
             self,
             "删除音源",
             f"确定要删除音源「{name}」吗？插件文件也会一并删除。",
-            QMessageBox.Yes | QMessageBox.No,
-            QMessageBox.No,
-        )
-        if answer != QMessageBox.Yes:
+            ok_text="删除",
+        ):
             return
         try:
             from ...online.registry import registry
@@ -1326,17 +1320,15 @@ class SettingsPage(Page):
                 return
             self._toast(f"发现新版本 {info.version}", "success")
             if info.url:
-                from PySide6.QtWidgets import QMessageBox
-
-                box = QMessageBox(self.window())
-                box.setWindowTitle("发现新版本")
-                box.setText(f"HushPlayer {info.version} 已发布")
-                detail = info.notes or "点击「打开下载页」前往发布页面。"
-                box.setInformativeText(detail[:600])
-                open_button = box.addButton("打开下载页", QMessageBox.ButtonRole.AcceptRole)
-                box.addButton("稍后", QMessageBox.ButtonRole.RejectRole)
-                box.exec()
-                if box.clickedButton() is open_button:
+                detail = (info.notes or "点击「打开下载页」前往发布页面。")[:600]
+                picked = choose(
+                    self.window(),
+                    "发现新版本",
+                    f"HushPlayer {info.version} 已发布\n\n{detail}",
+                    [("later", "稍后"), ("open", "打开下载页")],
+                    accent="open",
+                )
+                if picked == "open":
                     import webbrowser
 
                     webbrowser.open(info.url)

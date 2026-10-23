@@ -2,6 +2,20 @@
 
 本日志依据仓库中的 Git 提交、`hushplayer/version.py` 与构建产物整理。版本按发布时间从新到旧排列；同一版本的多条提交合并为一条，只写对使用者可见的变化。版本号 1.0.14 未单独发布，相关改动并入 1.0.15。
 
+## 1.2.8 — 2026-10-23
+
+### 变更
+- **系统对话框全部自绘**：新增 `hushplayer/ui/dialogs.py`（`CardDialog` / `MessageDialog` / `TextInputDialog` + `notify/confirm/choose/ask_text`），替换 `QMessageBox`（10 处）与 `QInputDialog`（4 处）；无边框卡片、行内标题栏、可拖动、Esc 关闭、按钮右对齐。`QFileDialog` 保留系统选择器。
+- **异常提示框**：`app.py` 未捕获异常改用 `notify(..., kind="error", detail=…)`，不再弹系统 MessageBox。
+- **导入匹配表头对齐**：表头改为与单元格一致（第 1/2/4 列左对齐、第 3 列右对齐），修复表头与数据错位。
+
+### 验证
+- `pytest -q --timeout=300 --junitxml=artifacts/junit_1_2_8.xml` → **253 passed / 0 failed**。
+- 真实窗口截图：`docs/screenshots/dialog_{confirm,notify,ask}_{light,dark}.png`、`import_match_{light,dark}.png`。
+- 打包验收：`启动 HushPlayer 1.2.8`、托盘注册成功、单实例、正常退出。
+
+### 产物
+- `F:\HushPlayerBuild\out\HushPlayer`、`HushPlayer-1.2.8-win64.zip`（SHA256 `E3367E5D3CE3AF5802B1B860A569A83328327BCF10368504AEC4FBF695A76B36`）
 ## 1.2.7 — 2026-10-23
 
 ### 修复

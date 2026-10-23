@@ -12,11 +12,12 @@ from typing import Callable, Sequence
 
 from PySide6.QtCore import QPoint
 from PySide6.QtGui import QAction, QGuiApplication
-from PySide6.QtWidgets import QInputDialog, QMenu, QMessageBox, QWidget
+from PySide6.QtWidgets import QMenu, QWidget
 
 from ..core.icons import icon as make_icon
 from ..core.logging_setup import get_logger
 from ..core.theme import theme
+from .dialogs import ask_text, confirm
 from ..model.track import Track
 from .context import ctx
 from .widgets.menu import themed_menu
@@ -173,7 +174,7 @@ def _add_to_playlist(playlist_id: int, tracks: Sequence[Track]) -> None:
 
 def _create_playlist(tracks: Sequence[Track], parent: QWidget) -> None:
     app = ctx()
-    name, ok = QInputDialog.getText(parent, "新建歌单", "歌单名称：")
+    name, ok = ask_text(parent, "新建歌单", "给这个歌单起个名字")
     name = (name or "").strip()
     if not ok or not name:
         return
@@ -190,14 +191,11 @@ def _remove_from_playlist(
 ) -> None:
     app = ctx()
     if len(tracks) > 1:
-        answer = QMessageBox.question(
+        if not confirm(
             parent,
             "从歌单中移除",
             f"确定要从该歌单中移除 {len(tracks)} 首歌曲吗？",
-            QMessageBox.Yes | QMessageBox.No,
-            QMessageBox.No,
-        )
-        if answer != QMessageBox.Yes:
+        ):
             return
     app.library.remove_from_playlist(playlist_id, [track.id for track in tracks])
     if callback is not None:
@@ -244,7 +242,7 @@ def _play_playlist(playlist_id: int) -> None:
 
 def _rename_playlist(parent: QWidget, playlist_id: int, current: str) -> None:
     app = ctx()
-    name, ok = QInputDialog.getText(parent, "重命名歌单", "新的名称：", text=current)
+    name, ok = ask_text(parent, "重命名歌单", "新的名称", text=current)
     name = (name or "").strip()
     if ok and name and name != current:
         app.library.rename_playlist(playlist_id, name)
@@ -252,14 +250,11 @@ def _rename_playlist(parent: QWidget, playlist_id: int, current: str) -> None:
 
 def _delete_playlist(parent: QWidget, playlist_id: int, name: str) -> None:
     app = ctx()
-    answer = QMessageBox.question(
+    if confirm(
         parent,
         "删除歌单",
         f"确定要删除歌单「{name}」吗？\n歌单中的歌曲仍会保留在音乐库中。",
-        QMessageBox.Yes | QMessageBox.No,
-        QMessageBox.No,
-    )
-    if answer == QMessageBox.Yes:
+    ):
         app.library.delete_playlist(playlist_id)
 
 

@@ -22,10 +22,8 @@ from PySide6.QtWidgets import (
     QFileDialog,
     QHBoxLayout,
     QHeaderView,
-    QInputDialog,
     QLabel,
     QLineEdit,
-    QMessageBox,
     QProgressBar,
     QStyle,
     QStackedWidget,
@@ -36,6 +34,7 @@ from PySide6.QtWidgets import (
 )
 
 from ..core.logging_setup import log_exception
+from .dialogs import ask_text, choose, notify
 from ..core.theme import css_rgba, qcolor, rgba, theme
 from ..model.track import format_duration
 from ..online import matching
@@ -226,7 +225,7 @@ class _TableHeader(QWidget):
             if width <= 0:
                 continue
             text = _MatchModel.HEADERS[column]
-            align = Qt.AlignLeft if column in (1, 2) else Qt.AlignHCenter
+            align = Qt.AlignRight if column == 3 else Qt.AlignLeft
             padding = theme().scaled(10, factor=0.6)
             rect = self.rect().adjusted(left + padding, 0, -(self.width() - left - width) - padding, 0)
             painter.setPen(rgba(palette.text, 0.62))
@@ -834,7 +833,7 @@ class PlaylistImportDialog(QDialog):
         self._on_row_changed(index)
 
     def _manual_search(self, index: int) -> None:
-        text, ok = QInputDialog.getText(self, "手动搜索", "输入歌曲名或「歌手 歌名」：")
+        text, ok = ask_text(self, "手动搜索", "输入歌曲名，或「歌手 歌名」", placeholder="例如：晴天 周杰伦")
         if not ok or not text.strip():
             return
         self._matcher.search(index, text)
@@ -885,24 +884,24 @@ class PlaylistImportDialog(QDialog):
         counts = self._matcher.counts()
         missing = counts["review"] + counts["unmatched"] + counts.get("pending", 0) + counts["skipped"]
         if missing:
-            box = QMessageBox(self)
-            box.setWindowTitle("还有未处理的歌曲")
-            box.setIcon(QMessageBox.Icon.Warning)
-            box.setText(
+            choice = choose(
+                self,
+                "还有未处理的歌曲",
                 f"将导入 {counts['local'] + counts['online'] + counts['unverified']} 首；"
                 f"{counts['review']} 首待确认、{counts['unmatched']} 首未匹配、"
-                f"{counts['skipped']} 首已跳过不会被导入。"
+                f"{counts['skipped']} 首已跳过不会被导入。\n\n"
+                "可以先返回处理，也可以继续导入，或继续并导出未导入清单。",
+                [
+                    ("back", "返回处理"),
+                    ("export", "导出清单并导入"),
+                    ("proceed", "仍然导入"),
+                ],
+                kind="warning",
+                accent="proceed",
             )
-            box.setInformativeText("可以先返回处理，也可以继续导入并导出未导入清单。")
-            back = box.addButton("返回处理", QMessageBox.ButtonRole.RejectRole)
-            export = box.addButton("导出清单并导入", QMessageBox.ButtonRole.ActionRole)
-            proceed = box.addButton("仍然导入", QMessageBox.ButtonRole.AcceptRole)
-            box.setDefaultButton(back)
-            box.exec()
-            clicked = box.clickedButton()
-            if clicked is back or clicked is None:
+            if choice in (None, "back"):
                 return
-            if clicked is export:
+            if choice == "export":
                 self._export_missing(rows)
         if False:  # kept for readability of the original guard
             return
@@ -927,7 +926,7 @@ class PlaylistImportDialog(QDialog):
                 mode = "replace"
                 playlist_id = existing.id
             elif chosen is create:
-                text, ok = QInputDialog.getText(self, "新建歌单", "歌单名称：", text=f"{name}（导入）")
+                text, ok = ask_text(self, "新建歌单", "给导入的歌单起个名字", text=f"{name}（导入）")
                 if not ok or not text.strip():
                     return
                 name = text.strip()
@@ -938,7 +937,7 @@ class PlaylistImportDialog(QDialog):
             outcome = apply_import(library, name, rows, mode=mode, playlist_id=playlist_id)
         except Exception as exc:  # noqa: BLE001
             log_exception("写入歌单失败", exc)
-            QMessageBox.warning(self, "导入失败", f"写入歌单时出错：{exc}")
+            notify(self, "导入失败", f"写入歌单时出错：{exc}", kind="error")
             return
         self._outcome = outcome
         self.done_detail.setText(

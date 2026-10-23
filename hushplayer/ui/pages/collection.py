@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
-from PySide6.QtWidgets import QHBoxLayout, QInputDialog, QMenu
+from PySide6.QtWidgets import QHBoxLayout, QMenu
 
 from ...model.track import Track
 from ..context import ctx
+from ..dialogs import ask_text, confirm
 from ..widgets.common import IconButton, TextButton
 from .trackpage import TrackListPage
 from ..widgets.menu import themed_menu
@@ -152,7 +153,7 @@ class PlaylistPage(TrackListPage):
             menu.exec(button.mapToGlobal(button.rect().bottomLeft()))
 
     def _rename(self) -> None:
-        name, ok = QInputDialog.getText(self, "重命名歌单", "歌单名称", text=self._playlist_name)
+        name, ok = ask_text(self, "重命名歌单", "歌单名称", text=self._playlist_name)
         if not ok:
             return
         name = name.strip()
@@ -182,16 +183,11 @@ class PlaylistPage(TrackListPage):
             ctx().window and ctx().window.toast(f"设置封面失败：{exc}", "error")
 
     def _delete(self) -> None:
-        from PySide6.QtWidgets import QMessageBox
-
-        answer = QMessageBox.question(
+        if not confirm(
             self,
             "删除歌单",
             f"确定要删除歌单「{self._playlist_name}」吗？\n歌单中的歌曲不会被删除。",
-            QMessageBox.Yes | QMessageBox.No,
-            QMessageBox.No,
-        )
-        if answer != QMessageBox.Yes:
+        ):
             return
         ctx().library.delete_playlist(self._playlist_id_value)
         self._playlist_id_value = 0

@@ -244,12 +244,14 @@ class TrackListPage(Page):
     def _playlist_selected(self, tracks: list) -> None:
         if not tracks:
             return
-        from PySide6.QtWidgets import QInputDialog, QMenu
+        from PySide6.QtWidgets import QMenu
+
+        from ..dialogs import ask_text
 
         library = ctx().library
         playlists = library.playlists_all()
         if not playlists:
-            text, ok = QInputDialog.getText(self, "新建歌单", "歌单名称：")
+            text, ok = ask_text(self, "新建歌单", "给这个歌单起个名字")
             name = (text or "").strip()
             if ok and name:
                 playlist_id = library.create_playlist(name)

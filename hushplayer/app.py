@@ -9,7 +9,7 @@ import traceback
 
 from PySide6.QtCore import QObject, Qt, QTimer, Signal
 from PySide6.QtGui import QIcon
-from PySide6.QtWidgets import QApplication, QMessageBox
+from PySide6.QtWidgets import QApplication
 
 from .core import icons
 from .core.logging_setup import get_logger, log_exception, recent_log_text, setup_logging
@@ -495,15 +495,15 @@ def _install_excepthook(app: QApplication) -> None:
         text = "".join(traceback.format_exception(exc_type, exc_value, exc_tb))
         log.error("未捕获异常\n%s", text)
         try:
-            box = QMessageBox()
-            box.setIcon(QMessageBox.Critical)
-            box.setWindowTitle("HushPlayer 遇到了问题")
-            box.setText("程序遇到了一个未处理的错误，已记录到日志。")
-            box.setInformativeText(
-                f"{exc_type.__name__}: {exc_value}\n\n日志：{recent_log_text(1200)[-500:]}"
+            from .ui.dialogs import notify
+
+            notify(
+                None,
+                "HushPlayer 遇到了问题",
+                "程序遇到了一个未处理的错误，已记录到日志。",
+                kind="error",
+                detail=f"{exc_type.__name__}: {exc_value}\n\n日志：{recent_log_text(1200)[-500:]}",
             )
-            box.setStandardButtons(QMessageBox.Ok)
-            box.exec()
         except Exception:  # noqa: BLE001
             pass
 

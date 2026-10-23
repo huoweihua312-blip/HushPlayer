@@ -15,7 +15,6 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLineEdit,
     QMenu,
-    QMessageBox,
     QStackedWidget,
     QSystemTrayIcon,
     QVBoxLayout,
@@ -27,6 +26,7 @@ from ..core.paths import data_dir
 from ..core.theme import apply_theme_to_app, theme
 from ..core import brand, icons
 from .context import ctx
+from .dialogs import ask_text, notify
 from .menus import playlist_menu
 from .widgets.common import TextButton
 from .widgets.frameless import FramelessWindow, center_on_screen, ensure_on_screen
@@ -393,9 +393,7 @@ class MainWindow(FramelessWindow):
         self._refresh_sidebar()
 
     def _create_playlist(self) -> None:
-        from PySide6.QtWidgets import QInputDialog
-
-        name, ok = QInputDialog.getText(self, "新建歌单", "歌单名称", text="新建歌单")
+        name, ok = ask_text(self, "新建歌单", "给这个歌单起个名字", text="新建歌单")
         if not ok or not name.strip():
             return
         playlist_id = ctx().library.create_playlist(name.strip())
@@ -793,7 +791,7 @@ class MainWindow(FramelessWindow):
         if not bool(ctx().settings.get("general.tray_hint_shown", False)):
             # First time: explain where the icon went, otherwise the window can
             # look like it vanished (Windows 11 keeps new icons in the overflow).
-            QMessageBox.information(
+            notify(
                 self,
                 "已最小化到系统托盘",
                 "HushPlayer 仍在后台播放。\n\n"

@@ -55,9 +55,20 @@ $staged = Join-Path $root "packaging\out\HushPlayer"
 # shell accepts its tray icon.
 $buildRoot = "F:\HushPlayerBuild"
 $buildOut = Join-Path $buildRoot "out"
-$dist = Join-Path $buildOut "HushPlayer"
 New-Item -ItemType Directory -Force $buildOut | Out-Null
-if (Test-Path $dist) { Remove-Item $dist -Recurse -Force }
+$versionForPath = (& $python -c "import sys; sys.path.insert(0,'.'); from hushplayer.version import VERSION; print(VERSION)").Trim()
+$dist = Join-Path $buildOut "HushPlayer"
+if (Test-Path $dist) {
+    try {
+        Remove-Item $dist -Recurse -Force -ErrorAction Stop
+    } catch {
+        # A running copy locks its files; stage this build next to it instead of
+        # killing the user's session.
+        $dist = Join-Path $buildOut ("HushPlayer-" + $versionForPath)
+        Write-Host "==> 旧目录正在使用，输出到 $dist" -ForegroundColor Yellow
+        if (Test-Path $dist) { Remove-Item $dist -Recurse -Force -ErrorAction SilentlyContinue }
+    }
+}
 Copy-Item $staged $dist -Recurse -Force
 $label = (icacls (Join-Path $dist "HushPlayer.exe") | Select-String "Mandatory Label")
 $labelText = if ($label) { $label.Line.Trim() } else { "no mandatory label (Medium)" }
