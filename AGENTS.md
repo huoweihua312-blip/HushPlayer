@@ -175,3 +175,4 @@ HushPlayer-<ver>-setup.exe /VERYSILENT /LOG=...
 - 2026-10-23：歌单导入 1.2.1 体验改进——三档匹配强度（`MATCH_STRENGTHS` strict/balanced/loose）、候选 18 个 + 变体二次搜索（`_query_variants`/`_start_variants`）、「全部采用最佳候选」、导入前确认与未导入 CSV 导出（`_export_missing`，`data_dir()/exports`）。注意：`.venv` Python 写 `CHANGELOG.md`/`AGENTS.md` 会 PermissionError，必须用 PowerShell。
 - 2026-10-23：1.2.2 修复「双击歌曲行弹出的候选菜单盖住光标、第二次点击误选」。菜单锚点改为光标右下方 28/30px 并做屏幕翻转；`PopupMenu` 增加 `_shown_at` + 220ms 激活保护（双击第二下不再命中菜单项）。以后凡是由「双击/单击」直接弹出的菜单都要走这条规则。
 - 2026-10-23：1.2.3——① `PopupMenu._sub_hover` 在指针离开子菜单时必须清零，否则会出现「二级菜单外仍高亮子项」；② 原生标题栏窗口（QDialog）用 `core/theme.py:apply_native_title_bar()` + DWM 20/19 跟随主题，导入向导 `showEvent`/主题变更时调用；③ `_content_width()` 对无标题子菜单取空串，防 `horizontalAdvance(None)` 崩溃。
+- 2026-10-23：1.2.4——导入向导的匹配表改用**自绘表头**（`_TableHeader`）。原因：原生 `QHeaderView` 不吃对话框 QSS/调色板，浅色模式下会变成黑色横条；同时 `QColor("rgba(...)")` 是无效写法（会退化成纯黑），自绘取色一律用 `theme().rgba()`。以后凡是「表格 + 主题」场景，优先自绘表头，不要依赖 QHeaderView 配色。

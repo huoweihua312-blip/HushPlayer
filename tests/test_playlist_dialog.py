@@ -175,3 +175,33 @@ def test_dialog_matches_native_title_bar_to_theme(inline_context, qapp, monkeypa
     dialog.close()
 
     assert calls, "showEvent should sync the DWM title bar with the app theme"
+
+
+def test_match_table_uses_custom_header(inline_context):
+    """表头自绘：原生 QHeaderView 隐藏，列标题跟随主题颜色。"""
+    from hushplayer.ui.playlist_import_dialog import PlaylistImportDialog
+
+    from PySide6.QtWidgets import QApplication
+
+    dialog = PlaylistImportDialog()
+    dialog.resize(980, 700)
+    dialog.show()
+    QApplication.processEvents()
+    try:
+        assert dialog.table.horizontalHeader().isVisible() is False
+        assert dialog.table_header.height() > 0
+        assert dialog.table_header.width() == dialog.table.width()
+        dialog.resize(1120, 720)
+        QApplication.processEvents()
+        assert dialog.table_header.width() == dialog.table.width()
+    finally:
+        dialog.close()
+        dialog.deleteLater()
+
+
+def test_setting_helper_survives_missing_context():
+    """没有 UI 上下文时读写设置必须静默降级，不能抛 RuntimeError。"""
+    from hushplayer.ui.playlist_import_dialog import _remember, _setting
+
+    assert _setting("playlist.import_strength", "balanced") in {"strict", "balanced", "loose"}
+    _remember("playlist.import_strength", "loose")

@@ -183,14 +183,62 @@ class _StepBar(QWidget):
 
 
 def _setting(key: str, default=None):
-    settings = getattr(ctx(), "settings", None)
+    try:
+        settings = getattr(ctx(), "settings", None)
+    except RuntimeError:
+        return default
     return settings.get(key, default) if settings is not None else default
 
 
 def _remember(key: str, value) -> None:
-    settings = getattr(ctx(), "settings", None)
+    try:
+        settings = getattr(ctx(), "settings", None)
+    except RuntimeError:
+        return
     if settings is not None:
         settings.set(key, value)
+
+class _TableHeader(QWidget):
+    """自绘表头：不依赖 QHeaderView 的原生配色，主题切换后随重绘更新。"""
+
+    def __init__(self, table: QTableView, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self._table = table
+        self.setFixedHeight(theme().scaled(30, factor=0.55))
+        table.horizontalHeader().sectionResized.connect(lambda *_: self.update())
+
+    def resizeEvent(self, event) -> None:  # noqa: N802
+        super().resizeEvent(event)
+        self.setFixedHeight(theme().scaled(30, factor=0.55))
+
+    def paintEvent(self, event) -> None:  # noqa: N802
+        palette = theme().palette
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing, True)
+        painter.fillRect(self.rect(), palette.window)
+        font = theme().font(9.0, 500)
+        painter.setFont(font)
+        metrics = painter.fontMetrics()
+        table = self._table
+        for column in range(table.model().columnCount()):
+            left = table.columnViewportPosition(column)
+            width = table.columnWidth(column)
+            if width <= 0:
+                continue
+            text = _MatchModel.HEADERS[column]
+            align = Qt.AlignLeft if column in (1, 2) else Qt.AlignHCenter
+            padding = theme().scaled(10, factor=0.6)
+            rect = self.rect().adjusted(left + padding, 0, -(self.width() - left - width) - padding, 0)
+            painter.setPen(rgba(palette.text, 0.52))
+            painter.drawText(rect, align | Qt.AlignVCenter, metrics.elidedText(text, Qt.ElideRight, max(10, width - padding * 2)))
+        painter.setPen(QPen(rgba(palette.text, 0.10), 1))
+        painter.drawLine(0, self.height() - 1, self.width(), self.height() - 1)
+        painter.end()
+
+
+class _TableHeaderSpacer(QWidget):
+    pass
+
 
 class PlaylistImportDialog(QDialog):
     imported = Signal(int, str)
@@ -345,6 +393,9 @@ class PlaylistImportDialog(QDialog):
         self.table.setSelectionMode(QAbstractItemView.SingleSelection)
         self.table.setEditTriggers(QAbstractItemView.NoEditTriggers)
         self.table.verticalHeader().setVisible(False)
+        header_view = self.table.horizontalHeader()
+        header_view.setVisible(False)
+        header_view.setSectionsClickable(False)
         self.table.setShowGrid(False)
         self.table.setAlternatingRowColors(False)
         header = self.table.horizontalHeader()
@@ -357,6 +408,8 @@ class PlaylistImportDialog(QDialog):
         header.setSectionResizeMode(4, QHeaderView.Fixed)
         header.resizeSection(4, theme().scaled(96, factor=0.6))
         self.table.doubleClicked.connect(self._open_candidates)
+        self.table_header = _TableHeader(self.table)
+        layout.addWidget(self.table_header, 0)
         layout.addWidget(self.table, 1)
 
         hint = QLabel("双击一行可换候选 / 手动搜索 / 跳过；只导入「本地」「在线已匹配」与「在线未验证」的行。")
