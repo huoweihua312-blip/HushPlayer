@@ -410,11 +410,18 @@ class PlaylistImportDialog(QDialog):
         self.cancel_button.setText("取消")
         if stage == 0:
             self.next_button.setEnabled(bool(self._entries))
-            self.next_button.setText("下一步")
+            self._set_next("下一步")
         elif stage == 1:
-            self.next_button.setText("开始导入" if self._matcher and self._matcher.total else "下一步")
+            self._set_next("开始导入" if self._matcher and self._matcher.total else "下一步")
         elif stage == 2:
             self.next_button.setVisible(False)
+
+    def _set_next(self, text: str) -> None:
+        """TextButton paints its own label, so plain setText() would not show."""
+        if hasattr(self.next_button, "set_text"):
+            self.next_button.set_text(text)
+        else:
+            self.next_button.setText(text)
 
     def _pick_file(self) -> None:
         path, _ = QFileDialog.getOpenFileName(
@@ -507,7 +514,7 @@ class PlaylistImportDialog(QDialog):
         self.progress.setValue(0)
         self._set_stage(1)
         self.next_button.setEnabled(False)
-        self.next_button.setText("匹配中…")
+        self._set_next("匹配中…")
         self._matcher.start(self._entries, online=self.online_toggle.isChecked(), verify=True)
         # Bind the model only after start() has created the rows.
         self.model.set_rows(self._matcher.rows)
@@ -521,7 +528,7 @@ class PlaylistImportDialog(QDialog):
 
     def _on_progress(self, done: int, total: int) -> None:
         if total and done >= total:
-            self.next_button.setText("开始导入")
+            self._set_next("开始导入")
             self.progress.setVisible(False)
         self.progress.setMaximum(max(1, total))
         self.progress.setValue(done)
@@ -536,7 +543,7 @@ class PlaylistImportDialog(QDialog):
             row.status != "pending" for row in self._matcher.rows
         )
         if settled:
-            self.next_button.setText("开始导入")
+            self._set_next("开始导入")
             self.progress.setVisible(False)
         parts = [f"{STATUS['local']} {counts['local']}"]
         parts.append(f"在线 {counts['online']}")
@@ -553,7 +560,7 @@ class PlaylistImportDialog(QDialog):
 
     def _on_finished(self) -> None:
         self.next_button.setEnabled(True)
-        self.next_button.setText("开始导入")
+        self._set_next("开始导入")
         self.status_label.setText(f"匹配完成：{self._matcher.done} / {self._matcher.total}")
         counts = self._matcher.counts()
         if counts["review"]:
