@@ -18,6 +18,7 @@ from PySide6.QtWidgets import (
     QApplication,
     QCheckBox,
     QDialog,
+    QFrame,
     QFileDialog,
     QHBoxLayout,
     QHeaderView,
@@ -215,7 +216,6 @@ class _TableHeader(QWidget):
         palette = theme().palette
         painter = QPainter(self)
         painter.setRenderHint(QPainter.Antialiasing, True)
-        painter.fillRect(self.rect(), palette.window)
         font = theme().font(9.0, 500)
         painter.setFont(font)
         metrics = painter.fontMetrics()
@@ -409,8 +409,14 @@ class PlaylistImportDialog(QDialog):
         header.resizeSection(4, theme().scaled(96, factor=0.6))
         self.table.doubleClicked.connect(self._open_candidates)
         self.table_header = _TableHeader(self.table)
-        layout.addWidget(self.table_header, 0)
-        layout.addWidget(self.table, 1)
+        self.table_frame = QFrame()
+        self.table_frame.setObjectName("ImportTableFrame")
+        frame_layout = QVBoxLayout(self.table_frame)
+        frame_layout.setContentsMargins(0, 0, 0, 0)
+        frame_layout.setSpacing(0)
+        frame_layout.addWidget(self.table_header)
+        frame_layout.addWidget(self.table, 1)
+        layout.addWidget(self.table_frame, 1)
 
         hint = QLabel("双击一行可换候选 / 手动搜索 / 跳过；只导入「本地」「在线已匹配」与「在线未验证」的行。")
         hint.setWordWrap(True)
@@ -474,6 +480,12 @@ class PlaylistImportDialog(QDialog):
             f"QProgressBar::chunk {{ background:{palette.accent}; border-radius:3px; }}"
         )
         self.table.setStyleSheet("QTableView { background: transparent; border: none; }")
+        self.table_frame.setStyleSheet(
+            f"QFrame#ImportTableFrame {{ background: {palette.surface};"
+            f" border: 1px solid {css_rgba(palette.text, 0.10)};"
+            f" border-radius: {theme().scaled(12, factor=0.6)}px; }}"
+        )
+        self._table_frame_inset = theme().scaled(1, factor=0.6)
         apply_native_title_bar(self)
 
     # ------------------------------------------------------------------ flow

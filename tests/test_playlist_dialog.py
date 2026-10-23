@@ -205,3 +205,20 @@ def test_setting_helper_survives_missing_context():
 
     assert _setting("playlist.import_strength", "balanced") in {"strict", "balanced", "loose"}
     _remember("playlist.import_strength", "loose")
+
+
+def test_match_table_is_wrapped_in_themed_card(inline_context):
+    """匹配表外框用自绘卡片（圆角 + 边框），表头与表格同属该卡片。"""
+    from hushplayer.ui.playlist_import_dialog import PlaylistImportDialog
+
+    dialog = PlaylistImportDialog()
+    try:
+        frame = dialog.table_frame
+        assert frame.objectName() == "ImportTableFrame"
+        assert dialog.table_header.parent() is frame
+        assert dialog.table.parent() is frame
+        style = frame.styleSheet()
+        assert "ImportTableFrame" in style
+        assert "border-radius" in style
+    finally:
+        dialog.deleteLater()
