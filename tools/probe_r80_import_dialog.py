@@ -81,7 +81,15 @@ def main() -> None:
     app.processEvents()
     dialog.grab().save(str(OUT / f"dialog_match_{mode}.png"))
 
-    dialog._go_next()
+    # stage 3: 完成页（跳过 _apply 的确认框，直接铺结果文案）
+    counts_now = dialog._matcher.counts()
+    dialog.done_detail.setText(
+        f"「夜间通勤」已导入 {counts_now['local']} 首，未匹配 {counts_now['unmatched']} 首。"
+        f" 本地 {counts_now['local']} 首 · 在线 {counts_now['online']} 首。"
+    )
+    dialog._set_stage(2)
+    app.processEvents()
+    time.sleep(0.1)
     app.processEvents()
     dialog.grab().save(str(OUT / f"dialog_done_{mode}.png"))
 

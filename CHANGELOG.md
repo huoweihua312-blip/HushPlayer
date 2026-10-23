@@ -2,6 +2,19 @@
 
 本日志依据仓库中的 Git 提交、`hushplayer/version.py` 与构建产物整理。版本按发布时间从新到旧排列；同一版本的多条提交合并为一条，只写对使用者可见的变化。版本号 1.0.14 未单独发布，相关改动并入 1.0.15。
 
+## 1.2.7 — 2026-10-23
+
+### 修复
+- **导入歌单对话框改为无边框自绘标题栏**：标题「导入歌单」与正文统一 24px 左基线，副标题同基线；右上关闭按钮与内容右边缘对齐；支持拖动标题栏移动、Esc 关闭、圆角遮罩。
+- **正文排版统一**：15pt/600 页面标题、9.4pt/0.75 主说明、9pt/0.55 计数与状态、9pt/0.5 次要提示、表头 9.2pt/0.62；底部页脚按钮不再被拉伸（增加 addStretch 占位）。
+- **匹配表表头配色**：自绘表头改用 rgba(palette.text, 0.62)，修掉 QColor 接收 CSS rgba 字符串会退化成黑色、深色下表头不可见的问题；分隔线 alpha 0.12。
+
+### 验证
+- pytest：249 passed / 0 failed / 0 errors（artifacts/junit_1_2_7.xml，59.6s）。
+- 可运行产物：F:\HushPlayerBuild\out\HushPlayer 与 HushPlayer-1.2.7-win64.zip。
+- 截图：docs/screenshots/import_source_light.png、import_match_light.png、import_done_light.png 及对应 dark 三张。
+
+
 ## 1.2.6 - 2026-10-23
 
 ### 更新摘要

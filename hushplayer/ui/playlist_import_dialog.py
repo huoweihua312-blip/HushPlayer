@@ -11,8 +11,8 @@ import time
 
 from pathlib import Path
 
-from PySide6.QtCore import QAbstractTableModel, QModelIndex, QPoint, QSize, Qt, QTimer, Signal
-from PySide6.QtGui import QColor, QPainter, QPen
+from PySide6.QtCore import QAbstractTableModel, QModelIndex, QPoint, QRectF, QSize, Qt, QTimer, Signal
+from PySide6.QtGui import QColor, QPainter, QPainterPath, QPen, QRegion
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QApplication,
@@ -36,7 +36,7 @@ from PySide6.QtWidgets import (
 )
 
 from ..core.logging_setup import log_exception
-from ..core.theme import apply_native_title_bar, css_rgba, qcolor, rgba, theme
+from ..core.theme import css_rgba, qcolor, rgba, theme
 from ..model.track import format_duration
 from ..online import matching
 from ..services.playlist_import import PlaylistEntry, parse_playlist, parse_playlist_text
@@ -229,15 +229,91 @@ class _TableHeader(QWidget):
             align = Qt.AlignLeft if column in (1, 2) else Qt.AlignHCenter
             padding = theme().scaled(10, factor=0.6)
             rect = self.rect().adjusted(left + padding, 0, -(self.width() - left - width) - padding, 0)
-            painter.setPen(rgba(palette.text, 0.52))
+            painter.setPen(rgba(palette.text, 0.62))
             painter.drawText(rect, align | Qt.AlignVCenter, metrics.elidedText(text, Qt.ElideRight, max(10, width - padding * 2)))
-        painter.setPen(QPen(rgba(palette.text, 0.10), 1))
+        painter.setPen(QPen(rgba(palette.text, 0.12), 1))
         painter.drawLine(0, self.height() - 1, self.width(), self.height() - 1)
         painter.end()
 
 
 class _TableHeaderSpacer(QWidget):
     pass
+
+
+class _DialogTitleBar(QWidget):
+    """Self-drawn caption so the title lines up with the content padding.
+
+    The native Windows caption is inset ~8px and cannot be laid out, which made
+    the wizard look misaligned next to its 24px content margin.
+    """
+
+    PAD = 24
+
+    def __init__(self, title: str, subtitle: str, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.setFixedHeight(theme().scaled(58, factor=0.8))
+        self.title_label = QLabel(title, self)
+        self.subtitle_label = QLabel(subtitle, self)
+        self.subtitle_label.setWordWrap(True)
+        self.setMouseTracking(True)
+        self._drag_offset: QPoint | None = None
+        self._close: QWidget | None = None
+
+    def attach_close(self, button: QWidget) -> None:
+        self._close = button
+        button.setParent(self)
+        button.raise_()
+        self._place_close()
+
+    def _place_close(self) -> None:
+        if self._close is None:
+            return
+        size = theme().scaled(32, factor=0.8)
+        pad = theme().scaled(self.PAD, factor=0.8)
+        top = (self.height() - size) // 2
+        self._close.setGeometry(self.width() - pad - size, top, size, size)
+
+    def resizeEvent(self, event) -> None:  # noqa: N802
+        super().resizeEvent(event)
+        pad = theme().scaled(self.PAD, factor=0.8)
+        top = theme().scaled(12, factor=0.8)
+        close_w = theme().scaled(32, factor=0.8)
+        right = self.width() - pad - close_w - theme().scaled(8, factor=0.6)
+        self.title_label.setGeometry(pad, top, max(120, right - pad), theme().scaled(24, factor=0.8))
+        self.subtitle_label.setGeometry(
+            pad,
+            top + theme().scaled(24, factor=0.8),
+            max(120, right - pad),
+            theme().scaled(18, factor=0.8),
+        )
+        self._place_close()
+
+    def paintEvent(self, event) -> None:  # noqa: N802
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing, True)
+        painter.fillRect(self.rect(), theme().palette.window)
+        painter.setPen(QPen(rgba(theme().palette.text, 0.08), 1))
+        painter.drawLine(0, self.height() - 1, self.width(), self.height() - 1)
+        painter.end()
+
+    def mousePressEvent(self, event) -> None:  # noqa: N802
+        if event.button() == Qt.MouseButton.LeftButton:
+            window = self.window()
+            handle = window.windowHandle()
+            if handle is not None and handle.startSystemMove():
+                self._drag_offset = None
+            else:
+                self._drag_offset = event.globalPosition().toPoint() - window.frameGeometry().topLeft()
+        super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event) -> None:  # noqa: N802
+        if self._drag_offset is not None and event.buttons() & Qt.MouseButton.LeftButton:
+            self.window().move(event.globalPosition().toPoint() - self._drag_offset)
+        super().mouseMoveEvent(event)
+
+    def mouseReleaseEvent(self, event) -> None:  # noqa: N802
+        self._drag_offset = None
+        super().mouseReleaseEvent(event)
 
 
 class PlaylistImportDialog(QDialog):
@@ -247,6 +323,7 @@ class PlaylistImportDialog(QDialog):
         super().__init__(parent)
         self.setWindowTitle("导入歌单")
         self.setModal(True)
+        self.setWindowFlag(Qt.WindowType.FramelessWindowHint, True)
         self.setMinimumSize(960, 640)
         self.resize(1040, 700)
         self._entries: list[PlaylistEntry] = []
@@ -261,35 +338,43 @@ class PlaylistImportDialog(QDialog):
 
     # ------------------------------------------------------------------ build
     def _build(self) -> None:
-        root = QVBoxLayout(self)
-        root.setContentsMargins(24, 20, 24, 18)
-        root.setSpacing(12)
+        pad = theme().scaled(_DialogTitleBar.PAD, factor=0.8)
 
-        header = QHBoxLayout()
-        titles = QVBoxLayout()
-        titles.setSpacing(2)
-        self.title_label = QLabel("导入歌单")
-        self.subtitle_label = QLabel("从文件或其他音乐平台导入，并匹配到你的本地与在线音源")
-        titles.addWidget(self.title_label)
-        titles.addWidget(self.subtitle_label)
-        header.addLayout(titles, 1)
+        root = QVBoxLayout(self)
+        root.setContentsMargins(0, 0, 0, 0)
+        root.setSpacing(0)
+
+        self.title_bar = _DialogTitleBar(
+            "导入歌单",
+            "从文件或其他音乐平台导入，并匹配到你的本地与在线音源",
+            self,
+        )
+        self.title_label = self.title_bar.title_label
+        self.subtitle_label = self.title_bar.subtitle_label
         self.close_button = IconButton("close", size=32, icon_size=16, tooltip="关闭")
         self.close_button.clicked.connect(self.reject)
-        header.addWidget(self.close_button, 0, Qt.AlignTop)
-        root.addLayout(header)
+        self.title_bar.attach_close(self.close_button)
+        root.addWidget(self.title_bar)
+
+        body = QWidget(self)
+        content = QVBoxLayout(body)
+        content.setContentsMargins(pad, theme().scaled(12, factor=0.8), pad, theme().scaled(18, factor=0.8))
+        content.setSpacing(12)
+        root.addWidget(body, 1)
 
         self.steps = _StepBar()
-        root.addWidget(self.steps)
+        content.addWidget(self.steps)
 
         self.stack = QStackedWidget()
         self.stack.addWidget(self._build_source_page())
         self.stack.addWidget(self._build_match_page())
         self.stack.addWidget(self._build_done_page())
-        root.addWidget(self.stack, 1)
+        content.addWidget(self.stack, 1)
 
         footer = QHBoxLayout()
         self.status_label = QLabel("")
         footer.addWidget(self.status_label, 1)
+        footer.addStretch(1)
         self.cancel_button = TextButton("取消", size=32)
         self.cancel_button.clicked.connect(self.reject)
         footer.addWidget(self.cancel_button)
@@ -303,7 +388,7 @@ class PlaylistImportDialog(QDialog):
         self.adopt_all.setVisible(False)
         footer.addWidget(self.adopt_all)
         footer.addWidget(self.next_button)
-        root.addLayout(footer)
+        content.addLayout(footer)
 
     def _build_source_page(self) -> QWidget:
         page = QWidget()
@@ -418,9 +503,11 @@ class PlaylistImportDialog(QDialog):
         frame_layout.addWidget(self.table, 1)
         layout.addWidget(self.table_frame, 1)
 
-        hint = QLabel("双击一行可换候选 / 手动搜索 / 跳过；只导入「本地」「在线已匹配」与「在线未验证」的行。")
-        hint.setWordWrap(True)
-        layout.addWidget(hint)
+        self.match_hint = QLabel(
+            "双击一行可换候选 / 手动搜索 / 跳过；只导入「本地」「在线已匹配」与「在线未验证」的行。"
+        )
+        self.match_hint.setWordWrap(True)
+        layout.addWidget(self.match_hint)
         return page
 
     def _build_done_page(self) -> QWidget:
@@ -448,7 +535,19 @@ class PlaylistImportDialog(QDialog):
     # ------------------------------------------------------------------ theme
     def showEvent(self, event) -> None:  # noqa: N802
         super().showEvent(event)
-        apply_native_title_bar(self)
+        self._apply_round_mask()
+
+    def resizeEvent(self, event) -> None:  # noqa: N802
+        super().resizeEvent(event)
+        self._apply_round_mask()
+
+    def _apply_round_mask(self) -> None:
+        """Frameless window: clip the corners ourselves (no translucent window)."""
+        radius = theme().scaled(14, factor=0.7)
+        path = QPainterPath()
+        path.addRoundedRect(QRectF(self.rect()), radius, radius)
+        region = QRegion(path.toFillPolygon().toPolygon())
+        self.setMask(region)
 
     def _apply_theme(self, *_args) -> None:
         palette = theme().palette
@@ -457,24 +556,27 @@ class PlaylistImportDialog(QDialog):
             f"QLabel {{ color: {palette.text}; }}"
         )
         self.title_label.setStyleSheet(
-            f"font-size:{theme().pt(17):.1f}pt; font-weight:700; color:{palette.text};"
+            f"font-size:{theme().pt(15):.1f}pt; font-weight:600; color:{palette.text};"
         )
         self.subtitle_label.setStyleSheet(
-            f"font-size:{theme().pt(9.4):.1f}pt; color:{css_rgba(palette.text, 0.5)};"
+            f"font-size:{theme().pt(9.4):.1f}pt; color:{css_rgba(palette.text, 0.55)};"
         )
-        self.file_hint.setStyleSheet(f"font-size:{theme().pt(9):.1f}pt; color:{css_rgba(palette.text, 0.45)};")
+        self.title_bar.update()
+        self._apply_round_mask()
+        self.file_hint.setStyleSheet(f"font-size:{theme().pt(9):.1f}pt; color:{css_rgba(palette.text, 0.5)};")
         self.source_info.setStyleSheet(f"font-size:{theme().pt(9.4):.1f}pt; color:{css_rgba(palette.text, 0.75)};")
-        self.source_hint.setStyleSheet(f"font-size:{theme().pt(8.8):.1f}pt; color:{css_rgba(palette.text, 0.45)};")
+        self.source_hint.setStyleSheet(f"font-size:{theme().pt(9):.1f}pt; color:{css_rgba(palette.text, 0.5)};")
         self.source_guide.setStyleSheet(
-            f"font-size:{theme().pt(9.4):.1f}pt; color:{css_rgba(palette.text, 0.38)};"
+            f"font-size:{theme().pt(9):.1f}pt; color:{css_rgba(palette.text, 0.42)};"
             f" padding: {theme().scaled(18, factor=0.8)}px {theme().scaled(22, factor=0.8)}px;"
             f" border: 1px dashed {css_rgba(palette.text, 0.16)};"
             f" border-radius: {theme().scaled(12, factor=0.6)}px;"
         )
         self.counts_label.setStyleSheet(f"font-size:{theme().pt(9):.1f}pt; color:{css_rgba(palette.text, 0.55)};")
+        self.match_hint.setStyleSheet(f"font-size:{theme().pt(9):.1f}pt; color:{css_rgba(palette.text, 0.5)};")
         self.status_label.setStyleSheet(f"font-size:{theme().pt(9):.1f}pt; color:{css_rgba(palette.text, 0.55)};")
-        self.done_title.setStyleSheet(f"font-size:{theme().pt(16):.1f}pt; font-weight:700; color:{palette.text};")
-        self.done_detail.setStyleSheet(f"font-size:{theme().pt(9.6):.1f}pt; color:{css_rgba(palette.text, 0.7)};")
+        self.done_title.setStyleSheet(f"font-size:{theme().pt(15):.1f}pt; font-weight:600; color:{palette.text};")
+        self.done_detail.setStyleSheet(f"font-size:{theme().pt(9.4):.1f}pt; color:{css_rgba(palette.text, 0.72)};")
         self.progress.setStyleSheet(
             f"QProgressBar {{ background:{css_rgba(palette.text, 0.10)}; border:none; border-radius:3px; }}"
             f"QProgressBar::chunk {{ background:{palette.accent}; border-radius:3px; }}"
@@ -485,7 +587,6 @@ class PlaylistImportDialog(QDialog):
             f" border: none; }}"
         )
         self._table_frame_inset = theme().scaled(1, factor=0.6)
-        apply_native_title_bar(self)
 
     # ------------------------------------------------------------------ flow
     @property

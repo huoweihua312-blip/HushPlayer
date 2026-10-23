@@ -177,4 +177,5 @@ HushPlayer-<ver>-setup.exe /VERYSILENT /LOG=...
 - 2026-10-23：1.2.3——① `PopupMenu._sub_hover` 在指针离开子菜单时必须清零，否则会出现「二级菜单外仍高亮子项」；② 原生标题栏窗口（QDialog）用 `core/theme.py:apply_native_title_bar()` + DWM 20/19 跟随主题，导入向导 `showEvent`/主题变更时调用；③ `_content_width()` 对无标题子菜单取空串，防 `horizontalAdvance(None)` 崩溃。
 - 2026-10-23：1.2.4——导入向导的匹配表改用**自绘表头**（`_TableHeader`）。原因：原生 `QHeaderView` 不吃对话框 QSS/调色板，浅色模式下会变成黑色横条；同时 `QColor("rgba(...)")` 是无效写法（会退化成纯黑），自绘取色一律用 `theme().rgba()`。以后凡是「表格 + 主题」场景，优先自绘表头，不要依赖 QHeaderView 配色。
 - 2026-10-23：1.2.5——匹配表包进圆角卡片（`QFrame#ImportTableFrame`，`palette.surface` + 10% 描边 + 12px 圆角），自绘表头只画文字与分隔线、不填底色。以后「表格进卡片」时，让容器负责背景与圆角，表头不要重复填色，否则会盖住圆角。
+- 2026-10-23：1.2.7——导入歌单对话框改为**无边框自绘标题栏**（_DialogTitleBar，24px 左基线对齐、拖动移动、Esc 关闭、#HushDialogRoot 圆角遮罩）；正文收成一套字阶（15pt/600 标题、9.4pt/0.75 主说明、9pt/0.55 计数、9pt/0.5 提示）；修自绘表头取色（QColor 不能吃 CSS rgba 字符串，否则变黑）；页脚按钮前加 addStretch 防拉伸。
 - 2026-10-23：1.2.6——新增「全黑」主题（`Palette(mode="pure")`，window/sidebar `#000000`，`_PALETTES` 三套并存，`is_dark` 把 pure 计入深色），主题选择器扩为四项并按宽度自适应瓦片；导入匹配表外框去掉（容器只留底色）。注意：`ThemePicker` 新增 API 后要 `grep "def set_value"` 确认没有重复定义（后定义会覆盖前者）；`QColor("rgba(...)")` 仍是无效写法。

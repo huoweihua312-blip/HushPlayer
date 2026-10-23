@@ -163,18 +163,28 @@ def test_candidate_menu_opens_away_from_cursor(inline_context, qapp, monkeypatch
     assert anchor.y() >= 400 + 20
     assert not (580 <= anchor.x() <= 620)
 
-def test_dialog_matches_native_title_bar_to_theme(inline_context, qapp, monkeypatch) -> None:
-    import hushplayer.ui.playlist_import_dialog as module
+def test_dialog_uses_custom_caption_aligned_to_content(inline_context, qapp) -> None:
+    """自绘标题栏：无边框、标题与正文同一条 24px 左基线。"""
+    from PySide6.QtCore import Qt
+    from hushplayer.core.theme import theme
+    from hushplayer.ui.playlist_import_dialog import PlaylistImportDialog, _DialogTitleBar
 
-    calls: list[int] = []
-    monkeypatch.setattr(module, "apply_native_title_bar", lambda widget: calls.append(1))
-
-    dialog = module.PlaylistImportDialog()
+    dialog = PlaylistImportDialog()
+    dialog.resize(980, 700)
     dialog.show()
     qapp.processEvents()
-    dialog.close()
 
-    assert calls, "showEvent should sync the DWM title bar with the app theme"
+    assert dialog.windowFlags() & Qt.WindowType.FramelessWindowHint
+    assert dialog.windowTitle() == "导入歌单"
+    assert isinstance(dialog.title_bar, _DialogTitleBar)
+
+    pad = theme().scaled(_DialogTitleBar.PAD, factor=0.8)
+    assert dialog.title_bar.title_label.geometry().x() == pad
+    assert dialog.title_bar.subtitle_label.geometry().x() == pad
+    close_rect = dialog.close_button.geometry()
+    assert dialog.title_bar.width() - (close_rect.x() + close_rect.width()) == pad
+
+    dialog.close()
 
 
 def test_match_table_uses_custom_header(inline_context):
