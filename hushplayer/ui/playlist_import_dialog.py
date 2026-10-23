@@ -628,10 +628,28 @@ class PlaylistImportDialog(QDialog):
         else:
             skip = menu.addAction("跳过这首歌")
             skip.triggered.connect(lambda: self._skip(row_index))
-        position = self.table.viewport().mapToGlobal(
-            self.table.visualRect(index).bottomLeft() + QPoint(0, 2)
-        )
-        menu.exec(position)
+        menu.exec(self._menu_anchor(index))
+
+    def _menu_anchor(self, index) -> QPoint:
+        """Place the candidate menu away from the click point.
+
+        Double-clicking a row opens this menu; if it appeared under the cursor the
+        second click would land on the first item. So offset it below-right of the
+        cursor, flipping up when the screen has no room below.
+        """
+        from PySide6.QtGui import QCursor
+
+        cursor = QCursor.pos()
+        width, height = 340, 280
+        screen = self.screen().availableGeometry() if self.screen() else None
+        x = cursor.x() + 28
+        y = cursor.y() + 30
+        if screen is not None:
+            if x + width > screen.right():
+                x = max(screen.left() + 8, cursor.x() - width - 20)
+            if y + height > screen.bottom():
+                y = max(screen.top() + 8, cursor.y() - height - 20)
+        return QPoint(x, y)
 
     def _choose(self, index: int, track) -> None:
         self._matcher.choose(index, track)

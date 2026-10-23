@@ -173,3 +173,4 @@ HushPlayer-<ver>-setup.exe /VERYSILENT /LOG=...
 - 2026-10-23：新增跨平台歌单导入（services/playlist_link.py、playlist_import.py、playlist_matcher.py + ui/playlist_import_dialog.py）。链接导入只支持网易云公开歌单，其余平台引导导出文件；匹配复用 online/matching.py 并对 Live/Remix/伴奏等版本 token 加减分；自动匹配的在线结果必须 resolve_playback 验证后才算可播放。详见 docs/PLAYLIST_IMPORT.md。
 
 - 2026-10-23：歌单导入 1.2.1 体验改进——三档匹配强度（`MATCH_STRENGTHS` strict/balanced/loose）、候选 18 个 + 变体二次搜索（`_query_variants`/`_start_variants`）、「全部采用最佳候选」、导入前确认与未导入 CSV 导出（`_export_missing`，`data_dir()/exports`）。注意：`.venv` Python 写 `CHANGELOG.md`/`AGENTS.md` 会 PermissionError，必须用 PowerShell。
+- 2026-10-23：1.2.2 修复「双击歌曲行弹出的候选菜单盖住光标、第二次点击误选」。菜单锚点改为光标右下方 28/30px 并做屏幕翻转；`PopupMenu` 增加 `_shown_at` + 220ms 激活保护（双击第二下不再命中菜单项）。以后凡是由「双击/单击」直接弹出的菜单都要走这条规则。

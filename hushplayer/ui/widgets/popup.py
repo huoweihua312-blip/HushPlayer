@@ -10,6 +10,8 @@ desktop lyrics) fall back to a masked native popup.
 
 from __future__ import annotations
 
+import time
+
 import ctypes
 from typing import Callable
 
@@ -98,6 +100,7 @@ class PopupMenu(QWidget):
         self._items: list = []
         self._hover = -1
         self._active: PopupAction | None = None
+        self._shown_at = 0.0
         self._loop: QEventLoop | None = None
         self._submenu: "PopupMenu | None" = None
         self._sub_open = -1
@@ -223,7 +226,11 @@ class PopupMenu(QWidget):
             child_w = self._submenu._intrinsic_size()[0] - 14
         return host.width() >= width + child_w + 8 and host.height() >= height + 8
 
+    def _mark_shown(self) -> None:
+        self._shown_at = time.monotonic()
+
     def popup(self, position: QPoint) -> None:  # noqa: N802
+        self._mark_shown()
         host = self._host_window()
         if self._fits_overlay(host):
             self._show_overlay(host, position)
@@ -298,6 +305,7 @@ class PopupMenu(QWidget):
         self.move(point)
 
     def exec(self, position: QPoint):  # noqa: N802
+        self._mark_shown()
         self._active = None
         self.popup(position)
         loop = QEventLoop(self)
@@ -436,6 +444,9 @@ class PopupMenu(QWidget):
             self._open_submenu(index)
 
     def mouseReleaseEvent(self, event) -> None:  # noqa: N802
+        if time.monotonic() - self._shown_at < 0.22:
+            # A double click opens this menu; the second press must not pick an item.
+            return
         point = event.position().toPoint()
         sub_index = self._sub_item_at(point)
         if sub_index >= 0 and self._submenu is not None:

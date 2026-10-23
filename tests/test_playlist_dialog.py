@@ -140,3 +140,25 @@ def test_adopt_all_and_export_missing(inline_context, qapp) -> None:
     assert Path(csv_path).exists()
     text = Path(csv_path).read_text(encoding="utf-8-sig")
     assert "未匹配" in text and "完全陌生的歌" in text
+
+def test_candidate_menu_opens_away_from_cursor(inline_context, qapp, monkeypatch) -> None:
+    from unittest.mock import patch
+
+    from PySide6.QtCore import QPoint
+
+    from hushplayer.model.track import Track
+    from hushplayer.services.playlist_import import PlaylistEntry
+    from hushplayer.ui.playlist_import_dialog import PlaylistImportDialog
+
+    dialog = PlaylistImportDialog()
+    dialog._accept_entries("锚点测试", [PlaylistEntry(title="夜航信号", artist="Aurora Field")], "")
+    dialog.online_toggle.setChecked(False)
+    dialog._start_matching()
+    _pump(qapp, dialog)
+    index = dialog.model.index(0, 0)
+
+    with patch("PySide6.QtGui.QCursor.pos", return_value=QPoint(600, 400)):
+        anchor = dialog._menu_anchor(index)
+    # 菜单必须避开光标：要么在下方，要么整体翻到左侧，不能从光标位置开始
+    assert anchor.y() >= 400 + 20
+    assert not (580 <= anchor.x() <= 620)
