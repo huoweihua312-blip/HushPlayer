@@ -114,6 +114,7 @@ DEFAULTS: dict[str, Any] = {
     },
     "playlist": {
         "import_strength": "balanced",
+        "auto_adopt": True,
     },
     "downloads": {
         "dir": "",

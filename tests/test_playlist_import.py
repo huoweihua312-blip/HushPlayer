@@ -338,3 +338,70 @@ def test_match_strength_thresholds_and_helpers() -> None:
         MatchCandidate(track=c, score=80),
     ])
     assert [item.track.id for item in deduped] == ["a", "c"]
+
+
+def test_auto_adopt_takes_local_candidate_without_review(qapp):
+    """自动模式下，本地 55 分以上的候选直接采用，不进入待确认。"""
+    from hushplayer.services.playlist_matcher import PlaylistMatcher
+
+    track = Track(id="local:auto1", kind="local", title="晴天", artist="周杰伦", album="叶惠美")
+    entry = PlaylistEntry(title="晴天", artist="周杰伦")
+
+    class _Tracks:
+        def search_local(self, term, limit=30):
+            return [track]
+
+    class _Lib:
+        tracks = _Tracks()
+
+    matcher = PlaylistMatcher(None, _Lib())
+    matcher.start([entry], online=False, strength="balanced", auto_adopt=True)
+    _pump(qapp, matcher)
+    row = matcher.rows[0]
+    assert row.status == "local"
+    assert row.track is not None and row.track.id == "local:auto1"
+
+
+def test_without_auto_adopt_low_confidence_still_needs_review(qapp):
+    from hushplayer.services.playlist_matcher import PlaylistMatcher
+
+    track = Track(id="local:auto2", kind="local", title="晴天", artist="林俊杰")
+    entry = PlaylistEntry(title="晴天", artist="周杰伦")
+
+    class _Tracks:
+        def search_local(self, term, limit=30):
+            return [track]
+
+    class _Lib:
+        tracks = _Tracks()
+
+    matcher = PlaylistMatcher(None, _Lib())
+    matcher.start([entry], online=False, strength="balanced")
+    _pump(qapp, matcher)
+    assert matcher.rows[0].status == "review"
+
+
+def test_auto_adopt_prefers_better_online_match_over_fuzzy_local(qapp):
+    """本地模糊命中(65) 不应压过在线精确命中(100)。"""
+    from hushplayer.services.playlist_matcher import PlaylistMatcher
+
+    local = Track(id="local:auto3", kind="local", title="晴天", artist="林俊杰")
+    client = FakeClient({"晴天 周杰伦": [_item("晴天", "周杰伦")]})
+
+    class _Tracks:
+        def search_local(self, term, limit=30):
+            return [local]
+
+    class _Lib:
+        tracks = _Tracks()
+
+    matcher = PlaylistMatcher(client, _Lib())
+    matcher.start(
+        [PlaylistEntry(title="晴天", artist="周杰伦")],
+        online=True,
+        auto_adopt=True,
+    )
+    _pump(qapp, matcher)
+    row = matcher.rows[0]
+    assert row.status == "online"
+    assert row.track is not None and row.track.source_id == "fake"

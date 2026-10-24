@@ -180,7 +180,12 @@ HushPlayer-<ver>-setup.exe /VERYSILENT /LOG=...
 - 2026-10-23：1.2.7——导入歌单对话框改为**无边框自绘标题栏**（_DialogTitleBar，24px 左基线对齐、拖动移动、Esc 关闭、#HushDialogRoot 圆角遮罩）；正文收成一套字阶（15pt/600 标题、9.4pt/0.75 主说明、9pt/0.55 计数、9pt/0.5 提示）；修自绘表头取色（QColor 不能吃 CSS rgba 字符串，否则变黑）；页脚按钮前加 addStretch 防拉伸。
 - 2026-10-23：1.2.6——新增「全黑」主题（`Palette(mode="pure")`，window/sidebar `#000000`，`_PALETTES` 三套并存，`is_dark` 把 pure 计入深色），主题选择器扩为四项并按宽度自适应瓦片；导入匹配表外框去掉（容器只留底色）。注意：`ThemePicker` 新增 API 后要 `grep "def set_value"` 确认没有重复定义（后定义会覆盖前者）；`QColor("rgba(...)")` 仍是无效写法。
 
-### 1.2.8（系统对话框自绘、导入表表头对齐）
+### 1.2.9（导入歌单零人工确认 · 自绘 CheckBox）
+
+- 匹配器新增 `auto_adopt`（默认由 `playlist.auto_adopt` 决定，默认 `True`）：本地候选不再直接进 `review`；在线可用时把本地候选带进在线竞优，按分数取高者；在线只有一个候选时也直接采用。只有完全无候选才 `unmatched`，`review` 仅在关闭自动采用时出现。
+- 不要用原生 `QCheckBox`：indicator 一旦用 QSS 上色就不再画对勾（深色下变成实心色块）。统一用 `hushplayer/ui/widgets/check.py:CheckBox`（`QAbstractButton` 子类，`toggled(bool)` 而非 `stateChanged`）。
+- 自绘控件的信号差异：`CheckBox`/`ToggleSwitch` 只有 `toggled`，没有 `stateChanged`；回调签名用 `bool`。
+- 测试必须 `_pump(qapp, matcher)`：`PlaylistMatcher.start()` 用 `QTimer.singleShot(0, …)` 分片执行，不同步事件循环会停在 `pending`。### 1.2.8（系统对话框自绘、导入表表头对齐）
 - 规则：不再使用 `QMessageBox` / `QInputDialog`；统一走 `hushplayer/ui/dialogs.py` 的 `notify / confirm / choose / ask_text`（`QFileDialog` 例外，保留系统文件选择器）。
 - 规则：自绘表头必须与 delegate 用同一套水平对齐（只有评分列 `AlignRight`），否则会差 6–10px。
 - 教训：`QPainter.save()` 与 `restore()` 之间抛异常会吞掉 Python traceback，终端只剩 `Painter ended with N saved states` + access violation；定位时 monkeypatch 包一层打印真实异常。

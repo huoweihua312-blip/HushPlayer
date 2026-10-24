@@ -16,7 +16,6 @@ from PySide6.QtGui import QColor, QPainter, QPainterPath, QPen, QRegion
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QApplication,
-    QCheckBox,
     QDialog,
     QFrame,
     QFileDialog,
@@ -35,6 +34,7 @@ from PySide6.QtWidgets import (
 
 from ..core.logging_setup import log_exception
 from .dialogs import ask_text, choose, notify
+from .widgets.check import CheckBox
 from ..core.theme import css_rgba, qcolor, rgba, theme
 from ..model.track import format_duration
 from ..online import matching
@@ -447,19 +447,28 @@ class PlaylistImportDialog(QDialog):
         self.name_input = QLineEdit()
         self.name_input.setPlaceholderText("导入后的歌单名")
         top.addWidget(self.name_input, 1)
-        self.online_toggle = QCheckBox("在线音源补齐")
+        layout.addLayout(top)
+
+        opts = QHBoxLayout()
+        opts.setSpacing(12)
+        self.online_toggle = CheckBox("在线音源补齐")
         self.online_toggle.setChecked(True)
         self.online_toggle.setToolTip("本地没有的歌曲，用已启用的在线音源搜索")
-        top.addWidget(self.online_toggle)
-        top.addSpacing(10)
+        opts.addWidget(self.online_toggle)
         self.strength = SegmentedControl(["严格", "平衡", "宽松"])
         self.strength.setToolTip(
             "严格：同时要求高分与明显领先；平衡：推荐；宽松：只取最高分，允许低置信导入"
         )
         saved = str(_setting("playlist.import_strength", "balanced"))
         self.strength.set_current({"strict": 0, "balanced": 1, "loose": 2}.get(saved, 1))
-        top.addWidget(self.strength)
-        layout.addLayout(top)
+        opts.addWidget(self.strength)
+        self.auto_toggle = CheckBox("自动采用最佳匹配")
+        self.auto_toggle.setToolTip("有可用候选就直接采用，不再逐条要求确认；只有完全找不到时才留给你")
+        self.auto_toggle.setChecked(bool(_setting("playlist.auto_adopt", True)))
+        self.auto_toggle.toggled.connect(self._on_auto_toggle)
+        opts.addWidget(self.auto_toggle)
+        opts.addStretch(1)
+        layout.addLayout(opts)
 
         self.progress = QProgressBar()
         self.progress.setTextVisible(False)
@@ -715,6 +724,7 @@ class PlaylistImportDialog(QDialog):
         self._matcher.start(
             self._entries,
             online=self.online_toggle.isChecked(),
+            auto_adopt=self.auto_toggle.isChecked(),
             verify=True,
             strength=strength,
         )
@@ -840,6 +850,12 @@ class PlaylistImportDialog(QDialog):
         self._on_row_changed(index)
 
     # ------------------------------------------------------------------ apply
+    def _on_auto_toggle(self, enabled: bool) -> None:
+        _remember("playlist.auto_adopt", enabled)
+        if enabled and self._matcher is not None:
+            # 打开开关时，把已有的待确认行直接采用最佳候选。
+            self._adopt_all()
+
     def _adopt_all(self) -> None:
         matcher = self._matcher
         if matcher is None:

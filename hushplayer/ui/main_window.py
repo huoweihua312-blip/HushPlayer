@@ -672,7 +672,7 @@ class MainWindow(FramelessWindow):
 
     def _ask_close_action(self) -> str:
         """Ask whether closing quits or hides to the tray. Returns quit/tray/cancel."""
-        from PySide6.QtWidgets import QCheckBox, QDialog, QHBoxLayout, QLabel, QVBoxLayout
+        from PySide6.QtWidgets import QDialog, QHBoxLayout, QLabel, QVBoxLayout
 
         dialog = QDialog(self)
         dialog.setWindowTitle("关闭 HushPlayer")
@@ -684,7 +684,9 @@ class MainWindow(FramelessWindow):
         title.setWordWrap(True)
         title.setFont(theme().font(10.4, 600))
         layout.addWidget(title)
-        remember = QCheckBox("记住我的选择（可在 设置 → 常规 中修改）")
+        from .widgets.check import CheckBox
+
+        remember = CheckBox("记住我的选择（可在 设置 → 常规 中修改）")
         layout.addWidget(remember)
 
         buttons = QHBoxLayout()

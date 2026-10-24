@@ -307,6 +307,7 @@ class PlaylistMatcher(QObject):
         online: bool = True,
         verify: bool = True,
         strength: str = "balanced",
+        auto_adopt: bool = False,
     ) -> None:
         # Mutate in place: the dialog's table model keeps this list by reference.
         self.rows[:] = [MatchRow(entry=entry, status="pending") for entry in entries]
@@ -319,6 +320,7 @@ class PlaylistMatcher(QObject):
         self._online = online
         self._verify = verify
         self._strength = strength if strength in MATCH_STRENGTHS else "balanced"
+        self._auto = bool(auto_adopt)
         self._sources = self._pick_sources()
         self.progress.emit(0, len(self.rows))
         QTimer.singleShot(0, self._local_pass)
@@ -394,6 +396,23 @@ class PlaylistMatcher(QObject):
             return
         if best and best[1] >= CANDIDATE_MIN_SCORE:
             row.candidates = [MatchCandidate(track=track, score=score) for track, score in scored[:_MAX_CANDIDATES] if score >= CANDIDATE_MIN_SCORE]
+            if self._auto and self._online and self._sources:
+                # 自动模式且在线可用：先记下本地候选，交给在线搜索比分数，
+                # 避免本地模糊命中压过在线精确命中。
+                row.status = "pending"
+                row.note = ""
+                self._queue.append(self.rows.index(row))
+                return
+            if self._auto:
+                # 自动模式：本地已有可用候选就直接采用，不再要求逐条确认。
+                row.track = best[0]
+                row.score = best[1]
+                row.status = "local"
+                row.verified = True
+                row.note = ""
+                self._remember(row)
+                self._emit(row)
+                return
             row.status = "review"
             row.note = "本地有相近结果"
             self._emit(row)
@@ -687,7 +706,21 @@ class PlaylistMatcher(QObject):
                 confident = bool(ranked) and ranked[0].score >= auto_min and (
                     len(ranked) == 1 or ranked[0].score - ranked[1].score >= auto_margin
                 )
-                if confident:
+                if self._auto and row.candidates:
+                    local_best = row.candidates[0]
+                    if not ranked or local_best.score >= ranked[0].score:
+                        row.track = local_best.track
+                        row.score = local_best.score
+                        row.status = "local"
+                        row.verified = True
+                        row.note = ""
+                        self._in_flight.discard(index)
+                        self._remember(row)
+                        self.progress.emit(self.done, len(self.rows))
+                        self._emit(row)
+                        QTimer.singleShot(0, self._pump)
+                        return
+                if confident or (self._auto and ranked):
                     row.candidates = ranked[:_MAX_CANDIDATES]
                     row.track = ranked[0].track
                     row.score = ranked[0].score
@@ -741,6 +774,19 @@ class PlaylistMatcher(QObject):
         )
         ranked = [item for item in ranked if item.score >= CANDIDATE_MIN_SCORE]
         row.candidates = ranked[:_MAX_CANDIDATES]
+        if ranked and self._auto:
+            row.track = ranked[0].track
+            row.status = "online"
+            row.score = ranked[0].score
+            row.note = ""
+            self._remember(row)
+            self.progress.emit(self.done, len(self.rows))
+            if self._verify:
+                self._verify_row(index, row)
+            else:
+                self._emit(row)
+                QTimer.singleShot(0, self._pump_variants)
+            return
         if ranked:
             row.status = "review"
             row.score = ranked[0].score

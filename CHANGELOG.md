@@ -2,6 +2,20 @@
 
 本日志依据仓库中的 Git 提交、`hushplayer/version.py` 与构建产物整理。版本按发布时间从新到旧排列；同一版本的多条提交合并为一条，只写对使用者可见的变化。版本号 1.0.14 未单独发布，相关改动并入 1.0.15。
 
+## 1.2.9 — 2026-10-25
+
+### 变更
+- **导入歌单默认零人工确认**：新增「自动采用最佳匹配」（向导内可关闭，设置键 `playlist.auto_adopt`，默认开）。本地命中不再先转「待确认」；本地候选与在线候选按分数择优（本地 65 分 vs 在线 100 分取在线），只要存在 ≥55 分候选就直接采用。
+- 「待确认」退化为兜底：只有关闭自动采用时才出现；完全没有候选才进「未匹配」。
+- 新增自绘 `hushplayer/ui/widgets/check.py:CheckBox`，替换原生 `QCheckBox`（导入向导「在线音源补齐」「自动采用最佳匹配」、关闭询问框「记住我的选择」）；原生 indicator 被 QSS 上色后不画对勾的问题（深色下像实心色块）随之消失。
+
+### 验证
+- `pytest -q --timeout=300 --junitxml=artifacts/junit_1_2_9.xml` → **256 passed / 0 failed**。
+- 新增用例：自动采纳本地候选、关闭后仍需确认、在线精确命中优先于本地模糊命中。
+- 截图：`docs/screenshots/import_match_{light,dark}.png` 显示两个自绘复选框与「待确认 0」。
+
+### 产物
+- `F:\HushPlayerBuild\out\HushPlayer`、`HushPlayer-1.2.9-win64.zip`
 ## 1.2.8 — 2026-10-23
 
 ### 变更
