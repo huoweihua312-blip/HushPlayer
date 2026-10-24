@@ -19,6 +19,10 @@ from dataclasses import dataclass, field
 
 from PySide6.QtCore import QObject, QTimer, Signal
 
+from ..core.logging_setup import get_logger, log_exception
+
+log = get_logger(__name__)
+
 from ..model.track import Track
 from ..online.matching import (
     AUTO_MARGIN,
@@ -162,6 +166,7 @@ class ImportOutcome:
     skipped: int = 0
     unmatched: int = 0
     pending: int = 0
+    failed: int = 0
     mode: str = "new"
 
 
@@ -242,14 +247,32 @@ def apply_import(
 
     unique: list[Track] = []
     for track in ordered:
-        if track.kind == "online" and not track.album_id:
-            library._ensure_online_album(track)
+        try:
+            if track.kind == "online" and not track.album_id:
+                library._ensure_online_album(track)
+        except Exception as exc:  # noqa: BLE001 - one bad row must not abort the import
+            log_exception(f"导入歌单：补全在线专辑失败（{track.display_title}）", exc)
         if track.id not in {item.id for item in unique}:
             unique.append(track)
 
     if unique:
-        library.add_to_playlist(outcome.playlist_id, unique)
+        try:
+            library.add_to_playlist(outcome.playlist_id, unique)
+        except Exception as exc:  # noqa: BLE001
+            log_exception("导入歌单：写入播放列表失败", exc)
+            outcome.failed = len(unique)
+            unique = []
     outcome.added = len(unique)
+    log.info(
+        "导入歌单「%s」：新增 %s，重复 %s，跳过 %s，未匹配 %s，待确认 %s，失败 %s",
+        name,
+        outcome.added,
+        outcome.duplicates,
+        outcome.skipped,
+        outcome.unmatched,
+        outcome.pending,
+        outcome.failed,
+    )
     return outcome
 
 
@@ -307,7 +330,7 @@ class PlaylistMatcher(QObject):
         online: bool = True,
         verify: bool = True,
         strength: str = "balanced",
-        auto_adopt: bool = False,
+        auto_adopt: bool = True,
     ) -> None:
         # Mutate in place: the dialog's table model keeps this list by reference.
         self.rows[:] = [MatchRow(entry=entry, status="pending") for entry in entries]
@@ -720,7 +743,7 @@ class PlaylistMatcher(QObject):
                         self._emit(row)
                         QTimer.singleShot(0, self._pump)
                         return
-                if confident or (self._auto and ranked):
+                if ranked and (self._auto or confident):
                     row.candidates = ranked[:_MAX_CANDIDATES]
                     row.track = ranked[0].track
                     row.score = ranked[0].score
@@ -821,5 +844,16 @@ class PlaylistMatcher(QObject):
     def _finished(self) -> None:
         if self._cancelled:
             return
+        if self._auto:
+            # 兜底：任何仍停在 review/pending 且已有候选的行，一律采用最佳候选，
+            # 保证导入时不会因为“需要确认”而丢歌。
+            for row in self.rows:
+                if row.status in ("review", "pending") and row.candidates:
+                    best = row.candidates[0]
+                    row.track = best.track
+                    row.score = best.score
+                    row.status = "online" if best.track.kind == "online" else "local"
+                    row.verified = True
+                    row.note = ""
         self._started = False
         self.finished.emit()

@@ -189,4 +189,4 @@ HushPlayer-<ver>-setup.exe /VERYSILENT /LOG=...
 - 规则：不再使用 `QMessageBox` / `QInputDialog`；统一走 `hushplayer/ui/dialogs.py` 的 `notify / confirm / choose / ask_text`（`QFileDialog` 例外，保留系统文件选择器）。
 - 规则：自绘表头必须与 delegate 用同一套水平对齐（只有评分列 `AlignRight`），否则会差 6–10px。
 - 教训：`QPainter.save()` 与 `restore()` 之间抛异常会吞掉 Python traceback，终端只剩 `Painter ended with N saved states` + access violation；定位时 monkeypatch 包一层打印真实异常。
-- 教训：`build.ps1` 在旧版正在运行时无法删除输出目录，已改为回退到 `HushPlayer-<version>`，不杀用户进程。
+- 教训：`build.ps1` 在旧版正在运行时无法删除输出目录，已改为回退到 `HushPlayer-<version>`，不杀用户进程。- 2026-10-25：1.2.10——导入歌单**彻底零确认**：`_apply()` 不再弹确认框/同名菜单（同名自动 merge），匹配器去掉 margin 门槛（有候选就采用最高分），`_finished()` 兜底采用残留 review/pending；对话框加 scrim（宿主窗口上 `rgba(0,0,0,0.40)` 遮罩）+ `palette.surface` 背景 + 1px 描边与主界面分层；`apply_import` 逐首 try/except 并写汇总日志。教训：`PlaylistImportDialog` 的 scrim 依赖父窗口，探针必须传 `ctx().window`，否则看不到遮罩。

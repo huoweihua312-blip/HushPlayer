@@ -376,7 +376,7 @@ def test_without_auto_adopt_low_confidence_still_needs_review(qapp):
         tracks = _Tracks()
 
     matcher = PlaylistMatcher(None, _Lib())
-    matcher.start([entry], online=False, strength="balanced")
+    matcher.start([entry], online=False, strength="balanced", auto_adopt=False)
     _pump(qapp, matcher)
     assert matcher.rows[0].status == "review"
 

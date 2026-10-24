@@ -59,7 +59,7 @@ def main() -> None:
     mode = sys.argv[1] if len(sys.argv) > 1 else "light"
     ctx().settings.set("appearance.theme", mode)
 
-    dialog = PlaylistImportDialog()
+    dialog = PlaylistImportDialog(ctx().window)
     stamp = time.strftime("%H%M%S")
     dialog.resize(980, 700)
     dialog.show()
@@ -70,6 +70,13 @@ def main() -> None:
     dialog._accept_entries("夜间通勤 " + stamp, ENTRIES, "来自 网易云音乐 链接")
     app.processEvents()
     dialog.grab().save(str(OUT / f"dialog_source_{mode}.png"))
+    from PySide6.QtGui import QGuiApplication
+    screen = QGuiApplication.primaryScreen()
+    win = ctx().window
+    g = win.geometry()
+    screen.grabWindow(0, g.x(), g.y(), g.width(), g.height()).save(
+        str(OUT / f"dialog_scrim_{mode}.png")
+    )
 
     dialog._go_next()
     pump(app, dialog)

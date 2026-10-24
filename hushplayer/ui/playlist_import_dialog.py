@@ -33,7 +33,7 @@ from PySide6.QtWidgets import (
 )
 
 from ..core.logging_setup import log_exception
-from .dialogs import ask_text, choose, notify
+from .dialogs import ask_text, notify
 from .widgets.check import CheckBox
 from ..core.theme import css_rgba, qcolor, rgba, theme
 from ..model.track import format_duration
@@ -330,6 +330,7 @@ class PlaylistImportDialog(QDialog):
         self._note = ""
         self._matcher: PlaylistMatcher | None = None
         self._stage = 0
+        self._scrim = None
 
         self._build()
         self._apply_theme()
@@ -544,10 +545,50 @@ class PlaylistImportDialog(QDialog):
     def showEvent(self, event) -> None:  # noqa: N802
         super().showEvent(event)
         self._apply_round_mask()
+        self._show_scrim()
+
+    def hideEvent(self, event) -> None:  # noqa: N802
+        self._hide_scrim()
+        super().hideEvent(event)
+
+    def paintEvent(self, event) -> None:  # noqa: N802
+        super().paintEvent(event)
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing, True)
+        painter.setPen(QPen(rgba(theme().palette.text, 0.24), 1))
+        painter.setBrush(Qt.NoBrush)
+        radius = theme().scaled(14, factor=0.7)
+        painter.drawRoundedRect(QRectF(self.rect()).adjusted(0.5, 0.5, -0.5, -0.5), radius, radius)
+
+    def _show_scrim(self) -> None:
+        """Dim the window behind the dialog so the frameless card reads as a layer."""
+        if self._scrim is not None:
+            return
+        parent = self.parentWidget()
+        host = parent.window() if parent is not None else None
+        if host is None or host is self:
+            return
+        scrim = QWidget(host)
+        scrim.setObjectName("HushDialogScrim")
+        scrim.setAttribute(Qt.WA_TransparentForMouseEvents, True)
+        scrim.setStyleSheet("background: rgba(0, 0, 0, 0.40);")
+        scrim.setGeometry(host.rect())
+        scrim.show()
+        scrim.raise_()
+        self._scrim = scrim
+
+    def _hide_scrim(self) -> None:
+        if self._scrim is None:
+            return
+        self._scrim.hide()
+        self._scrim.deleteLater()
+        self._scrim = None
 
     def resizeEvent(self, event) -> None:  # noqa: N802
         super().resizeEvent(event)
         self._apply_round_mask()
+        if self._scrim is not None and self._scrim.parentWidget() is not None:
+            self._scrim.setGeometry(self._scrim.parentWidget().rect())
 
     def _apply_round_mask(self) -> None:
         """Frameless window: clip the corners ourselves (no translucent window)."""
@@ -560,7 +601,7 @@ class PlaylistImportDialog(QDialog):
     def _apply_theme(self, *_args) -> None:
         palette = theme().palette
         self.setStyleSheet(
-            f"QDialog {{ background: {palette.window}; }}"
+            f"QDialog {{ background: {palette.surface}; }}"
             f"QLabel {{ color: {palette.text}; }}"
         )
         self.title_label.setStyleSheet(
@@ -861,7 +902,7 @@ class PlaylistImportDialog(QDialog):
         if matcher is None:
             return
         for index, row in enumerate(matcher.rows):
-            if row.status == "review" and row.candidates:
+            if row.status in ("review", "pending") and row.candidates:
                 matcher.choose(index, row.candidates[0].track)
         self._refresh_counts()
 
@@ -897,58 +938,20 @@ class PlaylistImportDialog(QDialog):
         if self._matcher is None:
             return
         rows = self._matcher.rows
+        # 导入阶段不再要求逐条确认：仍有候选的行一律采用最佳结果。
+        self._adopt_all()
         counts = self._matcher.counts()
-        missing = counts["review"] + counts["unmatched"] + counts.get("pending", 0) + counts["skipped"]
-        if missing:
-            choice = choose(
-                self,
-                "还有未处理的歌曲",
-                f"将导入 {counts['local'] + counts['online'] + counts['unverified']} 首；"
-                f"{counts['review']} 首待确认、{counts['unmatched']} 首未匹配、"
-                f"{counts['skipped']} 首已跳过不会被导入。\n\n"
-                "可以先返回处理，也可以继续导入，或继续并导出未导入清单。",
-                [
-                    ("back", "返回处理"),
-                    ("export", "导出清单并导入"),
-                    ("proceed", "仍然导入"),
-                ],
-                kind="warning",
-                accent="proceed",
-            )
-            if choice in (None, "back"):
-                return
-            if choice == "export":
-                self._export_missing(rows)
-        if False:  # kept for readability of the original guard
-            return
+        if counts["unmatched"] or counts.get("pending", 0) or counts["skipped"]:
+            self._export_missing(rows)
         library = ctx().library
         name = self.name_input.text().strip() or self._playlist_name or "导入的歌单"
         existing = find_playlist(library, name)
         mode = "new"
         playlist_id = None
         if existing is not None:
-            menu = PopupMenu(self)
-            merge = menu.addAction(f"合并到「{existing.name}」（保留现有歌曲）")
-            merge.triggered.connect(lambda: None)
-            replace = menu.addAction("覆盖同名歌单（清空后重填）")
-            replace.triggered.connect(lambda: None)
-            create = menu.addAction("新建一个不同名的歌单")
-            create.triggered.connect(lambda: None)
-            chosen = menu.exec(self.next_button.mapToGlobal(QPoint(0, -menu.height() - 6)))
-            if chosen is merge:
-                mode = "merge"
-                playlist_id = existing.id
-            elif chosen is replace:
-                mode = "replace"
-                playlist_id = existing.id
-            elif chosen is create:
-                text, ok = ask_text(self, "新建歌单", "给导入的歌单起个名字", text=f"{name}（导入）")
-                if not ok or not text.strip():
-                    return
-                name = text.strip()
-                mode = "new"
-            else:
-                return
+            # 同名歌单默认合并，避免在导入流程里再弹一次选择。
+            mode = "merge"
+            playlist_id = existing.id
         try:
             outcome = apply_import(library, name, rows, mode=mode, playlist_id=playlist_id)
         except Exception as exc:  # noqa: BLE001
