@@ -2,6 +2,17 @@
 
 本日志依据仓库中的 Git 提交、`hushplayer/version.py` 与构建产物整理。版本按发布时间从新到旧排列；同一版本的多条提交合并为一条，只写对使用者可见的变化。版本号 1.0.14 未单独发布，相关改动并入 1.0.15。
 
+## 1.2.11 — 2026-10-25
+
+### 修复
+
+- 修复导入向导勾选框在鼠标进入时崩溃：`hushplayer/ui/widgets/check.py` 调用了不存在的 `HoverAnimation.set_end()`，改用真实 API `HoverAnimation.to()`。
+- 新增回归测试 `tests/test_dialogs.py::test_checkbox_hover_uses_hover_animation_api`，覆盖进入/离开两段悬停动画。
+
+### 说明
+
+- 日志中同期的 `Request failed with status code 404` 与「音源 custom_source_e7ba10a41a43 播放解析超时」来自上游音源插件，与本次崩溃无关。
+
 ## 1.2.10 — 2026-10-25
 
 ### 变更

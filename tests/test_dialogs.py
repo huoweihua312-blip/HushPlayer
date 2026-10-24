@@ -49,3 +49,30 @@ def test_text_input_dialog_returns_entered_text(qapp):
     dialog.edit.returnPressed.emit()
     assert dialog.selected() == "ok"
     dialog.close()
+
+def test_checkbox_hover_uses_hover_animation_api(qapp):
+    """Regression: CheckBox used HoverAnimation.set_end which does not exist."""
+    import time
+
+    from PySide6.QtCore import QEvent, QPointF
+    from PySide6.QtGui import QEnterEvent
+
+    from hushplayer.ui.widgets.check import CheckBox
+
+    box = CheckBox("自动采用", size=16)
+    box.show()
+
+    center = QPointF(box.width() / 2, box.height() / 2)
+    box.enterEvent(QEnterEvent(center, center, center))
+    deadline = time.monotonic() + 1.5
+    while time.monotonic() < deadline and box._hover.value < 0.5:
+        qapp.processEvents()
+        time.sleep(0.01)
+    assert box._hover.value > 0.5
+
+    box.leaveEvent(QEvent(QEvent.Type.Leave))
+    deadline = time.monotonic() + 1.5
+    while time.monotonic() < deadline and box._hover.value > 0.5:
+        qapp.processEvents()
+        time.sleep(0.01)
+    assert box._hover.value < 0.5

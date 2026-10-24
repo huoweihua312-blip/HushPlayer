@@ -68,11 +68,11 @@ class CheckBox(QAbstractButton):
 
     # --------------------------------------------------------------- events
     def enterEvent(self, event) -> None:  # noqa: N802
-        self._hover.set_end(1.0)
+        self._hover.to(1.0)
         super().enterEvent(event)
 
     def leaveEvent(self, event) -> None:  # noqa: N802
-        self._hover.set_end(0.0)
+        self._hover.to(0.0)
         super().leaveEvent(event)
 
     def _on_toggled(self, checked: bool) -> None:
