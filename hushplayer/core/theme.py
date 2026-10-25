@@ -585,9 +585,11 @@ QTableView, QTreeView, QListView {{
     selection-background-color: transparent;
     selection-color: {p.text};
 }}
-QTableView::item, QTreeView::item, QListView::item {{ background: transparent; }}
+QTableView::item, QTreeView::item, QListView::item {{ background: transparent; border: 0px; outline: none; }}
 QTableView::item:selected, QTreeView::item:selected, QListView::item:selected {{
     background: transparent;
+    border: 0px;
+    outline: none;
     color: {p.text};
 }}
 """

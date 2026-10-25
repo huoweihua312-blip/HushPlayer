@@ -231,3 +231,9 @@ HushPlayer-<ver>-setup.exe /VERYSILENT /LOG=...
 - 页内搜索：`TrackListPage` 只过滤 `self._tracks`（当前页已加载数据），用模块级 `filter_tracks()`；`reload()` 调 `_apply_filter()`，由它统一维护副标题「匹配 / 总数」，不要再在 `reload()` 里直接 `_update_header()`。
 - 探针/验证：真实 GUI 探针必须 `HushApp(QApplication)`，`QApplication` 由脚本先建；`app.window` 在 `start()` 后才存在。
 - 清洗脚本：PowerShell 写 `AGENTS.md`/`CHANGELOG.md` 只用单引号 here-string + `[IO.File]::WriteAllText(..., UTF8Encoding($false))`，写完 `Get-Content -First/Last` 复核。
+
+## 高亮（1.3.16）
+
+- 整行色带只在 `TrackTable.paintEvent` 的 `_paint_row_bands()` 里画一次；`TrackDelegate` 不再画底、不再 `setClipRect` 逐格叠加。
+- `TrackTable` 固定 `QStyleFactory.create("Fusion")`；`HushApp.__init__` 对非 `main()` 启动兜底 `app.setStyle("Fusion")`——Windows 11 原生样式会在选中行每格边缘画 2px 系统强调色描边。
+- 回归探针 `tools/probe_r92_band.py` 必须输出选中/悬停各 6 点同色；`tests/test_gui_smoke.py` 22 项。

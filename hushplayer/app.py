@@ -32,6 +32,10 @@ class HushApp(QObject):
     def __init__(self, app: QApplication) -> None:
         super().__init__()
         self.app = app
+        # 程序化启动（测试/探针/嵌入）不会走 main()，这里兜底固定 Fusion：
+        # 原生 Windows 11 样式会给选中单元格画系统强调色描边，列表看起来像分块色带。
+        if app.style().objectName().lower() != "fusion":
+            app.setStyle("Fusion")
         self.window = None
         self._resolved_mode: str | None = None
         self._build_services()

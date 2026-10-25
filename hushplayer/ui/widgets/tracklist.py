@@ -25,6 +25,7 @@ from PySide6.QtCore import (
 )
 from PySide6.QtGui import QColor, QFontMetrics, QPainter, QPen
 from PySide6.QtWidgets import (
+    QStyleFactory,
     QAbstractItemView,
     QHeaderView,
     QStyle,
@@ -414,28 +415,10 @@ class TrackDelegate(QStyledItemDelegate):
         # a favourite toggled ...): that cell had no column 0, so the row looked
         # "broken". With the identical rect in every cell, both the row ends
         # (rounded) and the middle cells (square) line up seamlessly.
-        row_rect = QRectF(
-            0.5,
-            option.rect.top() + 1.0,
-            max(1.0, self.view.viewport().width() - 1.0),
-            option.rect.height() - 3.0,
-        )
-        # Each cell paints the same full-row band so a single-cell repaint can
-        # never leave a hole.  Qt does not always clip the painter to the cell
-        # (the delegate is invoked twice per index on some style paths), so a
-        # full-width band would otherwise be drawn once per column and the tint
-        # would stack into an almost solid block.  Clip to the cell first: one
-        # slice per cell, seamless across the row, no accumulation.
-        painter.setClipRect(option.rect)
-        if selected:
-            alpha = (0.20 if hovered else 0.15) if palette.is_dark else (0.15 if hovered else 0.11)
-            painter.setPen(Qt.NoPen)
-            painter.setBrush(rgba(palette.accent, alpha))
-            painter.drawRoundedRect(row_rect, radius, radius)
-        elif hover:
-            painter.setPen(Qt.NoPen)
-            painter.setBrush(rgba(palette.text, 0.045))
-            painter.drawRoundedRect(row_rect, radius, radius)
+        # The row band is painted once by ``TrackTable.paintEvent`` before the
+        # items are drawn.  Per-cell painting (even with a clip) left visible
+        # seams whenever Qt repainted a single cell or a style path invoked the
+        # delegate twice; one shape per row cannot stack or drift.
 
         if is_current and index.column() == COLUMN_INDEX:
             marker = QRectF(rect.left() + 2.5, rect.center().y() - rect.height() * 0.20, 3.0,
@@ -706,6 +689,9 @@ class TrackTable(QTableView):
             lambda *_: self._column_timer.start()
         )
         self.setShowGrid(False)
+        # Windows 11 原生样式会在选中行的每个单元格边上画 2px 系统强调色描边，
+        # 视觉上就是“分块的色带”。表格固定用 Fusion，自己画整行色带。
+        self.setStyle(QStyleFactory.create("Fusion"))
         self.setFrameShape(QTableView.NoFrame)
         self.setSelectionBehavior(QAbstractItemView.SelectRows)
         self.setSelectionMode(QAbstractItemView.ExtendedSelection)
@@ -1030,9 +1016,40 @@ class TrackTable(QTableView):
 
     # ------------------------------------------------------------------ paint
     def paintEvent(self, event) -> None:  # noqa: N802
+        self._paint_row_bands()
         super().paintEvent(event)
         if self._model.rowCount() == 0:
             self._paint_empty()
+
+    def _paint_row_bands(self) -> None:
+        """选中的行与悬停行只在视口画一次整条色带，避免逐格叠加/接缝。"""
+        model = self.model()
+        if model is None or model.rowCount() == 0:
+            return
+        palette = self._pal()
+        selection = self.selectionModel()
+        hover_row = getattr(self, "_hover_row", -1)
+        painter = QPainter(self.viewport())
+        painter.setRenderHint(QPainter.Antialiasing, True)
+        painter.setPen(Qt.NoPen)
+        width = max(1.0, self.viewport().width() - 1.0)
+        for row in range(model.rowCount()):
+            selected = bool(selection and selection.isRowSelected(row, QModelIndex()))
+            hovered = row == hover_row
+            if not selected and not hovered:
+                continue
+            top = self.rowViewportPosition(row)
+            height = self.rowHeight(row)
+            if height <= 0:
+                continue
+            rect = QRectF(0.5, top + 1.0, width, height - 3.0)
+            if selected:
+                alpha = (0.20 if hovered else 0.15) if palette.is_dark else (0.15 if hovered else 0.11)
+                painter.setBrush(rgba(palette.accent, alpha))
+            else:
+                painter.setBrush(rgba(palette.text, 0.045))
+            painter.drawRoundedRect(rect, 7.0, 7.0)
+        painter.end()
 
     def _paint_empty(self) -> None:
         palette = self._pal()
