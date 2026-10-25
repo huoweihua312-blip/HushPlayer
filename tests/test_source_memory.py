@@ -99,3 +99,17 @@ def test_forget_removes_every_key(data_dir) -> None:
     reloaded.remote_id = "re1"
     assert source_memory.track_alias(original) is None
     assert source_memory.track_alias(reloaded) is None
+
+def test_alias_matches_bracket_variants(data_dir) -> None:
+    source_memory.clear()
+    played = _online("t7", title="晴天")
+    match = _online("t8", source_id="ne", title="晴天")
+    source_memory.remember_track(played, match)
+
+    # The library row may say "晴天 (Live)" while the one that played was
+    # "晴天"; the loose title scan should still find the remembered source
+    # instead of searching every enabled source again.
+    variant = _online("t9", title="晴天 (Live)")
+    alias = source_memory.track_alias(variant)
+    assert alias is not None
+    assert alias["source_id"] == "ne"

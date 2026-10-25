@@ -984,6 +984,11 @@ class PlayerController(QObject):
             log.exception("proxy register failed")
             self._online_failed(track, f"本地缓存服务不可用：{exc}", tried, autoplay)
             return
+        # A fallback that actually produced a URL is evidence the source works;
+        # without this the alias source can stay "broken" from older failures
+        # and get skipped on the next play, forcing another search.
+        health.record_ok(match.source_id)
+        health.record_fail(track.source_id, "fallback")
         self.status_message.emit(f"已通过 {self._source_label(match.source_id)} 播放")
         # Remember the pairing only once audio really starts (see _commit_memory_pending):
         # some plugins return a URL that then 404s on the stream.

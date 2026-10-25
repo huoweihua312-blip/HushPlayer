@@ -1,23 +1,33 @@
+# HushPlayer Reimagined 更新日志
+
+本日志依据仓库中的 Git 提交、`hushplayer/version.py` 与构建产物整理。版本按发布时间从新到旧排列；同一版本的多条提交合并为一条，只写对使用者可见的变化。版本号 1.0.14 未单独发布，相关改动并入 1.0.15。
+
+## 1.3.9 — 2026-10-25
+
+- 同一首歌第二次播放仍跨源重搜：标题带括号后缀（如「晴天 (Live)」）时记忆键对不上，现在会再按「去掉括号的标题 + 歌手」宽松匹配一次；回退解析成功后现在会把该音源记为正常（`health.record_ok`），否则它可能一直被视为坏源而被跳过、导致每次仍重搜。
+- 「记忆源被判定为坏源而跳过」会写入日志，便于定位。
+- 测试 281 passed。
+
 ## 1.3.8 — 2026-10-25
 
 - 来源记忆改为「真正开始播放后才写入」：此前只要解析到 URL 就记下音源，而个别插件返回的地址在开流时 404，于是每次双击都先重试这个死源、再跨源搜索。现在只有引擎进入 playing 才提交（_memory_pending / _commit_memory_pending），解析失败则立即忘掉该别名。
-- 新增回归 	est_alias_is_not_written_before_playback_starts；全量 280 passed。
+- 新增回归 test_alias_is_not_written_before_playback_starts；全量 280 passed。
+
 ## 1.3.7 — 2026-10-25
 
 - 同一首歌重复双击仍先报「源不可用」：原因是记忆里记下的那个源已经 404，每次播放都先试它、失败再回原源、再跨源搜索。现在记住的源若被判定为损坏会直接跳过；记住的源一旦播放失败，不再回退原源，而是立刻跨源查找；单次失败不再立即忘记（连续两次失败才删）。
 - 测试 279 passed。
+
 ## 1.3.6 — 2026-10-25
 
 - 来源记忆失效：之前只按本地 track.id 记录，从搜索结果重新导入同一首歌会拿到新 id，于是又跨源搜一遍。现在同时按「原曲 source_id + remote_id」和「source_id + 标题 + 歌手」建索引，替换来源时也会写入。
 - 测试 277 passed。
+
 ## 1.3.5 — 2026-10-25
 
 - 快速切歌不生效：上一首/下一首不再「信号加载 + 显式加载」各跑一次（同一首解析两次），切歌时取消上一首未完成的在线解析、清掉旧的「缓冲中」。
 - 替换来源：保留 Live 与翻唱；歌手与原曲不同不再丢弃，改为标注「歌手不同（…），可能是翻唱」；试听片段/伴奏/纯音乐/铃声等仍过滤。
 - 测试 274 passed。
-# HushPlayer Reimagined 更新日志
-
-本日志依据仓库中的 Git 提交、`hushplayer/version.py` 与构建产物整理。版本按发布时间从新到旧排列；同一版本的多条提交合并为一条，只写对使用者可见的变化。版本号 1.0.14 未单独发布，相关改动并入 1.0.15。
 
 ## 1.3.4 — 2026-10-25
 
@@ -29,6 +39,7 @@
 
 **修复**
 - 「使用此来源」按钮点了没反应：按钮此前只关闭对话框、没有写入选中的候选，必须双击行才生效；现在单击选中后点按钮即可替换。
+
 ## 1.3.3 — 2026-10-25
 
 **改进**
@@ -38,10 +49,12 @@
 
 **修复**
 - 全量测试偶发 access violation（上一个用例 deferred delete 的控件在下一个用例进入事件循环时被销毁）：用例结束后统一冲刷 DeferredDelete 并回收，事件等待改为 processEvents 轮询。
+
 ## 1.3.2 — 2026-10-25
 
 - 修复：选中行高亮在部分列偏深（同一半透明底被逐格重复叠加）——绘制前把 painter 裁剪到单元格，整行恢复为单一透明度。
 - 修复：右键「替换歌曲来源」后界面与播放队列仍显示旧来源——替换后同步刷新列表页、播放队列与当前曲目。
+
 ## 1.3.1 — 2026-10-25
 
 **修复**
@@ -60,6 +73,7 @@
 - `pytest`：260 passed / 0 failed / 0 skipped；
 - 新增 `tests/test_source_replace.py`（3 例）+ 高亮探针 `tools/probe_r83_select.py`（PASS）；
 - 截图：`docs/screenshots/source_replace_dialog.png`。
+
 ## 1.2.11 — 2026-10-25
 
 ### 修复
@@ -83,6 +97,7 @@
 - `pytest`：256 passed / 0 failed。
 - 截图：`import_scrim_light.png` / `import_scrim_dark.png`（遮罩 + 对话框分层）、`import_match_light.png` / `import_match_dark.png`（待确认 0）。
 - 构建：`F:\HushPlayerBuild\out\HushPlayer-1.2.10-win64.zip`。
+
 ## 1.2.9 — 2026-10-25
 
 ### 变更
@@ -97,6 +112,7 @@
 
 ### 产物
 - `F:\HushPlayerBuild\out\HushPlayer`、`HushPlayer-1.2.9-win64.zip`
+
 ## 1.2.8 — 2026-10-23
 
 ### 变更
@@ -111,6 +127,7 @@
 
 ### 产物
 - `F:\HushPlayerBuild\out\HushPlayer`、`HushPlayer-1.2.8-win64.zip`（SHA256 `E3367E5D3CE3AF5802B1B860A569A83328327BCF10368504AEC4FBF695A76B36`）
+
 ## 1.2.7 — 2026-10-23
 
 ### 修复
@@ -122,7 +139,6 @@
 - pytest：249 passed / 0 failed / 0 errors（artifacts/junit_1_2_7.xml，59.6s）。
 - 可运行产物：F:\HushPlayerBuild\out\HushPlayer 与 HushPlayer-1.2.7-win64.zip。
 - 截图：docs/screenshots/import_source_light.png、import_match_light.png、import_done_light.png 及对应 dark 三张。
-
 
 ## 1.2.6 - 2026-10-23
 
@@ -142,6 +158,7 @@
 ### 产物
 
 - `F:\HushPlayerBuild\out\HushPlayer-1.2.6-win64.zip`，SHA256 `753B0E4EEB0C5787CAB244FF0F3A8E4337678A2427C94937AEBD7DE3278699D3`。
+
 ## 1.2.3 - 2026-10-23
 
 - 提交：由本轮 `fix(1.2.3)`

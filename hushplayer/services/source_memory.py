@@ -20,6 +20,7 @@ deleted at any time without losing favourites, playlists or settings:
 from __future__ import annotations
 
 import json
+import re
 import threading
 import time
 from pathlib import Path
@@ -100,6 +101,14 @@ def _norm(text: object) -> str:
     return "".join(ch for ch in raw if ch.isalnum() or "\u4e00" <= ch <= "\u9fff")
 
 
+_BRACKETS = re.compile(r"[\(（\[【].*?[\)）\]】]")
+
+
+def _loose(text: object) -> str:
+    """Normalise a title while ignoring bracketed version suffixes."""
+    return _norm(_BRACKETS.sub("", str(text or "")))
+
+
 def track_key(source_id: str, remote_id: str) -> str:
     """Stable key for a remote track, independent of the local row id."""
     return f"r::{source_id}::{remote_id}"
@@ -137,6 +146,25 @@ def track_alias(track: object) -> dict[str, Any] | None:
         entry = _valid(data.get(key)) if key else None
         if entry is not None:
             return entry
+    # Titles drift between the library row and the variant that actually
+    # played ("晴天" vs "晴天 (Live)"), so fall back to a loose scan over the
+    # same source instead of re-searching every time.
+    loose_title = _loose(title)
+    if loose_title:
+        loose_artist = _loose(artist)
+        best: dict[str, Any] | None = None
+        for raw in data.values():
+            entry = _valid(raw)
+            if entry is None or _loose(entry.get("title")) != loose_title:
+                continue
+            if loose_artist:
+                alias_artist = _loose(entry.get("artist"))
+                if alias_artist and loose_artist not in alias_artist and alias_artist not in loose_artist:
+                    continue
+            if best is None or float(entry.get("saved_at") or 0) > float(best.get("saved_at") or 0):
+                best = entry
+        if best is not None:
+            return best
     return None
 
 

@@ -208,6 +208,9 @@ def test_failed_alias_skips_original_source(qapp):
     alias = source_memory.track_alias(track.id)
     assert alias is not None
     assert alias["source_id"] == QQ.id
+    # A successful fallback is proof the source works; otherwise the next
+    # play would skip the alias as broken and search all sources again.
+    assert not health.looks_broken(QQ.id)
 
 
 def test_broken_alias_source_is_ignored(qapp):
