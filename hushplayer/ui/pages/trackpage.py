@@ -83,6 +83,7 @@ class TrackListPage(Page):
         library = ctx().library
         library.library_changed.connect(self._schedule_reload)
         library.favorites_changed.connect(self._schedule_favorites)
+        library.track_updated.connect(lambda _id: self._schedule_reload())
         library.playlists_changed.connect(self._schedule_reload)
         self.list.set_empty_text("还没有歌曲", "导入音乐文件或文件夹后，歌曲会显示在这里")
 

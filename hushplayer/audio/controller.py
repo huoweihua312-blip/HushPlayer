@@ -238,6 +238,14 @@ class PlayerController(QObject):
             log.exception("restore queue failed")
         return position
 
+    def refresh_track(self, track: Track) -> None:
+        """来源替换后，把队列与当前曲目里的旧对象换成新记录。"""
+
+        self.queue.replace_track(track)
+        if self._track is not None and self._track.id == track.id:
+            self._track = track
+            self.track_changed.emit(track)
+
     def restore_current(self, position_ms: int = 0, *, autoplay: bool = False) -> None:
         """Load the restored queue's current track at ``position_ms`` without starting."""
         track = self.queue.current

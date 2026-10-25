@@ -420,6 +420,13 @@ class TrackDelegate(QStyledItemDelegate):
             max(1.0, self.view.viewport().width() - 1.0),
             option.rect.height() - 3.0,
         )
+        # Each cell paints the same full-row band so a single-cell repaint can
+        # never leave a hole.  Qt does not always clip the painter to the cell
+        # (the delegate is invoked twice per index on some style paths), so a
+        # full-width band would otherwise be drawn once per column and the tint
+        # would stack into an almost solid block.  Clip to the cell first: one
+        # slice per cell, seamless across the row, no accumulation.
+        painter.setClipRect(option.rect)
         if selected:
             alpha = (0.20 if hovered else 0.15) if palette.is_dark else (0.15 if hovered else 0.11)
             painter.setPen(Qt.NoPen)

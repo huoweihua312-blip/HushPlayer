@@ -159,6 +159,20 @@ class PlayQueue(QObject):
         self.changed.emit()
         self.current_changed.emit(self.current)
 
+    def replace_track(self, track: Track) -> bool:
+        """用同一 ``id`` 的新记录替换队列里的旧对象（来源替换后同步）。"""
+
+        for index, old in enumerate(self._items):
+            if old.id != track.id:
+                continue
+            self._items[index] = track
+            self._by_id[track.id] = track
+            self.changed.emit()
+            if self.current is not None and self.current.id == track.id:
+                self.current_changed.emit(track)
+            return True
+        return False
+
     def append(self, tracks: list[Track]) -> int:
         added = [track for track in tracks if track is not None]
         if not added:

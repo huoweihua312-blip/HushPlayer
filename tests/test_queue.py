@@ -197,3 +197,18 @@ def test_clear() -> None:
     assert queue.count == 0
     assert queue.current is None
     assert queue.next_track() is None
+
+def test_replace_track_swaps_same_id_in_place() -> None:
+    """来源替换后队列里的旧对象要被换掉，播放位置与顺序不动。"""
+
+    queue = PlayQueue()
+    queue.set_tracks(make_tracks(3), start_index=1)
+    old = queue.current
+    assert old is not None
+    updated = Track(id=old.id, kind="online", title="新标题", artist="新歌手",
+                    source_id="another", remote_id="remote:1")
+    assert queue.replace_track(updated) is True
+    assert queue.current is not None
+    assert queue.current.title == "新标题"
+    assert queue.current_order_pos == 1
+    assert queue.replace_track(Track(id="local:missing", kind="local")) is False

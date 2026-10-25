@@ -149,6 +149,8 @@ def _replace_source(track: Track, parent: QWidget) -> None:
     if not accepted or candidate is None:
         return
     updated = app.library.replace_online_source(track.id, candidate)
+    if updated is not None:
+        app.player.refresh_track(updated)
     window = app.window
     if window is not None and hasattr(window, "toast"):
         if updated is not None:
