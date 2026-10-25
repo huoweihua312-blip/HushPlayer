@@ -8,8 +8,8 @@ wrap long lines (source names can be very long) instead of running off-screen.
 
 from __future__ import annotations
 
-from PySide6.QtCore import QEvent, QObject, QPoint, QTimer, Qt
-from PySide6.QtGui import QCursor, QGuiApplication
+from PySide6.QtCore import QEvent, QObject, QPoint, QRectF, QTimer, Qt
+from PySide6.QtGui import QColor, QCursor, QGuiApplication, QPainter, QPainterPath, QPen
 from PySide6.QtWidgets import QApplication, QLabel, QVBoxLayout, QWidget
 
 from ...core.theme import css_rgba, theme
@@ -50,15 +50,33 @@ class HoverTip(QWidget):
     def _restyle(self) -> None:
         palette = theme().palette
         self.setStyleSheet(
-            "QWidget { background: %s; border: 1px solid %s; border-radius: 8px; }"
             "QLabel { color: %s; font-size: %dpx; background: transparent; border: none; }"
-            % (
-                css_rgba(palette.elevated, 0.98),
-                css_rgba(palette.border, 0.9),
-                css_rgba(palette.text, 0.95),
-                theme().px(8.4),
-            )
+            % (css_rgba(palette.text, 0.95), theme().px(8.4))
         )
+
+    def paintEvent(self, event) -> None:  # noqa: N802
+        """Paint the rounded card ourselves.
+
+        A top-level translucent widget does not reliably honour a ``QWidget``
+        background rule from its stylesheet (it painted transparent, so the tip
+        looked like a white rectangle with invisible text).  Drawing the card
+        here is deterministic in both themes.
+        """
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        palette = theme().palette
+        card = QColor(palette.elevated)
+        card.setAlphaF(0.98)
+        border = QColor(palette.border)
+        border.setAlphaF(0.9)
+        rect = QRectF(self.rect()).adjusted(0.5, 0.5, -0.5, -0.5)
+        path = QPainterPath()
+        path.addRoundedRect(rect, 8.0, 8.0)
+        painter.fillPath(path, card)
+        painter.setPen(QPen(border, 1.0))
+        painter.drawPath(path)
+        painter.end()
+        super().paintEvent(event)
 
     # -------------------------------------------------------------------- api
     def show_text(self, global_pos: QPoint, text: str) -> None:
