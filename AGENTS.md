@@ -196,3 +196,4 @@ HushPlayer-<ver>-setup.exe /VERYSILENT /LOG=...
 - 修复导入向导勾选框悬停崩溃：`hushplayer/ui/widgets/check.py` 误调用不存在的 `HoverAnimation.set_end()`，应为 `HoverAnimation.to()`。凡复用 `hushplayer/ui/widgets/common.py` 中的小工具类，必须先确认公开方法名。
 - 回归：`tests/test_dialogs.py::test_checkbox_hover_uses_hover_animation_api` 覆盖进入/离开两段悬停动画（纯离屏渲染不会触发 `enterEvent`，这类 bug 只能靠事件级测试或真实悬停探针发现）。
 - 说明：日志里的 `Request failed with status code 404`、`播放解析超时（20000 ms）` 为上游音源插件问题，不是崩溃原因。
+- 2026-10-25：1.3.0——① 修复歌曲列表选中行高亮「只覆盖部分列」：`TrackDelegate.paint` 不再只在第 0 列画整行底，而是**每个单元格都画同一块整行圆角矩形**，靠单元格裁剪拼成整条带，任何单格重绘（封面加载、收藏变化）都会补齐；回归探针 `tools/probe_r83_select.py` 断言「只重绘标题列后颜色不变」。② 新增右键「替换歌曲来源…」（`services/source_replace.py` + `ui/track_source_dialog.py` + `TrackRepository.update_source`）：跨音源重搜同一首歌，选中后只改来源字段、**保留 track.id**，收藏/歌单/历史不丢。

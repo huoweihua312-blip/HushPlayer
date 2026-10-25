@@ -162,6 +162,35 @@ class LibraryService(QObject):
     def tracks_by_ids(self, ids: Iterable[str]) -> list[Track]:
         return self.tracks.get_many(list(ids))
 
+    def replace_online_source(self, track_id: str, candidate) -> Track | None:
+        """把一条在线记录换成另一个音源的同名曲目（``id`` 保持不变）。
+
+        ``candidate`` 是 :class:`hushplayer.services.source_replace.SourceCandidate`，
+        这里只做字段替换 + 失效封面缓存，返回更新后的 ``Track``。
+        """
+
+        from ..model.track import album_key, artist_key as _artist_key
+
+        self.tracks.update_source(
+            track_id,
+            source_id=candidate.source_id,
+            source_name=candidate.source_name,
+            remote_id=candidate.remote_id,
+            raw=getattr(candidate, "raw", None) or {},
+            title=getattr(candidate, "title", ""),
+            artist=getattr(candidate, "artist", ""),
+            album=getattr(candidate, "album", ""),
+            duration_ms=getattr(candidate, "duration_ms", 0),
+            artwork_url=getattr(candidate, "artwork_url", ""),
+            album_id=album_key(getattr(candidate, "album", ""), getattr(candidate, "artist", "")),
+            artist_id=_artist_key(getattr(candidate, "artist", "")),
+        )
+        updated = self.tracks.get(track_id)
+        if updated is not None:
+            self.covers.invalidate(updated.id)
+            self.track_updated.emit(updated.id)
+        return updated
+
     # -------------------------------------------------------------- favorites
     def is_favorite(self, track: Track | str) -> bool:
         track_id = track.id if isinstance(track, Track) else str(track)

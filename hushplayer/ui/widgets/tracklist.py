@@ -405,24 +405,27 @@ class TrackDelegate(QStyledItemDelegate):
         # playing   : berry title + equaliser bars + leading accent marker
         # both      : tint + bars + marker, title stays text colour
         # hover     : neutral wash (never a second accent layer)
-        if index.column() == 0:
-            # Paint the highlight once per row (not per cell) so the selection
-            # reads as one continuous row instead of four rounded pills.
-            row_rect = QRectF(
-                0.5,
-                option.rect.top() + 1.0,
-                max(1.0, self.view.viewport().width() - 1.0),
-                option.rect.height() - 3.0,
-            )
-            if selected:
-                alpha = (0.20 if hovered else 0.15) if palette.is_dark else (0.15 if hovered else 0.11)
-                painter.setPen(Qt.NoPen)
-                painter.setBrush(rgba(palette.accent, alpha))
-                painter.drawRoundedRect(row_rect, radius, radius)
-            elif hover:
-                painter.setPen(Qt.NoPen)
-                painter.setBrush(rgba(palette.text, 0.045))
-                painter.drawRoundedRect(row_rect, radius, radius)
+        # Draw the *same* full-row rounded rect in every column and let Qt's
+        # per-cell clip do the rest. Painting it from column 0 only looked
+        # continuous until Qt repainted a single cell (a cover finished loading,
+        # a favourite toggled ...): that cell had no column 0, so the row looked
+        # "broken". With the identical rect in every cell, both the row ends
+        # (rounded) and the middle cells (square) line up seamlessly.
+        row_rect = QRectF(
+            0.5,
+            option.rect.top() + 1.0,
+            max(1.0, self.view.viewport().width() - 1.0),
+            option.rect.height() - 3.0,
+        )
+        if selected:
+            alpha = (0.20 if hovered else 0.15) if palette.is_dark else (0.15 if hovered else 0.11)
+            painter.setPen(Qt.NoPen)
+            painter.setBrush(rgba(palette.accent, alpha))
+            painter.drawRoundedRect(row_rect, radius, radius)
+        elif hover:
+            painter.setPen(Qt.NoPen)
+            painter.setBrush(rgba(palette.text, 0.045))
+            painter.drawRoundedRect(row_rect, radius, radius)
 
         if is_current and index.column() == COLUMN_INDEX:
             marker = QRectF(rect.left() + 2.5, rect.center().y() - rect.height() * 0.20, 3.0,
@@ -726,6 +729,8 @@ class TrackTable(QTableView):
         self._header.sort_requested.connect(self._on_sort_requested)
         self.bar_phase = 0.0
         self.favorite_hover_row = -1
+        self._hover_row = -1
+        self.selectionModel().selectionChanged.connect(lambda *_: self.viewport().update())
         self._reorder = False
         self._anim = QTimer(self)
         self._anim.setInterval(90)
@@ -740,6 +745,16 @@ class TrackTable(QTableView):
     def eventFilter(self, watched, event) -> bool:  # noqa: N802 (Qt name)
         kind = event.type()
         if watched is self.viewport():
+            if kind == QEvent.Type.MouseMove:
+                index = self.indexAt(event.pos())
+                row = index.row() if index.isValid() else -1
+                if row != self._hover_row:
+                    self._hover_row = row
+                    self.viewport().update()
+            elif kind == QEvent.Type.Leave:
+                if self._hover_row != -1:
+                    self._hover_row = -1
+                    self.viewport().update()
             if kind == QEvent.Type.ToolTip:
                 index = self.indexAt(event.pos())
                 if index.isValid():

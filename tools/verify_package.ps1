@@ -1,11 +1,16 @@
 # 启动打包版、验证单实例与截图，然后优雅关闭。
+param(
+    [string]$SourceDir = ""
+)
 $ErrorActionPreference = "Stop"
 $root = "F:\Projects\HushPlayer-Reimagined"
 # The repo folder inherits a Low integrity label, and Windows refuses tray-icon
 # registration from low-integrity processes.  Verify from a normal (Medium)
 # folder so the run matches what users get after extracting the zip.
 $mediumOutput = "F:\HushPlayerBuild\out\HushPlayer"
-$sourceDir = if (Test-Path $mediumOutput) {
+$sourceDir = if ($SourceDir -and (Test-Path $SourceDir)) {
+    $SourceDir
+} elseif (Test-Path $mediumOutput) {
     $mediumOutput
 } else {
     Join-Path $root "packaging\out\HushPlayer"

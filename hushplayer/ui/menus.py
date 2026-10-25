@@ -97,6 +97,9 @@ def track_menu(
             download.triggered.connect(lambda: on_download(items))
         else:
             download.triggered.connect(lambda: _download(items, parent))
+        if single and first.kind == "online":
+            replace = _action(menu, "替换歌曲来源…", icon_name="refresh")
+            replace.triggered.connect(lambda: _replace_source(first, parent))
 
     menu.addSeparator()
     if playlist_id is not None:
@@ -130,6 +133,30 @@ def track_menu(
         remove.triggered.connect(on_remove)
 
     return menu
+
+
+def _replace_source(track: Track, parent: QWidget) -> None:
+    """打开「替换歌曲来源」对话框，并把选中的候选写回这条记录。"""
+
+    from PySide6.QtWidgets import QDialog
+
+    from .track_source_dialog import TrackSourceDialog
+
+    app = ctx()
+    dialog = TrackSourceDialog(parent, track)
+    accepted = dialog.exec() == QDialog.DialogCode.Accepted
+    candidate = dialog.chosen
+    if not accepted or candidate is None:
+        return
+    updated = app.library.replace_online_source(track.id, candidate)
+    window = app.window
+    if window is not None and hasattr(window, "toast"):
+        if updated is not None:
+            window.toast(
+                f"已把「{updated.display_title}」的来源换成 {candidate.source_name}"
+            )
+        else:
+            window.toast("替换来源失败，请查看日志")
 
 
 def _download(items: Sequence[Track], parent: QWidget) -> None:
