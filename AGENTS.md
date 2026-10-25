@@ -130,7 +130,7 @@ HushPlayer-<ver>-setup.exe /VERYSILENT /LOG=...
 
 ## 7. 验证纪律（每个改动都要过）
 
-1. `pytest -q`（当前基线 **274 passed**；只增不减，禁止放宽断言）。
+1. `pytest -q`（当前基线 **277 passed**；只增不减，禁止放宽断言）。
 2. 至少一个真实 GUI/离屏截图（`tools/probe_*.py` → `artifacts/qa/...`），不要只凭代码想象。
 3. 涉及打包：`packaging/build.ps1` + `tools/verify_package.ps1`。
 4. 涉及安装包：静默安装 → 版本/快捷方式/注册表 → 卸载 → 残留检查（见 6.1）。
@@ -202,3 +202,4 @@ HushPlayer-<ver>-setup.exe /VERYSILENT /LOG=...
 1.3.3 (2026-10-25) 记住可播音源：跨源回退成功后写 source_memory（track alias + 原源→可用源映射 + 最近可用源），再播同一首/预取都直达该源；已知损坏源短暂跳过。tooltip 改用自绘 HoverTip（ToolTipRouter 拦截 QEvent.ToolTip），不再有系统直角白框。测试：conftest 每例后冲刷 DeferredDelete + gc，downloads 用 processEvents 轮询，修复全量套件 access violation。
 - 2026-10-25（1.3.4）：替换来源对话框的底部按钮若在 add_named_button 之后才需要写回数据，必须再 clicked.connect(...) 设 chosen，否则 done(Accepted) 先执行、调用方拿到 None；搜索结果按源增量回调、并做标题/歌手/时长硬过滤（30 秒试听片段要按「试听片段」优先于「时长差」提示）。
 - 1.3.5：`next()/previous()` 用 `_silent_current` 包住队列前进，避免「信号驱动加载 + 显式 `_play_current`」同一首解析两次；切歌时 `client.cancel(上一请求)` 并清旧 busy；`source_replace.plausible` 不再按歌手丢弃（翻唱保留、`_note_for` 标注「歌手不同」）。
+- 1.3.6：`source_memory` 除 track.id 外还按「原曲 (source_id, remote_id)」与「source_id+规范化标题+歌手」建索引（搜索重新导入会换新 id，只按 id 记等于没记）；替换来源成功时也写入记忆。

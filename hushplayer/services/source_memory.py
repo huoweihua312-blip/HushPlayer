@@ -95,15 +95,49 @@ def _prune(data: dict[str, Any]) -> None:
 
 
 # ------------------------------------------------------------------ tracks
-def track_alias(track_id: str) -> dict[str, Any] | None:
-    if not track_id:
-        return None
-    entry = _read()["tracks"].get(str(track_id))
-    if not isinstance(entry, dict) or not entry.get("source_id"):
-        return None
-    if not entry.get("remote_id"):
+def _norm(text: object) -> str:
+    raw = str(text or "").lower()
+    return "".join(ch for ch in raw if ch.isalnum() or "\u4e00" <= ch <= "\u9fff")
+
+
+def track_key(source_id: str, remote_id: str) -> str:
+    """Stable key for a remote track, independent of the local row id."""
+    return f"r::{source_id}::{remote_id}"
+
+
+def query_key(source_id: str, title: str, artist: str) -> str:
+    return f"q::{source_id}::{_norm(title)}::{_norm(artist)}"
+
+
+def _valid(entry: object) -> dict[str, Any] | None:
+    if not isinstance(entry, dict) or not entry.get("source_id") or not entry.get("remote_id"):
         return None
     return dict(entry)
+
+
+def track_alias(track: object) -> dict[str, Any] | None:
+    """Look up a remembered source for ``track`` (accepts id or Track).
+
+    Tries the local row id first, then (source_id, remote_id) and finally the
+    normalised (source, title, artist) triple, so re-importing the same song
+    from search results still hits the memory.
+    """
+    if track is None:
+        return None
+    if isinstance(track, str):
+        entry = _valid(_read()["tracks"].get(track))
+        return entry
+    tid = str(getattr(track, "id", "") or "")
+    source_id = str(getattr(track, "source_id", "") or "")
+    remote_id = str(getattr(track, "remote_id", "") or "")
+    title = str(getattr(track, "title", "") or "")
+    artist = str(getattr(track, "artist", "") or "")
+    data = _read()["tracks"]
+    for key in (tid, track_key(source_id, remote_id) if remote_id else "", query_key(source_id, title, artist)):
+        entry = _valid(data.get(key)) if key else None
+        if entry is not None:
+            return entry
+    return None
 
 
 def remember_track(track: object, match: object) -> None:
@@ -123,19 +157,39 @@ def remember_track(track: object, match: object) -> None:
         "artwork_url": str(getattr(match, "artwork_url", "") or ""),
         "saved_at": time.time(),
     }
+    orig_source = str(getattr(track, "source_id", "") or "")
+    orig_remote = str(getattr(track, "remote_id", "") or "")
+    title = str(getattr(track, "title", "") or "")
+    artist = str(getattr(track, "artist", "") or "")
     with _LOCK:
         data = _read()
         data["tracks"][track_id] = alias
+        if orig_remote:
+            data["tracks"][track_key(orig_source, orig_remote)] = alias
+        data["tracks"][query_key(orig_source, title, artist)] = alias
         _prune(data)
         _write(data)
 
 
-def forget_track(track_id: str) -> None:
-    if not track_id:
+def forget_track(track: object) -> None:
+    if not track:
         return
+    if isinstance(track, str):
+        keys = [track]
+    else:
+        keys = [str(getattr(track, "id", "") or "")]
+        source_id = str(getattr(track, "source_id", "") or "")
+        remote_id = str(getattr(track, "remote_id", "") or "")
+        if remote_id:
+            keys.append(track_key(source_id, remote_id))
+        keys.append(query_key(source_id, str(getattr(track, "title", "") or ""), str(getattr(track, "artist", "") or "")))
     with _LOCK:
         data = _read()
-        if data["tracks"].pop(str(track_id), None) is not None:
+        dirty = False
+        for key in keys:
+            if key and data["tracks"].pop(key, None) is not None:
+                dirty = True
+        if dirty:
             _write(data)
 
 

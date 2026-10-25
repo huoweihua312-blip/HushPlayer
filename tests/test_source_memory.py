@@ -61,3 +61,41 @@ def test_remember_track_requires_remote_id(data_dir) -> None:
     source_memory.remember_track(original, match)
     # Without a remote id the alias would resolve to an empty payload; skip it.
     assert source_memory.track_alias("t3") is None
+
+
+def test_alias_survives_new_local_id(data_dir) -> None:
+    source_memory.clear()
+    original = _online("a1")
+    match = _online("a2", source_id="ne")
+    source_memory.remember_track(original, match)
+
+    # Same remote track re-imported from search gets a brand new local id.
+    again = _online("b1")
+    again.remote_id = "ra1"
+    alias = source_memory.track_alias(again)
+    assert alias is not None and alias["source_id"] == "ne"
+
+
+def test_alias_falls_back_to_title_and_artist(data_dir) -> None:
+    source_memory.clear()
+    original = _online("c1")
+    match = _online("c2", source_id="ne")
+    source_memory.remember_track(original, match)
+
+    reimported = _online("d1")
+    reimported.remote_id = "another-id"
+    alias = source_memory.track_alias(reimported)
+    assert alias is not None and alias["remote_id"] == "rc2"
+
+
+def test_forget_removes_every_key(data_dir) -> None:
+    source_memory.clear()
+    original = _online("e1")
+    match = _online("e2", source_id="ne")
+    source_memory.remember_track(original, match)
+
+    source_memory.forget_track(original)
+    reloaded = _online("e9")
+    reloaded.remote_id = "re1"
+    assert source_memory.track_alias(original) is None
+    assert source_memory.track_alias(reloaded) is None

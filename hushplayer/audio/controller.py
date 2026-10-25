@@ -521,7 +521,7 @@ class PlayerController(QObject):
         if nxt.kind != "online" or not nxt.source_id or nxt.id in self._preloaded:
             return
         target = nxt
-        alias = source_memory.track_alias(nxt.id)
+        alias = source_memory.track_alias(nxt)
         if alias is not None:
             alias_source = str(alias.get("source_id") or "")
             if alias_source and self._source_is_playable(alias_source):
@@ -615,7 +615,7 @@ class PlayerController(QObject):
             return
         target = track
         if use_alias and not force:
-            alias = source_memory.track_alias(track.id)
+            alias = source_memory.track_alias(track)
             if alias is not None:
                 alias_source = str(alias.get("source_id") or "")
                 same_source = alias_source == track.source_id
@@ -626,7 +626,7 @@ class PlayerController(QObject):
                     target = _track_from_alias(track, alias)
                     log.info("using remembered source %s for %r", alias_source, track.title)
                 elif not alias_source or not self._source_is_playable(alias_source):
-                    source_memory.forget_track(track.id)
+                    source_memory.forget_track(track)
         source_id = target.source_id
         if not source_id:
             self._online_failed(track, "该在线歌曲缺少音源信息", tried, autoplay)
@@ -713,7 +713,7 @@ class PlayerController(QObject):
                 # The remembered source no longer plays this row: drop the
                 # memory and go back to the normal (own source) route once.
                 log.info("remembered source %s failed for %r, forgetting", alias_source, track.title)
-                source_memory.forget_track(track.id)
+                source_memory.forget_track(track)
                 self._resolve_online(
                     track, autoplay=autoplay, force=True,
                     tried=set(tried) | {alias_source}, was_playing=was_playing,

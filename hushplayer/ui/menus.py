@@ -150,6 +150,12 @@ def _replace_source(track: Track, parent: QWidget) -> None:
         return
     updated = app.library.replace_online_source(track.id, candidate)
     if updated is not None:
+        try:
+            from ..services import source_memory
+
+            source_memory.remember_track(updated, candidate)
+        except Exception:  # noqa: BLE001 - memory is only an optimisation
+            log.debug("remember replaced source failed", exc_info=True)
         app.player.refresh_track(updated)
     window = app.window
     if window is not None and hasattr(window, "toast"):
