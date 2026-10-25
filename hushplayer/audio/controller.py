@@ -128,6 +128,10 @@ class PlayerController(QObject):
         self._busy = False
         self._resolve_generation = 0
         self._resolve_request_id = 0
+        # Remembered source is only trusted once audio really starts: a source
+        # can return a URL that then 404s on the stream, and writing it early
+        # makes every later play retry a dead alias.
+        self._memory_pending: tuple[Track, Track] | None = None
         self._failures = 0
         self._pending_resume = 0
         self._paused_at = 0.0
@@ -563,6 +567,7 @@ class PlayerController(QObject):
             # so the bar shows "buffering" for the track we are actually loading.
             self._set_busy(False)
         self._paused_pending = False
+        self._memory_pending = None
         self._track = track
         self._pending_resume = max(0, int(position))
         self._position = self._pending_resume
@@ -697,7 +702,7 @@ class PlayerController(QObject):
                 # source: go straight to the cross-source search.
                 log.info("remembered source %s failed for %r, searching elsewhere", alias_source, track.title)
                 health.record_fail(alias_source, error)
-                source_memory.mark_alias_failed(track)
+                source_memory.forget_track(track)
                 retry = set(tried) | {alias_source, track.source_id}
                 if self._online_fallback and self._fallback_all_sources(track, retry, autoplay, error):
                     self.status_message.emit(
@@ -980,14 +985,9 @@ class PlayerController(QObject):
             self._online_failed(track, f"本地缓存服务不可用：{exc}", tried, autoplay)
             return
         self.status_message.emit(f"已通过 {self._source_label(match.source_id)} 播放")
-        # Remember the pairing so this row (and this plugin's next tracks) does
-        # not have to search every source again — that was the visible "卡一下".
-        try:
-            source_memory.remember_track(track, match)
-            source_memory.remember_source_map(track.source_id, match.source_id)
-            source_memory.set_preferred(match.source_id)
-        except Exception:  # noqa: BLE001
-            log.debug("cannot persist source memory", exc_info=True)
+        # Remember the pairing only once audio really starts (see _commit_memory_pending):
+        # some plugins return a URL that then 404s on the stream.
+        self._memory_pending = (track, match)
         if match.duration_ms and not track.duration_ms:
             self._duration = match.duration_ms
             self.duration_changed.emit(self._duration)
@@ -1057,8 +1057,29 @@ class PlayerController(QObject):
             if self._track is not None and not self._track.duration_ms:
                 self._track.duration_ms = self._duration
 
+    def _commit_memory_pending(self) -> None:
+        """Persist the fallback pairing once audio really starts.
+
+        A plugin can return a resolve URL that 404s when the stream opens; if we
+        wrote the alias at resolve time, every later play would first retry that
+        dead source (the "还是要重新搜索" report).
+        """
+        pending = self._memory_pending
+        self._memory_pending = None
+        if pending is None or self._track is None:
+            return
+        track, match = pending
+        if track.id != self._track.id:
+            return
+        try:
+            source_memory.remember_track(track, match)
+            source_memory.remember_source_map(track.source_id, match.source_id)
+            source_memory.set_preferred(match.source_id)
+        except Exception:  # noqa: BLE001
+            log.debug("cannot persist source memory", exc_info=True)
     def _on_state(self, state: str) -> None:
         if state == "playing" and self._track is not None:
+            self._commit_memory_pending()
             self._failures = 0
             self._paused_at = 0.0
             self.track_started.emit(self._track)

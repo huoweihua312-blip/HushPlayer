@@ -130,7 +130,7 @@ HushPlayer-<ver>-setup.exe /VERYSILENT /LOG=...
 
 ## 7. 验证纪律（每个改动都要过）
 
-1. `pytest -q`（当前基线 **279 passed**；只增不减，禁止放宽断言）。
+1. `pytest -q`（当前基线 **280 passed**；只增不减，禁止放宽断言）。
 2. 至少一个真实 GUI/离屏截图（`tools/probe_*.py` → `artifacts/qa/...`），不要只凭代码想象。
 3. 涉及打包：`packaging/build.ps1` + `tools/verify_package.ps1`。
 4. 涉及安装包：静默安装 → 版本/快捷方式/注册表 → 卸载 → 残留检查（见 6.1）。
@@ -204,3 +204,4 @@ HushPlayer-<ver>-setup.exe /VERYSILENT /LOG=...
 - 1.3.5：`next()/previous()` 用 `_silent_current` 包住队列前进，避免「信号驱动加载 + 显式 `_play_current`」同一首解析两次；切歌时 `client.cancel(上一请求)` 并清旧 busy；`source_replace.plausible` 不再按歌手丢弃（翻唱保留、`_note_for` 标注「歌手不同」）。
 - 1.3.6：`source_memory` 除 track.id 外还按「原曲 (source_id, remote_id)」与「source_id+规范化标题+歌手」建索引（搜索重新导入会换新 id，只按 id 记等于没记）；替换来源成功时也写入记忆。
 - 1.3.7：记忆别名（alias）失败分支不能再回原源；`health.record_fail(alias_source)` + `source_memory.mark_alias_failed(track)`（fail>=2 才删），并带 `tried|{alias,orig}` 直接 `_fallback_all_sources`。
+- 1.3.8：来源记忆只在**真正开始播放**后才写（_memory_pending + _commit_memory_pending）。插件可能返回一个随后 404 的 URL，早写会让每次播放都先重试死别名；别名解析失败时直接 forget_track。Add-Content 已不再逐条追加，统一走本节。

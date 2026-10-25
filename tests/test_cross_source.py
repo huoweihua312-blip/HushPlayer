@@ -159,6 +159,7 @@ def test_remembered_source_skips_the_broken_one(qapp):
     track = track_from_item(KG_ITEM, source=KG)
     first.play_tracks([track], 0, context="test")
     assert loaded
+    first._on_state("playing")  # memory is written once audio really starts
 
     alias = source_memory.track_alias(track.id)
     assert alias is not None and alias["source_id"] == WY.id
@@ -171,6 +172,18 @@ def test_remembered_source_skips_the_broken_one(qapp):
     assert [call[0] for call in second_client.resolve_calls] == [WY.id]
     assert not second_client.search_calls
 
+def test_alias_is_not_written_before_playback_starts(qapp):
+    """Resolving a URL is not proof it plays: only start writes the memory."""
+    client = FakeClient(resolve_failures=3, search_items=[WY_ITEM])
+    controller, loaded = make_controller(client)
+    track = track_from_item(KG_ITEM, source=KG)
+    controller.play_tracks([track], 0, context="test")
+    assert loaded
+    assert source_memory.track_alias(track.id) is None
+
+    controller._on_state("playing")
+    alias = source_memory.track_alias(track.id)
+    assert alias is not None and alias["source_id"] == WY.id
 
 def test_failed_alias_skips_original_source(qapp):
     """A dead remembered source must not retry the original (also dead) one."""
@@ -178,6 +191,7 @@ def test_failed_alias_skips_original_source(qapp):
     first, _ = make_controller(first_client)
     track = track_from_item(KG_ITEM, source=KG)
     first.play_tracks([track], 0, context="test")
+    first._on_state("playing")
     assert source_memory.track_alias(track.id) is not None
 
     second = FakeClient(resolve_failures=1, search_items=[QQ_ITEM])
@@ -189,6 +203,7 @@ def test_failed_alias_skips_original_source(qapp):
     assert WY.id in sources
     assert KG.id not in sources, "original stale source should be skipped"
     assert second.search_calls, "should go straight to the cross-source search"
+    controller._on_state("playing")
     # The successful fallback rewrites the memory to the working source.
     alias = source_memory.track_alias(track.id)
     assert alias is not None
