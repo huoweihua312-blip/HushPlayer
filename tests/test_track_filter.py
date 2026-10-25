@@ -3,7 +3,7 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 from hushplayer.model.track import Track
-from hushplayer.ui.pages.trackpage import filter_tracks
+from hushplayer.ui.pages.trackpage import filter_tracks, play_queue_for
 
 
 def _track(title: str, artist: str, album: str = "", source: str = "") -> Track:
@@ -97,3 +97,38 @@ def test_manual_binding_writes_new_artwork(loaded_library) -> None:
     assert stored.source_id == "custom_source_wy"
     assert stored.remote_id == "wy-10"
     assert stored.artwork_url == "http://new/cover.jpg"
+
+
+def test_play_queue_uses_full_page_order_when_filtered() -> None:
+    tracks = [
+        _track("A", "林俊杰"),
+        _track("B", "林俊杰"),
+        _track("C", "其他"),
+        _track("D", "林俊杰"),
+    ]
+    visible = filter_tracks(tracks, "林俊杰")
+    assert [t.title for t in visible] == ["A", "B", "D"]
+
+    # 双击搜索结果里的第二首（B），队列仍应是整页顺序，并且从 B 在整页里的位置开始。
+    queue, start = play_queue_for(tracks, visible, 1)
+    assert queue is tracks
+    assert start == 1
+    assert queue[start].title == "B"
+
+    # 下一首应当是整页的下一首 C，而不是搜索结果里的下一首 D。
+    assert queue[start + 1].title == "C"
+
+
+def test_play_queue_falls_back_when_anchor_missing() -> None:
+    tracks = [_track("A", "x")]
+    visible = [_track("Z", "y")]
+    queue, start = play_queue_for(tracks, visible, 0)
+    assert queue is visible
+    assert start == 0
+
+
+def test_play_queue_handles_empty_visible() -> None:
+    tracks = [_track("A", "x")]
+    queue, start = play_queue_for(tracks, [], 3)
+    assert queue is tracks
+    assert start == 0

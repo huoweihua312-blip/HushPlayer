@@ -15,6 +15,24 @@ from .page import CenteredBox, Page, PageHeader
 from ..widgets.menu import themed_menu
 
 
+def play_queue_for(
+    full: list[Track], visible: list[Track], index: int
+) -> tuple[list[Track], int]:
+    """双击播放时，队列仍用整页顺序（歌单/我喜欢…），只用可见项定位起点。
+
+    页内搜索只是“看”的过滤，不应该把队列切到搜索结果；否则下一首会跳到
+    搜索结果里的下一首，而不是原歌单的下一首。
+    """
+    if not visible:
+        return full, 0
+    safe = max(0, min(index, len(visible) - 1))
+    anchor = visible[safe]
+    for position, track in enumerate(full):
+        if track.id == anchor.id:
+            return full, position
+    return visible, safe
+
+
 def filter_tracks(tracks: list[Track], query: str) -> list[Track]:
     """只保留匹配 *query* 的歌曲（标题/歌手/专辑/来源都参与匹配）。"""
     tokens = [token for token in str(query or "").casefold().split() if token]
@@ -208,8 +226,9 @@ class TrackListPage(Page):
     def _on_play(self, tracks: list, index: int) -> None:
         if not tracks:
             return
+        queue, start = play_queue_for(self._tracks, tracks, index)
         try:
-            ctx().player.play_tracks(tracks, index, context=self.context_label())
+            ctx().player.play_tracks(queue, start, context=self.context_label())
         except Exception as exc:  # noqa: BLE001
             from ...core.logging_setup import log_exception
 
