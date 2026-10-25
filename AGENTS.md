@@ -226,3 +226,8 @@ HushPlayer-<ver>-setup.exe /VERYSILENT /LOG=...
 - 换源（手动替换 / 回退晋升）后封面与歌词必须一起失效：`library.track_updated` 接到 `covers.invalidate` 与 `lyrics.invalidate`；歌词页订阅 `track_updated` 重取当前曲目（封面、专辑、歌词）。
 - 列表页过滤统一用 `TrackListPage.filter` + 模块级纯函数 `filter_tracks()`；过滤时副标题显示「命中 / 总数 首歌曲」。
 - 当前基线 **302 passed**。
+- 换源刷新：`LibraryService.replace_online_source` 成功路径必须 `covers.invalidate(updated.id)` + `track_updated.emit(updated.id)`；`app.py` 把 `track_updated` 同时接到 `covers.invalidate` 与 `lyrics.invalidate`；`LyricsPage._on_library_track_updated` 负责当前曲目重取封面/专辑/歌词。自动回退晋升由 `TrackBindingService.notify_updated()` 广播，不要在 controller 里直接摸 UI。
+- 播放栏换源刷新：`PlayerBar.refresh_track(track_id)` 由 `MainWindow` 用 `ctx().library.track_updated.connect(...)` 接线；不要在 `PlayerBar._wire()` 里加二次 import 的 try 块（会让 `test_gui_smoke::test_playerbar_controls_reach_controller` 的 volume 连接失效）。
+- 页内搜索：`TrackListPage` 只过滤 `self._tracks`（当前页已加载数据），用模块级 `filter_tracks()`；`reload()` 调 `_apply_filter()`，由它统一维护副标题「匹配 / 总数」，不要再在 `reload()` 里直接 `_update_header()`。
+- 探针/验证：真实 GUI 探针必须 `HushApp(QApplication)`，`QApplication` 由脚本先建；`app.window` 在 `start()` 后才存在。
+- 清洗脚本：PowerShell 写 `AGENTS.md`/`CHANGELOG.md` 只用单引号 here-string + `[IO.File]::WriteAllText(..., UTF8Encoding($false))`，写完 `Get-Content -First/Last` 复核。

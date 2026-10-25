@@ -320,6 +320,13 @@ class TrackBindingService:
             expected_revision=expected_revision,
         )
 
+    def notify_updated(self, track_id: str) -> None:
+        """广播“这首歌的来源/封面已变”，让列表、歌词页、播放栏一起刷新。"""
+        try:
+            self._library.track_updated.emit(str(track_id))
+        except Exception:  # noqa: BLE001 - UI 刷新失败不影响播放
+            pass
+
     def mark_failed(self, track_id: str, *, expected_revision: int | None) -> None:
         self._mark_state(
             track_id, verify_state=FAILED, expected_revision=expected_revision

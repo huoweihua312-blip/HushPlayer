@@ -306,6 +306,22 @@ class PlayerBar(QWidget):
         self._on_duration(track.duration_ms if track else 0)
         self._on_position(0)
 
+    def refresh_track(self, track_id: str) -> None:
+        """换源后同一首歌的封面/专辑可能已变，播放栏要跟着刷新。"""
+        if self._track is None or self._track.id != str(track_id):
+            return
+        try:
+            from ...ui.context import ctx
+
+            fresh = ctx().library.tracks.get(str(track_id))
+        except Exception:  # noqa: BLE001
+            return
+        if fresh is None:
+            return
+        self._track = fresh
+        self.cover.set_track(fresh)
+        self.info.set_track(fresh)
+
     def _on_state(self, state: str) -> None:
         self.play.set_playing(state == STATE_PLAYING)
         self._refresh_favorite()

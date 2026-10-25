@@ -823,6 +823,10 @@ class PlayerController(QObject):
         self.queue.replace_track(updated)
         self.track_changed.emit(updated)
         self.active_source_changed.emit(self._source_label(updated.source_id or ""))
+        try:
+            self._binding.notify_updated(updated.id)
+        except Exception:  # noqa: BLE001 - UI 刷新失败不影响播放
+            pass
 
     def _resolve_cache_key(self, track: Track) -> str:
         return f"{track.source_id}:{track.remote_id or track.id}:{self._quality}"

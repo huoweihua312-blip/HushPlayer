@@ -118,6 +118,12 @@ class MainWindow(FramelessWindow):
         self._page_background = background
 
         self.playerbar = PlayerBar()
+        try:
+            from .context import ctx
+
+            ctx().library.track_updated.connect(self.playerbar.refresh_track)
+        except Exception:  # noqa: BLE001 - 播放栏刷新失败不应阻断窗口创建
+            pass
         self.playerbar.lyrics_clicked.connect(lambda: self.navigate("lyrics"))
         self.playerbar.queue_clicked.connect(self.toggle_queue)
         self.playerbar.immersive_clicked.connect(self.open_immersive)
