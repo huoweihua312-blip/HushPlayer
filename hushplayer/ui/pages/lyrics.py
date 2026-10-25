@@ -58,6 +58,7 @@ class LyricsPage(Page):
 
         player = ctx().player
         player.track_changed.connect(self._on_track_changed)
+        ctx().library.track_updated.connect(self._on_library_track_updated)
         player.position_changed.connect(self._on_position)
         player.state_changed.connect(self._on_state)
         ctx().lyrics.resolved.connect(self._on_resolved)
@@ -190,6 +191,19 @@ class LyricsPage(Page):
             self._on_track_changed(track)
         elif track is not None and self._result is None:
             self._request_lyrics(track)
+
+    def _on_library_track_updated(self, track_id: str) -> None:
+        """换源后，正在显示的这首歌要从新来源刷新封面与歌词。"""
+        if self._track is None or self._track.id != str(track_id):
+            return
+        fresh = ctx().library.tracks.get(str(track_id))
+        if fresh is None:
+            return
+        self._track = fresh
+        self.cover.set_track(fresh)
+        self.album_label.setText(fresh.album or "")
+        self.provider_label.setText("")
+        self._request_lyrics(fresh, force=True)
 
     def _on_track_changed(self, track: Track | None) -> None:
         self._track = track

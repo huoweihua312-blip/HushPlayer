@@ -130,7 +130,7 @@ HushPlayer-<ver>-setup.exe /VERYSILENT /LOG=...
 
 ## 7. 验证纪律（每个改动都要过）
 
-1. `pytest -q`（当前基线 **296 passed**；只增不减，禁止放宽断言）。
+1. `pytest -q`（当前基线 **302 passed**；只增不减，禁止放宽断言）。
 2. 至少一个真实 GUI/离屏截图（`tools/probe_*.py` → `artifacts/qa/...`），不要只凭代码想象。
 3. 涉及打包：`packaging/build.ps1` + `tools/verify_package.ps1`。
 4. 涉及安装包：静默安装 → 版本/快捷方式/注册表 → 卸载 → 残留检查（见 6.1）。
@@ -221,3 +221,8 @@ HushPlayer-<ver>-setup.exe /VERYSILENT /LOG=...
 - 播放回退只在 `position>=1200` 且 `state=="playing"` 后确认，并把实际源写回 `tracks`；manual 绑定永不被自动覆盖。
 - 改 `controller.py` 禁止用「整段函数替换」脚本（曾把 `_on_resolved` 整方法吞掉）；改完必须核对 `def ` 清单并跑全量测试。
 - 测试基线：296 passed（1.3.13）。
+
+### 换源与页内搜索（1.3.14）
+- 换源（手动替换 / 回退晋升）后封面与歌词必须一起失效：`library.track_updated` 接到 `covers.invalidate` 与 `lyrics.invalidate`；歌词页订阅 `track_updated` 重取当前曲目（封面、专辑、歌词）。
+- 列表页过滤统一用 `TrackListPage.filter` + 模块级纯函数 `filter_tracks()`；过滤时副标题显示「命中 / 总数 首歌曲」。
+- 当前基线 **302 passed**。

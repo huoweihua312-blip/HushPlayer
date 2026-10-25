@@ -1,3 +1,8 @@
+## 1.3.14 — 2026-10-25
+- 换源（右键「替换歌曲来源」与自动回退晋升）后，封面与歌词一起从新来源刷新：`LibraryService.replace_online_source` 现在会 `covers.invalidate()` 并 `track_updated.emit()`；`app.py` 把 `track_updated` 接到 `covers.invalidate` 与 `lyrics.invalidate`，歌词页 `_on_library_track_updated` 重取当前曲目的封面、专辑与歌词。
+- 歌曲列表页（歌曲 / 我喜欢 / 最近播放 / 歌单详情）新增页内搜索框：`TrackListPage.filter`（`SearchField`）+ `filter_tracks()`，按标题/歌手/专辑/来源过滤当前页已加载的歌曲，多关键词同时命中；过滤时副标题显示「命中 / 总数 首歌曲」，无结果显示「没有匹配的歌曲」。
+- 测试：新增 `tests/test_track_filter.py` 6 条（过滤规则、换源发信号、真实绑定写回封面）。
+
 ## 1.3.13 — 2026-10-25
 
 ### 音源绑定重构（导入与播放都写回真实来源）

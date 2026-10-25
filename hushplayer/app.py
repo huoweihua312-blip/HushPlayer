@@ -75,6 +75,10 @@ class HushApp(QObject):
             self.library.tracks, self.library.bindings, self.library.meta, self.client, self
         )
         self.cache = CacheService(self.proxy, self.library.covers.store, self)
+        # 换源（手动替换 / 自动回退晋升）后封面与歌词都必须从新来源重新取，
+        # 否则会继续显示旧源的封面和歌词缓存。
+        self.library.track_updated.connect(self.library.covers.invalidate)
+        self.library.track_updated.connect(self.lyrics.invalidate)
         self.clock = PlaybackClock(self)
         # Play history powers 最近播放 and the play counts on cards; it must
         # cover online tracks too, not just the local library.

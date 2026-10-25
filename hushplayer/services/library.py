@@ -189,6 +189,7 @@ class LibraryService(QObject):
                 updated = self.tracks.get(track_id)
                 if updated is not None:
                     self.covers.invalidate(updated.id)
+                    self.track_updated.emit(updated.id)
                 return updated
 
         self.tracks.update_source(

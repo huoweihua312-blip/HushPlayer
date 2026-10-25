@@ -10,8 +10,25 @@ from ...model.track import Track, format_duration
 from ..context import ctx
 from ..menus import track_menu
 from ..widgets.tracklist import TrackListWidget
+from ..widgets.searchfield import SearchField
 from .page import CenteredBox, Page, PageHeader
 from ..widgets.menu import themed_menu
+
+
+def filter_tracks(tracks: list[Track], query: str) -> list[Track]:
+    """只保留匹配 *query* 的歌曲（标题/歌手/专辑/来源都参与匹配）。"""
+    tokens = [token for token in str(query or "").casefold().split() if token]
+    if not tokens:
+        return list(tracks)
+    result: list[Track] = []
+    for track in tracks:
+        haystack = " ".join(
+            (track.title or "", track.artist or "", track.album or "",
+             track.source_name or "")
+        ).casefold()
+        if all(token in haystack for token in tokens):
+            result.append(track)
+    return result
 
 
 class TrackListPage(Page):
@@ -45,6 +62,18 @@ class TrackListPage(Page):
         column_layout.setSpacing(8)
         self.header = PageHeader(self.title, self.subtitle)
         column_layout.addWidget(self.header)
+
+        filter_row = QHBoxLayout()
+        filter_row.setContentsMargins(0, 0, 0, 0)
+        filter_row.setSpacing(8)
+        self.filter = SearchField(
+            f"搜索{self.title}", width=theme().scaled(260, factor=1.0)
+        )
+        self.filter.text_changed.connect(self._apply_filter)
+        self.filter.submitted.connect(lambda _text: self._apply_filter())
+        filter_row.addWidget(self.filter, 0)
+        filter_row.addStretch(1)
+        column_layout.addLayout(filter_row)
 
         spacer = QWidget()
         spacer.setFixedHeight(6)
@@ -117,13 +146,25 @@ class TrackListPage(Page):
             log_exception("加载歌曲列表失败", exc)
             tracks = []
         self._tracks = tracks
-        self.list.set_tracks(tracks)
+        self._apply_filter()
         self._apply_favorites()
         self._sync_current()
-        self._update_header()
-        if not tracks:
+
+    def _apply_filter(self, _text: str = "") -> None:
+        query = self.filter.text().strip()
+        visible = filter_tracks(self._tracks, query)
+        self.list.set_tracks(visible)
+        if query:
+            self.list.set_empty_text(
+                "没有匹配的歌曲", f"当前页面没有包含「{query}」的歌曲"
+            )
+        else:
             title, description = self.empty_text()
             self.list.set_empty_text(title, description)
+        if query and self.show_count:
+            self.header.set_subtitle(f"{len(visible)} / {len(self._tracks)} 首歌曲")
+        else:
+            self._update_header()
 
     def _update_header(self) -> None:
         if not self.show_count:
