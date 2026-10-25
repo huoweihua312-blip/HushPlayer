@@ -8,9 +8,9 @@ wrap long lines (source names can be very long) instead of running off-screen.
 
 from __future__ import annotations
 
-from PySide6.QtCore import QPoint, QTimer, Qt
-from PySide6.QtGui import QGuiApplication
-from PySide6.QtWidgets import QLabel, QVBoxLayout, QWidget
+from PySide6.QtCore import QEvent, QObject, QPoint, QTimer, Qt
+from PySide6.QtGui import QCursor, QGuiApplication
+from PySide6.QtWidgets import QApplication, QLabel, QVBoxLayout, QWidget
 
 from ...core.theme import css_rgba, theme
 
@@ -95,6 +95,44 @@ def show_tip(global_pos: QPoint, text: str) -> None:
 def hide_tip() -> None:
     if _TIP is not None:
         _TIP.hide_tip()
+
+
+class ToolTipRouter(QObject):
+    """Route every widget's native tooltip through :class:`HoverTip`.
+
+    Qt's own tooltip is a plain rectangle drawn by the style — on Windows 11 it
+    showed square corners and an OS-coloured border even in the dark theme, which
+    the user spotted on the transport buttons ("外面还有边边角角").  Intercepting
+    ``QEvent.ToolTip`` at the application level keeps a single themed look (the
+    same rounded label the queue panel already uses) without touching every
+    ``setToolTip`` call site.
+    """
+
+    def eventFilter(self, obj: QObject, event: QEvent) -> bool:  # noqa: N802
+        kind = event.type()
+        if kind == QEvent.Type.ToolTip:
+            text = ""
+            try:
+                text = obj.toolTip() if hasattr(obj, "toolTip") else ""
+            except Exception:  # noqa: BLE001
+                text = ""
+            if text:
+                show_tip(QCursor.pos(), text)
+            return True
+        if kind in (QEvent.Type.Leave, QEvent.Type.MouseButtonPress, QEvent.Type.Wheel):
+            hide_tip()
+        return False
+
+
+_ROUTER: ToolTipRouter | None = None
+
+
+def install_tooltip_router(app: QApplication) -> ToolTipRouter:
+    global _ROUTER
+    if _ROUTER is None:
+        _ROUTER = ToolTipRouter(app)
+        app.installEventFilter(_ROUTER)
+    return _ROUTER
 
 
 def display_source(track) -> str:

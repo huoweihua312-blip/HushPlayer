@@ -8,6 +8,7 @@
 
 from __future__ import annotations
 
+import gc
 import os
 import shutil
 import sys
@@ -42,6 +43,24 @@ def qapp():
 
         app = QApplication([])
     yield app
+
+
+@pytest.fixture(autouse=True)
+def _drain_widgets(qapp):
+    """Flush ``deleteLater`` between tests.
+
+    Widgets scheduled for deletion in one test used to be destroyed later while
+    another test was pumping events, and Qt then aborted with an access
+    violation (stale timer/event target).  Draining deferred deletes and
+    collecting garbage right after each test keeps the shared QApplication
+    clean.
+    """
+    yield
+    from PySide6.QtCore import QCoreApplication, QEvent
+
+    QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+    QCoreApplication.processEvents()
+    gc.collect()
 
 
 @pytest.fixture()

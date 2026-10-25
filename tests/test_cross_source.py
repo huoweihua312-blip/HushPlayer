@@ -9,13 +9,20 @@
 from __future__ import annotations
 
 from PySide6.QtCore import QObject, Signal
+import pytest
 
 from hushplayer.audio.controller import PlayerController
 from hushplayer.audio.engine import PlaybackEngine
 from hushplayer.model.track import Track
-from hushplayer.model.track import Track
 from hushplayer.online import matching
 from hushplayer.online.models import SourceInfo, track_from_item
+from hushplayer.services import source_memory
+
+
+@pytest.fixture(autouse=True)
+def _isolated_source_memory(data_dir):
+    source_memory.clear()
+    yield
 
 KG = SourceInfo(
     id="custom_source_kg",
@@ -134,6 +141,26 @@ def test_no_fallback_when_disabled(qapp):
     assert not loaded
     assert not client.search_calls
     assert errors
+
+def test_remembered_source_skips_the_broken_one(qapp):
+    """After a successful cross-source fallback the next play goes straight there."""
+    first_client = FakeClient(resolve_failures=3, search_items=[WY_ITEM])
+    first, loaded = make_controller(first_client)
+    track = track_from_item(KG_ITEM, source=KG)
+    first.play_tracks([track], 0, context="test")
+    assert loaded
+
+    alias = source_memory.track_alias(track.id)
+    assert alias is not None and alias["source_id"] == WY.id
+
+    second_client = FakeClient(search_items=[])
+    second, loaded_again = make_controller(second_client)
+    second.play_track(track)
+
+    assert loaded_again, "remembered source should play without a new search"
+    assert [call[0] for call in second_client.resolve_calls] == [WY.id]
+    assert not second_client.search_calls
+
 
 def test_resolved_url_is_reused_within_ttl(qapp):
     client = FakeClient(search_items=[])

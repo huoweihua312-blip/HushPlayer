@@ -585,6 +585,9 @@ def main(argv: list[str] | None = None) -> int:
     from .core.fonts import load_bundled_fonts
 
     load_bundled_fonts()
+    from .ui.widgets.hover_tip import install_tooltip_router
+
+    install_tooltip_router(app)
     try:
         app.setQuitOnLastWindowClosed(True)
     except Exception:  # noqa: BLE001

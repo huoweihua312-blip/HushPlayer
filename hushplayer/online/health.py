@@ -76,6 +76,23 @@ def all_stats() -> dict[str, dict[str, Any]]:
     return _read()
 
 
+def looks_broken(source_id: str, *, window_s: float = 1800.0) -> bool:
+    """Recent, repeated failures with no later success.
+
+    Used to skip a resolve attempt we already know will 404 (a stale plugin),
+    which is what made switching tracks feel slow.
+    """
+    entry = stats(source_id)
+    if not entry:
+        return False
+    fail = int(entry.get("fail", 0))
+    last_fail = float(entry.get("last_fail") or 0)
+    last_ok = float(entry.get("last_ok") or 0)
+    if fail < 2 or last_fail <= last_ok:
+        return False
+    return (time.time() - last_fail) < window_s
+
+
 def summary(source_id: str) -> str:
     """Short human text for the settings list; empty when nothing recorded."""
     entry = stats(source_id)

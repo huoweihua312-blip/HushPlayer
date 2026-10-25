@@ -6,9 +6,11 @@ import http.server
 import json
 import pathlib
 import threading
+import time
 
 import pytest
 from PySide6.QtCore import QEventLoop, QTimer
+from PySide6.QtWidgets import QApplication
 
 from hushplayer.core import paths
 from hushplayer.core.settings import settings
@@ -71,27 +73,27 @@ class FakeClient:
 
 
 def pump(ms: int = 60) -> None:
-    loop = QEventLoop()
-    QTimer.singleShot(ms, loop.quit)
-    loop.exec()
+    deadline = time.monotonic() + ms / 1000.0
+    while time.monotonic() < deadline:
+        QApplication.processEvents()
+        time.sleep(0.01)
 
 
 def wait_for(predicate, timeout_ms: int = 15000) -> bool:
-    loop = QEventLoop()
-    timer = QTimer()
-    timer.setSingleShot(True)
-    timer.timeout.connect(loop.quit)
+    """Poll ``predicate`` while letting the app process events.
 
-    def check():
+    A nested :class:`QEventLoop` used to be used here, but it aborts with an
+    access violation when the whole suite has already created dialogs and audio
+    engines (Qt tears down a timer that a stale loop still owns).  Polling with
+    ``processEvents`` exercises the same worker→UI hand-off without that risk.
+    """
+    deadline = time.monotonic() + timeout_ms / 1000.0
+    while time.monotonic() < deadline:
+        QApplication.processEvents()
         if predicate():
-            loop.quit()
-        else:
-            QTimer.singleShot(25, check)
-
-    QTimer.singleShot(25, check)
-    timer.start(timeout_ms)
-    loop.exec()
-    timer.stop()
+            return True
+        time.sleep(0.02)
+    QApplication.processEvents()
     return predicate()
 
 
