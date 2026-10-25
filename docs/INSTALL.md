@@ -13,7 +13,7 @@
 | 文件 | 说明 |
 | --- | --- |
 | `HushPlayer/` | 解压即用目录（onedir），含 `HushPlayer.exe` 与 `_internal/` |
-| `HushPlayer-<版本>-win64.zip` | 上者的压缩包（当前 1.1.26） |
+| `HushPlayer-<版本>-win64.zip` | 上者的压缩包（当前 1.3.2） |
 | `SHA256SUMS.txt` | 压缩包校验值 |
 
 自行构建：
@@ -110,14 +110,9 @@ Get-FileHash HushPlayer-1.1.26-setup.exe -Algorithm SHA256
 # 0C6B7D4B3A355BB8183A22DB56CE1FFCCA347C83A431E515C0914783BE98CFEF
 ```
 
-### 1.1.26 安装包
-- 安装包：`HushPlayer-1.1.26-setup.exe`（82.4 MB，简体中文向导，可选择安装目录）。
-- SHA256：`E343BA1C0F368BF02F01546751314E775BF736A8251187828C4542B01C637196`
-- 免安装 zip：`HushPlayer-1.1.26-win64.zip`，SHA256 `FE180714863A18FCC6416C1E3C2C3B43D2D444B3F06D233B8223C206320303C1`
-- 实测：静默安装到自定义目录 → exe 版本 1.1.26、开始菜单与桌面快捷方式、`HKCU\Software\HushPlayer` 记录；启动后托盘注册成功；卸载清空程序目录与快捷方式，保留 `%LOCALAPPDATA%\HushPlayerReimagined` 用户数据。
+### 1.3.2 免安装包（当前版本）
+- 免安装目录：`F:\HushPlayerBuild\out\HushPlayer-1.3.2\`（`HushPlayer.exe` + `_internal/`，自带 Python 与 Node 22）。
+- zip：`HushPlayer-1.3.2-win64.zip`，SHA256 `6F8119A134D5F07CBDE83316E5DB412D2D7B48F5F010499C27116CE31521644E`。
+- 实测：启动日志 `启动 HushPlayer 1.3.2`、窗口 1280×820、单实例、托盘注册成功、关闭后进程退出。
+- 安装包（setup.exe）只在明确要求时构建；最近一次为 1.1.26（历史产物见 `F:\HushPlayerBuild\out`）。
 
-- 安装包：`HushPlayer-1.1.26-setup.exe`（82.4 MB，简体中文向导，可选择安装目录）。
-- SHA256：`CDC8F2AD9D5907C6E89063A8D75FAF3746AD08DC280F71428212CFEFDC0C3B31`
-- 免安装 zip：`HushPlayer-1.1.26-win64.zip`，SHA256 `E5CD2F70662D76BD1E95097FB98A7EEFA54678EA4518B6BB7F0B0BAC4CD72D04`
-- 卸载会删除程序目录（含 PyInstaller 的 `_internal` 与更新器），保留 `%LOCALAPPDATA%\HushPlayerReimagined` 里的音乐库、歌单与设置。
-- 升级安装时目录框默认填上次安装位置（读 `HKCU\Software\HushPlayer\InstallDir`，其次读 Inno 的卸载记录），仍可手动更改。
