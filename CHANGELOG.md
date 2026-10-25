@@ -1,3 +1,16 @@
+## 1.3.13 — 2026-10-25
+
+### 音源绑定重构（导入与播放都写回真实来源）
+
+- 新增 `track_source_binding_state`（schema v2）：`selection_mode=auto|manual`、`verify_state=pending|verified|failed`、`revision`、`origin_platform/origin_remote_id`；旧库启动时给在线曲目回填 `auto/pending`。
+- `TrackBindingService`（`hushplayer/services/binding.py`）挂在 `library.source_bindings`：导入写 `auto/pending` + 原始平台 ID；右键替换写 `manual`；**manual 永不被自动流程覆盖**（服务层 + revision 双重守卫）。
+- 播放解析改为**绑定优先**：绑定源可播时不触发任何跨源搜索；缓存 key 用实际解析源；预加载同样走绑定。
+- 写回时机：引擎开始出进度（`position>=1200ms` 且 `state=playing`）才确认，并把实际源写回 `tracks`、同步队列与界面；回退到别的源时以新 revision 晋升 `verified`。假成功（无进度）不晋升。
+- 导入侧不再伪造「已验证」：自动采用的行是 `pending`，首次成功播放后才变 `verified`。
+
+### 测试
+
+- 296 passed（新增 `tests/test_binding.py` 10 项绑定/导入/回退/竞态用例）。
 ## 1.3.12 — 2026-10-25
 
 ### 修复「播放过的歌仍然每次重新搜源」
