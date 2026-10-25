@@ -70,6 +70,31 @@ if (Test-Path $dist) {
     }
 }
 Copy-Item $staged $dist -Recurse -Force
+
+# 剪掉未使用的 Qt 组件（QML/Quick/Pdf 在本项目里 0 引用）。
+# 保留 Qt6Multimedia/Qt6Network/opengl32sw（软件 GL 兜底）与 avcodec（解码）。
+$unused = @(
+    "Qt6Quick.dll", "Qt6QuickWidgets.dll", "Qt6Qml.dll", "Qt6QmlModels.dll",
+    "Qt6QmlWorkerScript.dll", "Qt6Pdf.dll", "Qt6PdfWidgets.dll"
+)
+$trimmed = 0L
+foreach ($name in $unused) {
+    $file = Join-Path $dist "_internal\PySide6\$name"
+    if (Test-Path $file) { $trimmed += (Get-Item $file).Length; Remove-Item $file -Force }
+}
+foreach ($rel in @("_internal\PySide6\plugins\imageformats\qpdf.dll", "_internal\PySide6\plugins\qmltooling")) {
+    $target = Join-Path $dist $rel
+    if (Test-Path $target) {
+        if ((Get-Item $target).PSIsContainer) {
+            $trimmed += (Get-ChildItem $target -Recurse -File | Measure-Object Length -Sum).Sum
+            Remove-Item $target -Recurse -Force
+        } else {
+            $trimmed += (Get-Item $target).Length
+            Remove-Item $target -Force
+        }
+    }
+}
+if ($trimmed -gt 0) { Write-Host ("==> 已裁剪未使用组件：{0:N1} MB" -f ($trimmed / 1MB)) -ForegroundColor DarkGray }
 $label = (icacls (Join-Path $dist "HushPlayer.exe") | Select-String "Mandatory Label")
 $labelText = if ($label) { $label.Line.Trim() } else { "no mandatory label (Medium)" }
 $sizeMb = [math]::Round(((Get-ChildItem $dist -Recurse -File | Measure-Object Length -Sum).Sum / 1MB), 1)

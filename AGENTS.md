@@ -206,3 +206,6 @@ HushPlayer-<ver>-setup.exe /VERYSILENT /LOG=...
 - 1.3.7：记忆别名（alias）失败分支不能再回原源；`health.record_fail(alias_source)` + `source_memory.mark_alias_failed(track)`（fail>=2 才删），并带 `tried|{alias,orig}` 直接 `_fallback_all_sources`。
 - 1.3.8：来源记忆只在**真正开始播放**后才写（_memory_pending + _commit_memory_pending）。插件可能返回一个随后 404 的 URL，早写会让每次播放都先重试死别名；别名解析失败时直接 forget_track。Add-Content 已不再逐条追加，统一走本节。
 - **1.3.9**：同一首第二次播放仍跨源重搜——记忆键遇到「晴天 (Live)」这类括号标题对不上，`source_memory.track_alias` 增补「去括号 + 歌手」宽松扫描（取 saved_at 最新）；回退解析成功必须 `health.record_ok(match.source_id)` 否则该源可能一直被当坏源跳过；跳过记忆源时写日志。
+
+- **1.3.10（2026-10-25）：包体裁剪。** `packaging/hushplayer.spec` 排除 PIL/QML，`packaging/build.ps1` 在 Copy 后删除 Qt6Quick/Qml/Pdf DLL 与 qpdf 插件（保留 opengl32sw 与 avcodec）；实测 271→240.6 MB、启动 0.95–1.29 s。新增 `docs/AI_RECOMMENDATION.md`（仅设计）。
+

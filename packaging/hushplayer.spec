@@ -31,8 +31,6 @@ hiddenimports = [
     "mutagen.wave",
     "mutagen.aiff",
     "mutagen.asf",
-    "PIL.Image",
-    "PIL.ImageDraw",
     "PySide6.QtMultimedia",
     "PySide6.QtSvg",
 ]
@@ -48,6 +46,14 @@ excludes = [
     "matplotlib",
     "scipy",
     "soundfile",
+    "PIL",
+    "PySide6.QtQuick",
+    "PySide6.QtQml",
+    "PySide6.QtQmlModels",
+    "PySide6.QtQmlWorkerScript",
+    "PySide6.QtQuickWidgets",
+    "PySide6.QtPdf",
+    "PySide6.QtPdfWidgets",
 ]
 
 analysis = Analysis(
