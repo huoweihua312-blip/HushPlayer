@@ -93,6 +93,21 @@ def looks_broken(source_id: str, *, window_s: float = 1800.0) -> bool:
     return (time.time() - last_fail) < window_s
 
 
+def recently_failed(source_id: str, *, window_s: float = 600.0) -> bool:
+    """Failed lately and has not succeeded since.
+
+    Slightly weaker than :func:`looks_broken` (one failure is enough), used to
+    stop re-trying a source that just 404'd every time a track is switched.
+    """
+    entry = stats(source_id)
+    if not entry:
+        return False
+    last_fail = float(entry.get("last_fail") or 0)
+    last_ok = float(entry.get("last_ok") or 0)
+    if not last_fail or last_fail <= last_ok:
+        return False
+    return (time.time() - last_fail) < window_s
+
 def summary(source_id: str) -> str:
     """Short human text for the settings list; empty when nothing recorded."""
     entry = stats(source_id)

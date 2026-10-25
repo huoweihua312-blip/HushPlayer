@@ -1,3 +1,16 @@
+## 1.3.12 — 2026-10-25
+
+### 修复「播放过的歌仍然每次重新搜源」
+
+- `health.recently_failed(source_id, window_s=600)`：一次失败即可跳过（之前要求 30 分钟内失败 ≥2 次，所以死源总被再试一次）。
+- `_fallback_all_sources`：优先过滤最近失败且之后未成功的音源；`only`（已知可用源聚焦）不受影响。
+- 记忆别名失败时同时清掉 `preferred`（`source_memory.clear_preferred()`），否则每首歌都会被重新导向同一个死源——这是「改了很多遍还在重搜」的真正原因。
+- 回退失败时把 `fail` 记到候选源（`match.source_id`）而不是原曲来源，健康度统计不再失真。
+- `preferred()` 在键缺失时返回空串（原先 `KeyError`，清空偏好会崩）。
+
+### 测试
+
+- 新增 `test_dead_alias_clears_preferred_source`、`test_fallback_skips_recently_failed_source`；全量 285 passed。
 ## 1.3.11 — 2026-10-25
 
 - 提示刷屏：回退时「源不可用 / 已切换 / 已通过」三条会挤在一起，现在 0.9 秒内同类型提示只保留一条并就地更新文字。

@@ -213,6 +213,38 @@ def test_failed_alias_skips_original_source(qapp):
     assert not health.looks_broken(QQ.id)
 
 
+def test_dead_alias_clears_preferred_source(qapp):
+    """A dead preferred source must not be re-tried for every future track."""
+    first_client = FakeClient(resolve_failures=3, search_items=[WY_ITEM])
+    first, _ = make_controller(first_client)
+    track = track_from_item(KG_ITEM, source=KG)
+    first.play_tracks([track], 0, context="test")
+    first._on_state("playing")
+    source_memory.set_preferred(WY.id)
+
+    second = FakeClient(resolve_failures=1, search_items=[QQ_ITEM])
+    controller, _ = make_controller(second)
+    controller._sources = [KG, WY, QQ]
+    controller.play_track(track)
+
+    assert source_memory.preferred() != WY.id
+
+
+def test_fallback_skips_recently_failed_source(qapp):
+    """Do not open a search on a plugin that just failed (it 404s again)."""
+    health.record_fail(QQ.id, "404")
+    client = FakeClient(resolve_failures=3, search_items=[WY_ITEM])
+    controller, loaded = make_controller(client)
+    controller._sources = [KG, WY, QQ]
+    track = track_from_item(KG_ITEM, source=KG)
+
+    controller.play_tracks([track], 0, context="test")
+
+    assert loaded
+    searched = [source_id for source_id, _keyword in client.search_calls]
+    assert QQ.id not in searched, searched
+
+
 def test_broken_alias_source_is_ignored(qapp):
     first_client = FakeClient(resolve_failures=3, search_items=[WY_ITEM])
     first, _ = make_controller(first_client)

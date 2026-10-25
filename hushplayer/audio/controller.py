@@ -706,6 +706,9 @@ class PlayerController(QObject):
                 log.info("remembered source %s failed for %r, searching elsewhere", alias_source, track.title)
                 health.record_fail(alias_source, error)
                 source_memory.forget_track(track)
+                if source_memory.preferred() == alias_source:
+                    # Otherwise every later track is steered into this dead source.
+                    source_memory.clear_preferred()
                 retry = set(tried) | {alias_source, track.source_id}
                 if self._online_fallback and self._fallback_all_sources(track, retry, autoplay, error):
                     self.status_message.emit(
@@ -830,6 +833,9 @@ class PlayerController(QObject):
                 sources = remaining
         else:
             preferred = source_memory.preferred()
+            healthy = [s for s in remaining if not health.recently_failed(s.id)]
+            if healthy:
+                remaining = healthy
             sources = sorted(remaining, key=lambda s: 0 if s.id == preferred else 1)
         sources = sources[:FALLBACK_MAX]
         if not sources:
@@ -996,7 +1002,7 @@ class PlayerController(QObject):
         # without this the alias source can stay "broken" from older failures
         # and get skipped on the next play, forcing another search.
         health.record_ok(match.source_id)
-        health.record_fail(track.source_id, "fallback")
+        health.record_fail(match.source_id, "fallback")
         self.status_message.emit(f"已通过 {self._source_label(match.source_id)} 播放")
         # Remember the pairing only once audio really starts (see _commit_memory_pending):
         # some plugins return a URL that then 404s on the stream.

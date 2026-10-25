@@ -13,7 +13,7 @@
 | 文件 | 说明 |
 | --- | --- |
 | `HushPlayer/` | 解压即用目录（onedir），含 `HushPlayer.exe` 与 `_internal/` |
-| `HushPlayer-<版本>-win64.zip` | 上者的压缩包（当前 1.3.8） |
+| `HushPlayer-<版本>-win64.zip` | 上者的压缩包（当前 1.3.12） |
 | `SHA256SUMS.txt` | 压缩包校验值 |
 
 自行构建：
@@ -112,7 +112,7 @@ Get-FileHash HushPlayer-1.1.26-setup.exe -Algorithm SHA256
 
 ### 1.3.8 免安装包（当前版本）
 - 免安装目录：`F:\HushPlayerBuild\out\HushPlayer\`（`HushPlayer.exe` + `_internal/`，自带 Python 与 Node 22）。
-- zip：`HushPlayer-1.3.8-win64.zip`，SHA256 `0DB5D706D884856175CAB3284207494EA6DCB1C8EC2FCDC266D2E543731DC9AD`。
+- zip：`HushPlayer-1.3.12-win64.zip`，SHA256 `7990536640E833D27E2CF1543DB2C8553D60F882B7D2C3C9D38D79E0B1E6868C`。
 - 实测：启动日志 `启动 HushPlayer 1.3.8`、窗口 1280×820、单实例、关闭后进程退出（`alive_after_close=False`）。
 - 安装包（setup.exe）只在明确要求时构建；最近一次为 1.1.26（历史产物见 `F:\HushPlayerBuild\out`）。
 

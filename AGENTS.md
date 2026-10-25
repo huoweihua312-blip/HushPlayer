@@ -211,3 +211,5 @@ HushPlayer-<ver>-setup.exe /VERYSILENT /LOG=...
 
 - 1.3.11：toast 同 kind 0.9s 内合并须改 `Toast.set_text` + 重置宽；播放栏「当前音源」走 `active_source_changed`；诊断包 `services/diagnostics.py` 需对 settings 脱敏；`IconButton` 焦点环画在 `paintEvent` 末尾。
 - 测试基线：283 passed（1.3.11）。
+
+- **1.3.12**：修「播过的歌仍每次重搜」——`health.recently_failed()` 一次失败即跳过；回退时过滤最近失败源；别名失败同时 `source_memory.clear_preferred()`（否则每首歌都被导向同一死源）；回退失败把健康度记到候选源；`preferred()` 缺键不再 KeyError。测试 285 passed。

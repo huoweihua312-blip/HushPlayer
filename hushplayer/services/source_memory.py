@@ -280,9 +280,16 @@ def remember_source_map(original_source_id: str, working_source_id: str) -> None
 
 # -------------------------------------------------------------- preferred
 def preferred() -> str:
-    entry = _read()["preferred"]
+    entry = _read().get("preferred")
     return str(entry.get("source_id") or "") if isinstance(entry, dict) else ""
 
+
+def clear_preferred() -> None:
+    """Forget the last working source (it stopped working)."""
+    with _LOCK:
+        data = _read()
+        if data.pop("preferred", None) is not None:
+            _write(data)
 
 def set_preferred(source_id: str) -> None:
     if not source_id:
