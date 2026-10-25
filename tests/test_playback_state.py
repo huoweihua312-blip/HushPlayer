@@ -146,3 +146,20 @@ def test_engine_halt_pending_leaves_pausable_state(qapp) -> None:
     engine.stop()
     assert engine.state == "stopped"
     engine.shutdown()
+
+def test_rapid_next_resolves_each_track_once(qapp) -> None:
+    controller, client, engine = make_controller(qapp)
+    tracks = [
+        track_from_item({**ONLINE_ITEM, "id": f"rapid-{i}", "title": f"曲 {i}"}, source=SOURCE)
+        for i in range(3)
+    ]
+    controller.play_tracks(tracks, 0)
+    assert len(client.pending) == 1
+
+    controller.next()
+    controller.next()
+
+    assert controller.current.id == tracks[2].id, "连按两次下一首应停在第三首"
+    assert len(client.pending) == 3, "每首歌只应发起一次解析（信号与显式加载不重复）"
+    controller.stop()
+    controller.shutdown()

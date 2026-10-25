@@ -35,6 +35,7 @@ MIN_SCORE = 55
 CACHE_TTL_S = 600.0
 
 # 这些词出现在候选标题里、而原曲标题没有 → 基本可以确定不是同一版本。
+# 「翻唱」故意不在此列：用户明确说过要在候选里保留翻唱版本（不同歌手也保留）。
 _VARIANT_WORDS = (
     "伴奏",
     "纯音乐",
@@ -43,7 +44,6 @@ _VARIANT_WORDS = (
     "片段",
     "试听",
     "demo",
-    "翻唱",
     "remix",
     "dj版",
     "弹鼓",
@@ -121,6 +121,15 @@ def _base_title(text: str) -> str:
 def _titles_compatible(expected: str, actual: str) -> bool:
     if not expected or not actual:
         return False
+    # 括号被 normalize_text 抹掉后「家书（翻唱）」会变成「家书 翻唱」；先去掉
+    # 原曲没有的「翻唱/cover」标记，翻唱版本才能继续参与比较。
+    for soft in ("翻唱版", "翻唱", "cover"):
+        if soft in actual and soft not in expected:
+            actual = actual.replace(soft, " ").strip()
+    expected = " ".join(expected.split())
+    actual = " ".join(actual.split())
+    if not actual:
+        return False
     if expected == actual:
         return True
     # 「晴天 (Live)」正规化后是「晴天 live」：去掉原曲里没有的纯英文/数字尾巴再比。
@@ -167,8 +176,8 @@ def plausible(track: Track, candidate: SourceCandidate) -> bool:
     actual_title = normalize_text(candidate.title)
     if not _titles_compatible(expected_title, actual_title):
         return False
-    if not _artists_compatible(normalize_text(track.artist), normalize_text(candidate.artist)):
-        return False
+    # 歌手不同不再直接丢弃：翻唱/合作版常常是用户真正想找的那一条。标题与
+    # 时长已经足够筛掉无关结果，歌手差异只作为提示展示（见 `_note_for`）。
     for word in _VARIANT_WORDS:
         if word in actual_title and word not in expected_title:
             return False
@@ -181,11 +190,16 @@ def _note_for(track: Track, candidate: SourceCandidate) -> str:
     problem = _duration_problem(track.duration_ms, candidate.duration_ms)
     if problem:
         return problem
+    notes: list[str] = []
+    if track.artist and candidate.artist and not _artists_compatible(
+        normalize_text(track.artist), normalize_text(candidate.artist)
+    ):
+        notes.append(f"歌手不同（{candidate.artist}），可能是翻唱")
     if track.duration_ms and candidate.duration_ms:
         diff = abs(track.duration_ms - candidate.duration_ms)
         if diff >= 15_000:
-            return f"时长与原曲差 {diff // 1000} 秒，请确认版本"
-    return ""
+            notes.append(f"时长与原曲差 {diff // 1000} 秒，请确认版本")
+    return "；".join(notes)
 
 
 def _candidate_for(

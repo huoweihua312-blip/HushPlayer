@@ -127,6 +127,7 @@ class PlayerController(QObject):
         self._position = 0
         self._busy = False
         self._resolve_generation = 0
+        self._resolve_request_id = 0
         self._failures = 0
         self._pending_resume = 0
         self._paused_at = 0.0
@@ -396,7 +397,14 @@ class PlayerController(QObject):
     def next(self, *, auto: bool = False) -> None:
         if not self.queue.count:
             return
-        track = self.queue.next_track(auto=auto)
+        # The queue emits ``current_changed`` while it advances; loading there
+        # *and* here would resolve the same track twice (and spawn two online
+        # requests).  Suppress the signal-driven load and do one explicit load.
+        self._silent_current = True
+        try:
+            track = self.queue.next_track(auto=auto)
+        finally:
+            self._silent_current = False
         if track is None:
             return
         self._play_current(reset_position=True)
@@ -407,7 +415,11 @@ class PlayerController(QObject):
         if not auto and self._position > 4000:
             self.seek(0)
             return
-        track = self.queue.previous_track(auto=auto)
+        self._silent_current = True
+        try:
+            track = self.queue.previous_track(auto=auto)
+        finally:
+            self._silent_current = False
         if track is None:
             return
         self._play_current(reset_position=True)
@@ -546,6 +558,10 @@ class PlayerController(QObject):
         if track is None:
             return
         was_playing = self.engine.state == "playing"
+        if self._busy and not self.engine.state == "loading":
+            # A new load supersedes the previous resolve; drop the stale spinner
+            # so the bar shows "buffering" for the track we are actually loading.
+            self._set_busy(False)
         self._paused_pending = False
         self._track = track
         self._pending_resume = max(0, int(position))
@@ -646,7 +662,16 @@ class PlayerController(QObject):
                 return
             self._resolve_cache.pop(cache_key, None)
         self._set_busy(True, "正在获取播放地址…")
-        self.client.resolve_playback(
+        if self._resolve_request_id:
+            # Switching tracks (or pressing next twice quickly) must not keep the
+            # old resolve queued: the runtime would answer both and the stale one
+            # keeps the player waiting on a track the user already left.
+            try:
+                self.client.cancel(self._resolve_request_id)
+            except Exception:
+                log.debug("cancel resolve %s failed", self._resolve_request_id, exc_info=True)
+            self._resolve_request_id = 0
+        self._resolve_request_id = self.client.resolve_playback(
             source_id,
             runtime_track(target),
             lambda response: self._on_resolved(
@@ -655,7 +680,7 @@ class PlayerController(QObject):
                 target=target if target is not track else None,
             ),
             quality=self._quality,
-        )
+        ) or 0
 
     def _on_resolved(self, track: Track, response: dict, generation: int,
                      autoplay: bool, tried: set[str], was_playing: bool,

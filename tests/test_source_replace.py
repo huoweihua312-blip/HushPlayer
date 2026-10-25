@@ -170,7 +170,7 @@ def _candidate(remote_id: str, **kwargs) -> SourceCandidate:
     return SourceCandidate(**data)
 
 
-def test_plausible_rejects_wrong_song_preview_and_cover() -> None:
+def test_plausible_keeps_covers_but_rejects_previews_and_other_songs() -> None:
     track = _plausible_track()
     assert sr.plausible(track, _candidate("a"))
 
@@ -178,11 +178,13 @@ def test_plausible_rejects_wrong_song_preview_and_cover() -> None:
     assert not sr.plausible(track, preview), "30 秒试听片段不应通过"
     assert "试听片段" in sr._duration_problem(track.duration_ms, preview.duration_ms)
 
+    # 用户要求保留翻唱：标题对得上、歌手不同时仍然展示，只加提示。
     cover = _candidate("c", title="家书（翻唱）", artist="别人", score=80)
-    assert not sr.plausible(track, cover), "翻唱版本不应通过"
+    assert sr.plausible(track, cover), "翻唱版本应保留在候选里"
+    assert "歌手不同" in sr._note_for(track, cover)
 
     other = _candidate("d", title="完全不同的歌", artist="别人", score=70)
-    assert not sr.plausible(track, other), "标题/歌手都不符不应通过"
+    assert not sr.plausible(track, other), "标题不符不应通过"
 
 
 def test_search_reports_candidates_incrementally() -> None:
