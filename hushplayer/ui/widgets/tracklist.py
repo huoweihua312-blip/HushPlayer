@@ -393,7 +393,10 @@ class TrackDelegate(QStyledItemDelegate):
 
         rect = QRectF(option.rect).adjusted(1, 1, -1, -2)
         selected = bool(option.state & QStyle.State_Selected)
-        hovered = bool(option.state & QStyle.State_MouseOver)
+        # Row-level hover: Qt sets State_MouseOver per *cell*, which made the
+        # cell under the cursor use a stronger tint than its siblings and the
+        # row looked patchy.  Use the table's tracked hover row instead.
+        hovered = getattr(self.view, '_hover_row', -1) == index.row()
         hover = hovered and not selected
         focused = bool(option.state & QStyle.State_HasFocus)
         is_current = track.id == model.current_id

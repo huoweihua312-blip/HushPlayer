@@ -4,6 +4,7 @@ os.environ.setdefault("HUSHPLAYER_DATA_DIR", os.path.abspath("artifacts/qa/r83/d
 import sys
 sys.path.insert(0, os.path.abspath("."))
 from PySide6.QtWidgets import QApplication, QWidget, QVBoxLayout
+from PySide6.QtCore import QPoint
 from PySide6.QtGui import QPainter, QColor
 from hushplayer.core.theme import theme
 from hushplayer.model.track import Track
@@ -24,6 +25,12 @@ table.set_tracks(tracks)
 host.resize(900, 320); host.show(); table.show()
 for _ in range(10):
     app.processEvents(); time.sleep(0.01)
+# move the mouse over the *artist* cell first: hover is now tracked per row
+artist_pt = QPoint(table.columnViewportPosition(2) + 40, table.visualRect(table.model().index(0, 2)).center().y())
+from PySide6.QtGui import QMouseEvent
+from PySide6.QtCore import QEvent, Qt
+ev = QMouseEvent(QEvent.Type.MouseMove, artist_pt, table.viewport().mapToGlobal(artist_pt), Qt.NoButton, Qt.NoButton, Qt.NoModifier)
+QApplication.sendEvent(table.viewport(), ev)
 table.selectRow(0)
 for _ in range(10):
     app.processEvents(); time.sleep(0.01)

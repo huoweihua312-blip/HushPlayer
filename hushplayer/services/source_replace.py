@@ -11,6 +11,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Callable, Iterable, Sequence
 
+from PySide6.QtCore import QTimer
+
 from ..core.logging_setup import get_logger, log_exception
 from ..model.track import Track
 from ..online import models as online_models
@@ -119,6 +121,17 @@ class SourceReplaceSearch:
         if not self._sources:
             self._finish()
             return
+        # The JSONL runtime may not be running yet (the user may never have
+        # opened online search this session).  Without this the requests sit in
+        # the client's outbound queue and the dialog waits forever.
+        try:
+            if not getattr(self._client, "running", False):
+                starter = getattr(self._client, "ensure_started", None)
+                if callable(starter):
+                    starter()
+        except Exception as exc:  # pragma: no cover - defensive
+            log_exception("替换来源：启动在线运行时失败", exc)
+        QTimer.singleShot(self._timeout_ms + 2_000, self._on_deadline)
         keyword = " ".join(part for part in (self._track.title, self._track.artist) if part)
         self._dispatching = True
         for source in self._sources:
@@ -146,21 +159,48 @@ class SourceReplaceSearch:
         if source is None:
             return
         self._pending.discard(source_id)
+        try:
+            self._collect(source_id, source, response)
+        except Exception as exc:  # pragma: no cover - defensive
+            self._errors.append(f"{source.label}：结果解析失败（{exc}）")
+            log_exception("替换来源：解析搜索结果失败", exc)
+        if not self._pending and not self._dispatching:
+            self._finish()
+
+    def _collect(self, source_id: str, source, response: dict | None) -> None:
         if not response or not response.get("ok"):
             error = (response or {}).get("error") or "未知错误"
             self._errors.append(f"{source.label}：{error}")
+            return
+        raw = response.get("data")
+        if isinstance(raw, dict):
+            items = raw.get("data") or raw.get("songs") or raw.get("list") or []
+        elif isinstance(raw, list):
+            items = raw
         else:
-            items = (response.get("data") or {}).get("data") or []
-            if isinstance(items, dict):
-                items = items.get("songs") or items.get("list") or []
-            for item in list(items)[:MAX_PER_SOURCE]:
-                if not isinstance(item, dict):
-                    continue
+            items = []
+        if not isinstance(items, list):
+            items = []
+        for item in items[:MAX_PER_SOURCE]:
+            if not isinstance(item, dict):
+                continue
+            try:
                 candidate = _candidate_for(self._track, item, source)
-                if candidate is not None and candidate.score >= MIN_SCORE:
-                    self._candidates.append(candidate)
-        if not self._pending and not self._dispatching:
-            self._finish()
+            except Exception as exc:  # pragma: no cover - defensive
+                log_exception("替换来源：候选解析失败", exc)
+                continue
+            if candidate is not None and candidate.score >= MIN_SCORE:
+                self._candidates.append(candidate)
+
+    def _on_deadline(self) -> None:
+        if self._finished:
+            return
+        missing = sorted(self._pending)
+        if missing:
+            self._errors.append(f"{len(missing)} 个音源在 {self._timeout_ms // 1000} 秒内没有响应")
+            log.warning("替换来源：超时未返回的音源 %s", ", ".join(missing))
+        self._pending.clear()
+        self._finish()
 
     def _finish(self) -> None:
         if self._finished:
