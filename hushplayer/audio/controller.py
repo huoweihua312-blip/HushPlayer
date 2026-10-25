@@ -114,6 +114,7 @@ class PlayerController(QObject):
         engine: PlaybackEngine | None = None,
         client: OnlineSourceClient | None = None,
         proxy: AudioProxy | None = None,
+        binding: object | None = None,
     ) -> None:
         super().__init__(parent)
         self.engine = engine or PlaybackEngine(self)
@@ -147,6 +148,9 @@ class PlayerController(QObject):
         self._preload_requests: dict[str, int] = {}
         self._replaygain: str = "off"
         self._online_fallback = True
+        # 绑定服务由 app 注入；None 时退化为 1.3.x 的 alias/回退行为。
+        self._binding = binding
+        self._attempt: dict | None = None
 
         self.engine.set_volume(self._volume)
         self.engine.position_changed.connect(self._on_position)
@@ -610,7 +614,9 @@ class PlayerController(QObject):
             self.error_message.emit("本地文件不可用，播放已停止")
 
     def _resolve_online(self, track: Track, *, autoplay: bool, force: bool,
-                        tried: set[str], was_playing: bool, use_alias: bool = True) -> None:
+                        tried: set[str], was_playing: bool,
+                        use_alias: bool = True,
+                        keep_quality: bool = False) -> None:
         preloaded = None if force else self._preloaded.pop(track.id, None)
         if preloaded is not None:
             self._resolve_generation += 1
@@ -619,40 +625,69 @@ class PlayerController(QObject):
             self._on_resolved(track, {"ok": True, "data": preloaded}, generation,
                               autoplay, tried, was_playing)
             return
+
+        # 正式绑定（DB）是唯一真相：只要它指向一个可用的 source/remote_id，
+        # 就直接解析地址，绝不重新投票。
         target = track
-        if use_alias and not force:
+        revision = 0
+        bound: Track | None = None
+        if self._binding is not None and not force:
+            stored = self._binding.get_target(track.id)
+            if (stored is not None and stored.kind == "online"
+                    and stored.source_id and stored.remote_id):
+                bound = stored
+                revision = int(self._binding.state(track.id).revision)
+                if (stored.source_id != track.source_id
+                        or stored.remote_id != track.remote_id):
+                    target = stored
+                    log.info("binding target %s/%s for %r",
+                             stored.source_id, stored.remote_id, track.title)
+
+        # 兼容旧数据：没有绑定时仍可使用 source_memory 别名解析。
+        if target is track and use_alias and not force:
             alias = source_memory.track_alias(track)
             if alias is not None:
                 alias_source = str(alias.get("source_id") or "")
                 same_source = alias_source == track.source_id
-                # With cross-source fallback switched off the user asked for the
-                # track's own source; a remembered alias to another platform
-                # would silently override that choice.
-                if alias_source and (self._online_fallback or same_source) and self._source_is_playable(alias_source) and not health.looks_broken(alias_source):
+                if (alias_source and (self._online_fallback or same_source)
+                        and self._source_is_playable(alias_source)
+                        and not health.looks_broken(alias_source)):
                     target = _track_from_alias(track, alias)
-                    log.info("using remembered source %s for %r", alias_source, track.title)
+                    log.info("using remembered source %s for %r",
+                             alias_source, track.title)
                 elif not alias_source or not self._source_is_playable(alias_source):
                     source_memory.forget_track(track)
+
         source_id = target.source_id
         if not source_id:
             self._online_failed(track, "该在线歌曲缺少音源信息", tried, autoplay)
             return
-        # A plugin that keeps 404-ing costs a useless resolve on every track.  If
-        # a working source was remembered for it, go there directly.
+
+        # 绑定源被禁用/文件缺失时，才允许跨源回退。
+        if bound is not None and not self._source_is_playable(source_id):
+            if self._online_fallback and self._fallback_all_sources(
+                track, {source_id, track.source_id}, autoplay,
+                "原音源不可用，正在其他音源中查找",
+            ):
+                return
+
         if target is track and use_alias and not force and self._online_fallback:
             mapped = source_memory.source_map(track.source_id)
             if mapped and self._source_is_playable(mapped) and health.looks_broken(track.source_id):
-                log.info("skip broken source %s for %r → %s", track.source_id, track.title, mapped)
+                log.info("skip broken source %s for %r → %s",
+                         track.source_id, track.title, mapped)
                 self.status_message.emit(
-                    f"{self._source_label(track.source_id)} 最近无法播放，正在使用 {self._source_label(mapped)}"
+                    f"{self._source_label(track.source_id)} 最近无法播放，"
+                    f"正在使用 {self._source_label(mapped)}"
                 )
-                if self._fallback_all_sources(
-                    track, {track.source_id}, autoplay, "该音源最近解析失败", only=mapped
-                ):
+                if self._fallback_all_sources(track, {track.source_id}, autoplay,
+                                              "该音源最近解析失败", only=mapped):
                     return
+
         self._resolve_generation += 1
         generation = self._resolve_generation
-        self._quality_index = 0
+        if not keep_quality:
+            self._quality_index = 0
         cache_key = self._resolve_cache_key(target)
         cached = self._resolve_cache.get(cache_key)
         if cached is not None and not force:
@@ -664,27 +699,28 @@ class PlayerController(QObject):
             )
             if fresh:
                 log.info("resolve cache hit for %s (%.0fms old)", track.title, age_ms)
-                self._apply_resolved(
-                    track, payload, generation, autoplay, was_playing, source_id=source_id
-                )
+                self._begin_attempt(track, target, revision)
+                self._apply_resolved(track, payload, generation, autoplay,
+                                     was_playing, source_id=source_id)
                 return
             self._resolve_cache.pop(cache_key, None)
+
         self._set_busy(True, "正在获取播放地址…")
         if self._resolve_request_id:
-            # Switching tracks (or pressing next twice quickly) must not keep the
-            # old resolve queued: the runtime would answer both and the stale one
-            # keeps the player waiting on a track the user already left.
             try:
                 self.client.cancel(self._resolve_request_id)
-            except Exception:
+            except Exception:  # noqa: BLE001
                 log.debug("cancel resolve %s failed", self._resolve_request_id, exc_info=True)
             self._resolve_request_id = 0
+        self._begin_attempt(track, target, revision)
+        via_alias = target is not track and bound is None
         self._resolve_request_id = self.client.resolve_playback(
             source_id,
             runtime_track(target),
             lambda response: self._on_resolved(
                 track, response, generation, autoplay, tried, was_playing,
-                alias_used=target is not track, alias_source=source_id,
+                alias_used=via_alias,
+                alias_source=source_id if via_alias else "",
                 target=target if target is not track else None,
             ),
             quality=self._quality,
@@ -694,55 +730,99 @@ class PlayerController(QObject):
                      autoplay: bool, tried: set[str], was_playing: bool,
                      *, alias_used: bool = False, alias_source: str = "",
                      target: Track | None = None) -> None:
+        """解析结果回调：成功就播放，失败才降级/回退。"""
+
         if generation != self._resolve_generation:
             return
         self._set_busy(False)
         if not response.get("ok"):
             error = str(response.get("error") or "未知错误")
-            if alias_used:
-                # The remembered source is dead for this row.  Do not burn the
-                # quality chain on it, and skip the original (already stale)
-                # source: go straight to the cross-source search.
-                log.info("remembered source %s failed for %r, searching elsewhere", alias_source, track.title)
+            log.info("resolve failed for %r via %s: %s",
+                     track.title, alias_source or track.source_id, error)
+            if alias_used and alias_source:
                 health.record_fail(alias_source, error)
-                source_memory.forget_track(track)
                 if source_memory.preferred() == alias_source:
-                    # Otherwise every later track is steered into this dead source.
                     source_memory.clear_preferred()
-                retry = set(tried) | {alias_source, track.source_id}
-                if self._online_fallback and self._fallback_all_sources(track, retry, autoplay, error):
-                    self.status_message.emit(
-                        f"{self._source_label(alias_source)} 暂时不可用，正在其他音源中查找"
-                    )
-                    return
-                source_memory.forget_track(track)
-                self.error_message.emit(f"无法播放《{track.display_title}》：{_short(error)}")
-                return
-            chain = self._quality_chain
-            if self._quality_index + 1 < len(chain):
-                # Some plugins only resolve one quality tier; try the next
-                # tier before declaring the whole source unusable.
+            # 同一绑定源换一档音质再试，仍然不改身份。
+            if not alias_used and self._quality_index + 1 < len(QUALITY_CHAIN):
                 self._quality_index += 1
-                next_quality = chain[self._quality_index]
-                log.info("retry %s with quality %s (%s)", track.title, next_quality, error)
-                self.client.resolve_playback(
-                    (target or track).source_id,
-                    runtime_track(target or track),
-                    lambda resp: self._on_resolved(
-                        track, resp, generation, autoplay, tried, was_playing,
-                        alias_used=alias_used, alias_source=alias_source, target=target,
-                    ),
-                    quality=next_quality,
+                self._quality = QUALITY_CHAIN[self._quality_index]
+                self._resolve_online(
+                    track, autoplay=autoplay, force=True, tried=tried,
+                    was_playing=was_playing, use_alias=False, keep_quality=True,
                 )
                 return
-            self._quality_index = 0
+            if self._binding is not None and target is not None:
+                try:
+                    state = self._binding.state(track.id)
+                    self._binding.mark_failed(
+                        track.id, expected_revision=int(state.revision)
+                    )
+                except Exception:  # noqa: BLE001 - 状态写入失败不应影响播放
+                    log.debug("mark binding failed for %s", track.id, exc_info=True)
             self._online_failed(track, error, tried, autoplay)
             return
-        data = dict(response.get("data") or {})
-        self._resolve_cache[self._resolve_cache_key(track)] = (time.monotonic(), data)
-        self._apply_resolved(
-            track, data, generation, autoplay, was_playing, tried, source_id=(target or track).source_id
-        )
+
+        payload = response.get("data") or {}
+        used = target or track
+        self._resolve_cache[self._resolve_cache_key(used)] = (time.monotonic(), payload)
+        health.record_ok(used.source_id or track.source_id or "")
+        self._apply_resolved(track, payload, generation, autoplay, was_playing,
+                             source_id=used.source_id)
+
+    def _begin_attempt(self, track: Track, target: Track, revision: int,
+                       *, was_fallback: bool = False) -> None:
+        """记录「这一次播放尝试」的身份，供播放确认时校验。"""
+        if self._binding is None or target.kind != "online":
+            self._attempt = None
+            return
+        from ..services.binding import BindingChoice
+
+        self._attempt = {
+            "track_id": track.id,
+            "choice": BindingChoice.from_track(target),
+            "source_id": target.source_id,
+            "remote_id": target.remote_id,
+            "revision": int(revision),
+            "was_fallback": bool(was_fallback),
+            "confirmed": False,
+        }
+
+    def _confirm_attempt(self) -> None:
+        """音频真的向前推进后，才把这次来源写入正式绑定。"""
+        attempt = self._attempt
+        if attempt is None or attempt.get("confirmed"):
+            return
+        track = self._track
+        if track is None or track.id != attempt["track_id"]:
+            return
+        if self._binding is None:
+            attempt["confirmed"] = True
+            return
+        current = self._binding.state(track.id)
+        if current.revision != int(attempt["revision"]):
+            # 播放期间用户/导入改过绑定：旧回调不得覆盖新选择。
+            attempt["confirmed"] = True
+            return
+        choice = attempt["choice"]
+        if attempt.get("was_fallback") and choice.source_id != (track.source_id or ""):
+            ok = self._binding.adopt_verified_fallback(
+                track.id, choice, expected_revision=current.revision
+            )
+        else:
+            ok = self._binding.mark_play_verified(
+                track.id, expected_revision=current.revision, choice=choice
+            )
+        attempt["confirmed"] = True
+        if not ok:
+            return
+        updated = self._binding.get_target(track.id)
+        if updated is None:
+            return
+        self._track = updated
+        self.queue.replace_track(updated)
+        self.track_changed.emit(updated)
+        self.active_source_changed.emit(self._source_label(updated.source_id or ""))
 
     def _resolve_cache_key(self, track: Track) -> str:
         return f"{track.source_id}:{track.remote_id or track.id}:{self._quality}"
@@ -768,7 +848,7 @@ class PlayerController(QObject):
             expires = float(data.get("expiresAt") or 0)
         except (TypeError, ValueError):
             expires = 0.0
-        cache_key = f"{track.source_id}:{track.remote_id or track.id}:{quality}"
+        cache_key = f"{source_id or track.source_id}:{track.remote_id or track.id}:{quality}"
         ext = self._guess_ext(url, mime)
         try:
             stream_url = self.proxy.register(
@@ -1001,8 +1081,12 @@ class PlayerController(QObject):
         # A fallback that actually produced a URL is evidence the source works;
         # without this the alias source can stay "broken" from older failures
         # and get skipped on the next play, forcing another search.
+        # 回退成功后只记成功：旧的 record_fail 会让同一个源刚成功就被判坏。
         health.record_ok(match.source_id)
-        health.record_fail(match.source_id, "fallback")
+        revision = 0
+        if self._binding is not None:
+            revision = int(self._binding.state(track.id).revision)
+        self._begin_attempt(track, match, revision, was_fallback=True)
         self.status_message.emit(f"已通过 {self._source_label(match.source_id)} 播放")
         # Remember the pairing only once audio really starts (see _commit_memory_pending):
         # some plugins return a URL that then 404s on the stream.
@@ -1068,6 +1152,8 @@ class PlayerController(QObject):
     def _on_position(self, value: int) -> None:
         self._position = int(value)
         self.position_changed.emit(self._position)
+        if self._position >= 1200 and self.state == "playing":
+            self._confirm_attempt()
 
     def _on_duration(self, value: int) -> None:
         if value > 0:

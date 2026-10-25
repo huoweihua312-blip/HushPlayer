@@ -170,6 +170,36 @@ class ImportOutcome:
     mode: str = "new"
 
 
+def _bind_import_choices(library, rows: Iterable[MatchRow]) -> None:
+    """把本次导入选中的在线歌曲写成一等公民绑定（auto/pending）。
+
+    写的是 ``tracks`` + ``track_source_binding_state``，不是 JSON 缓存；
+    已经有 manual 绑定的歌曲会被 ``commit_binding`` 的 guard 拒绝覆盖。
+    """
+
+    bindings = getattr(library, "source_bindings", None)
+    if bindings is None:
+        return
+    from .binding import BindingChoice
+
+    for row in rows:
+        track = row.track
+        if track is None or row.skipped or track.kind != "online":
+            continue
+        if not (track.source_id and track.remote_id):
+            continue
+        if library.tracks.get(track.id) is None:
+            continue
+        entry = row.entry
+        origin = (entry.origin_platform, entry.origin_remote_id) if entry.origin_platform else None
+        try:
+            bindings.import_choice(
+                track.id, BindingChoice.from_track(track), origin=origin
+            )
+        except Exception:  # noqa: BLE001 - 单曲绑定失败不应中断整个导入
+            log.warning("write binding failed for %s", track.id, exc_info=True)
+
+
 def find_playlist(library, name: str):
     wanted = (name or "").strip().casefold()
     for playlist in library.playlists_all():
@@ -263,6 +293,7 @@ def apply_import(
             outcome.failed = len(unique)
             unique = []
     outcome.added = len(unique)
+    _bind_import_choices(library, rows)
     log.info(
         "导入歌单「%s」：新增 %s，重复 %s，跳过 %s，未匹配 %s，待确认 %s，失败 %s",
         name,
@@ -845,15 +876,15 @@ class PlaylistMatcher(QObject):
         if self._cancelled:
             return
         if self._auto:
-            # 兜底：任何仍停在 review/pending 且已有候选的行，一律采用最佳候选，
-            # 保证导入时不会因为“需要确认”而丢歌。
+            # 兜底：仍停在 review/pending 且有候选的行采用最佳候选，但不伪造
+            # “已验证”——能否真正播放由首次播放后的绑定确认决定。
             for row in self.rows:
                 if row.status in ("review", "pending") and row.candidates:
                     best = row.candidates[0]
                     row.track = best.track
                     row.score = best.score
                     row.status = "online" if best.track.kind == "online" else "local"
-                    row.verified = True
-                    row.note = ""
+                    row.verified = None
+                    row.note = "自动采用最佳候选，首次播放后验证"
         self._started = False
         self.finished.emit()

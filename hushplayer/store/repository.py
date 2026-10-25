@@ -210,44 +210,87 @@ class TrackRepository:
     ) -> None:
         """只换「来源」相关字段，保留 ``id``，所以收藏/歌单/历史都不受影响。"""
 
-        payload = json.dumps(raw or {}, ensure_ascii=False)
         with self.db.transaction() as tx:
-            tx.execute(
-                """
-                UPDATE tracks SET
-                    source_id=?, source_name=?, remote_id=?, raw=?,
-                    title=COALESCE(NULLIF(?, ''), title),
-                    artist=COALESCE(NULLIF(?, ''), artist),
-                    album=COALESCE(NULLIF(?, ''), album),
-                    duration_ms=CASE WHEN ? > 0 THEN ? ELSE duration_ms END,
-                    artwork_url=COALESCE(NULLIF(?, ''), artwork_url),
-                    album_id=COALESCE(NULLIF(?, ''), album_id),
-                    artist_id=COALESCE(NULLIF(?, ''), artist_id)
-                WHERE id=?
-                """,
-                (
-                    source_id,
-                    source_name,
-                    remote_id,
-                    payload,
-                    title,
-                    artist,
-                    album,
-                    int(duration_ms),
-                    int(duration_ms),
-                    artwork_url,
-                    album_id,
-                    artist_id,
-                    track_id,
-                ),
+            self.update_source_tx(
+                tx,
+                track_id,
+                source_id=source_id,
+                source_name=source_name,
+                remote_id=remote_id,
+                raw=raw,
+                title=title,
+                artist=artist,
+                album=album,
+                duration_ms=duration_ms,
+                artwork_url=artwork_url,
+                album_id=album_id,
+                artist_id=artist_id,
             )
-            if artist_id:
-                tx.execute("DELETE FROM track_artists WHERE track_id=?", (track_id,))
-                for position, name in enumerate(split_artists(artist or "")):
-                    tx.execute(
-                        "INSERT OR IGNORE INTO track_artists (track_id, artist_id, name, position) VALUES (?,?,?,?)",
-                        (track_id, artist_key(name), name, position),
-                    )
+
+    def update_source_tx(
+        self,
+        tx,
+        track_id: str,
+        *,
+        source_id: str,
+        source_name: str,
+        remote_id: str,
+        raw: dict | None = None,
+        title: str = "",
+        artist: str = "",
+        album: str = "",
+        duration_ms: int = 0,
+        artwork_url: str = "",
+        album_id: str = "",
+        artist_id: str = "",
+    ) -> bool:
+        """在调用方事务里改来源；返回是否命中该行。
+
+        与 :meth:`update_source` 的差别：``album_id`` 直接写入（允许空串清掉旧
+        专辑关联），歌手关联按新的 ``artist`` 重建，避免跨源后仍挂着旧专辑/歌手。
+        """
+
+        payload = json.dumps(raw or {}, ensure_ascii=False)
+        cursor = tx.execute(
+            """
+            UPDATE tracks SET
+                source_id=?, source_name=?, remote_id=?, raw=?,
+                title=COALESCE(NULLIF(?, ''), title),
+                artist=COALESCE(NULLIF(?, ''), artist),
+                album=COALESCE(NULLIF(?, ''), album),
+                duration_ms=CASE WHEN ? > 0 THEN ? ELSE duration_ms END,
+                artwork_url=COALESCE(NULLIF(?, ''), artwork_url),
+                album_id=?,
+                artist_id=?
+            WHERE id=?
+            """,
+            (
+                source_id,
+                source_name,
+                remote_id,
+                payload,
+                title,
+                artist,
+                album,
+                int(duration_ms),
+                int(duration_ms),
+                artwork_url,
+                album_id,
+                artist_id,
+                track_id,
+            ),
+        )
+        if not cursor.rowcount:
+            return False
+        names = split_artists(artist or "")
+        if names:
+            tx.execute("DELETE FROM track_artists WHERE track_id=?", (track_id,))
+            for position, name in enumerate(names):
+                tx.execute(
+                    "INSERT OR IGNORE INTO track_artists (track_id, artist_id, name, position) VALUES (?,?,?,?)",
+                    (track_id, artist_key(name), name, position),
+                )
+        return True
 
     def delete(self, track_ids: Iterable[str]) -> int:
         ids = list(dict.fromkeys(track_ids))

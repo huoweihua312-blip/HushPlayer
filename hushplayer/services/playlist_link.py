@@ -225,9 +225,13 @@ def _netease_entry(track: dict) -> PlaylistEntry:
     )
     album = track.get("al") or track.get("album") or {}
     duration = track.get("dt") or track.get("duration") or 0
+    song_id = track.get("id") or ""
     return PlaylistEntry(
         title=str(track.get("name") or "").strip(),
         artist=artist,
         album=str(album.get("name") or "").strip(),
         duration_ms=int(duration or 0),
+        origin_platform="netease",
+        origin_remote_id=str(song_id) if song_id else "",
+        origin_raw=dict(track),
     )

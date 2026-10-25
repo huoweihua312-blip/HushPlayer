@@ -163,27 +163,50 @@ class LibraryService(QObject):
         return self.tracks.get_many(list(ids))
 
     def replace_online_source(self, track_id: str, candidate) -> Track | None:
-        """把一条在线记录换成另一个音源的同名曲目（``id`` 保持不变）。
+        """手动把一首在线歌曲换到另一个来源（右键「替换歌曲来源」）。
 
-        ``candidate`` 是 :class:`hushplayer.services.source_replace.SourceCandidate`，
-        这里只做字段替换 + 失效封面缓存，返回更新后的 ``Track``。
+        走 :class:`TrackBindingService.manual_choose`：立即写入 DB、锁定为
+        ``manual``，之后自动回退/重新导入都不能覆盖它。
         """
 
-        from ..model.track import album_key, artist_key as _artist_key
+        bindings = getattr(self, "source_bindings", None)
+        if bindings is not None and getattr(candidate, "remote_id", ""):
+            from .binding import BindingChoice
+
+            choice = BindingChoice(
+                source_id=str(getattr(candidate, "source_id", "") or ""),
+                source_name=str(getattr(candidate, "source_name", "") or ""),
+                remote_id=str(getattr(candidate, "remote_id", "") or ""),
+                title=str(getattr(candidate, "title", "") or ""),
+                artist=str(getattr(candidate, "artist", "") or ""),
+                album=str(getattr(candidate, "album", "") or ""),
+                duration_ms=int(getattr(candidate, "duration_ms", 0) or 0),
+                artwork_url=str(getattr(candidate, "artwork_url", "") or ""),
+                album_id=str(getattr(candidate, "album_id", "") or ""),
+                raw=dict(getattr(candidate, "raw", {}) or {}),
+            )
+            if bindings.manual_choose(track_id, choice):
+                updated = self.tracks.get(track_id)
+                if updated is not None:
+                    self.covers.invalidate(updated.id)
+                return updated
 
         self.tracks.update_source(
             track_id,
             source_id=candidate.source_id,
             source_name=candidate.source_name,
             remote_id=candidate.remote_id,
-            raw=getattr(candidate, "raw", None) or {},
-            title=getattr(candidate, "title", ""),
-            artist=getattr(candidate, "artist", ""),
-            album=getattr(candidate, "album", ""),
-            duration_ms=getattr(candidate, "duration_ms", 0),
-            artwork_url=getattr(candidate, "artwork_url", ""),
-            album_id=album_key(getattr(candidate, "album", ""), getattr(candidate, "artist", "")),
-            artist_id=_artist_key(getattr(candidate, "artist", "")),
+            raw=candidate.raw,
+            title=candidate.title,
+            artist=candidate.artist,
+            album=candidate.album,
+            duration_ms=candidate.duration_ms,
+            artwork_url=candidate.artwork_url,
+            album_id=getattr(candidate, "album_id", "") or (
+                album_key(candidate.album, candidate.artist)
+                if candidate.album else ""
+            ),
+            artist_id=getattr(candidate, "artist_id", "") or "",
         )
         updated = self.tracks.get(track_id)
         if updated is not None:
@@ -191,7 +214,6 @@ class LibraryService(QObject):
             self.track_updated.emit(updated.id)
         return updated
 
-    # -------------------------------------------------------------- favorites
     def is_favorite(self, track: Track | str) -> bool:
         track_id = track.id if isinstance(track, Track) else str(track)
         stored = self.tracks.get(track_id)

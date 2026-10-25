@@ -20,7 +20,7 @@ from ..core.logging_setup import get_logger
 
 log = get_logger("db")
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS tracks (
@@ -118,6 +118,22 @@ CREATE TABLE IF NOT EXISTS meta (
     key TEXT PRIMARY KEY,
     value TEXT NOT NULL DEFAULT ''
 );
+
+-- 音源绑定状态：tracks.{source_id,source_name,remote_id,raw} 是权威身份，
+-- 这张表只保存「谁选的」「验证到哪一步」「第几版」。
+CREATE TABLE IF NOT EXISTS track_source_binding_state (
+    track_id TEXT PRIMARY KEY,
+    selection_mode TEXT NOT NULL DEFAULT 'auto' CHECK (selection_mode IN ('auto', 'manual')),
+    verify_state TEXT NOT NULL DEFAULT 'pending'
+        CHECK (verify_state IN ('pending', 'verified', 'failed')),
+    revision INTEGER NOT NULL DEFAULT 1,
+    origin_platform TEXT NOT NULL DEFAULT '',
+    origin_remote_id TEXT NOT NULL DEFAULT '',
+    verified_at REAL NOT NULL DEFAULT 0,
+    updated_at REAL NOT NULL DEFAULT 0,
+    FOREIGN KEY (track_id) REFERENCES tracks(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_binding_verify ON track_source_binding_state(verify_state);
 """
 
 
@@ -166,7 +182,21 @@ class Database:
 
     def _migrate(self, conn: sqlite3.Connection, from_version: int) -> None:
         log.info("数据库迁移: %s -> %s", from_version, SCHEMA_VERSION)
-        # v1 为初始版本，后续版本在此追加 ALTER TABLE
+        if from_version < 2:
+            # v2：音源绑定状态表。`_SCHEMA` 的 CREATE TABLE IF NOT EXISTS 已经
+            # 覆盖升级，这里只给已有在线曲目补一行，让「无状态行」也有确定语义。
+            now = _now()
+            conn.execute(
+                """
+                INSERT OR IGNORE INTO track_source_binding_state(
+                    track_id, selection_mode, verify_state, revision,
+                    origin_platform, origin_remote_id, verified_at, updated_at
+                )
+                SELECT id, 'auto', 'pending', 1, source_id, remote_id, 0, ?
+                FROM tracks WHERE kind='online' AND source_id != ''
+                """,
+                (now,),
+            )
 
     def _ensure_system_playlists(self, conn: sqlite3.Connection) -> None:
         row = conn.execute("SELECT id FROM playlists WHERE system=1 AND name='我喜欢'").fetchone()

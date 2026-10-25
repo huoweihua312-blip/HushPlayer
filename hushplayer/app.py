@@ -50,6 +50,7 @@ class HushApp(QObject):
         from .online.proxy import AudioProxy
         from .services.cache import CacheService
         from .services.downloads import DownloadService
+        from .services.binding import TrackBindingService
         from .services.library import LibraryService
         from .services.state import PlaybackKeeper
         from .store.db import Database
@@ -59,11 +60,17 @@ class HushApp(QObject):
         paths.remember_program_dir()
         self.db = Database()
         self.library = LibraryService(self.db)
+        self.bindings = TrackBindingService(
+            self.library, on_change=self.library.track_updated.emit
+        )
+        self.library.source_bindings = self.bindings
         self.artwork = ArtworkStore()
 
         self.proxy = AudioProxy()
         self.client = OnlineSourceClient(self)
-        self.player = PlayerController(self, client=self.client, proxy=self.proxy)
+        self.player = PlayerController(
+            self, client=self.client, proxy=self.proxy, binding=self.bindings
+        )
         self.lyrics = LyricsService(
             self.library.tracks, self.library.bindings, self.library.meta, self.client, self
         )

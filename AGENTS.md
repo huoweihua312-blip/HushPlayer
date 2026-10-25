@@ -130,7 +130,7 @@ HushPlayer-<ver>-setup.exe /VERYSILENT /LOG=...
 
 ## 7. 验证纪律（每个改动都要过）
 
-1. `pytest -q`（当前基线 **281 passed**；只增不减，禁止放宽断言）。
+1. `pytest -q`（当前基线 **296 passed**；只增不减，禁止放宽断言）。
 2. 至少一个真实 GUI/离屏截图（`tools/probe_*.py` → `artifacts/qa/...`），不要只凭代码想象。
 3. 涉及打包：`packaging/build.ps1` + `tools/verify_package.ps1`。
 4. 涉及安装包：静默安装 → 版本/快捷方式/注册表 → 卸载 → 残留检查（见 6.1）。
@@ -213,3 +213,11 @@ HushPlayer-<ver>-setup.exe /VERYSILENT /LOG=...
 - 测试基线：283 passed（1.3.11）。
 
 - **1.3.12**：修「播过的歌仍每次重搜」——`health.recently_failed()` 一次失败即跳过；回退时过滤最近失败源；别名失败同时 `source_memory.clear_preferred()`（否则每首歌都被导向同一死源）；回退失败把健康度记到候选源；`preferred()` 缺键不再 KeyError。测试 285 passed。
+
+## 音源绑定（1.3.13，2026-10-25）
+- `tracks.source_id / source_name / remote_id / raw` 是唯一权威；绑定状态在 `track_source_binding_state`（`selection_mode=auto|manual`、`verify_state=pending|verified|failed`、`revision`、`origin_platform`、`origin_remote_id`），schema v2，`_migrate` 给旧在线曲目回填 auto/pending。
+- 服务 `hushplayer/services/binding.py::TrackBindingService` 必须挂在 `library.source_bindings`；**不能写 `library.bindings`**——那是歌词绑定仓库 `LyricBindingRepository`，覆盖会破坏歌词。
+- `mark_play_verified` / `mark_failed` / `adopt_verified_fallback` 的 `expected_revision` 为 keyword-only；`PlayerController.play_track()` 没有 `autoplay` 参数，整队播放用 `play_tracks(tracks, index)`。
+- 播放回退只在 `position>=1200` 且 `state=="playing"` 后确认，并把实际源写回 `tracks`；manual 绑定永不被自动覆盖。
+- 改 `controller.py` 禁止用「整段函数替换」脚本（曾把 `_on_resolved` 整方法吞掉）；改完必须核对 `def ` 清单并跑全量测试。
+- 测试基线：296 passed（1.3.13）。

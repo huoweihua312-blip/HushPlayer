@@ -45,6 +45,10 @@ class PlaylistEntry:
     album: str = ""
     path: str = ""
     duration_ms: int = 0
+    # 导入文件/链接里带的「原始平台身份」，用于优先做同平台精确匹配。
+    origin_platform: str = ""
+    origin_remote_id: str = ""
+    origin_raw: dict = field(default_factory=dict)
 
 
 @dataclass
