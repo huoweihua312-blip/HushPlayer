@@ -1258,6 +1258,13 @@ class SettingsPage(Page):
         card = SettingsCard("诊断与更新", "")
         card.add_row(self._row("检查更新", "获取最新版本信息", self._action_button("检查", "cloud", self._check_updates)))
         card.add_row(self._row("打开日志文件夹", "反馈问题时请附上日志文件", self._action_button("打开", "folder", self._open_logs)))
+        card.add_row(
+            self._row(
+                "导出诊断包",
+                "把日志、版本、音源状态（已脱敏）打包成一个 zip，方便反馈问题",
+                self._action_button("导出", "download", self._export_diagnostics),
+            )
+        )
         card.add_row(self._row("打开数据目录", "收藏、歌单与设置保存在此", self._action_button("打开", "folder", self._open_data)))
         column.addWidget(card)
 
@@ -1304,6 +1311,23 @@ class SettingsPage(Page):
             return PySide6.__version__
         except Exception:  # noqa: BLE001
             return "未知"
+
+    def _export_diagnostics(self) -> None:
+        from ...services import diagnostics
+
+        try:
+            path = diagnostics.export_bundle()
+        except Exception as exc:  # noqa: BLE001
+            self._toast(f"导出失败：{exc}", "error")
+            return
+        self._toast(f"诊断包已导出：{path.name}", "success")
+        try:
+            from PySide6.QtGui import QDesktopServices  # noqa: F401
+            from PySide6.QtCore import QUrl
+
+            QDesktopServices.openUrl(QUrl.fromLocalFile(str(path.parent)))
+        except Exception:  # noqa: BLE001
+            pass
 
     def _check_updates(self) -> None:
         from ...services.updater import UpdateService

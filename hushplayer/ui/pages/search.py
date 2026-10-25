@@ -372,6 +372,26 @@ class SearchPage(Page):
             self.online_empty.set_text("在线音源未就绪", "正在启动 Node.js 运行时与音源插件")
             return
 
+        cache = getattr(self, "_online_cache", None)
+        if cache is None:
+            cache = self._online_cache = {}
+        cache_key = (text, self.source_filter.current() or "")
+        cached = cache.get(cache_key)
+        if cached is not None and not force and time.monotonic() - cached[0] < 300:
+            tracks, errors, total = cached[1], cached[2], cached[3]
+            self._online_tracks = list(tracks)
+            self._errors = list(errors)
+            self._online_total = total
+            self.online_toolbar.setVisible(True)
+            self.online_status.setVisible(True)
+            self.online_stack.setCurrentWidget(self.online_list)
+            self.online_list.set_tracks(list(tracks))
+            self.online_status.setText(
+                f"缓存结果 · {len(tracks)} 首（5 分钟内有效，点搜索图标可刷新）"
+            )
+            self.play_all_button.setEnabled(bool(tracks))
+            return
+
         for request_id in getattr(self, "_request_ids", []):
             try:
                 ctx().client.cancel(request_id)
@@ -518,6 +538,11 @@ class SearchPage(Page):
     def _finish_online(self, last_source: str) -> None:
         if self._finished:
             return
+        cache = getattr(self, "_online_cache", None)
+        if cache is not None:
+            cache[(self._query, self.source_filter.current() or "")] = (
+                time.monotonic(), list(self._online_tracks), list(self._errors), self._online_total,
+            )
         self._finished = True
         self._deadline_timer.stop()
         self._render_timer.stop()

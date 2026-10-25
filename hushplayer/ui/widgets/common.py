@@ -205,7 +205,7 @@ class IconButton(QAbstractButton):
         self.setCheckable(checkable)
         self.setCursor(Qt.PointingHandCursor)
         self.setFixedSize(size, size)
-        self.setFocusPolicy(Qt.NoFocus)
+        self.setFocusPolicy(Qt.StrongFocus)
         if tooltip:
             self.setToolTip(tooltip)
             # Screen readers and tooling both use this; keep it in sync with the
@@ -260,6 +260,12 @@ class IconButton(QAbstractButton):
             painter.setPen(Qt.NoPen)
             painter.setBrush(QColor(theme().palette.accent))
             painter.drawEllipse(QPointF(rect.center().x(), rect.bottom() - 2.5), 2.2, 2.2)
+        if self.hasFocus():
+            # Keyboard users need to see where Tab landed; the frameless window
+            # paints everything itself, so native focus rings never show up.
+            painter.setPen(QPen(rgba(theme().palette.accent, 0.75), 1.4))
+            painter.setBrush(Qt.NoBrush)
+            painter.drawRoundedRect(rect.adjusted(1.2, 1.2, -1.2, -1.2), radius, radius)
         painter.end()
 
 

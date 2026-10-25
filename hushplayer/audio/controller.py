@@ -91,6 +91,7 @@ class ResolvedStream:
 
 class PlayerController(QObject):
     track_changed = Signal(object)      # Track | None
+    active_source_changed = Signal(str)  # label of the source that played
     track_started = Signal(object)      # Track, when audio actually begins
     state_changed = Signal(str)
     position_changed = Signal(int)
@@ -663,7 +664,9 @@ class PlayerController(QObject):
             )
             if fresh:
                 log.info("resolve cache hit for %s (%.0fms old)", track.title, age_ms)
-                self._apply_resolved(track, payload, generation, autoplay, was_playing)
+                self._apply_resolved(
+                    track, payload, generation, autoplay, was_playing, source_id=source_id
+                )
                 return
             self._resolve_cache.pop(cache_key, None)
         self._set_busy(True, "正在获取播放地址…")
@@ -734,14 +737,16 @@ class PlayerController(QObject):
             return
         data = dict(response.get("data") or {})
         self._resolve_cache[self._resolve_cache_key(track)] = (time.monotonic(), data)
-        self._apply_resolved(track, data, generation, autoplay, was_playing, tried)
+        self._apply_resolved(
+            track, data, generation, autoplay, was_playing, tried, source_id=(target or track).source_id
+        )
 
     def _resolve_cache_key(self, track: Track) -> str:
         return f"{track.source_id}:{track.remote_id or track.id}:{self._quality}"
 
     def _apply_resolved(self, track: Track, data: dict, generation: int,
                         autoplay: bool, was_playing: bool,
-                        tried: set[str] | None = None) -> None:
+                        tried: set[str] | None = None, source_id: str = "") -> None:
         tried = tried if tried is not None else set()
         if generation != self._resolve_generation:
             return
@@ -770,7 +775,10 @@ class PlayerController(QObject):
             log.exception("proxy register failed")
             self._online_failed(track, f"本地缓存服务不可用：{exc}", tried, autoplay)
             return
-        health.record_ok(track.source_id or "")
+        health.record_ok(source_id or track.source_id or "")
+        self.active_source_changed.emit(
+            self._source_label(source_id or track.source_id or "")
+        )
         self.engine.load(stream_url, duration_hint=track.duration_ms, autoplay=autoplay)
         self._apply_pending_position()
         if was_playing and not autoplay:

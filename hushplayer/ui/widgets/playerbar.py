@@ -27,6 +27,7 @@ class TrackInfo(QWidget):
         self._title = ""
         self._artist = ""
         self._badge = ""
+        self._active_source = ""
         self._status = ""
         self._hover = HoverAnimation(self, 120)
         self.setMinimumWidth(240)
@@ -44,6 +45,11 @@ class TrackInfo(QWidget):
         super().showEvent(event)
         self._fit_height()
 
+    def set_active_source(self, name: str) -> None:
+        """Show the source that actually resolved the stream."""
+        self._active_source = name or ""
+        self.update()
+
     def set_track(self, track: Track | None, *, subtitle: str = "") -> None:
         if track is None:
             self._title = "未在播放"
@@ -53,6 +59,7 @@ class TrackInfo(QWidget):
             self._title = track.display_title
             self._artist = track.display_artist
             self._badge = display_source(track) if track.is_online else ""
+            self._active_source = ""
         self.setToolTip(f"{self._title}\n{self._artist}" if self._title else "")
         self.update()
 
@@ -136,7 +143,7 @@ class TrackInfo(QWidget):
                 badge_text,
                 tone="accent",
             )
-        elif self._badge:
+        elif self._active_source or self._badge:
             room = rect.width() - artist_metrics.horizontalAdvance(artist_text) - 10
             if room > 40:
                 painter.setPen(QPen(rgba(palette.text, 0.28)))
@@ -144,7 +151,9 @@ class TrackInfo(QWidget):
                     QRectF(artist_metrics.horizontalAdvance(artist_text) + 8, y, room,
                            artist_metrics.height()),
                     int(Qt.AlignLeft | Qt.AlignVCenter),
-                    artist_metrics.elidedText("· " + self._badge, Qt.ElideRight, int(room)),
+                    artist_metrics.elidedText(
+                        "· " + (self._active_source or self._badge), Qt.ElideRight, int(room)
+                    ),
                 )
         painter.end()
 
@@ -260,6 +269,7 @@ class PlayerBar(QWidget):
         player.volume_changed.connect(self._on_volume)
         player.muted_changed.connect(self._on_muted)
         player.queue_changed.connect(self._refresh_queue_badge)
+        player.active_source_changed.connect(self.set_active_source)
         player.shuffle_changed.connect(self._on_shuffle)
         player.repeat_changed.connect(self._on_repeat)
         player.loading_changed.connect(self._on_loading)
@@ -351,6 +361,9 @@ class PlayerBar(QWidget):
             self.info.set_subtitle("选择一首歌曲开始收听")
             return
         self.info.set_subtitle(track.display_artist)
+
+    def set_active_source(self, name: str) -> None:
+        self.info.set_active_source(name)
 
     def _refresh_queue_badge(self) -> None:
         try:

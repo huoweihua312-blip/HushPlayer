@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import time
+
 from PySide6.QtCore import QEasingCurve, QPropertyAnimation, QRectF, Qt, QTimer, Signal
 from PySide6.QtGui import QFontMetrics, QPainter, QPen
 from PySide6.QtWidgets import QGraphicsOpacityEffect, QWidget
@@ -31,6 +33,13 @@ class Toast(QWidget):
         self._fade = QPropertyAnimation(self._effect, b"opacity", self)
         self._fade.setDuration(theme().duration(180))
         self._fade.setEasingCurve(QEasingCurve.OutCubic)
+
+    def set_text(self, text: str) -> None:
+        self._text = text
+        metrics = QFontMetrics(theme().font(9.2, 500))
+        width = min(560, metrics.horizontalAdvance(text) + 54)
+        self.setFixedSize(max(120, width), self.height())
+        self.update()
 
     def appear(self) -> None:
         self.show()
@@ -97,12 +106,28 @@ class ToastHost(QWidget):
         self.setAttribute(Qt.WA_NoSystemBackground, True)
         self._toasts: list[Toast] = []
         self._offset_bottom = 110
+        self._last_toast: Toast | None = None
+        self._last_kind = ""
+        self._last_at = 0.0
 
     def set_bottom_offset(self, offset: int) -> None:
         self._offset_bottom = offset
         self._relayout()
 
     def show_message(self, text: str, kind: str = "info", *, timeout: int = 2800) -> Toast:
+        now = time.monotonic()
+        # Three lines of "source unavailable / switched / playing" used to
+        # stack on top of the bar; keep one live line per kind instead.
+        if (
+            self._last_toast is not None
+            and self._last_kind == kind
+            and now - self._last_at < 0.9
+            and self._last_toast in self._toasts
+        ):
+            self._last_toast.set_text(text)
+            self._last_at = now
+            self._relayout()
+            return self._last_toast
         toast = Toast(text, kind, self)
         toast.setAttribute(Qt.WA_TransparentForMouseEvents, False)
         toast.closed.connect(self._on_closed)
@@ -114,6 +139,9 @@ class ToastHost(QWidget):
         toast.appear()
         self._relayout()
         QTimer.singleShot(max(800, timeout), toast.dismiss)
+        self._last_toast = toast
+        self._last_kind = kind
+        self._last_at = now
         return toast
 
     def _on_closed(self, toast: Toast) -> None:

@@ -153,7 +153,7 @@ def _replace_source(track: Track, parent: QWidget) -> None:
         try:
             from ..services import source_memory
 
-            source_memory.remember_track(updated, candidate)
+            source_memory.forget_track(updated)
         except Exception:  # noqa: BLE001 - memory is only an optimisation
             log.debug("remember replaced source failed", exc_info=True)
         app.player.refresh_track(updated)

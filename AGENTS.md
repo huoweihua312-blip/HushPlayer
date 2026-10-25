@@ -209,3 +209,5 @@ HushPlayer-<ver>-setup.exe /VERYSILENT /LOG=...
 
 - **1.3.10（2026-10-25）：包体裁剪。** `packaging/hushplayer.spec` 排除 PIL/QML，`packaging/build.ps1` 在 Copy 后删除 Qt6Quick/Qml/Pdf DLL 与 qpdf 插件（保留 opengl32sw 与 avcodec）；实测 271→240.6 MB、启动 0.95–1.29 s。新增 `docs/AI_RECOMMENDATION.md`（仅设计）。
 
+- 1.3.11：toast 同 kind 0.9s 内合并须改 `Toast.set_text` + 重置宽；播放栏「当前音源」走 `active_source_changed`；诊断包 `services/diagnostics.py` 需对 settings 脱敏；`IconButton` 焦点环画在 `paintEvent` 末尾。
+- 测试基线：283 passed（1.3.11）。
