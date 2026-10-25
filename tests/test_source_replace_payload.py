@@ -8,9 +8,20 @@ from __future__ import annotations
 
 from PySide6.QtCore import QObject, Signal
 
+import pytest
+
 from hushplayer.model.track import Track
 from hushplayer.online.models import SourceInfo
+from hushplayer.services import source_replace as sr
 from hushplayer.services.source_replace import SourceReplaceSearch
+
+
+@pytest.fixture(autouse=True)
+def _clear_replace_cache():
+    """结果缓存按「歌名|歌手」共享，测试之间必须清掉，否则互相污染。"""
+    sr.clear_cache()
+    yield
+    sr.clear_cache()
 
 
 class _Client(QObject):

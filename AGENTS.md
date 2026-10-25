@@ -130,7 +130,7 @@ HushPlayer-<ver>-setup.exe /VERYSILENT /LOG=...
 
 ## 7. 验证纪律（每个改动都要过）
 
-1. `pytest -q`（当前基线 **219 passed**；只增不减，禁止放宽断言）。
+1. `pytest -q`（当前基线 **273 passed**；只增不减，禁止放宽断言）。
 2. 至少一个真实 GUI/离屏截图（`tools/probe_*.py` → `artifacts/qa/...`），不要只凭代码想象。
 3. 涉及打包：`packaging/build.ps1` + `tools/verify_package.ps1`。
 4. 涉及安装包：静默安装 → 版本/快捷方式/注册表 → 卸载 → 残留检查（见 6.1）。
@@ -200,3 +200,4 @@ HushPlayer-<ver>-setup.exe /VERYSILENT /LOG=...
 - 1.3.1（2026-10-25）：选中行高亮按「行」判定 hover（Qt 的 State_MouseOver 是按单元格给的，不能用于整行底色）；右键替换来源先 ensure_started、`_on_response` 兼容 list/dict 并加超时兜底。
 1.3.2 (2026-10-25) 高亮色带逐格叠加（补 setClipRect）；替换来源后同步刷新列表页/队列/当前曲目（PlayQueue.replace_track 需同时更新 _by_id）。
 1.3.3 (2026-10-25) 记住可播音源：跨源回退成功后写 source_memory（track alias + 原源→可用源映射 + 最近可用源），再播同一首/预取都直达该源；已知损坏源短暂跳过。tooltip 改用自绘 HoverTip（ToolTipRouter 拦截 QEvent.ToolTip），不再有系统直角白框。测试：conftest 每例后冲刷 DeferredDelete + gc，downloads 用 processEvents 轮询，修复全量套件 access violation。
+- 2026-10-25（1.3.4）：替换来源对话框的底部按钮若在 add_named_button 之后才需要写回数据，必须再 clicked.connect(...) 设 chosen，否则 done(Accepted) 先执行、调用方拿到 None；搜索结果按源增量回调、并做标题/歌手/时长硬过滤（30 秒试听片段要按「试听片段」优先于「时长差」提示）。
