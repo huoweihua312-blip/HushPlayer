@@ -14,7 +14,7 @@ import pytest
 from hushplayer.audio.controller import PlayerController
 from hushplayer.audio.engine import PlaybackEngine
 from hushplayer.model.track import Track
-from hushplayer.online import matching
+from hushplayer.online import health, matching
 from hushplayer.online.models import SourceInfo, track_from_item
 from hushplayer.services import source_memory
 
@@ -22,6 +22,7 @@ from hushplayer.services import source_memory
 @pytest.fixture(autouse=True)
 def _isolated_source_memory(data_dir):
     source_memory.clear()
+    health.reset()
     yield
 
 KG = SourceInfo(
@@ -40,6 +41,15 @@ WY = SourceInfo(
 )
 
 KG_ITEM = {"id": "kg-1", "title": "晴天", "artist": "周杰伦", "album": "叶惠美", "duration": 269000}
+QQ = SourceInfo(
+    id="custom_source_qq",
+    name="QQ音乐",
+    platform="qq",
+    enabled=True,
+    capabilities={"search": True, "playback": True},
+)
+
+QQ_ITEM = {"id": "qq-3", "title": "晴天", "artist": "周杰伦", "album": "叶惠美", "duration": 269000}
 WY_ITEM = {"id": "wy-9", "title": "晴天", "artist": "周杰伦", "album": "叶惠美", "duration": 269000}
 
 
@@ -160,6 +170,46 @@ def test_remembered_source_skips_the_broken_one(qapp):
     assert loaded_again, "remembered source should play without a new search"
     assert [call[0] for call in second_client.resolve_calls] == [WY.id]
     assert not second_client.search_calls
+
+
+def test_failed_alias_skips_original_source(qapp):
+    """A dead remembered source must not retry the original (also dead) one."""
+    first_client = FakeClient(resolve_failures=3, search_items=[WY_ITEM])
+    first, _ = make_controller(first_client)
+    track = track_from_item(KG_ITEM, source=KG)
+    first.play_tracks([track], 0, context="test")
+    assert source_memory.track_alias(track.id) is not None
+
+    second = FakeClient(resolve_failures=1, search_items=[QQ_ITEM])
+    controller, _ = make_controller(second)
+    controller._sources = [KG, WY, QQ]
+    controller.play_track(track)
+
+    sources = [source_id for source_id, _quality in second.resolve_calls]
+    assert WY.id in sources
+    assert KG.id not in sources, "original stale source should be skipped"
+    assert second.search_calls, "should go straight to the cross-source search"
+    # The successful fallback rewrites the memory to the working source.
+    alias = source_memory.track_alias(track.id)
+    assert alias is not None
+    assert alias["source_id"] == QQ.id
+
+
+def test_broken_alias_source_is_ignored(qapp):
+    first_client = FakeClient(resolve_failures=3, search_items=[WY_ITEM])
+    first, _ = make_controller(first_client)
+    track = track_from_item(KG_ITEM, source=KG)
+    first.play_tracks([track], 0, context="test")
+
+    health.record_fail(WY.id, "404")
+    health.record_fail(WY.id, "404")
+
+    client = FakeClient(search_items=[])
+    controller, _ = make_controller(client)
+    controller.play_track(track)
+
+    assert client.resolve_calls, "should still try something"
+    assert client.resolve_calls[0][0] != WY.id, "source known to be broken must be skipped"
 
 
 def test_resolved_url_is_reused_within_ttl(qapp):

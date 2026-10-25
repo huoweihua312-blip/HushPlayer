@@ -622,7 +622,7 @@ class PlayerController(QObject):
                 # With cross-source fallback switched off the user asked for the
                 # track's own source; a remembered alias to another platform
                 # would silently override that choice.
-                if alias_source and (self._online_fallback or same_source) and self._source_is_playable(alias_source):
+                if alias_source and (self._online_fallback or same_source) and self._source_is_playable(alias_source) and not health.looks_broken(alias_source):
                     target = _track_from_alias(track, alias)
                     log.info("using remembered source %s for %r", alias_source, track.title)
                 elif not alias_source or not self._source_is_playable(alias_source):
@@ -691,6 +691,22 @@ class PlayerController(QObject):
         self._set_busy(False)
         if not response.get("ok"):
             error = str(response.get("error") or "未知错误")
+            if alias_used:
+                # The remembered source is dead for this row.  Do not burn the
+                # quality chain on it, and skip the original (already stale)
+                # source: go straight to the cross-source search.
+                log.info("remembered source %s failed for %r, searching elsewhere", alias_source, track.title)
+                health.record_fail(alias_source, error)
+                source_memory.mark_alias_failed(track)
+                retry = set(tried) | {alias_source, track.source_id}
+                if self._online_fallback and self._fallback_all_sources(track, retry, autoplay, error):
+                    self.status_message.emit(
+                        f"{self._source_label(alias_source)} 暂时不可用，正在其他音源中查找"
+                    )
+                    return
+                source_memory.forget_track(track)
+                self.error_message.emit(f"无法播放《{track.display_title}》：{_short(error)}")
+                return
             chain = self._quality_chain
             if self._quality_index + 1 < len(chain):
                 # Some plugins only resolve one quality tier; try the next
@@ -709,17 +725,6 @@ class PlayerController(QObject):
                 )
                 return
             self._quality_index = 0
-            if alias_used:
-                # The remembered source no longer plays this row: drop the
-                # memory and go back to the normal (own source) route once.
-                log.info("remembered source %s failed for %r, forgetting", alias_source, track.title)
-                source_memory.forget_track(track)
-                self._resolve_online(
-                    track, autoplay=autoplay, force=True,
-                    tried=set(tried) | {alias_source}, was_playing=was_playing,
-                    use_alias=False,
-                )
-                return
             self._online_failed(track, error, tried, autoplay)
             return
         data = dict(response.get("data") or {})

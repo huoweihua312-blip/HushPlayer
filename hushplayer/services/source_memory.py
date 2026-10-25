@@ -193,6 +193,41 @@ def forget_track(track: object) -> None:
             _write(data)
 
 
+def mark_alias_failed(track: object) -> None:
+    """Remember that a remembered alias just failed to resolve.
+
+    One 404 is usually transient (the plugin rotates URLs), so the alias is
+    kept for a retry; only after two failures in a row do we drop it.
+    """
+    if not track:
+        return
+    if isinstance(track, str):
+        keys = [track]
+    else:
+        keys = [str(getattr(track, "id", "") or "")]
+        source_id = str(getattr(track, "source_id", "") or "")
+        remote_id = str(getattr(track, "remote_id", "") or "")
+        if remote_id:
+            keys.append(track_key(source_id, remote_id))
+        keys.append(query_key(source_id, str(getattr(track, "title", "") or ""), str(getattr(track, "artist", "") or "")))
+    with _LOCK:
+        data = _read()
+        dirty = False
+        for key in keys:
+            if not key:
+                continue
+            entry = data["tracks"].get(key)
+            if not isinstance(entry, dict):
+                continue
+            entry["fail"] = int(entry.get("fail", 0) or 0) + 1
+            entry["last_fail"] = time.time()
+            dirty = True
+            if entry["fail"] >= 2:
+                data["tracks"].pop(key, None)
+        if dirty:
+            _write(data)
+
+
 # ------------------------------------------------------------- source map
 def source_map(original_source_id: str) -> str:
     entry = _read()["source_map"].get(str(original_source_id or ""))
