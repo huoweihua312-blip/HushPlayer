@@ -318,3 +318,10 @@ HushPlayer-<ver>-setup.exe /VERYSILENT /LOG=...
 - 歌词搜索列表用 `setItemWidget` + `item.setSizeHint(QSize(0, ROW_HEIGHT))`（宽度给 0 才会跟随 viewport）；自绘 `paintEvent` 必须保证 `painter.end()` 被执行，否则一次 AttributeError 就会变成访问冲突。
 - 自绘行不要引用不存在的调色板字段（`Palette` 没有 `alternate`），取色统一 `rgba(palette.x, alpha)`。
 - 1.3.21 变更记录：封面落库 + `covers.ready` 刷新、封面点击跳歌词页、机器翻译兜底、结构化歌词搜索与选中态重构；新增 `tests/test_lyrics_translate.py`、`tests/test_cover_persist.py`；基线 **377 passed**。
+## 打包不内置音源（1.3.22，2026-10-27）
+
+- 安装包/zip **不得包含任何音源插件**：`packaging/hushplayer.spec` 只拷 `source_runtime` 的运行时文件，随包注册表固定用 `packaging/source_registry.json`（`{"version": 1, "sources": []}`）。不要再用整目录 datas（会把 `sources/active|backups|staging` 和开发机的启用清单一起打进去）。
+- 首次启动 `registry.ensure()` 会创建空 `%LOCALAPPDATA%\HushPlayerReimagined\sources\source_registry.json`；日志应为「已创建可写音源目录（0 个音源）」。已有用户不会被覆盖。
+- 新增/删除运行时文件时，同步检查 `runner.js`/`plugin_host.js` 的 `require` 依赖，只打包真正被引用的文件。
+- 用户数据（`hushplayer.db`、`settings.json`、`play_queue.json`、`online_source_memory.json`、`sources\`、`cache\`、`logs\`）只在 `%LOCALAPPDATA%\HushPlayerReimagined`，安装/升级/卸载都不得触碰。
+- 1.3.22 变更记录：spec 改为精确 datas + 空注册表；安装/卸载验证通过；版本号 1.3.22。

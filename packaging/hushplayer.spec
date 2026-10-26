@@ -15,8 +15,19 @@ ROOT = Path(SPECPATH).resolve().parent  # noqa: F821 - PyInstaller 注入
 
 APP_NAME = "HushPlayer"
 
+# 只打包运行音源所必需的运行时文件：安装包**不内置任何音源插件**。
+# 空 registry 会让首次启动创建空音源列表，用户自行导入插件（见 AGENTS 1.3.22）。
+RUNTIME = ROOT / "hushplayer" / "runtime" / "source_runtime"
+
 datas = [
-    (str(ROOT / "hushplayer" / "runtime" / "source_runtime"), "hushplayer/runtime/source_runtime"),
+    (str(RUNTIME / "plugin_host.js"), "hushplayer/runtime/source_runtime"),
+    (str(RUNTIME / "runner.js"), "hushplayer/runtime/source_runtime"),
+    (str(RUNTIME / "source_test_worker.js"), "hushplayer/runtime/source_runtime"),
+    (str(RUNTIME / "package.json"), "hushplayer/runtime/source_runtime"),
+    (str(RUNTIME / "package-lock.json"), "hushplayer/runtime/source_runtime"),
+    (str(RUNTIME / "README.md"), "hushplayer/runtime/source_runtime"),
+    (str(RUNTIME / "node_modules"), "hushplayer/runtime/source_runtime/node_modules"),
+    (str(ROOT / "packaging" / "source_registry.json"), "hushplayer/runtime/source_runtime"),
     (str(ROOT / "hushplayer" / "runtime" / "node"), "hushplayer/runtime/node"),
     (str(ROOT / "assets"), "assets"),
 ]

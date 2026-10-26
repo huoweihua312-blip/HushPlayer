@@ -4,7 +4,7 @@
 ; intentionally left in place when uninstalling.
 
 #define AppName "HushPlayer"
-#define AppVersion "1.3.21"
+#define AppVersion "1.3.22"
 #define AppExe "HushPlayer.exe"
 #define AppId "{{6F1C2B7E-3A4D-4E5B-9C8A-2D1E0B7F4A21}"
 
@@ -57,7 +57,7 @@ Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{
 Name: "autostart"; Description: "登录 Windows 时自动启动 HushPlayer"; GroupDescription: "启动选项"; Flags: unchecked
 
 [Files]
-Source: "F:\HushPlayerBuild\out\HushPlayer-1.3.21\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "F:\HushPlayerBuild\out\HushPlayer\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [Icons]
 Name: "{group}\{#AppName}"; Filename: "{app}\{#AppExe}"

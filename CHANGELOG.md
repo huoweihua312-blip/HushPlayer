@@ -1,5 +1,19 @@
 # 更新日志
 
+## 1.3.22 — 2026-10-27
+
+### 安装包不再内置音源插件
+
+- 安装包过去会把开发机上的 `source_registry.json` 与 `sources/active|backups|staging` 一起打包（PyInstaller 整目录复制），新用户首次启动会被写入这份「别人的音源清单」，包里还混着 14 个旧版本备份与测试夹具。
+- `packaging/hushplayer.spec` 改为只打包运行音源所需的运行时（`plugin_host.js`、`runner.js`、`source_test_worker.js`、`package*.json`、`node_modules`），并用 `packaging/source_registry.json`（`{"version":1,"sources":[]}`）作为随包注册表：首次启动创建空音源列表，用户在「设置 → 音源」自行导入插件。
+- `registry.ensure()` 只在注册表缺失时复制，因此已有用户的音源清单不受影响；升级安装只替换程序文件。
+- 用户数据（`%LOCALAPPDATA%\HushPlayerReimagined`：歌单、收藏、历史、设置、绑定、会话、缓存）本来就不进安装包，卸载也不删除。
+
+### 验证
+
+- 打包目录检查：`_internal/hushplayer/runtime/source_runtime/` 无 `sources/`，`source_registry.json` 为空清单。
+- 静默安装 → 启动 → 卸载：exe 版本 1.3.22、首启日志 `已创建可写音源目录（0 个音源）`、卸载后目录清空、用户数据保留。
+- 全量 `pytest`：**377 passed**（未改代码逻辑）。
 ## 1.3.21 — 2026-10-26
 
 ### 封面、翻译与歌词搜索

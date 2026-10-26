@@ -13,7 +13,7 @@
 | 文件 | 说明 |
 | --- | --- |
 | `HushPlayer/` | 解压即用目录（onedir），含 `HushPlayer.exe` 与 `_internal/` |
-| `HushPlayer-<版本>-win64.zip` | 上者的压缩包（当前 1.3.21） |
+| `HushPlayer-<版本>-win64.zip` | 上者的压缩包（当前 1.3.22） |
 | `SHA256SUMS.txt` | 压缩包校验值 |
 
 自行构建：
@@ -106,13 +106,15 @@ HushPlayer 是绿色版：把 `HushPlayer` 目录放在任意位置（例如 `D:
 校验安装包：
 
 ```powershell
-Get-FileHash HushPlayer-1.3.21-setup.exe -Algorithm SHA256
-# A7D6062B3BD6EE46CDEDA228618E3699152999D54AD55EA724EB4CC449F578FF
+Get-FileHash HushPlayer-1.3.22-setup.exe -Algorithm SHA256
+# 0045B9F1F1D5D6319537DC802CC5A323F73250D9B809D7415F2F5AAB5D54D2F1
 ```
 
-### 1.3.8 免安装包（当前版本）
+### 1.3.22 发布包（当前版本）
 - 免安装目录：`F:\HushPlayerBuild\out\HushPlayer\`（`HushPlayer.exe` + `_internal/`，自带 Python 与 Node 22）。
-- zip：`HushPlayer-1.3.12-win64.zip`，SHA256 `7990536640E833D27E2CF1543DB2C8553D60F882B7D2C3C9D38D79E0B1E6868C`。
-- 实测：启动日志 `启动 HushPlayer 1.3.8`、窗口 1280×820、单实例、关闭后进程退出（`alive_after_close=False`）。
-- 安装包（setup.exe）只在明确要求时构建；最近一次为 1.1.26（历史产物见 `F:\HushPlayerBuild\out`）。
-
+- zip：`HushPlayer-1.3.22-win64.zip`（110,006,845 字节），SHA256 `5A7447E2BF5F201130D2AB1CD50936E88E0A3B7D76BAD69092D4792A6FC90289`。
+- 安装包：`HushPlayer-1.3.22-setup.exe`（76,782,779 字节），SHA256 `0045B9F1F1D5D6319537DC802CC5A323F73250D9B809D7415F2F5AAB5D54D2F1`。
+- 安装包与 zip **不内置任何音源插件**：首次启动音源列表为空，需在「设置 → 音源」自行导入；已有用户数据与音源清单不受影响。
+- 实测：`verify_package.ps1` → 窗口 1280×820、`instances=1`、`alive_after_close=False`，日志 `启动 HushPlayer 1.3.22`；
+  静默安装/卸载验证 → exe 版本 1.3.22、桌面与开始菜单快捷方式创建、卸载后目录与快捷方式清空、用户数据保留。
+- 安装包记忆验证后会还原 `HKCU\Software\HushPlayer\InstallDir` 与 `last_program_dir.ini`，不污染真实安装记忆。
