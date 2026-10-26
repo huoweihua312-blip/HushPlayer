@@ -338,3 +338,59 @@ def test_failed_restore_keeps_previous_session_file(qapp, loaded_library, data_d
     fresh_keeper.save_now()
     assert os.path.isfile(queue_file())
     assert open(queue_file(), "r", encoding="utf-8").read() == before
+
+def test_failed_session_write_keeps_pending_state(qapp, loaded_library, monkeypatch) -> None:
+    """会话写盘失败：保留待保存状态，不能把失败当成功。"""
+    from hushplayer.services import state as state_module
+
+    tracks = loaded_library.tracks.list(limit=2)
+    controller, _client, _engine = _controller(qapp, tracks)
+    keeper = PlaybackKeeper(controller, loaded_library.tracks)
+    controller._position = 42_000  # noqa: SLF001
+    assert keeper.save_now() is True
+    saved_position = keeper._last_saved_position
+
+    controller._position = 95_000  # noqa: SLF001
+    original = state_module.os.replace
+    monkeypatch.setattr(
+        state_module.os,
+        "replace",
+        lambda *_a, **_k: (_ for _ in ()).throw(PermissionError(13, "denied")),
+    )
+    assert keeper.save_now() is False
+    assert keeper._dirty is True
+    assert keeper._last_saved_position == saved_position, "写失败不能更新已保存位置"
+
+    payload = json.loads(open(queue_file(), "r", encoding="utf-8").read())
+    assert payload["position_ms"] == 42_000, "失败时不得覆盖上一次有效会话"
+
+    # 权限恢复后必须能把最新的 95000 落盘。
+    monkeypatch.setattr(state_module.os, "replace", original)
+    assert keeper.save_now() is True
+    payload = json.loads(open(queue_file(), "r", encoding="utf-8").read())
+    assert payload["position_ms"] == 95_000
+
+
+def test_flush_retries_once_when_write_fails(qapp, loaded_library, monkeypatch) -> None:
+    """退出路径再试一次：第一次失败、第二次成功时进度必须保住。"""
+    from hushplayer.services import state as state_module
+
+    tracks = loaded_library.tracks.list(limit=2)
+    controller, _client, _engine = _controller(qapp, tracks)
+    keeper = PlaybackKeeper(controller, loaded_library.tracks)
+    controller._position = 12_500  # noqa: SLF001
+
+    original = state_module.os.replace
+    calls = {"n": 0}
+
+    def flaky(src, dst):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise PermissionError(13, "denied")
+        return original(src, dst)
+
+    monkeypatch.setattr(state_module.os, "replace", flaky)
+    keeper.flush()
+    payload = json.loads(open(queue_file(), "r", encoding="utf-8").read())
+    assert payload["position_ms"] == 12_500
+    assert calls["n"] >= 2

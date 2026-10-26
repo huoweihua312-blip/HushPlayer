@@ -15,7 +15,7 @@ from typing import Any, Iterable
 
 from PySide6.QtCore import QObject, Signal
 
-from ..core.logging_setup import get_logger
+from ..core.logging_setup import get_logger, log_exception
 from ..library.artwork import CoverProvider
 from ..library.scanner import ScanResult, Scanner
 from ..model.track import Track, album_key
@@ -64,6 +64,7 @@ class LibraryService(QObject):
         self.bindings = LyricBindingRepository(db)
         self.meta = MetaStore(db)
         self.covers = CoverProvider(parent=self)
+        self.covers.ready.connect(self._on_cover_ready)
         self.scanner = Scanner(self.tracks, self.meta, parent=self)
         self.scanner.stage.connect(self.scan_stage)
         self.scanner.progress.connect(self.scan_progress)
@@ -311,13 +312,23 @@ class LibraryService(QObject):
         if not track.album_artist and track.artist:
             track.album_artist = track.artist
 
-    def record_play(self, track: Track, context: str = "") -> None:
-        if track.kind == "online":
-            self._ensure_online_album(track)
-            if self.tracks.get(track.id) is None:
-                self.tracks.upsert(track)
-        self.tracks.record_play(track.id, context)
+    def record_play(self, track: Track, context: str = "") -> bool:
+        """Record one *qualified* listen; False means the DB write failed.
+
+        A failed write must not look like a recorded listen: the controller
+        keeps the episode pending and retries with backoff.
+        """
+        try:
+            if track.kind == "online":
+                self._ensure_online_album(track)
+                if self.tracks.get(track.id) is None:
+                    self.tracks.upsert(track)
+            self.tracks.record_play(track.id, context)
+        except Exception as exc:  # noqa: BLE001 - DB/IO failure must not stop playback
+            log_exception("记录播放历史失败", exc)
+            return False
         self.track_updated.emit(track.id)
+        return True
 
     # ------------------------------------------------------- 失效文件与重定位
     def missing_tracks(self, limit: int = 0) -> list[Track]:
@@ -400,6 +411,23 @@ class LibraryService(QObject):
 
     def art_for(self, track: Track, size: int, *, dpr: float = 2.0):
         return self.covers.pixmap(track, size, dpr=dpr)
+
+    def _on_cover_ready(self, track_id: str) -> None:
+        """封面下载完成后把磁盘路径写回数据库，重启后不再掉封面。"""
+
+        path = self.covers.resolved_path(track_id)
+        if not path:
+            return
+        try:
+            updated = self.tracks.get(track_id)
+            if updated is None or updated.artwork_path == path:
+                return
+            if not self.tracks.update_artwork_path(track_id, path):
+                return
+            updated.artwork_path = path
+            self.track_updated.emit(track_id)
+        except Exception as exc:  # noqa: BLE001 - 封面持久化失败不应影响播放
+            log_exception("保存封面路径失败", exc)
 
     def prefetch_cover(self, track: Track) -> None:
         self.covers.prefetch(track)

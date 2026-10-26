@@ -498,11 +498,11 @@ async function getLyric(musicItem) {
         /* 歌词URL */
         // lrc: "",
         /* 纯文本歌词 */
-        rawLrc: res.lrc.lyric,
+        rawLrc: res.lrc?.lyric || "",
         /* 没有时间戳的 纯文本歌词 */
         // rawLrcTxt: "",
-        /* 纯文本格式的翻译 */
-        // translation: "",
+        /* 纯文本格式的翻译：网易云放在 tlyric.lyric 里 */
+        translation: res.tlyric?.lyric || "",
         /* 时间 s */
         // time: 0,
         /* 下标 */

@@ -86,8 +86,10 @@ class HushApp(QObject):
         self.library.track_updated.connect(self.lyrics.invalidate)
         self.clock = PlaybackClock(self)
         # Play history powers 最近播放 and the play counts on cards; it must
-        # cover online tracks too, not just the local library.
-        self.player.track_started.connect(self._record_play)
+        # cover online tracks too, not just the local library.  It is driven by
+        # "one qualified listen per episode", not by every `playing` transition
+        # (pause/resume used to inflate the count).
+        self.player.listening_confirmed.connect(self._record_listening)
         self.player.position_changed.connect(self.clock.set_position)
         self.player.duration_changed.connect(self.clock.set_duration)
         self.player.state_changed.connect(
@@ -520,11 +522,21 @@ class HushApp(QObject):
         if self.runtime_ok:
             QTimer.singleShot(400, self.client.ensure_started)
 
-    def _record_play(self, track) -> None:
+    def _record_listening(self, track) -> None:
+        """Persist one qualified listen and report the DB result back.
+
+        The controller only stops retrying when the transaction really
+        committed; a failed write must not look recorded.
+        """
+        ok = False
         try:
-            self.library.record_play(track)
+            ok = bool(self.library.record_play(track, self.player.queue.context))
         except Exception as exc:  # noqa: BLE001
             log_exception("记录播放历史失败", exc)
+        try:
+            self.player.note_play_recorded(getattr(track, "id", ""), ok)
+        except Exception:  # noqa: BLE001
+            log.debug("report play history result failed", exc_info=True)
 
     def _on_client_failure(self, message: str) -> None:
         log.warning("在线音源不可用：%s", message)

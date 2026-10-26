@@ -186,6 +186,16 @@ class TrackRepository:
             "UPDATE tracks SET lyrics_offset_ms=? WHERE id=?", (int(offset_ms), track_id)
         )
 
+    def update_artwork_path(self, track_id: str, path: str) -> bool:
+        """把已下载到磁盘的封面路径写回数据库，重启后无需再联网。"""
+
+        if not path:
+            return False
+        cursor = self.db.connection().execute(
+            "UPDATE tracks SET artwork_path=? WHERE id=?", (str(path), track_id)
+        )
+        return bool(cursor.rowcount)
+
     def update_path(self, track_id: str, path: str, size: int = 0, modified: float = 0.0) -> None:
         self.db.connection().execute(
             "UPDATE tracks SET path=?, path_key=?, size=?, modified_at=? WHERE id=?",

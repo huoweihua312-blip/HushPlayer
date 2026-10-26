@@ -23,7 +23,7 @@ from typing import Any, Iterable
 
 from PySide6.QtCore import QObject, QTimer, Signal
 
-from ..core.logging_setup import get_logger
+from ..core.logging_setup import get_logger, log_fields
 from ..model.track import Track
 from ..online import models
 from ..online.client import OnlineSourceClient
@@ -58,6 +58,14 @@ QUALITY_CHAIN = ("standard", "higher", "320k")
 CACHE_QUALITY_TIERS = ("standard", "higher", "exhigh", "lossless", "320k", "128k")
 FALLBACK_SEARCH_TIMEOUT_MS = 14000
 FALLBACK_MAX_CANDIDATES = 3
+#: 一次「逻辑收听会话」累计真实播放多久才算有效收听。与音源绑定的 verified
+#: 确认（1.2s）完全独立：绑定关心"能不能放"，历史只关心"听了多久"。
+LISTEN_CONFIRM_MS = 20_000
+#: 短音频（不足 20 秒）自然播完时，按这个比例判定"真的听了"。
+LISTEN_SHORT_RATIO = 0.6
+LISTEN_SHORT_MIN_MS = 3_000
+#: 写历史失败后的有界重试间隔；用尽后只记 warn，不影响播放。
+LISTEN_RECORD_RETRY_MS = (2000, 5000, 15000)
 
 
 def _alias_payload(alias: dict[str, Any]) -> dict[str, Any]:
@@ -156,6 +164,8 @@ class PlayerController(QObject):
     track_changed = Signal(object)      # Track | None
     active_source_changed = Signal(str)  # label of the source that played
     track_started = Signal(object)      # Track, when audio actually begins
+    #: 一次逻辑收听会话达到有效时长后发一次（App 负责写库并回报结果）。
+    listening_confirmed = Signal(object)  # Track
     state_changed = Signal(str)
     position_changed = Signal(int)
     duration_changed = Signal(int)
@@ -227,6 +237,20 @@ class PlayerController(QObject):
         # 绑定服务由 app 注入；None 时退化为 1.3.x 的 alias/回退行为。
         self._binding = binding
         self._attempt: dict | None = None
+
+        # ---------------------------------------------------- 逻辑收听会话
+        # 与 _session（异步播放校验）刻意分开：换音质 / URL 重试都会走 _load，
+        # 但那仍是"同一次收听"；只有换歌、单曲循环新一轮才是新 episode。
+        self._episode = 0
+        self._episode_track_id = ""
+        self._episode_listened_ms = 0
+        self._episode_qualified = False
+        self._episode_recorded = False
+        self._episode_in_flight = False
+        self._episode_retry = 0
+        self._episode_retry_timer = QTimer(self)
+        self._episode_retry_timer.setSingleShot(True)
+        self._episode_retry_timer.timeout.connect(self._retry_listening_record)
 
         self.engine.set_volume(self._volume)
         self.engine.position_changed.connect(self._on_position)
@@ -751,14 +775,15 @@ class PlayerController(QObject):
         position = 0 if reset_position else self._position
         self._failures = 0
         self._fallback_tried.clear()
-        self._load(track, position=position, autoplay=True)
+        self._load(track, position=position, autoplay=True, new_episode=True)
 
     def _on_queue_current_changed(self, track: object) -> None:
         # 队列从外部换了当前曲目（例如恢复会话）；恢复阶段只摆状态，不加载。
         if self._restoring or self._silent_current:
             return
         if isinstance(track, Track) and track is not self._track:
-            self._load(track, position=0, autoplay=self.engine.state == "playing")
+            self._load(track, position=0, autoplay=self.engine.state == "playing",
+                       new_episode=True)
 
     def _on_mode_changed(self) -> None:
         if self.queue.shuffle != self._last_shuffle:
@@ -844,7 +869,7 @@ class PlayerController(QObject):
         self.engine.set_gain(replaygain.scale_for(track.path, mode))
 
     def _load(self, track: Track, *, position: int = 0, autoplay: bool = True,
-              force_resolve: bool = False) -> None:
+              force_resolve: bool = False, new_episode: bool | None = None) -> None:
         if track is None:
             return
         was_playing = self.engine.state == "playing"
@@ -862,6 +887,7 @@ class PlayerController(QObject):
         self._restored_pending = False
         self._invalidate_preloads(keep_track_id=track.id)
         self._track = track
+        self._begin_episode(track, restart=new_episode)
         self._pending_resume = max(0, int(position))
         self._position = self._pending_resume
         self._duration = track.duration_ms or 0
@@ -1187,6 +1213,12 @@ class PlayerController(QObject):
                     proxy.note_playing(cache_key)
                 except Exception:  # noqa: BLE001 - 保护标记失败不影响播放
                     log.debug("note playing cache token failed", exc_info=True)
+                log.info(
+                    "cache hit %s",
+                    log_fields(session=self._session, track=identity.target.id,
+                               source=identity.source_id, remote=remote_id,
+                               quality=tier, path=path),
+                )
                 return path, tier
         return None
 
@@ -1600,6 +1632,117 @@ class PlayerController(QObject):
             return suffix
         return "mp3"
 
+    # ------------------------------------------------- listening episodes
+    def _begin_episode(self, track: Track, *, restart: bool | None) -> None:
+        """Start a logical listening episode unless this load is a retry.
+
+        ``restart=False`` = URL refresh / quality retry of the same song: keep
+        accumulating.  ``restart=True`` = explicit restart (next track, repeat
+        one, user play).  ``None`` = new song starts a new episode, same song
+        does not (pause/resume never calls ``_load`` at all).
+        """
+        if restart is False:
+            return
+        if restart is not True and track.id == self._episode_track_id:
+            return
+        self._episode += 1
+        self._episode_track_id = track.id
+        self._episode_listened_ms = 0
+        self._episode_qualified = False
+        self._episode_recorded = False
+        self._episode_in_flight = False
+        self._episode_retry = 0
+        self._episode_retry_timer.stop()
+        log.debug("listening episode %d starts: track=%s source=%s",
+                  self._episode, track.id, track.source_id or "-")
+
+    @property
+    def listening_episode(self) -> int:
+        return self._episode
+
+    @property
+    def listening_listened_ms(self) -> int:
+        return self._episode_listened_ms
+
+    def _accumulate_listening(self, delta: int) -> None:
+        """Only real forward playback counts; seeks and resume jumps do not."""
+        if delta <= 0:
+            return
+        track = self._track
+        if track is None or track.id != self._episode_track_id:
+            return
+        self._episode_listened_ms += delta
+        if not self._episode_qualified and self._episode_listened_ms >= LISTEN_CONFIRM_MS:
+            self._qualify_listening()
+
+    def _qualify_listening(self) -> None:
+        if self._episode_qualified or self._episode_in_flight:
+            return
+        track = self._track
+        if track is None or track.id != self._episode_track_id:
+            return
+        self._episode_qualified = True
+        self._episode_in_flight = True
+        log.info("listening confirmed: episode=%d track=%s listened=%dms source=%s",
+                 self._episode, track.id, self._episode_listened_ms, track.source_id or "-")
+        self.listening_confirmed.emit(track)
+
+    def note_play_recorded(self, track_id: str, ok: bool) -> None:
+        """App reports the DB result; only ``ok`` stops further writes.
+
+        ``qualified`` and ``recorded`` are separate on purpose: a failed SQLite
+        transaction must not look like a recorded listen.
+        """
+        if not self._episode_qualified:
+            return
+        if track_id and track_id != self._episode_track_id:
+            return
+        self._episode_in_flight = False
+        if ok:
+            self._episode_recorded = True
+            self._episode_retry = 0
+            log.info("play history recorded: episode=%d track=%s",
+                     self._episode, track_id or self._episode_track_id)
+            return
+        log.warning("play history write failed: episode=%d track=%s",
+                    self._episode, track_id or self._episode_track_id)
+        self._schedule_record_retry()
+
+    def _schedule_record_retry(self) -> None:
+        if self._episode_recorded:
+            return
+        if self._episode_retry >= len(LISTEN_RECORD_RETRY_MS):
+            log.error("play history still not recorded: episode=%d track=%s",
+                      self._episode, self._episode_track_id)
+            return
+        delay = LISTEN_RECORD_RETRY_MS[self._episode_retry]
+        self._episode_retry += 1
+        self._episode_retry_timer.start(delay)
+
+    def _retry_listening_record(self) -> None:
+        if self._episode_recorded or not self._episode_qualified or self._episode_in_flight:
+            return
+        track = self._track
+        if track is None or track.id != self._episode_track_id:
+            return
+        self._episode_in_flight = True
+        log.info("retrying play history: episode=%d track=%s", self._episode, track.id)
+        self.listening_confirmed.emit(track)
+
+    def _maybe_confirm_short_track(self) -> None:
+        """短音频（不足 20s）自然播完时也允许记一次，但必须有真实推进。"""
+        if self._episode_qualified or self._episode_recorded:
+            return
+        track = self._track
+        if track is None or track.id != self._episode_track_id:
+            return
+        duration = int(self._duration or track.duration_ms or 0)
+        if duration <= 0 or duration > LISTEN_CONFIRM_MS:
+            return
+        needed = max(LISTEN_SHORT_MIN_MS, int(duration * LISTEN_SHORT_RATIO))
+        if self._episode_listened_ms >= needed:
+            self._qualify_listening()
+
     # ------------------------------------------------------------- signals
     def _on_position(self, value: int) -> None:
         value = int(value)
@@ -1609,9 +1752,11 @@ class PlayerController(QObject):
         self.position_changed.emit(value)
         # 只有「真实向前推进」才算播放成功：seek、恢复上次进度、回绕都会造成
         # 单次巨大跳变，不能拿它当验证依据。
-        if (0 < value - previous <= 1200 and value >= 1200
-                and self.engine.state == "playing"):
-            self._confirm_attempt()
+        playing = self.engine.state == "playing"
+        if 0 < value - previous <= 1200 and playing:
+            self._accumulate_listening(value - previous)
+            if value >= 1200:
+                self._confirm_attempt()
 
     def _on_duration(self, value: int) -> None:
         if value > 0:
@@ -1661,7 +1806,13 @@ class PlayerController(QObject):
     def _on_end_of_media(self) -> None:
         if self.queue.count == 0:
             return
+        # 「播完」不等于「听了」：拖到结尾同样会触发这个事件，所以先按真实
+        # 累计推进决定是否要补记短音频，再进入下一轮/下一首。
+        self._maybe_confirm_short_track()
         if self.queue.repeat == "one":
+            # 新一轮单曲循环是新的逻辑收听会话（同一事件只创建一次）。
+            if self._track is not None:
+                self._begin_episode(self._track, restart=True)
             self.seek(0)
             self.engine.play()
             return

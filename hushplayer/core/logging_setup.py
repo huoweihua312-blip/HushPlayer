@@ -78,6 +78,11 @@ def get_logger(name: str = "") -> logging.Logger:
     return logging.getLogger(f"{_LOGGER_NAME}.{name}" if name else _LOGGER_NAME)
 
 
+def log_fields(**fields: object) -> str:
+    """统一 ``key=value`` 日志字段，缺省字段直接省略（不打印 None）。"""
+    return " ".join(f"{key}={value}" for key, value in fields.items() if value not in (None, ""))
+
+
 def log_exception(message: str, exc: BaseException | None = None) -> str:
     logger = get_logger("crash")
     detail = "".join(traceback.format_exception(exc)) if exc is not None else traceback.format_exc()

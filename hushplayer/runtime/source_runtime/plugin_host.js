@@ -668,7 +668,11 @@ async function getLyric(sourceId, musicItem, options = {}) {
         `音源 ${sourceId} 歌词请求`
     );
     const rawLrc = extractLyricText(result);
-    const translation = result?.translation || result?.translatedLrc || result?.tlyric || "";
+    // 翻译字段可能是字符串，也可能是 {lyric: "..."} 之类的对象；直接 String()
+    // 会得到 "[object Object]"，所以统一走递归提取。
+    const translation = extractLyricText(
+        result?.translation || result?.translatedLrc || result?.tlyric || ""
+    );
     return {
         available: Boolean(String(rawLrc).trim()),
         rawLrc: String(rawLrc || ""),

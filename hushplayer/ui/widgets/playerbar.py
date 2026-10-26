@@ -163,6 +163,7 @@ class PlayerBar(QWidget):
     queue_clicked = Signal()
     immersive_clicked = Signal()
     track_info_clicked = Signal()
+    cover_clicked = Signal()
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -189,7 +190,7 @@ class PlayerBar(QWidget):
         # ---------------------------------------------------------- left
         self.cover = CoverWidget(54, radius=8)
         self.cover.setCursor(Qt.PointingHandCursor)
-        self.cover.clicked.connect(self.track_info_clicked)
+        self.cover.clicked.connect(self.cover_clicked)
         left.addWidget(self.cover, 0, Qt.AlignVCenter)
 
         self.info = TrackInfo()
@@ -320,6 +321,7 @@ class PlayerBar(QWidget):
             return
         self._track = fresh
         self.cover.set_track(fresh)
+        self.cover.refresh()
         self.info.set_track(fresh)
 
     def _on_state(self, state: str) -> None:

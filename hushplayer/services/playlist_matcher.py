@@ -102,6 +102,11 @@ def _adjusted_score(expected: Track, candidate: Track) -> int:
     return max(0, score)
 
 
+def _duration_bucket(duration_ms: int) -> int:
+    """5 秒一档；0 表示导入文件没给时长，单独一档。"""
+    return int(duration_ms or 0) // 5000
+
+
 def _dedupe_candidates(items: list[MatchCandidate]) -> list[MatchCandidate]:
     """Drop duplicates of the same remote song, keeping the best score."""
     seen: set[tuple[str, str]] = set()
@@ -134,6 +139,9 @@ class MatchRow:
     track: Track | None = None
     score: int = 0
     candidates: list[MatchCandidate] = field(default_factory=list)
+    #: 在 ``rows`` 中的位置。重复行的 dataclass 相等会让 ``list.index()``
+    #: 返回第一个相同行，缓存/排队就会把两首不同的歌当成同一条。
+    index: int = -1
     note: str = ""
     verified: bool | None = None
     skipped: bool = False
@@ -331,7 +339,8 @@ class PlaylistMatcher(QObject):
         self._client = client
         self._library = library
         self.rows: list[MatchRow] = []
-        self._cache: dict[tuple[str, str], MatchRow] = {}
+        #: 只缓存搜索结果（候选），不缓存「最终选了哪首」；命中后按当前行重新评分。
+        self._cache: dict[tuple, list[MatchCandidate]] = {}
         self._queue: list[int] = []
         self._in_flight: set[int] = set()
         self._index = 0
@@ -375,7 +384,10 @@ class PlaylistMatcher(QObject):
         auto_adopt: bool = True,
     ) -> None:
         # Mutate in place: the dialog's table model keeps this list by reference.
-        self.rows[:] = [MatchRow(entry=entry, status="pending") for entry in entries]
+        self.rows[:] = [
+            MatchRow(entry=entry, status="pending", index=position)
+            for position, entry in enumerate(entries)
+        ]
         self._queue = []
         self._in_flight.clear()
         self._cache.clear()
@@ -404,7 +416,7 @@ class PlaylistMatcher(QObject):
             if index < self._index:
                 continue
             self._index = index + 1
-            self._match_local(row)
+            self._match_local(row, index)
             if index % 25 == 0:
                 self.progress.emit(self.done, total)
                 QTimer.singleShot(0, lambda i=index + 1: self._continue_local(i))
@@ -420,7 +432,7 @@ class PlaylistMatcher(QObject):
         for index in range(start, total):
             row = self.rows[index]
             self._index = index + 1
-            self._match_local(row)
+            self._match_local(row, index)
             if index % 25 == 0:
                 self.progress.emit(self.done, total)
                 QTimer.singleShot(0, lambda i=index + 1: self._continue_local(i))
@@ -429,7 +441,10 @@ class PlaylistMatcher(QObject):
         self.progress.emit(self.done, total)
         self._start_online()
 
-    def _match_local(self, row: MatchRow) -> None:
+    def _match_local(self, row: MatchRow, index: int | None = None) -> None:
+        if index is None:
+            index = row.index if row.index >= 0 else self.rows.index(row)
+        row.index = index
         entry = row.entry
         if not entry.title:
             row.status = "unmatched"
@@ -466,7 +481,7 @@ class PlaylistMatcher(QObject):
                 # 避免本地模糊命中压过在线精确命中。
                 row.status = "pending"
                 row.note = ""
-                self._queue.append(self.rows.index(row))
+                self._queue.append(index)
                 return
             if self._auto:
                 # 自动模式：本地已有可用候选就直接采用，不再要求逐条确认。
@@ -483,7 +498,7 @@ class PlaylistMatcher(QObject):
             self._emit(row)
             return
         if self._online and self._sources:
-            self._queue.append(self.rows.index(row))
+            self._queue.append(index)
             return
         row.status = "unmatched"
         row.note = "本地库没有这首歌"
@@ -517,16 +532,9 @@ class PlaylistMatcher(QObject):
         while self._queue and len(self._in_flight) < _MAX_ROWS_IN_FLIGHT:
             index = self._queue.pop(0)
             row = self.rows[index]
-            key = (normalize_text(row.entry.title), normalize_text(row.entry.artist))
-            cached = self._cache.get(key)
-            if cached is not None:
-                row.status = cached.status
-                row.track = cached.track
-                row.score = cached.score
-                row.candidates = list(cached.candidates)
-                row.note = cached.note
-                row.verified = cached.verified
-                self._emit(row)
+            cached = self._cache.get(self._cache_key(row.entry))
+            if cached:
+                self._apply_cached_candidates(index, row, cached)
                 continue
             self._in_flight.add(index)
             self._search_row(index, row)
@@ -864,24 +872,72 @@ class PlaylistMatcher(QObject):
         self.progress.emit(self.done, len(self.rows))
         QTimer.singleShot(0, self._pump_variants)
 
-    def _remember(self, row: MatchRow) -> None:
-        key = (normalize_text(row.entry.title), normalize_text(row.entry.artist))
-        self._cache[key] = MatchRow(
-            entry=row.entry,
-            status=row.status,
-            track=row.track,
-            score=row.score,
-            candidates=list(row.candidates),
-            note=row.note,
-            verified=row.verified,
-            skipped=row.skipped,
+    def _cache_key(self, entry) -> tuple:  # noqa: ANN001 - PlaylistEntry
+        """同一份导入里，只有「同一首歌的同一版本」才允许复用候选。
+
+        只按标题+歌手做键会把「晴天」和「晴天 (Live)」、同名不同专辑、
+        时长差很多的现场版混在一起；旧实现还会连 status/track 一起复制，
+        等于把上一行的选源决定直接搬给另一首不同的歌。
+        """
+        return (
+            normalize_text(entry.title),
+            normalize_text(entry.artist),
+            normalize_text(entry.album or ""),
+            "|".join(sorted(_version_tokens(f"{entry.title} {entry.album or ''}"))),
+            _duration_bucket(int(entry.duration_ms or 0)),
+            normalize_text(entry.origin_platform or ""),
+            normalize_text(entry.origin_remote_id or ""),
         )
 
+    def _apply_cached_candidates(self, index: int, row: MatchRow,
+                                 candidates: list[MatchCandidate]) -> None:
+        """命中搜索缓存后，用当前行重新评分；绝不复制上一行的结论。"""
+        expected = _wanted_track(row.entry)
+        ranked = sorted(
+            (
+                MatchCandidate(track=item.track, score=_adjusted_score(expected, item.track))
+                for item in candidates
+            ),
+            key=lambda item: item.score,
+            reverse=True,
+        )
+        ranked = [item for item in ranked if item.score >= CANDIDATE_MIN_SCORE]
+        row.candidates = _dedupe_candidates(ranked)[:_MAX_CANDIDATES]
+        if not ranked:
+            row.status = "unmatched"
+            row.note = "在线音源也没有找到"
+            self._emit(row)
+            return
+        auto_min, auto_margin = self._thresholds()
+        row.score = ranked[0].score
+        if ranked[0].score >= auto_min and (
+            len(ranked) == 1 or ranked[0].score - ranked[1].score >= auto_margin
+        ):
+            row.track = ranked[0].track
+            row.status = "online"
+            row.note = ""
+            # 候选复用不等于可播放：仍然要真正 resolve 一次才标记 verified。
+            self._verify_row(index, row)
+            return
+        row.status = "review"
+        row.note = "在线有相近结果"
+        self._emit(row)
+
+    def _remember(self, row: MatchRow) -> None:
+        # 只记住「搜索返回了什么候选」；本地/未匹配结论依赖当前曲库，不复用。
+        if not row.candidates or row.status not in ("online", "review", "unverified"):
+            return
+        self._cache[self._cache_key(row.entry)] = list(row.candidates)
+
     def _emit(self, row: MatchRow) -> None:
-        try:
-            self.row_changed.emit(self.rows.index(row))
-        except ValueError:
-            pass
+        position = row.index if row.index >= 0 else -1
+        if position < 0:
+            try:
+                position = self.rows.index(row)
+                row.index = position
+            except ValueError:
+                return
+        self.row_changed.emit(position)
 
     def _finished(self) -> None:
         if self._cancelled:

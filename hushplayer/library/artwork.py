@@ -209,6 +209,11 @@ class CoverProvider(QObject):
     def invalidate(self, track_id: str) -> None:
         self._resolved.pop(track_id, None)
 
+    def resolved_path(self, track_id: str) -> str:
+        """已经下载到磁盘的封面路径（没有则空串）。"""
+
+        return self._resolved.get(track_id, "")
+
     def clear_memory(self) -> None:
         self._memory.clear()
 

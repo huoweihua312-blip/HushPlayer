@@ -23,6 +23,7 @@ from PySide6.QtCore import QObject, Signal
 
 from hushplayer.audio.controller import PlayerController
 from hushplayer.audio.engine import PlaybackEngine
+from hushplayer.online import health
 from hushplayer.online.models import SourceInfo, track_from_item
 from hushplayer.online.proxy import AudioProxy, token_for, valid_cache_file
 
@@ -358,3 +359,58 @@ def test_real_download_is_stored_with_identity_and_reused(qapp, proxy) -> None:
     finally:
         server.shutdown()
         server.server_close()
+
+
+def test_cache_hit_does_not_touch_source_health(qapp, proxy) -> None:
+    """断网/插件故障时从缓存播放，不能把源记成失败，也不能伪造成功。"""
+    health.reset()
+    track = track_from_item(ITEM, source=WY)
+    _write_cache(proxy, f"{WY.id}:{track.remote_id}:standard")
+    controller, client, loads, _engine = _controller(qapp, proxy)
+    _play(controller, track)
+
+    assert loads and loads[0].endswith(".mp3")
+    assert client.resolve_calls == []
+    assert health.recently_failed(WY.id) is False
+    assert health.looks_broken(WY.id) is False
+
+
+def test_cached_playback_counts_history_once_across_pause_resume(qapp, proxy) -> None:
+    """缓存播放同样走逻辑收听会话：暂停继续、URL 刷新都不能重复计数。"""
+    track = track_from_item(ITEM, source=WY)
+    _write_cache(proxy, f"{WY.id}:{track.remote_id}:standard")
+    controller, _client, loads, engine = _controller(qapp, proxy)
+
+    records: list[str] = []
+
+    def record(track_obj) -> None:  # noqa: ANN001
+        records.append(track_obj.id)
+        controller.note_play_recorded(track_obj.id, True)
+
+    controller.listening_confirmed.connect(record)
+    _play(controller, track)
+    engine._state = "playing"
+    controller._on_state("playing")
+
+    position = 0
+    for _ in range(12):
+        position += 1000
+        controller._on_position(position)
+    controller._on_state("paused")
+    for _ in range(3):
+        controller._on_state("playing")
+        controller._on_state("paused")
+    for _ in range(12):
+        position += 1000
+        controller._on_position(position)
+
+    assert records == [track.id]
+    assert len(loads) == 1
+
+    # 断网重试（同一次会话）：_load 不长出第二个会话，也不会再记一次。
+    controller._load(controller.current_track, position=position)
+    for _ in range(5):
+        position += 1000
+        controller._on_position(position)
+    assert records == [track.id]
+    assert controller.listening_episode >= 1

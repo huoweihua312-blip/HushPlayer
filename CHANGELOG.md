@@ -1,5 +1,40 @@
 # 更新日志
 
+## 1.3.21 — 2026-10-26
+
+### 封面、翻译与歌词搜索
+
+- **播放栏封面不再消失、重启也不用重新下载**：`CoverProvider` 下载完成后通过 `covers.ready` 通知 `LibraryService._on_cover_ready`，把内容寻址后的封面路径写回 `tracks.artwork_path`；`CoverWidget` 懒连接 `covers.ready`，异步封面就绪即淡入，换源/绑定确认后 `refresh()` 重新取图。此前下载结果只存在内存，`covers.invalidate()` 一清就永久空白，重启后还得重新联网。
+- **点播放栏封面改为直达歌词页**：新增 `PlayerBar.cover_clicked`，`MainWindow` 连到 `navigate("lyrics")`。专辑页只聚合本地曲目，点在线歌曲封面跳过去常常只剩本地歌，容易被当成跳错。
+- **外文歌曲翻译真正可用**：音源插件普遍只返回 `rawLrc`、`tlyric` 多为对象或干脆没有，原来只根据 `document.has_translation` 决定按钮可用，导致按钮永远是灰的。新增 `hushplayer/lyrics/translate.py` 机器翻译兜底（Edge → Google → MyMemory，按行缓存、批量 40、磁盘缓存 `cache/lyrics/translations.json`），歌词页与沉浸式播放器的翻译按钮只要「有歌词」就可点，点击后异步翻译、逐行回填并勾选翻译显示。
+- **插件翻译提取修正**：`plugin_host.js` 的 `translation` 改用 `extractLyricText(...)`，避免 `tlyric` 是对象时被 `String()` 成 `[object Object]`；内置网易云插件同时返回 `res.tlyric?.lyric`。
+- **歌词搜索支持「歌名 + 歌手」**：`_LyricsSearchJob` 不再只用 LRCLIB 的 `q` 模糊查询，改为依次尝试 `track_name + artist_name + album_name`、`track_name`、`q` 三组参数，结果按「歌名匹配、歌手匹配、时长接近、是否带时间轴」排序。此前 `q="歌名 歌手"` 在 LRCLIB 几乎不命中，只有纯歌名搜得到。
+- **歌词搜索结果看得清选中项**：对话框列表改为自绘行（选中底色 + 左侧强调条 + 右侧「已选中」胶囊 + 歌名/歌手·专辑·时长/匹配理由三行），预览区顶部显示「已选中：标题 · 歌手（逐行时间轴/纯文本）」，长文本统一 `elidedText` 截断；列表行宽用 `QSize(0, ROW_HEIGHT)` 跟随视口，不再被裁切。
+
+### 测试
+
+- 新增 `tests/test_lyrics_translate.py`（6 项）、`tests/test_cover_persist.py`（3 项），覆盖翻译缓存/回退、结构化搜索参数顺序与排序、封面路径落库与 `covers.ready` 刷新、封面点击不串到文字信息区。
+- 全量 `pytest`：**377 passed**（基线 368）。
+- 真实 GUI 探针 `tools/probe_r95_lyrics_search.py` → `artifacts/qa/r95/lyrics_search.png`（760×520，选中态与匹配理由清晰可辨）。
+## 1.3.20 — 2026-10-26
+
+### 稳定性收口（P0/P1）
+
+- **托盘最小化恢复**：`_hide_to_tray()` 不再调用不存在的 `Settings.save()`；改为 `flush()` 并吞掉写盘异常。此前 `AttributeError` 发生在 `hide()` 之前，用户第一次「最小化到托盘」会直接失效。
+- **设置写盘不再假成功**：`Settings._write()` 返回是否成功，`mkdir` 纳入 `try`；`flush()` 只有写成功才清 `_dirty`，失败保留内存值并按 1s/5s/30s 有界退避重试，退出时再试一次；`.bak` 只在覆盖成功之后刷新，写失败不会破坏上一次备份。
+- **播放历史只记一次**：新增逻辑收听 Episode（与播放会话 `_session` 分离）。统计口径为**累计有效播放时间** 20 秒（暂停/缓冲/URL 重试不清零、seek 跳变不计入）；不足 20 秒的短歌曲自然播完可按真实推进计入；单曲循环在 `end_of_media` 创建新 Episode，`_load()` 重试/换音质不新建。拖到结尾不算完整收听。
+- **历史写入可重试、不重复**：`library.record_play()` 返回是否真正提交；控制器区分 `qualified` 与 `recorded`，写库失败保留待记录状态并做 2s/5s/15s 有界重试，`recorded=True` 后不再写；迟到回执按 track_id 校验，不会写到切换后的新歌上。
+- **会话写盘可靠**：`PlaybackKeeper._write()` 返回成败，失败保留 `_dirty` 且不更新 `_last_saved_position`，按 1.5s/5s/15s 重试，退出路径再试一次并留日志；恢复失败仍保留上一次有效会话文件。
+- **歌单匹配缓存拆分身份**：搜索缓存只存候选列表，不再复制 `status/track/verified`；键扩展为标题+歌手+专辑+版本特征+时长分桶（5 秒）+ `origin_platform/origin_remote_id`，命中后按当前行重新评分并重新 resolve 验证。顺带修掉重复行因 `dataclass` 相等导致 `rows.index()` 总返回第一行、第二次搜索被吞掉的缺陷。
+- **缓存回归加固**：缓存命中不触碰音源健康度；缓存播放同样走收听 Episode，暂停继续/URL 刷新不重复记历史；插件禁用、截断/损坏索引、换源、清理保护均有真实临时文件与本地 HTTP 集成测试。
+- **诊断包脱敏与字段**：`summary.json` 新增 `session`（版本/进度/current_id/队列长度/随机重复）与 `audio_cache`（文件数/字节/完整/损坏）；日志正文中的 `Cookie/Authorization/token/password` 及 URL 查询参数在打包时脱敏；新增 `log_fields()` 统一 `key=value` 日志字段。
+
+### 测试
+
+- 新增 `tests/test_tray.py`、`tests/test_playback_history.py`、`tests/test_match_cache.py`；`tests/test_settings.py`、`tests/test_session_restore.py`、`tests/test_diagnostics.py`、`tests/test_offline_cache.py` 增加失败写盘、重试、缓存、脱敏等用例。
+- 全量 `pytest`：**368 passed**（基线 340，新增 28 项）。schema 保持 v2，未新增表/列；旧 `settings.json`、`play_queue.json`、缓存与历史不被清空或回改。
+
+
 ## 1.3.19 — 2026-10-26
 
 ### 会话持久化与离线缓存专项修复

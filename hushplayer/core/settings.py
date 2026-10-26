@@ -20,6 +20,8 @@ from .logging_setup import get_logger
 
 log = get_logger("settings")
 _MISSING = object()
+#: 写盘失败的退避重试间隔（毫秒）；用尽后只在退出时再试一次。
+_RETRY_DELAY_MS = (1000, 5000, 30000)
 
 DEFAULTS: dict[str, Any] = {
     "schema": 1,
@@ -152,6 +154,10 @@ class Settings(QObject):
         self._save_timer.setInterval(350)
         self._save_timer.timeout.connect(self.flush)
         self._dirty = False
+        self._retry_timer = QTimer(self)
+        self._retry_timer.setSingleShot(True)
+        self._retry_timer.timeout.connect(self.flush)
+        self._retry_index = 0
 
     # ------------------------------------------------------------------ 读写
     def load(self) -> None:
@@ -180,25 +186,61 @@ class Settings(QObject):
                 self._data["appearance"]["theme_animation_mode"] = "reveal" if legacy else "off"
         self._data.get("appearance", {}).pop("theme_animation", None)
 
-    def flush(self) -> None:
-        if not self._dirty:
-            return
-        self._write()
-        self._dirty = False
+    def flush(self) -> bool:
+        """Persist pending settings; returns False when the disk write failed.
 
-    def _write(self) -> None:
-        self._path.parent.mkdir(parents=True, exist_ok=True)
+        ``_dirty`` is only cleared after the atomic replace actually succeeded:
+        memory already holding a newer value than the file on disk is exactly
+        the state we must not mistake for "saved".  A failed write keeps the
+        latest values in memory and schedules a bounded retry.
+        """
+        if not self._dirty:
+            return True
+        if self._write():
+            self._dirty = False
+            self._retry_index = 0
+            self._retry_timer.stop()
+            return True
+        self._schedule_retry()
+        return False
+
+    def _schedule_retry(self) -> None:
+        """Limited backoff: a permanently unwritable disk must not spin."""
+        if self._retry_index >= len(_RETRY_DELAY_MS):
+            log.error("设置仍未能写入磁盘（已重试 %d 次），将在退出时再试一次", self._retry_index)
+            return
+        delay = _RETRY_DELAY_MS[self._retry_index]
+        self._retry_index += 1
+        self._retry_timer.start(delay)
+
+    def _write(self) -> bool:
         tmp = self._path.with_suffix(".tmp")
+        previous: bytes | None = None
         try:
+            # mkdir 也属于写盘链路：目录不可创建时必须走同一个失败分支，
+            # 不能把 OSError 抛给调用方（首启/受限目录会直接崩溃）。
+            self._path.parent.mkdir(parents=True, exist_ok=True)
             tmp.write_text(json.dumps(self._data, ensure_ascii=False, indent=2), encoding="utf-8")
             if self._path.is_file():
                 try:
-                    shutil.copy2(self._path, self._path.with_suffix(".bak"))
+                    previous = self._path.read_bytes()
                 except OSError:
-                    pass
+                    previous = None
             os.replace(tmp, self._path)
         except OSError as exc:
-            log.error("写入设置失败: %s", exc)
+            log.error("写入设置失败（%s），保留内存中的最新设置: %s", self._path, exc)
+            try:
+                tmp.unlink(missing_ok=True)
+            except OSError:
+                pass
+            return False
+        if previous is not None:
+            # 备份只在覆盖成功之后刷新：写盘失败时旧的 .bak 必须原样保留。
+            try:
+                self._path.with_suffix(".bak").write_bytes(previous)
+            except OSError:
+                pass
+        return True
 
     # ------------------------------------------------------------------ 访问
     def get(self, key: str, default: Any = _MISSING) -> Any:

@@ -128,6 +128,8 @@ class MainWindow(FramelessWindow):
         self.playerbar.queue_clicked.connect(self.toggle_queue)
         self.playerbar.immersive_clicked.connect(self.open_immersive)
         self.playerbar.track_info_clicked.connect(self._go_to_current_album)
+        # 封面点击直接进歌词页：专辑页里在线歌曲常常只有本地曲目，会让人以为点错了。
+        self.playerbar.cover_clicked.connect(lambda: self.navigate("lyrics"))
         content_layout.addWidget(self.playerbar)
 
         self.queue_panel = QueuePanel(self.content)
@@ -808,7 +810,12 @@ class MainWindow(FramelessWindow):
                 "你可以把它拖到常显区域，或用「设置 → 常规 → 关闭窗口时」改成直接退出。",
             )
             ctx().settings.set("general.tray_hint_shown", True)
-            ctx().settings.save()
+            # Settings 没有 save()；set() 已排入 350ms 防抖，这里主动 flush 一次
+            # 让它立刻落盘，但提示状态的写入失败绝不能阻断最小化。
+            try:
+                ctx().settings.flush()
+            except Exception as exc:  # noqa: BLE001 - 磁盘/权限异常
+                log_exception("保存托盘提示状态失败", exc)
         self.hide()
         if self._tray is not None:
             self._tray.showMessage(

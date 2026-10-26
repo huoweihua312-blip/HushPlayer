@@ -37,6 +37,7 @@ class CoverWidget(QWidget):
         self._animation.setDuration(220)
         self._animation.setEasingCurve(QEasingCurve.OutCubic)
         self._animation.valueChanged.connect(self._on_fade)
+        self._ready_connected = False
         self.setFixedSize(size, size)
         self.setCursor(Qt.PointingHandCursor if parent is not None else Qt.ArrowCursor)
 
@@ -52,6 +53,8 @@ class CoverWidget(QWidget):
 
     def set_track(self, item: Track | Album | Artist | Playlist | None, *, animate: bool = True) -> None:
         if item is self._track:
+            # 同一个对象也可能刚拿到封面（下载完成 / 换源后路径写回），补一次刷新。
+            self._refresh()
             return
         self._track = item
         if animate and not theme().reduce_motion:
@@ -92,6 +95,9 @@ class CoverWidget(QWidget):
             from ..context import ctx
 
             provider = ctx().covers
+            if not self._ready_connected:
+                provider.ready.connect(self._on_cover_ready)
+                self._ready_connected = True
             self._pixmap = provider.pixmap(self._track, self._size)
         except Exception:
             self._pixmap = None
@@ -101,6 +107,12 @@ class CoverWidget(QWidget):
             self._animation.setEndValue(1.0)
             self._animation.start()
         self.update()
+
+    def _on_cover_ready(self, track_id: str) -> None:
+        track = self._track
+        if track is None or getattr(track, "id", "") != str(track_id):
+            return
+        self._refresh(animate=True)
 
     def _on_fade(self, value) -> None:
         self._fade = float(value)

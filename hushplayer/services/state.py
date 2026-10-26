@@ -29,6 +29,8 @@ SAVE_DEBOUNCE_MS = 1200
 SEEK_SAVE_DELAY_MS = 800
 #: 位置跳变超过这个值就认为是 seek，而不是正常的播放推进。
 SEEK_JUMP_MS = 1500
+#: 会话写盘失败的重试退避（毫秒）。
+SAVE_RETRY_MS = (1500, 5000, 15000)
 
 
 def queue_file() -> str:
@@ -58,6 +60,8 @@ class PlaybackKeeper(QObject):
         #: flush() 之后进入「已收尾」状态：退出时引擎 stop() 会把位置清零，
         #: 那之后的保存只会把用户真实进度覆盖成 0。
         self._closed = False
+        #: 写盘失败后的重试计数；成功一次就清零。
+        self._retry_count = 0
 
         self._save_timer = QTimer(self)
         self._save_timer.setSingleShot(True)
@@ -135,20 +139,43 @@ class PlaybackKeeper(QObject):
         if not self._save_timer.isActive():
             self._save_timer.start()
 
-    def save_now(self) -> None:
+    def save_now(self) -> bool:
+        """Write the session file; returns False when the disk write failed.
+
+        A failed write keeps ``_dirty`` set and does **not** update
+        ``_last_saved_position``: the next attempt must still know how much of
+        the session is unsaved, otherwise a transient disk error silently loses
+        the user's progress.
+        """
         if self._closed:
-            return
+            return False
         self._save_timer.stop()
         payload = self.payload()
         if not payload:
             if self._suppress_clear:
-                return
+                return True
             self._clear()
-            return
+            self._dirty = False
+            return True
         self._suppress_clear = False
-        self._write(payload)
+        # 正在尝试写的这份数据就是「待保存」状态；写失败时它必须保持脏标记。
+        self._dirty = True
+        if not self._write(payload):
+            self._schedule_retry()
+            return False
+        self._retry_count = 0
         self._dirty = False
         self._last_saved_position = payload.get("position_ms", -1)
+        return True
+
+    def _schedule_retry(self) -> None:
+        if self._retry_count >= len(SAVE_RETRY_MS):
+            log.error("无法写入播放会话（已重试 %d 次），继续使用内存中的状态", self._retry_count)
+            return
+        delay = SAVE_RETRY_MS[self._retry_count]
+        self._retry_count += 1
+        log.warning("写入播放会话失败，%d ms 后重试（第 %d 次）", delay, self._retry_count)
+        self._save_timer.start(delay)
 
     def payload(self) -> dict[str, Any]:
         queue = self._controller.queue
@@ -176,7 +203,12 @@ class PlaybackKeeper(QObject):
                 self._clear()
             return
         self._suppress_clear = False
-        self._write(payload)
+        # 退出路径：写失败再试一次（权限突然恢复、目录刚被释放都很常见），
+        # 仍失败就明确留日志，绝不假装保存成功。
+        if not self._write(payload):
+            if not self._write(payload):
+                log.error("退出时仍无法写入播放会话，本次进度可能丢失")
+                return
         self._last_saved_position = payload.get("position_ms", -1)
 
     # ------------------------------------------------------------- internals
@@ -226,16 +258,22 @@ class PlaybackKeeper(QObject):
             return {}
         return payload
 
-    def _write(self, payload: dict[str, Any]) -> None:
+    def _write(self, payload: dict[str, Any]) -> bool:
         path = queue_file()
+        tmp = path + ".tmp"
         try:
             os.makedirs(os.path.dirname(path), exist_ok=True)
-            tmp = path + ".tmp"
             with open(tmp, "w", encoding="utf-8") as handle:
                 json.dump(payload, handle, ensure_ascii=False)
             os.replace(tmp, path)
+            return True
         except OSError:
             log.exception("cannot save play queue")
+            try:
+                os.remove(tmp)
+            except OSError:
+                pass
+            return False
 
     def _clear(self) -> None:
         try:

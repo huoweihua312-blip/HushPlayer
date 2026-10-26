@@ -586,6 +586,15 @@ class _ControlsBar(QWidget):
 
     def _on_translate(self, checked: bool) -> None:
         ctx().settings.set("lyrics.translate", bool(checked))
+        if not checked:
+            return
+        document = self._document
+        if document is None or document.is_empty() or document.has_translation:
+            return
+        if self._track is None:
+            return
+        self.controls.translate.setEnabled(False)
+        ctx().lyrics.translate(self._track, document)
 
     def _on_desktop(self) -> None:
         window = getattr(ctx(), "desktop_lyrics", None)
@@ -703,6 +712,9 @@ class ImmersiveWindow(QWidget):
         player.duration_changed.connect(lambda _d: self._update_track_meta())
         player.state_changed.connect(self._on_state)
         ctx().lyrics.resolved.connect(self._on_lyrics_resolved)
+        ctx().lyrics.translation_started.connect(self._on_translation_started)
+        ctx().lyrics.translation_ready.connect(self._on_translation_ready)
+        ctx().lyrics.translation_failed.connect(self._on_translation_failed)
         ctx().settings.changed.connect(self._on_setting)
 
         self._build_shortcuts()
@@ -957,7 +969,7 @@ class ImmersiveWindow(QWidget):
             self.stage.set_translation(translate)
             self.lyrics_stage.set_translation(translate)
             self.controls.translate.setChecked(translate)
-            self.controls.translate.setEnabled(result.document.has_translation)
+            self.controls.translate.setEnabled(True)
             return
         self.stage.set_document(None)
         self.lyrics_stage.set_document(None, "")
@@ -968,6 +980,26 @@ class ImmersiveWindow(QWidget):
         else:
             self.lyrics_stage.lyrics.set_empty_text("暂无歌词", result.message or "")
         self.controls.translate.setEnabled(False)
+
+    def _on_translation_started(self, track_id: str) -> None:
+        if self._track is None or str(track_id) != self._track.id:
+            return
+        self.controls.translate.setEnabled(False)
+
+    def _on_translation_ready(self, result: LyricsResult) -> None:
+        if self._track is None or result.track_id != self._track.id:
+            return
+        self._apply_lyrics(result)
+        self.controls.translate.setEnabled(True)
+        self.controls.translate.setChecked(True)
+
+    def _on_translation_failed(self, message: str) -> None:
+        self.controls.translate.setChecked(False)
+        self.controls.translate.setEnabled(self._document is not None)
+        window = self.window()
+        toast = getattr(window, "toast", None)
+        if callable(toast):
+            toast(message or "翻译失败", "warning")
 
     def _on_position(self, position: int) -> None:
         self.stage.set_position(position)

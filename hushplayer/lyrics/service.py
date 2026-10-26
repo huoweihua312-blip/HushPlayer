@@ -31,6 +31,7 @@ from PySide6.QtCore import QObject, QRunnable, QThreadPool, Signal
 from ..core import paths
 from ..core.logging_setup import get_logger
 from ..lyrics import parser as lyric_parser
+from ..lyrics import translate as lyric_translate
 from ..model.lyrics import EMPTY_DOCUMENT, LyricDocument
 from ..model.track import Track
 from ..online.client import OnlineSourceClient
@@ -104,6 +105,19 @@ def _write_cache(track_id: str, text: str, *, provider: str, translation: str = 
         os.replace(tmp, target)
     except OSError:
         log.debug("cannot write lyrics cache for %s", track_id)
+
+
+def _translation_lrc(document: LyricDocument) -> str:
+    """把已翻译的行重新拼成 LRC，写入缓存后下次启动仍带翻译。"""
+
+    rows: list[str] = []
+    for line in document.lines:
+        text = line.translation.strip()
+        if not text:
+            continue
+        total = max(0, int(line.start_ms))
+        rows.append(f"[{total // 60000:02d}:{total % 60000 / 1000:05.2f}]{text}")
+    return "\n".join(rows)
 
 
 def _read_cache(track_id: str) -> tuple[str, str, str] | None:
@@ -304,28 +318,88 @@ class LyricsCandidate:
         return bool(self.synced.strip())
 
 
+def _rank_candidates(
+    candidates: list["LyricsCandidate"], title: str, artist: str, duration_ms: int
+) -> list["LyricsCandidate"]:
+    """按「歌名相似 → 歌手相似 → 时长接近」排序，名字完全命中的排最前。"""
+
+    from ..online.matching import normalize_text  # 延迟导入，避免循环依赖
+
+    want_title = normalize_text(title)
+    want_artist = normalize_text(artist)
+
+    def score(item: LyricsCandidate) -> tuple[int, int, int]:
+        title_text = normalize_text(item.title)
+        artist_text = normalize_text(item.artist)
+        title_hit = 2 if title_text and title_text == want_title else (
+            1 if want_title and want_title in title_text else 0
+        )
+        artist_hit = 2 if artist_text and artist_text == want_artist else (
+            1 if want_artist and want_artist in artist_text else 0
+        )
+        if duration_ms and item.duration_ms:
+            delta = abs(item.duration_ms - duration_ms)
+            near = 2 if delta <= 2500 else (1 if delta <= 8000 else 0)
+        else:
+            near = 0
+        return (title_hit, artist_hit, near)
+
+    return sorted(candidates, key=lambda item: (score(item), item.has_timing), reverse=True)
+
+
 class _LyricsSearchJob(QRunnable):
-    def __init__(self, service: "LyricsService", query: str, token: int) -> None:
+    """先按结构化参数查 LRCLIB，再退回自由文本，避免「歌名 歌手」搜不到。"""
+
+    def __init__(
+        self,
+        service: "LyricsService",
+        query: str,
+        token: int,
+        *,
+        title: str = "",
+        artist: str = "",
+        album: str = "",
+        duration_ms: int = 0,
+    ) -> None:
         super().__init__()
         self._service = service
         self._query = query
         self._token = token
+        self._title = title.strip()
+        self._artist = artist.strip()
+        self._album = album.strip()
+        self._duration_ms = int(duration_ms or 0)
+
+    def _params_sets(self) -> list[dict[str, str]]:
+        sets: list[dict[str, str]] = []
+        if self._title:
+            structured = {"track_name": self._title}
+            if self._artist:
+                structured["artist_name"] = self._artist
+            if self._album:
+                structured["album_name"] = self._album
+            sets.append(structured)
+            if self._artist:
+                sets.append({"track_name": self._title})
+        if self._query:
+            sets.append({"q": self._query})
+        return sets
 
     def run(self) -> None:  # pragma: no cover - network
-        candidates: list[LyricsCandidate] = []
+        collected: dict[int, LyricsCandidate] = {}
         error = ""
         try:
-            response = requests.get(
-                LRCLIB_SEARCH,
-                params={"q": self._query},
-                headers={"User-Agent": LRCLIB_UA, "Accept": "application/json"},
-                timeout=(6, 12),
-            )
-            response.raise_for_status()
-            for entry in response.json() or []:
-                try:
-                    candidates.append(
-                        LyricsCandidate(
+            for params in self._params_sets():
+                response = requests.get(
+                    LRCLIB_SEARCH,
+                    params=params,
+                    headers={"User-Agent": LRCLIB_UA, "Accept": "application/json"},
+                    timeout=(6, 12),
+                )
+                response.raise_for_status()
+                for entry in response.json() or []:
+                    try:
+                        candidate = LyricsCandidate(
                             id=int(entry.get("id") or 0),
                             title=str(entry.get("trackName") or entry.get("name") or ""),
                             artist=str(entry.get("artistName") or ""),
@@ -334,18 +408,51 @@ class _LyricsSearchJob(QRunnable):
                             synced=str(entry.get("syncedLyrics") or ""),
                             plain=str(entry.get("plainLyrics") or ""),
                         )
-                    )
-                except Exception:
-                    continue
+                    except Exception:  # noqa: BLE001 - 单条坏数据跳过
+                        continue
+                    collected.setdefault(candidate.id or hash(candidate), candidate)
+                if len(collected) >= 8:
+                    break
         except Exception as exc:  # noqa: BLE001
             error = _network_error(exc)
+        candidates = _rank_candidates(
+            list(collected.values()), self._title, self._artist, self._duration_ms
+        )
         self._service._on_search_done(self._token, candidates, error)  # noqa: SLF001
+
+
+class _TranslationJob(QRunnable):
+    """把逐行外文歌词送到翻译服务（线程池里执行）。"""
+
+    def __init__(self, service: "LyricsService", track_id: str, texts: list[str]) -> None:
+        super().__init__()
+        self._service = service
+        self._track_id = track_id
+        self._texts = texts
+
+    def run(self) -> None:  # pragma: no cover - network
+        try:
+            rows = lyric_translate.translate_lines(self._texts)
+        except Exception as exc:  # noqa: BLE001
+            log.warning("歌词翻译失败：%s", exc)
+            self._service._translation_failed_internal.emit(str(exc))  # noqa: SLF001
+            return
+        if not any(row.strip() for row in rows):
+            self._service._translation_failed_internal.emit("翻译服务暂时不可用")  # noqa: SLF001
+            return
+        self._service._translated_internal.emit(self._track_id, rows)  # noqa: SLF001
+
 
 
 class LyricsService(QObject):
     resolved = Signal(object)  # LyricsResult
     search_finished = Signal(list)  # list[LyricsCandidate]
     search_failed = Signal(str)
+    translation_started = Signal(str)  # track id
+    translation_ready = Signal(object)  # LyricsResult（document 已带翻译）
+    translation_failed = Signal(str)
+    _translated_internal = Signal(str, object)
+    _translation_failed_internal = Signal(str)
 
     def __init__(
         self,
@@ -370,16 +477,102 @@ class LyricsService(QObject):
         self._search_token = 0
         self._search_pool = QThreadPool(self)
         self._search_pool.setMaxThreadCount(1)
+        self._translation_pool = QThreadPool(self)
+        self._translation_pool.setMaxThreadCount(1)
+        self._translating: dict[str, LyricDocument] = {}
+        self._translated_internal.connect(self._apply_translation)
+        self._translation_failed_internal.connect(self._on_translation_failed)
 
     # ------------------------------------------------------------------ api
-    def search(self, query: str) -> None:
-        """Search LRCLIB by free text; emits search_finished/search_failed."""
+    def search(
+        self,
+        query: str,
+        *,
+        title: str = "",
+        artist: str = "",
+        album: str = "",
+        duration_ms: int = 0,
+    ) -> None:
+        """Search LRCLIB; 结构化参数优先，``query`` 作为兜底。
+
+        LRCLIB 的 ``q`` 是自由文本匹配，「歌名 歌手」这种组合常常一条都
+        搜不到；有 ``title`` 时先用 ``track_name``/``artist_name`` 查询。
+        """
+
         query = query.strip()
-        if not query:
+        title = title.strip()
+        artist = artist.strip()
+        if not query and not title:
             self.search_failed.emit("请输入歌曲名或歌手名")
             return
         self._search_token += 1
-        self._search_pool.start(_LyricsSearchJob(self, query, self._search_token))
+        self._search_pool.start(
+            _LyricsSearchJob(
+                self,
+                query,
+                self._search_token,
+                title=title,
+                artist=artist,
+                album=album,
+                duration_ms=duration_ms,
+            )
+        )
+
+    def translate(self, track: Track, document: LyricDocument) -> None:
+        """为没有自带翻译的歌词请求逐行中文翻译（后台执行）。"""
+
+        if document is None or not document.lines:
+            self.translation_failed.emit("没有可翻译的歌词")
+            return
+        if document.has_translation:
+            self.translation_ready.emit(
+                LyricsResult(
+                    track_id=track.id,
+                    document=document,
+                    status=STATUS_OK,
+                    provider="translation",
+                )
+            )
+            return
+        self._translating[track.id] = document
+        self.translation_started.emit(track.id)
+        self._translation_pool.start(
+            _TranslationJob(self, track.id, [line.text for line in document.lines])
+        )
+
+    def _apply_translation(self, track_id: str, rows: object) -> None:
+        document = self._translating.pop(str(track_id), None)
+        if document is None:
+            return
+        translated = list(rows or [])
+        for line, text in zip(document.lines, translated):
+            if str(text or "").strip():
+                line.translation = str(text).strip()
+        document.has_translation = any(line.translation.strip() for line in document.lines)
+        if not document.has_translation:
+            self.translation_failed.emit("没有可翻译的外文歌词")
+            return
+        cached = _read_cache(track_id)
+        if cached is not None:
+            _write_cache(
+                track_id,
+                cached[0],
+                provider=cached[2],
+                translation=_translation_lrc(document),
+            )
+        result = LyricsResult(
+            track_id=track_id,
+            document=document,
+            status=STATUS_OK,
+            provider="translation",
+            message="机器翻译",
+        )
+        self._cache[track_id] = result
+        self.translation_ready.emit(result)
+
+    def _on_translation_failed(self, message: str) -> None:
+        self._translating.clear()
+        self.translation_failed.emit(message)
 
     def _on_search_done(
         self, token: int, candidates: list[LyricsCandidate], error: str

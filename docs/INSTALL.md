@@ -13,7 +13,7 @@
 | 文件 | 说明 |
 | --- | --- |
 | `HushPlayer/` | 解压即用目录（onedir），含 `HushPlayer.exe` 与 `_internal/` |
-| `HushPlayer-<版本>-win64.zip` | 上者的压缩包（当前 1.3.12） |
+| `HushPlayer-<版本>-win64.zip` | 上者的压缩包（当前 1.3.21） |
 | `SHA256SUMS.txt` | 压缩包校验值 |
 
 自行构建：
@@ -106,8 +106,8 @@ HushPlayer 是绿色版：把 `HushPlayer` 目录放在任意位置（例如 `D:
 校验安装包：
 
 ```powershell
-Get-FileHash HushPlayer-1.1.26-setup.exe -Algorithm SHA256
-# 0C6B7D4B3A355BB8183A22DB56CE1FFCCA347C83A431E515C0914783BE98CFEF
+Get-FileHash HushPlayer-1.3.21-setup.exe -Algorithm SHA256
+# A7D6062B3BD6EE46CDEDA228618E3699152999D54AD55EA724EB4CC449F578FF
 ```
 
 ### 1.3.8 免安装包（当前版本）

@@ -57,7 +57,7 @@
 | 图标 | `core/icons.py` 的颜色参数只能吃 `QColor/color_key`，alpha 由 painter 控制。 |
 | 调色板覆盖 | 局部改色用对象级 override（`TrackTable.palette_override`、`QueuePanel.activate_palette()`），**不要**改全局 `theme().palette`。 |
 | 队列 | `_items` 是界面顺序、`_order` 是播放顺序；随机开启时当前曲置首；`append()` 一律排队尾。 |
-| 历史 | 播放历史由 `HushPlayer._record_play()` 通过 `player.track_started` 写入；`最近播放` 依赖它，别删。 |
+| 历史 | 播放历史由 `PlayerController.listening_confirmed` 驱动（一次逻辑收听会话最多记一次：累计有效播放 20s，或短歌自然播完），`HushPlayer._record_listening()` 落库并按成功与否回报；`最近播放` 依赖它，别删。 |
 | 在线收藏 | 在线曲入库时要补 `album_id`（`library._ensure_online_album`），否则「专辑/歌手」聚合查不到。 |
 | 播放失败 | 失败必须走终态（`_set_busy(False)` + `engine.stop()` + `error_message`），否则 UI 卡在「缓冲中」。 |
 | 测试 | 跨用例不要反复建/销毁 `OnlineSourceClient`（QProcess 双销毁会 fail-fast）；GUI 夹具 teardown 会弹模态时用 `HUSHPLAYER_NO_CLOSE_PROMPT=1`。 |
@@ -122,7 +122,7 @@ HushPlayer-<ver>-setup.exe /VERYSILENT /LOG=...
 - 队列时长被截断：面板宽度随字号缩放，窄宽列宽按字号换算，滚动条出现时重算。
 - 来源样式：胶囊 → 副标题浅色文字。
 - 在线收藏不进专辑/歌手：SQL 只查 `kind='local'`；改为「本地 + 已收藏在线」，并给在线曲补 `album_id`。
-- 最近播放恒空：从未调用 `record_play`；改为监听 `track_started`。
+- 最近播放恒空：从未调用 `record_play`；1.3.19 起监听 `track_started`，1.3.20 改为 `listening_confirmed`（每会话最多一次）。
 - 主题连点卡死：`ThemeReveal.finish()` + 冷却窗口，避免多层遮罩叠加。
 - 托盘图标：项目目录带 Low 完整性标签时 `Shell_NotifyIcon` 返回 WinError 5；打包版装到 Medium 目录正常，`services/tray_probe.py` 会真实探测，失败则最小化到任务栏而不是隐藏窗口。
 - 关闭询问：默认 `ask`，`closeEvent` 有重入保护（Windows 会重复投递 WM_CLOSE）。
@@ -130,7 +130,7 @@ HushPlayer-<ver>-setup.exe /VERYSILENT /LOG=...
 
 ## 7. 验证纪律（每个改动都要过）
 
-1. `pytest -q`（当前基线 **302 passed**；只增不减，禁止放宽断言）。
+1. `pytest -q`（当前基线 **377 passed**；只增不减，禁止放宽断言）。
 2. 至少一个真实 GUI/离屏截图（`tools/probe_*.py` → `artifacts/qa/...`），不要只凭代码想象。
 3. 涉及打包：`packaging/build.ps1` + `tools/verify_package.ps1`。
 4. 涉及安装包：静默安装 → 版本/快捷方式/注册表 → 卸载 → 残留检查（见 6.1）。
@@ -297,3 +297,24 @@ HushPlayer-<ver>-setup.exe /VERYSILENT /LOG=...
 - 2026-10-26（1.3.19）：新增 `AudioProxy.configure/note_playing/protected_tokens/purge_unprotected/_after_download`、
   `valid_cache_file/media_files`；`PlayerController.begin_restore/end_restore/restore_current/_prime_restored/_cached_stream/_apply_cached/_schedule_auto_next`；
   `PlaybackKeeper` 增加 `_closed/_seek_timer/_on_position_changed`；`PlayQueue.restore` 改 `current_id` 优先；版本号 1.3.19。
+## 稳定性收口（1.3.20，2026-10-26）
+
+- **托盘提示写入**：`_hide_to_tray()` 只能调用 `settings.flush()`；`Settings` 从来没有 `save()`。提示写入失败也必须继续 `hide()`，并且只提示一次。
+- **设置写盘**：`_write()/flush()` 返回 bool；失败保留 `_dirty` 与内存值，按 `_RETRY_DELAY_MS` 有界退避，退出再试；`.bak` 只在覆盖成功后刷新。
+- **收听计数**：统计口径是「累计有效播放 20s」（`LISTEN_CONFIRM_MS`），暂停/缓冲/URL 重试不清零，seek 跳变不计入；短歌曲自然播完可按真实推进计入；拖到结尾不算。
+- **Episode 语义**：逻辑收听会话 `_episode` 与播放会话 `_session` 分开；`_load()` 重试/换音质传 `new_episode=False`，换歌传 `True`，单曲循环只在 `end_of_media` 新建。
+- **历史提交**：`library.record_play()` 返回 bool；控制器区分 `qualified` 与 `recorded`，失败按 `LISTEN_RECORD_RETRY_MS` 重试，`note_play_recorded()` 必须校验 track_id，迟到回执不能写到新歌。
+- **会话写盘**：`PlaybackKeeper._write()` 返回 bool；失败不更新 `_last_saved_position`，保留 `_dirty` 并退避重试。
+- **匹配缓存**：只缓存搜索候选，不缓存 `status/track/verified`；键含专辑、版本特征、时长分桶与 origin 身份；命中后重新评分并重新 resolve。`MatchRow.index` 必须显式维护，不能用 `rows.index(row)`（重复行会被判成同一行）。
+- **诊断包**：`summary.json` 的 `session`/`audio_cache` 字段可诊断恢复与缓存；日志正文按 `Cookie/Authorization/token/password` 与 URL 参数脱敏后再打包。
+- 1.3.20 变更记录：上述 P0/P1 收口；新增 `tests/test_tray.py`、`tests/test_playback_history.py`、`tests/test_match_cache.py`；全量 **368 passed**。
+## 音源封面与歌词（1.3.21，2026-10-26）
+
+- 播放栏封面点击 → `navigate("lyrics")`（`PlayerBar.cover_clicked`）；文字信息区点击仍走 `_go_to_current_album`。专辑页只聚合本地曲目，不要用封面跳专辑页。
+- 封面缓存是内容寻址的：`CoverProvider` 下载完成 → `covers.ready` → `LibraryService._on_cover_ready` 写 `tracks.artwork_path`（`TrackRepository.update_artwork_path`）。**不要只在内存 `_resolved` 里留着**，否则 `covers.invalidate()` 后封面永久空白、重启重下。
+- `CoverWidget.set_track` 对同一对象也要 `refresh()`；`covers.ready` 必须懒连接并按 track id 刷新，否则异步下载完成的封面不会出现在播放栏。
+- 外文歌词翻译不要依赖插件 `tlyric`（多为对象或缺失）：走 `hushplayer/lyrics/translate.py`（Edge → Google → MyMemory，按行缓存 + 磁盘缓存）。翻译按钮的可用条件是「有歌词」，不是「已有翻译」。
+- 歌词搜索必须用 LRCLIB 结构化参数（`track_name` / `artist_name` / `album_name`），`q` 只作最后回退；结果要按歌名/歌手/时长/时间轴排序。
+- 歌词搜索列表用 `setItemWidget` + `item.setSizeHint(QSize(0, ROW_HEIGHT))`（宽度给 0 才会跟随 viewport）；自绘 `paintEvent` 必须保证 `painter.end()` 被执行，否则一次 AttributeError 就会变成访问冲突。
+- 自绘行不要引用不存在的调色板字段（`Palette` 没有 `alternate`），取色统一 `rgba(palette.x, alpha)`。
+- 1.3.21 变更记录：封面落库 + `covers.ready` 刷新、封面点击跳歌词页、机器翻译兜底、结构化歌词搜索与选中态重构；新增 `tests/test_lyrics_translate.py`、`tests/test_cover_persist.py`；基线 **377 passed**。

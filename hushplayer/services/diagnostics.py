@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import platform
+import re
 import zipfile
 from datetime import datetime
 from pathlib import Path
@@ -13,6 +14,20 @@ from ..version import VERSION
 from ..online import health
 
 _SENSITIVE = ("token", "cookie", "secret", "password", "authorization", "csrf")
+
+#: 日志正文里的凭据：日志是排查问题时唯一的现场，必须和 settings.json 一样脱敏。
+_TEXT_SECRETS = (
+    re.compile(
+        r"(?i)\b(cookie|authorization|token|secret|password|csrf)\b\"?\s*[:=]\s*\"?([^\"\s,;}]+)"
+    ),
+    re.compile(r"(?i)([?&](?:token|key|sign|auth|password|secret)=)[^&\s]+"),
+)
+
+
+def _redact_text(text: str) -> str:
+    for pattern in _TEXT_SECRETS:
+        text = pattern.sub(lambda match: f"{match.group(1)}=***", text)
+    return text
 
 
 def _sanitize(value):
@@ -31,6 +46,27 @@ def _read_json(path: Path):
         return json.loads(path.read_text(encoding="utf-8"))
     except Exception:  # noqa: BLE001
         return None
+
+
+def _audio_cache_summary(data: Path) -> dict:
+    """缓存命中/完整性概览；只统计大小与索引状态，不读音频内容。"""
+    cache_dir = data / "cache" / "audio"
+    if not cache_dir.is_dir():
+        return {"files": 0, "bytes": 0, "complete": 0, "broken": 0}
+    files = [item for item in cache_dir.iterdir() if item.is_file() and item.suffix != ".json"]
+    complete = broken = 0
+    for item in files:
+        meta = _read_json(item.with_suffix(".meta.json"))
+        if isinstance(meta, dict) and meta.get("complete"):
+            complete += 1
+        else:
+            broken += 1
+    return {
+        "files": len(files),
+        "bytes": sum(item.stat().st_size for item in files if item.is_file()),
+        "complete": complete,
+        "broken": broken,
+    }
 
 
 def export_bundle(dest: Path | None = None) -> Path:
@@ -80,6 +116,19 @@ def export_bundle(dest: Path | None = None) -> Path:
         "preferred": (memory.get("preferred") or {}).get("source_id") if isinstance(memory, dict) else "",
     }
 
+    session = _read_json(data / "play_queue.json") or {}
+    if isinstance(session, dict):
+        summary["session"] = {
+            "version": session.get("version"),
+            "saved_at": session.get("saved_at"),
+            "position_ms": session.get("position_ms"),
+            "current_id": session.get("current_id"),
+            "tracks": len(session.get("items") or []),
+            "shuffle": session.get("shuffle"),
+            "repeat": session.get("repeat"),
+        }
+    summary["audio_cache"] = _audio_cache_summary(data)
+
     settings = _read_json(data / "settings.json")
     if settings is not None:
         summary["settings"] = _sanitize(settings)
@@ -90,7 +139,8 @@ def export_bundle(dest: Path | None = None) -> Path:
             path = data / "logs" / name if (data / "logs" / name).exists() else data / name
             if path.exists() and path.is_file():
                 try:
-                    bundle.write(path, f"logs/{name}")
+                    text = path.read_text(encoding="utf-8", errors="replace")
+                    bundle.writestr(f"logs/{name}", _redact_text(text))
                 except OSError:
                     pass
         bundle.writestr(

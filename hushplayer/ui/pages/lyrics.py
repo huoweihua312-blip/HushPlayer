@@ -62,6 +62,9 @@ class LyricsPage(Page):
         player.position_changed.connect(self._on_position)
         player.state_changed.connect(self._on_state)
         ctx().lyrics.resolved.connect(self._on_resolved)
+        ctx().lyrics.translation_started.connect(self._on_translation_started)
+        ctx().lyrics.translation_ready.connect(self._on_translation_ready)
+        ctx().lyrics.translation_failed.connect(self._on_translation_failed)
         ctx().settings.changed.connect(self._on_setting)
         self.refresh_theme()
 
@@ -262,7 +265,7 @@ class LyricsPage(Page):
         self.provider_label.setText(f"歌词来源 · {provider}" if result.status == STATUS_OK else "")
         if result.status == STATUS_OK and document is not None and not document.is_empty():
             self.view.set_document(document, keep_position=same_track)
-            self._update_translate_button(document.has_translation)
+            self._update_translate_button(True)
             self.translate_button.setChecked(
                 bool(ctx().settings.get("lyrics.translate", True)) and document.has_translation
             )
@@ -304,6 +307,28 @@ class LyricsPage(Page):
     def _update_translate_button(self, available: bool) -> None:
         self.translate_button.setEnabled(bool(available))
 
+    def _on_translation_started(self, track_id: str) -> None:
+        if self._track is None or str(track_id) != self._track.id:
+            return
+        self._update_translate_button(False)
+        self.hint_label.setText("正在翻译…")
+
+    def _on_translation_ready(self, result: LyricsResult) -> None:
+        if self._track is None or result.track_id != self._track.id:
+            return
+        self._apply_result(result)
+        self.translate_button.setChecked(True)
+        self.view.set_show_translation(True)
+        self.hint_label.setText("机器翻译")
+
+    def _on_translation_failed(self, message: str) -> None:
+        if self._track is None:
+            return
+        self.translate_button.setChecked(False)
+        self._update_translate_button(self._result is not None)
+        self.hint_label.setText(message or "翻译失败")
+        ctx().window.toast(message or "翻译失败", "warning")
+
     def _offset_label(self) -> None:
         if not hasattr(self, "offset_label"):
             return
@@ -341,8 +366,24 @@ class LyricsPage(Page):
         ctx().window.open_immersive()
 
     def _toggle_translation(self, checked: bool) -> None:
-        self.view.set_show_translation(bool(checked))
         ctx().settings.set("lyrics.translate", bool(checked), save=True)
+        if not checked:
+            self.view.set_show_translation(False)
+            return
+        document = self._result.document if self._result is not None else None
+        if document is None or document.is_empty():
+            self.view.set_show_translation(False)
+            return
+        if document.has_translation:
+            self.view.set_show_translation(True)
+            return
+        # 音源没有自带翻译：先关掉显示，向后端要一次机器翻译，成功后自动打开。
+        self.view.set_show_translation(False)
+        if self._track is None:
+            return
+        self._update_translate_button(False)
+        self.hint_label.setText("正在翻译…")
+        ctx().lyrics.translate(self._track, document)
 
     def _search_lyrics(self) -> None:
         track = self._track
@@ -350,8 +391,14 @@ class LyricsPage(Page):
             return
         from ..widgets.lyrics_search import LyricsSearchDialog
 
-        query = f"{track.title} {track.artist}".strip()
-        dialog = LyricsSearchDialog(self.window(), initial=query)
+        dialog = LyricsSearchDialog(
+            self.window(),
+            initial=f"{track.title} {track.artist}".strip(),
+            title=track.title,
+            artist=track.artist,
+            album=track.album or "",
+            duration_ms=track.duration_ms,
+        )
         if dialog.exec() != dialog.DialogCode.Accepted or dialog.candidate is None:
             return
         result = ctx().lyrics.apply_candidate(track, dialog.candidate)
