@@ -1,0 +1,14 @@
+#!/bin/sh
+# Pre-push: 推送前复查仓库跟踪文件，避免把个人音源/凭据推上公开仓库。
+# 本地钩子可以被 --no-verify 跳过，发行构建（packaging/build.ps1）会再强制检查一次。
+set -e
+
+ROOT=$(git rev-parse --show-toplevel)
+cd "$ROOT"
+
+PY="$ROOT/.venv/Scripts/python.exe"
+if [ ! -x "$PY" ]; then
+    PY="python"
+fi
+
+"$PY" tools/security_scan.py --tracked || exit 1

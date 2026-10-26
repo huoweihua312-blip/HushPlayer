@@ -130,7 +130,7 @@ HushPlayer-<ver>-setup.exe /VERYSILENT /LOG=...
 
 ## 7. 验证纪律（每个改动都要过）
 
-1. `pytest -q`（当前基线 **377 passed**；只增不减，禁止放宽断言）。
+1. `pytest -q`（当前基线 **397 passed**；只增不减，禁止放宽断言）。
 2. 至少一个真实 GUI/离屏截图（`tools/probe_*.py` → `artifacts/qa/...`），不要只凭代码想象。
 3. 涉及打包：`packaging/build.ps1` + `tools/verify_package.ps1`。
 4. 涉及安装包：静默安装 → 版本/快捷方式/注册表 → 卸载 → 残留检查（见 6.1）。
@@ -325,3 +325,14 @@ HushPlayer-<ver>-setup.exe /VERYSILENT /LOG=...
 - 新增/删除运行时文件时，同步检查 `runner.js`/`plugin_host.js` 的 `require` 依赖，只打包真正被引用的文件。
 - 用户数据（`hushplayer.db`、`settings.json`、`play_queue.json`、`online_source_memory.json`、`sources\`、`cache\`、`logs\`）只在 `%LOCALAPPDATA%\HushPlayerReimagined`，安装/升级/卸载都不得触碰。
 - 1.3.22 变更记录：spec 改为精确 datas + 空注册表；安装/卸载验证通过；版本号 1.3.22。
+
+## 隐私隔离与安全发布（1.3.23，2026-10-27）
+
+- 音源插件只存 `data_dir()/sources`；仓库里 `source_runtime/sources/`、`qq.js`、`source_registry.json` 一律不跟踪。改插件逻辑就改代码，不要把真实插件再 `git add` 回来。
+- 空音源是合法状态：`registry.ensure()` 必须能只写空注册表就启动；`tests/test_privacy_isolation.py` 覆盖。
+- 迁移语义：先备份到 `migration_backup/legacy-<时间戳>/`，已存在不覆盖，缺文件保持可重试；只写 `sources/`，不碰数据库/设置/缓存。
+- 指纹不一致（插件被更新或手改）只告警并按可用处理——不能当缺失，否则每次启动都重试迁移。
+- 提交 / 推送 / 构建都会跑 `tools/security_scan.py`（`--staged` / `--tracked` / `--path ... --release` / `--zip`）。新增误报只能加到 `tools/security_allowlist.json` 并写明 reason，禁止整目录放行。
+- `packaging/build.ps1` 里的检查是硬门槛：产物含个人目录或状态文件会删除产物并中止；Git 钩子只是便利，可被 `--no-verify` 跳过。
+- 不要重写历史 / 强推 / 删远程分支：历史里公开过的 `MUSIC_U` 需用户确认后单独处理（见 `docs/SECURITY.md` §5）。
+- 1.3.23 变更：新增 `hushplayer/online/source_migration.py`、`tools/security_scan.py`、`tools/security_allowlist.json`、`docs/SECURITY.md`、`tests/test_privacy_isolation.py`，`.githooks/pre-push`；基线 **397 passed**。

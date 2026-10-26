@@ -12,3 +12,6 @@ if [ ! -x "$PY" ]; then
 fi
 
 "$PY" tools/agents_guard.py || exit 1
+
+# 敏感信息与个人文件检查：命中高风险直接拒绝提交。
+"$PY" tools/security_scan.py --staged || exit 1

@@ -99,3 +99,9 @@ powershell -ExecutionPolicy Bypass -File packaging\build.ps1 -Zip
 ## 许可
 
 本项目源码以 MIT 许可发布（见 `LICENSE`）。运行时依赖的第三方组件、Node.js 与音源插件适用其各自许可；本项目不包含任何受 DRM 保护的内容，也不绕过付费/权限限制。
+
+## 隐私与安全
+
+- 音源插件、数据库、歌单、收藏、历史、缓存都只存在 `%LOCALAPPDATA%\HushPlayerReimagined`（便携模式 `Data\`），不进仓库、不进安装包。
+- 安装包只带 Node 运行框架与空音源注册表；第一次启动后到「设置 → 音源」自行安装插件。
+- 提交 / 推送 / 构建都会扫描敏感信息（Cookie、Token、私钥、真实数据库、个人插件）。详见 [docs/SECURITY.md](docs/SECURITY.md)。

@@ -1,0 +1,31 @@
+{
+  "version": 1,
+  "comment": "HushPlayer 安全检查白名单。每条必须有 reason；path 用 fnmatch 通配（* 可跨目录）。不要用 tests/、sources/ 等整目录放行来掩盖真实凭据。",
+  "entries": [
+    {
+      "path": "hushplayer/runtime/source_runtime/node_modules/*",
+      "rule": "personal_email",
+      "reason": "第三方依赖 package.json / LICENSE 里的维护者邮箱，属于上游元数据"
+    },
+    {
+      "path": "hushplayer/runtime/source_runtime/node_modules/*",
+      "rule": "cookie_header",
+      "reason": "node_modules 中 HTTP 客户端库自带的 Cookie 文档与测试字符串"
+    },
+    {
+      "path": "hushplayer/runtime/source_runtime/node_modules/*",
+      "rule": "signed_url",
+      "reason": "node_modules 依赖 README 里的示例 URL，非本项目签名"
+    },
+    {
+      "path": "packaging/languages/*.isl",
+      "rule": "personal_email",
+      "reason": "Inno Setup 官方简体中文翻译文件里的译者邮箱"
+    },
+    {
+      "path": "docs/qa/*",
+      "rule": "signed_url",
+      "reason": "QA 文档引用本地合成 URL 示例"
+    }
+  ]
+}

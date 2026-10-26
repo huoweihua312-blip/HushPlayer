@@ -40,6 +40,11 @@ if (-not (Test-Path $node)) {
     Remove-Item -Recurse -Force $tmp
 }
 
+
+Write-Host "==> 安全检查（仓库跟踪文件）" -ForegroundColor Cyan
+& $python tools\security_scan.py --tracked
+if ($LASTEXITCODE -ne 0) { throw "仓库中存在高风险敏感信息，构建中止。" }
+
 Write-Host "==> PyInstaller" -ForegroundColor Cyan
 # PyInstaller runs under the (possibly low-integrity) venv interpreter, so it
 # must write inside the repo.  Right after the build this script — running as
@@ -95,6 +100,15 @@ foreach ($rel in @("_internal\PySide6\plugins\imageformats\qpdf.dll", "_internal
     }
 }
 if ($trimmed -gt 0) { Write-Host ("==> 已裁剪未使用组件：{0:N1} MB" -f ($trimmed / 1MB)) -ForegroundColor DarkGray }
+
+Write-Host "==> 安全检查（发行产物）" -ForegroundColor Cyan
+& $python tools\security_scan.py --path $dist --release
+if ($LASTEXITCODE -ne 0) {
+    Write-Host "!! 发行产物含敏感信息或布局不合规，已删除本次输出：$dist" -ForegroundColor Red
+    Remove-Item $dist -Recurse -Force -ErrorAction SilentlyContinue
+    throw "安全检查未通过，构建中止。"
+}
+
 $label = (icacls (Join-Path $dist "HushPlayer.exe") | Select-String "Mandatory Label")
 $labelText = if ($label) { $label.Line.Trim() } else { "no mandatory label (Medium)" }
 $sizeMb = [math]::Round(((Get-ChildItem $dist -Recurse -File | Measure-Object Length -Sum).Sum / 1MB), 1)
@@ -107,6 +121,14 @@ if ($Zip) {
     $zipPath = Join-Path $buildOut "HushPlayer-$version-win64.zip"
     if (Test-Path $zipPath) { Remove-Item $zipPath -Force }
     Compress-Archive -Path $dist -DestinationPath $zipPath -CompressionLevel Optimal
+
+    Write-Host "==> 安全检查（ZIP 发行包）" -ForegroundColor Cyan
+    & $python tools\security_scan.py --zip $zipPath
+    if ($LASTEXITCODE -ne 0) {
+        Remove-Item $zipPath -Force -ErrorAction SilentlyContinue
+        throw "压缩包安全检查未通过，已删除。"
+    }
+
     $hash = (Get-FileHash $zipPath -Algorithm SHA256).Hash
     "$hash  HushPlayer-$version-win64.zip" | Set-Content (Join-Path $buildOut "SHA256SUMS.txt") -Encoding ascii
     Write-Host "==> 压缩包：$zipPath" -ForegroundColor Green

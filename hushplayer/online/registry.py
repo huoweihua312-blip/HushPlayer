@@ -25,6 +25,8 @@ from typing import Any
 from ..core.logging_setup import get_logger, log_exception
 from ..core.paths import data_dir, resource_path
 
+from .source_migration import migrate_legacy_sources
+
 __all__ = [
     "SourceRegistry",
     "registry",
@@ -197,35 +199,30 @@ class SourceRegistry:
         return path
 
     def ensure(self) -> None:
-        """Create the writable copy of the bundled runtime on first use."""
+        """Create the writable source home and migrate legacy plugins once.
+
+        程序目录（含旧版本的安装目录）只当迁移来源，真正的插件、备份和注册表
+        都在 ``data_dir()/sources``。迁移是幂等的：文件已存在就不覆盖，中断后
+        下次启动继续补齐（见 ``hushplayer.online.source_migration``）。
+        """
         home = data_dir() / "sources"
         home.mkdir(parents=True, exist_ok=True)
         (home / _USER_DIR).mkdir(exist_ok=True)
         (home / _ACTIVE_DIR).mkdir(exist_ok=True)
         target = home / "source_registry.json"
-        if target.is_file():
+        if not target.is_file():
+            report = migrate_legacy_sources(home=home)
+            if not target.is_file():
+                target.write_text('{"version": 1, "sources": []}', encoding="utf-8")
+                log.warning(
+                    "音源迁移未完成（%s），先以空列表启动；下次启动会重试", report.reason or "未知原因"
+                )
+            else:
+                log.info("已创建可写音源目录：%s（%s）", home, report.summary())
             return
-        bundled = resource_path("hushplayer", "runtime", "source_runtime")
-        source = bundled / "source_registry.json"
-        if not source.is_file():
-            target.write_text('{"version": 1, "sources": []}', encoding="utf-8")
-            return
-        data = _read_json(source)
-        for entry in data.get("sources", []):
-            relative = str(entry.get("filename") or "").strip()
-            if not relative:
-                continue
-            origin = bundled / relative
-            if not origin.is_file():
-                continue
-            destination = home / relative
-            destination.parent.mkdir(parents=True, exist_ok=True)
-            try:
-                shutil.copy2(origin, destination)
-            except OSError as exc:
-                log_exception(f"复制内置音源失败：{relative}", exc)
-        target.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
-        log.info("已创建可写音源目录：%s（%d 个音源）", home, len(data.get("sources", [])))
+        report = migrate_legacy_sources(home=home)
+        if report.migrated:
+            log.info("补齐了 %d 个缺失的音源文件（%s）", report.migrated, report.summary())
 
     # ------------------------------------------------------------------ 读写
     def entries(self) -> list[dict[str, Any]]:
@@ -336,12 +333,23 @@ class SourceRegistry:
         return True
 
     def restore_bundled(self) -> int:
-        """Re-add every bundled source that is missing from the writable copy."""
+        """Re-add framework-provided sources that are missing from the writable copy.
+
+        1.3.23 起发行包不带任何第三方插件，所以随包注册表是空列表。这里只接受
+        显式标记 ``"bundled": true`` 的条目，避免开发者本机的私人插件被误当作
+        「内置音源」重新装回数据目录。
+        """
         bundled = resource_path("hushplayer", "runtime", "source_runtime")
         bundled_registry = bundled / "source_registry.json"
         if not bundled_registry.is_file():
             return 0
-        builtin = _read_json(bundled_registry).get("sources", [])
+        builtin = [
+            entry
+            for entry in _read_json(bundled_registry).get("sources", [])
+            if isinstance(entry, dict) and entry.get("bundled") is True
+        ]
+        if not builtin:
+            return 0
         data = _read_json(self.registry_path)
         entries = data.get("sources", [])
         known = {str(entry.get("id")) for entry in entries}

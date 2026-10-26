@@ -1,4 +1,13 @@
 # 更新日志
+## 1.3.23 — 2026-10-27
+
+- 个人音源与公开仓库隔离：`source_runtime/sources`、`qq.js`、`source_registry.json` 停止跟踪（本地文件保留），`.gitignore` 覆盖数据库、设置、会话、缓存、日志与凭据。
+- 新增 `hushplayer/online/source_migration.py`：旧程序目录 → `data_dir()/sources` 的可恢复迁移（先备份、已存在不覆盖、保留 id 与启用状态、缺文件下次重试）。
+- `registry.ensure()` 只从用户数据目录加载音源；`restore_bundled()` 不再把开发者本机的注册表条目当内置源装回。
+- 新增 `tools/security_scan.py` + `tools/security_allowlist.json`：暂存区 / 跟踪文件 / 发行目录 / ZIP / 安装脚本扫描，命中高风险直接阻塞；接入 pre-commit、pre-push 与 `packaging/build.ps1`。
+- 三个历史探测脚本里写死的签名订阅 URL 改为环境变量 `HUSHPLAYER_PROBE_SUBSCRIPTION`。
+- 文档：新增 `docs/SECURITY.md`（四层边界、迁移、扫描、`MUSIC_U` 处置建议），README 增加隐私说明。
+- 测试：新增 `tests/test_privacy_isolation.py` 18 项；全量 `pytest`：**395 passed**。
 
 ## 1.3.22 — 2026-10-27
 

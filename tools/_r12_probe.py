@@ -1,5 +1,6 @@
+import os
 import requests, json
-url = "https://source.shiqianjiang.cn/api/script/mf.json?key=CERU_KEY-AFCAB5B1-B84C-4530-A460-F2FC7E30945F"
+URL = os.environ.get("HUSHPLAYER_PROBE_SUBSCRIPTION", "")
 r = requests.get(url, timeout=15, headers={"User-Agent": "HushPlayer/1.0.12"})
 print(r.status_code, r.headers.get("content-type"), len(r.content))
 data = r.json()

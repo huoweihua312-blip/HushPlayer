@@ -28,3 +28,78 @@ pytest-of-*/
 
 # 测试时误建在仓库根的数据目录（本地数据不进版本库）
 /HushPlayer-*/
+
+# ---------------------------------------------------------------------------
+# 个人音源插件与运行数据（1.3.23）
+#
+# 音源插件属于「用户自己安装的运行数据」：默认安装在
+# %LOCALAPPDATA%\HushPlayerReimagined\sources（便携模式为 <exe>\Data）。
+# 仓库只保留运行框架（plugin_host.js / runner.js / node_modules），
+# 插件本体、备份、暂存和注册表一律不进 Git。
+# 注意：不要改成忽略全部 *.js / *.json，源码与合法测试资源仍需跟踪。
+# ---------------------------------------------------------------------------
+/hushplayer/runtime/source_runtime/sources/
+/hushplayer/runtime/source_runtime/source_registry.json
+/hushplayer/runtime/source_runtime/qq.js
+/user_sources/
+/source_registry.json
+/source_health.json
+/online_source_memory.json
+
+# 用户数据库与运行状态（根目录 = 便携数据目录）
+*.db
+*.db-wal
+*.db-shm
+*.sqlite
+*.sqlite3
+*.sqlite-wal
+*.sqlite-shm
+/hushplayer.db
+/settings.json
+/play_queue.json
+/playback_session.json
+/library.json
+/playlists.json
+/stats.json
+/pending_imports.json
+/ignored_imports.json
+/remote_tracks.json
+/lyrics_bindings.json
+/metadata_cache.json
+
+# 凭据 / 密钥 / 环境文件
+.env
+.env.*
+*.pem
+*.key
+*.p12
+*.pfx
+id_rsa
+id_ed25519
+secrets.json
+credentials.json
+cookies.txt
+*_cookie*.txt
+
+# 缓存、下载、导出、日志与诊断（只锚定仓库根，避免误伤 hushplayer/lyrics 等源码目录）
+/cache/
+/downloads/
+/exports/
+/lyrics/
+*.lrc.tmp
+logs/
+diagnostics/
+*.dmp
+*.etl
+*.crash
+*.stackdump
+_source_probe.txt
+probe_output*.txt
+*.probe.txt
+
+# 其它本地临时文件
+*.tmp
+*.bak
+*.orig
+*.rej
+~$*

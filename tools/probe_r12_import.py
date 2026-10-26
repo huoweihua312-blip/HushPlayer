@@ -10,7 +10,7 @@ from hushplayer.app import HushApp
 from hushplayer.ui.context import ctx
 from hushplayer.ui.pages.settings import SECTIONS
 
-URL = "https://source.shiqianjiang.cn/api/script/mf.json?key=CERU_KEY-AFCAB5B1-B84C-4530-A460-F2FC7E30945F"
+URL = os.environ.get("HUSHPLAYER_PROBE_SUBSCRIPTION", "")
 app = QApplication(sys.argv)
 hush = HushApp(app); hush.start()
 win = ctx().window

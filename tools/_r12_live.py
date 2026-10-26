@@ -6,7 +6,7 @@ os.environ.setdefault("HUSH_CONSOLE", "0")
 sys.path.insert(0, ".")
 from hushplayer.online import registry as reg_mod
 reg = reg_mod.registry(); reg.ensure()
-url = "https://source.shiqianjiang.cn/api/script/mf.json?key=CERU_KEY-AFCAB5B1-B84C-4530-A460-F2FC7E30945F"
+URL = os.environ.get("HUSHPLAYER_PROBE_SUBSCRIPTION", "")
 report = reg.install_subscription(url)
 print("installed", len(report.installed), "dups", len(report.duplicates), "failed", len(report.failed))
 print("summary", report.summary())
