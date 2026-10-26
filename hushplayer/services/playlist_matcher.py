@@ -174,7 +174,8 @@ def _bind_import_choices(library, rows: Iterable[MatchRow]) -> None:
     """把本次导入选中的在线歌曲写成一等公民绑定（auto/pending）。
 
     写的是 ``tracks`` + ``track_source_binding_state``，不是 JSON 缓存；
-    已经有 manual 绑定的歌曲会被 ``commit_binding`` 的 guard 拒绝覆盖。
+    ``import_choice`` 会拒绝覆盖 manual 和已经验证过的 auto 绑定，重复导入
+    因此是安全的。新歌保持 pending，等第一次真正播出声后再验证。
     """
 
     bindings = getattr(library, "source_bindings", None)
@@ -187,8 +188,18 @@ def _bind_import_choices(library, rows: Iterable[MatchRow]) -> None:
         if track is None or row.skipped or track.kind != "online":
             continue
         if not (track.source_id and track.remote_id):
+            # 不要静默跳过：插件返回的 id/songmid 提取不完整时必须能在日志里
+            # 定位到是哪一首、缺了哪个字段，否则这首歌永远不会被绑定。
+            log.warning(
+                "导入绑定跳过《%s》：歌曲 ID 不完整（source_id=%r, remote_id=%r, raw keys=%s）",
+                track.display_title,
+                track.source_id,
+                track.remote_id,
+                sorted(track.raw)[:8] if isinstance(track.raw, dict) else type(track.raw),
+            )
             continue
         if library.tracks.get(track.id) is None:
+            log.warning("导入绑定跳过《%s》：曲目不在数据库里", track.display_title)
             continue
         entry = row.entry
         origin = (entry.origin_platform, entry.origin_remote_id) if entry.origin_platform else None

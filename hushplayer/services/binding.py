@@ -18,7 +18,10 @@ import time
 from dataclasses import dataclass, field
 from typing import Any, Callable
 
+from ..core.logging_setup import get_logger
 from ..model.track import Track, album_key, artist_key
+
+log = get_logger("services.binding")
 
 AUTO = "auto"
 MANUAL = "manual"
@@ -29,6 +32,10 @@ FAILED = "failed"
 
 _SELECTION_MODES = {AUTO, MANUAL}
 _VERIFY_STATES = {PENDING, VERIFIED, FAILED}
+
+
+class _Rejected(Exception):
+    """Raised inside a transaction so ``BEGIN IMMEDIATE`` is rolled back."""
 
 
 @dataclass(frozen=True)
@@ -162,60 +169,69 @@ class TrackBindingService:
             return False
 
         now = time.time()
-        with self._db.transaction() as tx:
-            row = tx.execute(
-                "SELECT selection_mode, revision, origin_platform, origin_remote_id "
-                "FROM track_source_binding_state WHERE track_id=?",
-                (track_id,),
-            ).fetchone()
-            current_mode = row[0] if row else AUTO
-            revision = int(row[1]) if row else 0
-            if expected_revision is not None and revision != int(expected_revision):
-                return False
-            # 手动锁定后，自动路径一律不得覆盖。
-            if current_mode == MANUAL and mode == AUTO:
-                return False
+        try:
+            with self._db.transaction() as tx:
+                row = tx.execute(
+                    "SELECT selection_mode, revision, origin_platform, origin_remote_id "
+                    "FROM track_source_binding_state WHERE track_id=?",
+                    (track_id,),
+                ).fetchone()
+                current_mode = row[0] if row else AUTO
+                # No state row yet == the implicit revision 1 that ``state()``
+                # reports, so a caller holding ``state().revision`` is never
+                # rejected because the row has not been materialised yet.
+                revision = int(row[1]) if row else 1
+                if expected_revision is not None and revision != int(expected_revision):
+                    raise _Rejected(
+                        f"revision mismatch (have {revision}, expected {expected_revision})"
+                    )
+                # 手动锁定后，自动路径一律不得覆盖。
+                if current_mode == MANUAL and mode == AUTO:
+                    raise _Rejected("manual binding is locked against automatic writes")
 
-            updated = self._tracks.update_source_tx(
-                tx, track_id, **choice.as_update_kwargs()
-            )
-            if not updated:
-                return False
+                updated = self._tracks.update_source_tx(
+                    tx, track_id, **choice.as_update_kwargs()
+                )
+                if not updated:
+                    raise _Rejected("track row disappeared before the update")
 
-            if origin is not None:
-                origin_platform, origin_remote_id = origin
-            else:
-                origin_platform = row[2] if row else ""
-                origin_remote_id = row[3] if row else ""
+                if origin is not None:
+                    origin_platform, origin_remote_id = origin
+                else:
+                    origin_platform = row[2] if row else ""
+                    origin_remote_id = row[3] if row else ""
 
-            new_revision = revision + 1
-            verified_at = now if verify_state == VERIFIED else 0.0
-            tx.execute(
-                """
-                INSERT INTO track_source_binding_state(
-                    track_id, selection_mode, verify_state, revision,
-                    origin_platform, origin_remote_id, verified_at, updated_at
-                ) VALUES (?,?,?,?,?,?,?,?)
-                ON CONFLICT(track_id) DO UPDATE SET
-                    selection_mode=excluded.selection_mode,
-                    verify_state=excluded.verify_state,
-                    revision=excluded.revision,
-                    origin_platform=excluded.origin_platform,
-                    origin_remote_id=excluded.origin_remote_id,
-                    verified_at=excluded.verified_at,
-                    updated_at=excluded.updated_at
-                """,
-                (
-                    track_id,
-                    mode,
-                    verify_state,
-                    new_revision,
-                    origin_platform,
-                    origin_remote_id,
-                    verified_at,
-                    now,
-                ),
-            )
+                new_revision = (int(row[1]) + 1) if row else 1
+                verified_at = now if verify_state == VERIFIED else 0.0
+                tx.execute(
+                    """
+                    INSERT INTO track_source_binding_state(
+                        track_id, selection_mode, verify_state, revision,
+                        origin_platform, origin_remote_id, verified_at, updated_at
+                    ) VALUES (?,?,?,?,?,?,?,?)
+                    ON CONFLICT(track_id) DO UPDATE SET
+                        selection_mode=excluded.selection_mode,
+                        verify_state=excluded.verify_state,
+                        revision=excluded.revision,
+                        origin_platform=excluded.origin_platform,
+                        origin_remote_id=excluded.origin_remote_id,
+                        verified_at=excluded.verified_at,
+                        updated_at=excluded.updated_at
+                    """,
+                    (
+                        track_id,
+                        mode,
+                        verify_state,
+                        new_revision,
+                        origin_platform,
+                        origin_remote_id,
+                        verified_at,
+                        now,
+                    ),
+                )
+        except _Rejected as exc:
+            log.warning("绑定写入被拒绝：%s（%s）", track_id, exc)
+            return False
 
         self._emit(track_id)
         return True
@@ -248,8 +264,31 @@ class TrackBindingService:
         choice: BindingChoice,
         *,
         origin: tuple[str, str] | None = None,
+        force: bool = False,
     ) -> bool:
-        """导入时批量选出的候选：写来源但保持 ``pending``，不冒充已验证。"""
+        """导入时批量选出的候选：写来源但保持 ``pending``，不冒充已验证。
+
+        重复导入同一歌单是常见操作，它只应补齐「还没有来源」的歌曲：
+        用户手动选的来源、以及已经真正播放验证过的自动绑定都不能被一次
+        普通导入改写。只有显式 ``force=True``（用户点了「重新匹配」）或调用
+        方在确认旧绑定真正失效后才会走到覆盖分支。
+        """
+
+        if not force:
+            current = self.state(track_id)
+            if current.manual:
+                log.info("导入跳过 %s：已有手动来源", track_id)
+                return False
+            if current.verified:
+                target = self.get_target(track_id)
+                if (
+                    target is not None
+                    and target.kind == "online"
+                    and target.source_id
+                    and target.remote_id
+                ):
+                    log.info("导入跳过 %s：已有已验证的自动绑定", track_id)
+                    return False
 
         return self.commit_binding(
             track_id,
@@ -341,38 +380,49 @@ class TrackBindingService:
         expected_revision: int | None,
     ) -> bool:
         now = time.time()
-        with self._db.transaction() as tx:
-            row = tx.execute(
-                "SELECT revision FROM track_source_binding_state WHERE track_id=?",
-                (track_id,),
-            ).fetchone()
-            revision = int(row[0]) if row else 0
-            if expected_revision is not None and revision != int(expected_revision):
-                return False
-            if row is None:
-                tx.execute(
-                    """
-                    INSERT INTO track_source_binding_state(
-                        track_id, selection_mode, verify_state, revision,
-                        origin_platform, origin_remote_id, verified_at, updated_at
-                    ) VALUES (?, 'auto', ?, 1, '', '', ?, ?)
-                    """,
-                    (track_id, verify_state, now if verify_state == VERIFIED else 0.0, now),
-                )
-            else:
-                tx.execute(
-                    """
-                    UPDATE track_source_binding_state
-                    SET verify_state=?, revision=revision+1, verified_at=?, updated_at=?
-                    WHERE track_id=?
-                    """,
-                    (
-                        verify_state,
-                        now if verify_state == VERIFIED else 0.0,
-                        now,
-                        track_id,
-                    ),
-                )
+        try:
+            with self._db.transaction() as tx:
+                row = tx.execute(
+                    "SELECT revision FROM track_source_binding_state WHERE track_id=?",
+                    (track_id,),
+                ).fetchone()
+                revision = int(row[0]) if row else 1
+                if expected_revision is not None and revision != int(expected_revision):
+                    raise _Rejected(
+                        f"revision mismatch (have {revision}, expected {expected_revision})"
+                    )
+                if row is None:
+                    tx.execute(
+                        """
+                        INSERT INTO track_source_binding_state(
+                            track_id, selection_mode, verify_state, revision,
+                            origin_platform, origin_remote_id, verified_at, updated_at
+                        ) VALUES (?, 'auto', ?, 1, '', '', ?, ?)
+                        """,
+                        (
+                            track_id,
+                            verify_state,
+                            now if verify_state == VERIFIED else 0.0,
+                            now,
+                        ),
+                    )
+                else:
+                    tx.execute(
+                        """
+                        UPDATE track_source_binding_state
+                        SET verify_state=?, revision=revision+1, verified_at=?, updated_at=?
+                        WHERE track_id=?
+                        """,
+                        (
+                            verify_state,
+                            now if verify_state == VERIFIED else 0.0,
+                            now,
+                            track_id,
+                        ),
+                    )
+        except _Rejected as exc:
+            log.warning("绑定状态写入被拒绝：%s（%s）", track_id, exc)
+            return False
         self._emit(track_id)
         return True
 

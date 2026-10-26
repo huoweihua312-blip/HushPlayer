@@ -28,6 +28,7 @@ from typing import Any
 
 from ..core import paths
 from ..core.logging_setup import get_logger
+from ..online.models import payload_matches_source
 
 log = get_logger("services.source_memory")
 
@@ -189,6 +190,15 @@ def remember_track(track: object, match: object) -> None:
     orig_remote = str(getattr(track, "remote_id", "") or "")
     title = str(getattr(track, "title", "") or "")
     artist = str(getattr(track, "artist", "") or "")
+    # Old aliases only kept the mapping and reused the *original* payload,
+    # which is how a NetEase plugin once received a Kugou song id.  Persist the
+    # matched track's own payload so a replay can rebuild an identity-consistent
+    # request; only keep it when it provably belongs to this alias.
+    raw = getattr(match, "raw", None)
+    if isinstance(raw, dict) and raw and payload_matches_source(
+        raw, source_id, str(getattr(match, "remote_id", "") or "")
+    ):
+        alias["raw"] = raw
     with _LOCK:
         data = _read()
         data["tracks"][track_id] = alias

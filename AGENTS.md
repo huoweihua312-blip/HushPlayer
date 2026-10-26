@@ -237,3 +237,40 @@ HushPlayer-<ver>-setup.exe /VERYSILENT /LOG=...
 - 整行色带只在 `TrackTable.paintEvent` 的 `_paint_row_bands()` 里画一次；`TrackDelegate` 不再画底、不再 `setClipRect` 逐格叠加。
 - `TrackTable` 固定 `QStyleFactory.create("Fusion")`；`HushApp.__init__` 对非 `main()` 启动兜底 `app.setStyle("Fusion")`——Windows 11 原生样式会在选中行每格边缘画 2px 系统强调色描边。
 - 回归探针 `tools/probe_r92_band.py` 必须输出选中/悬停各 6 点同色；`tests/test_gui_smoke.py` 22 项。
+
+## 音源记忆与正式绑定（1.3.18，2026-10-26）
+
+1. **选源优先级写死在一个地方**：`PlayerController._resolve_identity(track)` 是唯一入口。
+   先读 `tracks` + `track_source_binding_state`；有有效在线绑定（`source_id` + `remote_id` 齐全）就返回
+   `PlaybackIdentity(bound=True)`，**旧 `source_memory` 别名 / `source_map` / `preferred` 一律不得参与这一首的选源**；
+   只有完全没有正式绑定时才允许旧 JSON 兼容。不要在 `_resolve_online`、预加载、强制刷新里另写一套优先级判断。
+2. **force 只绕 URL 缓存**：`_resolve_online(..., force=True)` 只跳过 `_preloaded` 与 `_resolve_cache`，
+   歌曲身份永远来自正式绑定；音质重试（`_next_quality`）保持同一 `source_id + remote_id`，
+   失败重试不得改写全局 `self._quality`。
+3. **预加载必须自带身份**：`PreloadedStream` 存 `source_id/remote_id/quality/revision/request_id + request payload`；
+   `_take_preloaded()` 逐项比对，不一致直接丢弃。预加载命中同样要 `_begin_attempt()`，播放确认后才 verified。
+   切歌 / 手动换源 / 停止 / `refresh_track` 调 `_invalidate_preloads()`（递增 `_preload_epoch` + cancel 在途请求），
+   迟到回调用 epoch 丢弃。
+4. **一套成功标准**：所有路径共用 `_begin_attempt()` / `_confirm_attempt()`。attempt 带 `session`、`quality`、
+   `revision` 与目标身份；只有 `engine.state == "playing"` 且位置真实推进
+   （`0 < 本次增量 <= 1200` 且越过 1200ms）才确认；seek / 暂停 / 切歌 / 新会话不得提交旧 attempt。
+   有绑定服务时，旧 JSON 记忆只能在 `_confirm_attempt()` 里提交，不能在 `_on_state("playing")` 抢先写。
+5. **失败归因用真实尝试**：`_online_failed(attempted=...)` 记录真正失败的源；`tried` 集合也按真实尝试累加；
+   回退搜索失败记到被搜索的源；状态文案的「暂时无法播放」用失败源而不是原队列源。
+6. **跨源解析必须身份自洽**：请求 payload 一律用 `models.runtime_track(track, source_id=track.source_id)`；
+   `models.sanitize_payload()` 会丢掉不属于目标源的 identity / source-scoped 字段
+   （`id/songmid/mid/songId/musicId/hash…`）。`source_memory` 只保存通过 `payload_matches_source()` 的 raw；
+   旧别名缺目标 raw 时用最小合法请求，禁止复用原音源 item。
+7. **导入不降级**：`TrackBindingService.import_choice()` 拒绝覆盖 `manual` 或有效 `auto/verified`；
+   revision guard 用内部 `_Rejected` 在事务外返回 False（不要在 `with transaction()` 里直接 `return`）。
+   ID 不完整的导入行必须打 warning，不能静默跳过。
+8. 回归：`tests/test_binding_regressions.py` 14 项覆盖上述规则；改 `controller.py` / `binding.py` /
+   `online/models.py` 必须跑全量 `python -m pytest -q`（当前 **319 passed**）。
+   改 controller 仍按 1.3.13 的规矩：禁止整段函数替换脚本，改完核对 `def ` 清单。
+
+- 2026-10-26（1.3.18）：音源记忆专项修复。新增 `PlaybackIdentity` / `PreloadedStream` / `_resolve_identity` /
+  `_take_preloaded` / `_invalidate_preloads` / `_next_generation` / `_next_quality`；`_resolve_online` 与
+  `_on_resolved` 改为身份优先；`_on_position` 改为增量判断；`online/models.py` 新增
+  `sanitize_payload / payload_matches_source / item_identity`；`binding.py` 事务 guard 改 `_Rejected` 且
+  `import_choice` 拒绝降级；`source_memory` 保存并校验目标 raw；新增 `tests/test_binding_regressions.py` 14 项，
+  全量 319 passed；版本号 1.3.18。

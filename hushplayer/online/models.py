@@ -213,18 +213,117 @@ def tracks_from_items(
     return tracks
 
 
-def runtime_track(track: Track) -> dict[str, Any]:
-    """Build the payload the runtime needs to resolve a stream for ``track``."""
-    payload: dict[str, Any] = {}
-    raw = track.raw if isinstance(track.raw, dict) else {}
-    item = raw.get("raw")
-    if isinstance(item, Mapping):
-        payload = dict(item)
-    else:
-        payload = dict(raw)
-    payload.pop("capabilities", None)
-    if track.remote_id and not payload.get("id"):
-        payload["id"] = track.remote_id
+#: Fields a plugin reads to decide *which recording* to resolve.  They are
+#: source specific: sending a QQ ``songmid`` to the NetEase plugin resolves a
+#: different song (or nothing at all), so they may never cross sources.
+IDENTITY_KEYS = (
+    "id",
+    "songmid",
+    "mid",
+    "songId",
+    "musicId",
+    "hash",
+    "fileHash",
+    "songHash",
+    "albumMid",
+    "albummid",
+    "copyrightId",
+    "mediaMid",
+)
+
+#: Keys that describe where a payload came from.  Reusing them on another
+#: source would mislabel the request, so they are dropped together with the
+#: identity keys whenever the payload does not belong to the target source.
+SOURCE_SCOPED_KEYS = (
+    "sourceId",
+    "source_id",
+    "sourceName",
+    "source_name",
+    "albumId",
+    "album_id",
+    "artistId",
+    "artist_id",
+)
+
+
+def _payload_item(raw: Any) -> dict[str, Any]:
+    """Return the flat item a plugin receives, following the nested ``raw``."""
+    if not isinstance(raw, Mapping):
+        return {}
+    nested = raw.get("raw")
+    return dict(nested) if isinstance(nested, Mapping) else dict(raw)
+
+
+def item_identity(item: Mapping[str, Any]) -> str:
+    """Best-effort song id inside a plugin payload (any protocol spelling)."""
+    for key in IDENTITY_KEYS:
+        value = item.get(key)
+        if value not in (None, ""):
+            return str(value)
+    return ""
+
+
+def payload_matches_source(raw: Any, source_id: str, remote_id: str) -> bool:
+    """True when ``raw`` was produced by ``source_id`` for ``remote_id``.
+
+    Older ``source_memory`` aliases only stored the mapping and kept the
+    *original* track payload, which is exactly how a NetEase request ended up
+    carrying a Kugou id.  Anything that disagrees is rejected here instead of
+    being guessed.
+    """
+    item = _payload_item(raw)
+    if not item:
+        return False
+    owner = str(item.get("sourceId") or item.get("source_id") or "")
+    if owner and source_id and owner != source_id:
+        return False
+    if remote_id:
+        identity = item_identity(item)
+        if identity and identity != str(remote_id):
+            return False
+    return True
+
+
+def sanitize_payload(
+    raw: Any, *, source_id: str, remote_id: str
+) -> dict[str, Any]:
+    """Return a payload whose identity provably belongs to ``remote_id``.
+
+    A payload from another source keeps only source-agnostic metadata; the
+    identity is rebuilt from ``remote_id``.  A missing/foreign payload degrades
+    to a minimal, internally consistent request rather than guessing.
+    """
+    item = _payload_item(raw)
+    item.pop("capabilities", None)
+    if not payload_matches_source(item, source_id, remote_id):
+        item = {
+            key: value
+            for key, value in item.items()
+            if key not in IDENTITY_KEYS and key not in SOURCE_SCOPED_KEYS
+        }
+        if remote_id:
+            item["id"] = remote_id
+    elif remote_id and not item.get("id"):
+        item["id"] = remote_id
+    return item
+
+
+def runtime_track(
+    track: Track, *, source_id: str | None = None, raw: Any = None
+) -> dict[str, Any]:
+    """Build the payload the runtime needs to resolve a stream for ``track``.
+
+    ``source_id`` defaults to ``track.source_id``; callers that play a bound
+    target pass it explicitly so the payload is always built for the source
+    that is actually about to resolve it.  The payload and the id can never
+    disagree with each other.
+    """
+    expected_source = track.source_id if source_id is None else source_id
+    payload = sanitize_payload(
+        track.raw if raw is None else raw,
+        source_id=expected_source,
+        remote_id=track.remote_id,
+    )
     if track.title and not payload.get("title"):
         payload["title"] = track.title
     if track.artist and not payload.get("artist"):
@@ -250,8 +349,11 @@ def source_of(track: Track, sources: Iterable[SourceInfo]) -> SourceInfo | None:
 __all__ = [
     "SourceInfo",
     "build_sources",
+    "item_identity",
+    "payload_matches_source",
     "platform_label",
     "runtime_track",
+    "sanitize_payload",
     "source_of",
     "track_from_item",
     "tracks_from_items",

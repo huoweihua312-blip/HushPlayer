@@ -57,6 +57,25 @@ FALLBACK_SEARCH_TIMEOUT_MS = 14000
 FALLBACK_MAX_CANDIDATES = 3
 
 
+def _alias_payload(alias: dict[str, Any]) -> dict[str, Any]:
+    """Return the alias' own payload, never the payload of the original source.
+
+    ``source_memory`` only started persisting ``raw`` in this version; older
+    entries kept just the mapping, and reusing the original track's payload is
+    exactly what made a NetEase plugin receive a Kugou song id.  A payload that
+    cannot be proven to belong to the remembered source is dropped and the
+    runtime builds a minimal, internally consistent request instead.
+    """
+    raw = alias.get("raw")
+    source_id = str(alias.get("source_id") or "")
+    remote_id = str(alias.get("remote_id") or "")
+    if isinstance(raw, dict) and raw and models.payload_matches_source(
+        raw, source_id, remote_id
+    ):
+        return dict(raw)
+    return {}
+
+
 def _track_from_alias(track: Track, alias: dict[str, Any]) -> Track:
     """A resolve-only copy of ``track`` pointing at the remembered candidate.
 
@@ -74,7 +93,7 @@ def _track_from_alias(track: Track, alias: dict[str, Any]) -> Track:
         source_name=str(alias.get("source_name") or track.source_name),
         remote_id=str(alias.get("remote_id") or ""),
         artwork_url=str(alias.get("artwork_url") or track.artwork_url),
-        raw=dict(track.raw),
+        raw=_alias_payload(alias),
     )
 
 
@@ -87,6 +106,47 @@ class ResolvedStream:
     expires_at: float
     headers: dict[str, str]
     source_id: str
+
+
+@dataclass(slots=True)
+class PreloadedStream:
+    """A prefetched URL together with the exact identity it was resolved for.
+
+    Storing a bare URL was the reason a stale preload could play a different
+    source (or a different song) than the one the database binding demands.
+    """
+
+    source_id: str
+    remote_id: str
+    quality: str
+    revision: int
+    request_id: int
+    request: dict[str, Any]
+    data: dict[str, Any]
+
+
+@dataclass(slots=True)
+class PlaybackIdentity:
+    """*Which* recording this playback session must use, and at which revision.
+
+    ``bound`` means the database already owns this song's source; ``alias_used``
+    means only the legacy JSON memory had an opinion.  The distinction is what
+    keeps old aliases from ever overriding a formal binding.
+    """
+
+    target: Track
+    revision: int = 0
+    bound: bool = False
+    alias_used: bool = False
+    alias_source: str = ""
+
+    @property
+    def source_id(self) -> str:
+        return self.target.source_id
+
+    @property
+    def remote_id(self) -> str:
+        return self.target.remote_id
 
 
 class PlayerController(QObject):
@@ -130,6 +190,11 @@ class PlayerController(QObject):
         self._busy = False
         self._resolve_generation = 0
         self._resolve_request_id = 0
+        #: 每次 ``_load()`` 开启新的播放会话；attempt 带着它，迟到的确认回调
+        #: 就不可能把「上一首/上一次播放」的成功算到当前会话头上。
+        self._session = 0
+        #: 上一次收到的播放位置，用于区分「真实推进」与 seek 造成的跳变。
+        self._last_position_value = 0
         # Remembered source is only trusted once audio really starts: a source
         # can return a URL that then 404s on the stream, and writing it early
         # makes every later play retry a dead alias.
@@ -144,8 +209,10 @@ class PlayerController(QObject):
         self._quality = "standard"
         self._quality_index = 0
         self._resolve_cache: dict[str, tuple[float, dict]] = {}
-        self._preloaded: dict[str, dict] = {}
-        self._preload_requests: dict[str, int] = {}
+        self._preloaded: dict[str, PreloadedStream] = {}
+        self._preload_requests: dict[str, tuple[int, int]] = {}
+        #: 预加载世代；手动换源/切歌/绑定变化时自增，让迟到的回调作废。
+        self._preload_epoch = 0
         self._replaygain: str = "off"
         self._online_fallback = True
         # 绑定服务由 app 注入；None 时退化为 1.3.x 的 alias/回退行为。
@@ -274,9 +341,16 @@ class PlayerController(QObject):
         return position
 
     def refresh_track(self, track: Track) -> None:
-        """来源替换后，把队列与当前曲目里的旧对象换成新记录。"""
+        """来源替换后，把队列与当前曲目里的旧对象换成新记录。
+
+        手动换源会改写正式绑定：任何为这首歌排队的预加载/播放尝试都基于旧
+        身份，必须立刻作废，否则迟到的回调会把旧来源又播回来。
+        """
 
         self.queue.replace_track(track)
+        self._invalidate_preloads()
+        if self._attempt is not None and self._attempt.get("track_id") == track.id:
+            self._attempt = None
         if self._track is not None and self._track.id == track.id:
             self._track = track
             self.track_changed.emit(track)
@@ -369,7 +443,8 @@ class PlayerController(QObject):
             self._paused_at = time.monotonic()
             # invalidate the in-flight resolve so a late answer cannot start
             # playback behind the user's back
-            self._resolve_generation += 1
+            self._next_generation()
+            self._attempt = None
             self._set_busy(False)
             self._paused_pending = True
             self.engine.halt_pending()
@@ -395,7 +470,9 @@ class PlayerController(QObject):
         self._load(self._track, position=self._position, autoplay=True)
 
     def stop(self) -> None:
-        self._resolve_generation += 1
+        self._next_generation()
+        self._attempt = None
+        self._invalidate_preloads()
         self._paused_pending = False
         self._set_busy(False)
         self.engine.stop()
@@ -495,6 +572,106 @@ class PlayerController(QObject):
         self._busy = busy
         self.loading_changed.emit(busy, hint)
 
+    def _next_generation(self) -> int:
+        self._resolve_generation += 1
+        return self._resolve_generation
+
+    def _invalidate_preloads(self, keep_track_id: str | None = None) -> None:
+        """作废预加载及其请求；``keep_track_id`` 的已存结果保留（马上要用）。"""
+
+        self._preload_epoch += 1
+        for track_id in list(self._preloaded):
+            if keep_track_id and track_id == keep_track_id:
+                continue
+            self._preloaded.pop(track_id, None)
+        cancel = getattr(self.client, "cancel", None)
+        for track_id, (request_id, _epoch) in list(self._preload_requests.items()):
+            self._preload_requests.pop(track_id, None)
+            if request_id and cancel is not None:
+                try:
+                    cancel(request_id)
+                except Exception:  # noqa: BLE001 - 取消失败不影响状态失效
+                    log.debug("cancel preload %s failed", request_id, exc_info=True)
+
+    def _resolve_identity(self, track: Track) -> "PlaybackIdentity":
+        """决定这次播放的歌曲身份：正式绑定 > 旧记忆 > 队列原样。
+
+        ``revision`` 取的是「确定身份这一刻」的数据库版本；之后的异步回调
+        只能拿它来做比较，不允许再读一个新版本替自己背书。
+        """
+        stored: Track | None = None
+        if self._binding is not None:
+            try:
+                stored = self._binding.get_target(track.id)
+            except Exception:  # noqa: BLE001 - 绑定读取失败退回队列对象
+                log.debug("read binding target for %s failed", track.id, exc_info=True)
+                stored = None
+        has_valid_binding = (
+            stored is not None
+            and stored.kind == "online"
+            and bool(stored.source_id)
+            and bool(stored.remote_id)
+        )
+        revision = 0
+        if self._binding is not None:
+            try:
+                revision = int(self._binding.state(track.id).revision)
+            except Exception:  # noqa: BLE001
+                log.debug("read binding state for %s failed", track.id, exc_info=True)
+                revision = 0
+        if has_valid_binding:
+            if (stored.source_id != track.source_id
+                    or stored.remote_id != track.remote_id):
+                log.info("binding target %s/%s for %r",
+                         stored.source_id, stored.remote_id, track.title)
+            return PlaybackIdentity(target=stored, revision=revision, bound=True)
+
+        # 只有「没有有效正式绑定」时才允许兼容旧 source_memory。
+        alias = source_memory.track_alias(track)
+        if alias is not None:
+            alias_source = str(alias.get("source_id") or "")
+            same_source = alias_source == track.source_id
+            playable = self._source_is_playable(alias_source)
+            if (alias_source and (self._online_fallback or same_source)
+                    and playable and not health.looks_broken(alias_source)):
+                log.info("using remembered source %s for %r",
+                         alias_source, track.title)
+                return PlaybackIdentity(
+                    target=_track_from_alias(track, alias),
+                    revision=revision,
+                    alias_used=True,
+                    alias_source=alias_source,
+                )
+            if not alias_source or not playable:
+                source_memory.forget_track(track)
+        return PlaybackIdentity(target=track, revision=revision)
+
+    def _take_preloaded(self, track: Track, identity: "PlaybackIdentity",
+                        quality: str) -> dict[str, Any] | None:
+        """Consume a preload only when it was resolved for *this* identity."""
+        entry = self._preloaded.pop(track.id, None)
+        if entry is None:
+            return None
+        problems = []
+        if entry.request and not models.payload_matches_source(
+            entry.request, identity.source_id, identity.remote_id
+        ):
+            problems.append("payload identity")
+        if entry.source_id != identity.source_id:
+            problems.append(f"source {entry.source_id!r} != {identity.source_id!r}")
+        if entry.remote_id != identity.remote_id:
+            problems.append(f"remote {entry.remote_id!r} != {identity.remote_id!r}")
+        if entry.quality != quality:
+            problems.append(f"quality {entry.quality!r} != {quality!r}")
+        if int(entry.revision) != int(identity.revision):
+            problems.append(f"revision {entry.revision} != {identity.revision}")
+        if problems:
+            log.info("丢弃过期预加载 %s：%s", track.title, "；".join(problems))
+            return None
+        log.info("preloaded stream hit for %r (%s/%s @ %s)",
+                 track.title, entry.source_id, entry.remote_id, entry.quality)
+        return dict(entry.data)
+
     def _play_current(self, *, reset_position: bool) -> None:
         track = self.queue.current
         if track is None:
@@ -520,40 +697,72 @@ class PlayerController(QObject):
             self.repeat_changed.emit(self._last_repeat)
 
     def preload_next(self, *, delay_ms: int = 2500) -> None:
-        """Resolve the upcoming online track ahead of time (no UI impact)."""
-        if not self._online_fallback and not self.client:
+        """Resolve the upcoming online track ahead of time (no UI impact).
+
+        The prefetch must obey the same identity rules as playback: it first
+        asks the database (then, only without a binding, the legacy memory) what
+        this song is, and stores that identity together with the URL so the
+        consumption side can prove the two still agree.
+        """
+        if self.client is None:
             return
         upcoming = self.queue.upcoming(1)
         if not upcoming:
             return
         nxt = upcoming[0]
-        if nxt.kind != "online" or not nxt.source_id or nxt.id in self._preloaded:
+        if nxt.kind != "online" or not nxt.id:
             return
-        target = nxt
-        alias = source_memory.track_alias(nxt)
-        if alias is not None:
-            alias_source = str(alias.get("source_id") or "")
-            if alias_source and self._source_is_playable(alias_source):
-                target = _track_from_alias(nxt, alias)
-        source = next((item for item in self._sources if item.id == target.source_id), None)
-        if source is None or not source.can_play:
+        if nxt.id in self._preloaded or nxt.id in self._preload_requests:
             return
-        payload = models.runtime_track(target)
+        identity = self._resolve_identity(nxt)
+        target = identity.target
+        if not target.source_id or not self._source_is_playable(target.source_id):
+            return
         quality = self._quality or "standard"
+        payload = models.runtime_track(target, source_id=target.source_id)
+        epoch = self._preload_epoch
         request_id = self.client.resolve_playback(
-            target.source_id, payload,
-            lambda response, tid=nxt.id: self._on_preloaded(tid, response),
+            target.source_id,
+            payload,
+            lambda response, tid=nxt.id, ident=identity, q=quality,
+                   req=payload, token=epoch: self._on_preloaded(
+                       tid, response, ident, q, req, token
+                   ),
             quality=quality,
         )
         if request_id:
-            self._preload_requests[nxt.id] = request_id
+            self._preload_requests[nxt.id] = (int(request_id), epoch)
 
-    def _on_preloaded(self, track_id: str, response: dict[str, Any]) -> None:
+    def _on_preloaded(
+        self,
+        track_id: str,
+        response: dict[str, Any],
+        identity: "PlaybackIdentity",
+        quality: str,
+        request: dict[str, Any],
+        epoch: int,
+    ) -> None:
+        registered = self._preload_requests.get(track_id)
+        if registered is not None and registered[1] == epoch:
+            self._preload_requests.pop(track_id, None)
+        if epoch != self._preload_epoch:
+            # 手动换源/切歌已经让这次预加载过期，迟到结果不得写回缓存。
+            log.info("丢弃迟到的预加载回调：%s", track_id)
+            return
         if not response.get("ok"):
             return
         data = response.get("data") or {}
-        if isinstance(data, dict) and data.get("url"):
-            self._preloaded[track_id] = data
+        if not isinstance(data, dict) or not data.get("url"):
+            return
+        self._preloaded[track_id] = PreloadedStream(
+            source_id=identity.source_id,
+            remote_id=identity.remote_id,
+            quality=quality,
+            revision=int(identity.revision),
+            request_id=int(registered[0]) if registered else 0,
+            request=dict(request),
+            data=dict(data),
+        )
 
     def _apply_replaygain(self, track: Track, source: str) -> None:
         mode = str(self._replaygain or "off")
@@ -573,6 +782,12 @@ class PlayerController(QObject):
             self._set_busy(False)
         self._paused_pending = False
         self._memory_pending = None
+        # A new load starts a new playback session: any attempt/confirm from the
+        # previous session is invalid, and preloads for other tracks are stale.
+        self._session += 1
+        self._attempt = None
+        self._last_position_value = 0
+        self._invalidate_preloads(keep_track_id=track.id)
         self._track = track
         self._pending_resume = max(0, int(position))
         self._position = self._pending_resume
@@ -615,65 +830,49 @@ class PlayerController(QObject):
 
     def _resolve_online(self, track: Track, *, autoplay: bool, force: bool,
                         tried: set[str], was_playing: bool,
-                        use_alias: bool = True,
-                        keep_quality: bool = False) -> None:
-        preloaded = None if force else self._preloaded.pop(track.id, None)
-        if preloaded is not None:
-            self._resolve_generation += 1
-            generation = self._resolve_generation
-            self._quality_index = 0
-            self._on_resolved(track, {"ok": True, "data": preloaded}, generation,
-                              autoplay, tried, was_playing)
-            return
+                        identity: PlaybackIdentity | None = None,
+                        quality: str | None = None) -> None:
+        """Resolve a stream for the *formal* identity of ``track``.
 
-        # 正式绑定（DB）是唯一真相：只要它指向一个可用的 source/remote_id，
-        # 就直接解析地址，绝不重新投票。
-        target = track
-        revision = 0
-        bound: Track | None = None
-        if self._binding is not None and not force:
-            stored = self._binding.get_target(track.id)
-            if (stored is not None and stored.kind == "online"
-                    and stored.source_id and stored.remote_id):
-                bound = stored
-                revision = int(self._binding.state(track.id).revision)
-                if (stored.source_id != track.source_id
-                        or stored.remote_id != track.remote_id):
-                    target = stored
-                    log.info("binding target %s/%s for %r",
-                             stored.source_id, stored.remote_id, track.title)
-
-        # 兼容旧数据：没有绑定时仍可使用 source_memory 别名解析。
-        if target is track and use_alias and not force:
-            alias = source_memory.track_alias(track)
-            if alias is not None:
-                alias_source = str(alias.get("source_id") or "")
-                same_source = alias_source == track.source_id
-                if (alias_source and (self._online_fallback or same_source)
-                        and self._source_is_playable(alias_source)
-                        and not health.looks_broken(alias_source)):
-                    target = _track_from_alias(track, alias)
-                    log.info("using remembered source %s for %r",
-                             alias_source, track.title)
-                elif not alias_source or not self._source_is_playable(alias_source):
-                    source_memory.forget_track(track)
+        ``force`` only bypasses the URL cache (expired/poisoned URLs); it never
+        re-decides which song/source to play.  Retries pass ``identity`` and
+        ``quality`` explicitly so every attempt keeps the exact same
+        ``source_id + remote_id``.
+        """
+        if identity is None:
+            identity = self._resolve_identity(track)
+        target = identity.target
+        revision = int(identity.revision)
+        bound = bool(identity.bound)
+        if quality is None:
+            quality = self._quality or "standard"
+        generation = self._next_generation()
 
         source_id = target.source_id
         if not source_id:
-            self._online_failed(track, "该在线歌曲缺少音源信息", tried, autoplay)
+            self._online_failed(track, "该在线歌曲缺少音源信息", tried, autoplay,
+                                attempted=target, kind="source-unavailable")
             return
 
-        # 绑定源被禁用/文件缺失时，才允许跨源回退。
-        if bound is not None and not self._source_is_playable(source_id):
+        # 只有「源本身不可用」（插件缺失/被禁用）才允许换源；URL 失效留给
+        # 同一身份的刷新/音质降级处理。
+        if not self._source_is_playable(source_id):
             if self._online_fallback and self._fallback_all_sources(
                 track, {source_id, track.source_id}, autoplay,
-                "原音源不可用，正在其他音源中查找",
+                "原音源不可用，正在其他音源中查找", quality=quality,
+                failed_source=source_id,
             ):
                 return
+            self._online_failed(track, "原音源不可用", tried, autoplay,
+                                attempted=target, kind="source-unavailable")
+            return
 
-        if target is track and use_alias and not force and self._online_fallback:
+        # 旧 source_map 只对「没有正式绑定」且没有别名可用的歌曲生效。
+        if not bound and not identity.alias_used and self._online_fallback:
             mapped = source_memory.source_map(track.source_id)
-            if mapped and self._source_is_playable(mapped) and health.looks_broken(track.source_id):
+            if (mapped and mapped != source_id
+                    and self._source_is_playable(mapped)
+                    and health.looks_broken(track.source_id)):
                 log.info("skip broken source %s for %r → %s",
                          track.source_id, track.title, mapped)
                 self.status_message.emit(
@@ -681,14 +880,20 @@ class PlayerController(QObject):
                     f"正在使用 {self._source_label(mapped)}"
                 )
                 if self._fallback_all_sources(track, {track.source_id}, autoplay,
-                                              "该音源最近解析失败", only=mapped):
+                                              "该音源最近解析失败", only=mapped,
+                                              quality=quality,
+                                              failed_source=track.source_id):
                     return
 
-        self._resolve_generation += 1
-        generation = self._resolve_generation
-        if not keep_quality:
-            self._quality_index = 0
-        cache_key = self._resolve_cache_key(target)
+        preloaded = None if force else self._take_preloaded(track, identity, quality)
+        if preloaded is not None:
+            self._begin_attempt(track, target, revision, quality=quality)
+            self._apply_resolved(track, preloaded, generation, autoplay,
+                                 was_playing, identity=identity, quality=quality,
+                                 tried=tried)
+            return
+
+        cache_key = self._resolve_cache_key(target, quality)
         cached = self._resolve_cache.get(cache_key)
         if cached is not None and not force:
             stamped, payload = cached
@@ -699,9 +904,10 @@ class PlayerController(QObject):
             )
             if fresh:
                 log.info("resolve cache hit for %s (%.0fms old)", track.title, age_ms)
-                self._begin_attempt(track, target, revision)
+                self._begin_attempt(track, target, revision, quality=quality)
                 self._apply_resolved(track, payload, generation, autoplay,
-                                     was_playing, source_id=source_id)
+                                     was_playing, identity=identity,
+                                     quality=quality, tried=tried)
                 return
             self._resolve_cache.pop(cache_key, None)
 
@@ -712,77 +918,88 @@ class PlayerController(QObject):
             except Exception:  # noqa: BLE001
                 log.debug("cancel resolve %s failed", self._resolve_request_id, exc_info=True)
             self._resolve_request_id = 0
-        self._begin_attempt(track, target, revision)
-        via_alias = target is not track and bound is None
+        self._begin_attempt(track, target, revision, quality=quality)
         self._resolve_request_id = self.client.resolve_playback(
             source_id,
-            runtime_track(target),
+            runtime_track(target, source_id=source_id),
             lambda response: self._on_resolved(
                 track, response, generation, autoplay, tried, was_playing,
-                alias_used=via_alias,
-                alias_source=source_id if via_alias else "",
-                target=target if target is not track else None,
+                identity=identity, quality=quality,
             ),
-            quality=self._quality,
+            quality=quality,
         ) or 0
 
     def _on_resolved(self, track: Track, response: dict, generation: int,
                      autoplay: bool, tried: set[str], was_playing: bool,
-                     *, alias_used: bool = False, alias_source: str = "",
-                     target: Track | None = None) -> None:
+                     *, identity: PlaybackIdentity, quality: str) -> None:
         """解析结果回调：成功就播放，失败才降级/回退。"""
 
         if generation != self._resolve_generation:
             return
         self._set_busy(False)
+        target = identity.target
         if not response.get("ok"):
             error = str(response.get("error") or "未知错误")
-            log.info("resolve failed for %r via %s: %s",
-                     track.title, alias_source or track.source_id, error)
-            if alias_used and alias_source:
-                health.record_fail(alias_source, error)
-                if source_memory.preferred() == alias_source:
-                    source_memory.clear_preferred()
-            # 同一绑定源换一档音质再试，仍然不改身份。
-            if not alias_used and self._quality_index + 1 < len(QUALITY_CHAIN):
-                self._quality_index += 1
-                self._quality = QUALITY_CHAIN[self._quality_index]
+            log.info("resolve failed for %r via %s/%s @ %s: %s",
+                     track.title, target.source_id, target.remote_id, quality, error)
+            # 同一绑定源换一档音质再试，仍然不改身份。旧别名不参与音质阶梯：
+            # 它本来就是兼容路径，失败就该进入跨源搜索，而不是拖慢三倍。
+            next_quality = None if identity.alias_used else _next_quality(quality)
+            if next_quality is not None:
                 self._resolve_online(
                     track, autoplay=autoplay, force=True, tried=tried,
-                    was_playing=was_playing, use_alias=False, keep_quality=True,
+                    was_playing=was_playing, identity=identity,
+                    quality=next_quality,
                 )
                 return
-            if self._binding is not None and target is not None:
+            if identity.alias_used:
+                # 别名的音质都失败了：不能再退回原源，也不能继续信这个名字。
+                if identity.alias_source and source_memory.preferred() == identity.alias_source:
+                    source_memory.clear_preferred()
+                source_memory.mark_alias_failed(track)
+            if identity.bound and self._binding is not None:
                 try:
-                    state = self._binding.state(track.id)
                     self._binding.mark_failed(
-                        track.id, expected_revision=int(state.revision)
+                        track.id, expected_revision=int(identity.revision)
                     )
                 except Exception:  # noqa: BLE001 - 状态写入失败不应影响播放
                     log.debug("mark binding failed for %s", track.id, exc_info=True)
-            self._online_failed(track, error, tried, autoplay)
+            # 别名失败时把原源也加入 tried：不能立刻绕回刚刚不可用的来源。
+            failed_tried = set(tried)
+            if identity.alias_used and track.source_id:
+                failed_tried.add(track.source_id)
+            self._online_failed(track, error, failed_tried, autoplay,
+                                attempted=target, kind="resolve")
             return
 
         payload = response.get("data") or {}
-        used = target or track
-        self._resolve_cache[self._resolve_cache_key(used)] = (time.monotonic(), payload)
-        health.record_ok(used.source_id or track.source_id or "")
+        if not isinstance(payload, dict):
+            payload = {}
+        resolved_quality = str(payload.get("quality") or quality)
+        # 缓存键永远是「实际播放目标」的身份，绝不用原队列歌曲的 remote_id。
+        self._resolve_cache[self._resolve_cache_key(target, resolved_quality)] = (
+            time.monotonic(), payload
+        )
+        health.record_ok(target.source_id or track.source_id or "")
         self._apply_resolved(track, payload, generation, autoplay, was_playing,
-                             source_id=used.source_id)
+                             identity=identity, quality=quality, tried=tried)
 
     def _begin_attempt(self, track: Track, target: Track, revision: int,
-                       *, was_fallback: bool = False) -> None:
+                       *, was_fallback: bool = False, quality: str = "") -> None:
         """记录「这一次播放尝试」的身份，供播放确认时校验。"""
-        if self._binding is None or target.kind != "online":
+        if target.kind != "online" or not target.source_id:
             self._attempt = None
             return
         from ..services.binding import BindingChoice
 
         self._attempt = {
             "track_id": track.id,
+            # 会话标识让「上一首歌/上一次加载」的迟到的确认无法落到当前播放上。
+            "session": self._session,
             "choice": BindingChoice.from_track(target),
             "source_id": target.source_id,
             "remote_id": target.remote_id,
+            "quality": str(quality or ""),
             "revision": int(revision),
             "was_fallback": bool(was_fallback),
             "confirmed": False,
@@ -793,16 +1010,25 @@ class PlayerController(QObject):
         attempt = self._attempt
         if attempt is None or attempt.get("confirmed"):
             return
+        if attempt.get("session") != self._session:
+            attempt["confirmed"] = True
+            return
         track = self._track
         if track is None or track.id != attempt["track_id"]:
             return
+        if self.engine.state != "playing":
+            return
         if self._binding is None:
+            # 没有绑定服务时才由旧 JSON 记忆兜底；同样只认真实播放。
             attempt["confirmed"] = True
+            self._commit_memory_pending()
             return
         current = self._binding.state(track.id)
         if current.revision != int(attempt["revision"]):
             # 播放期间用户/导入改过绑定：旧回调不得覆盖新选择。
             attempt["confirmed"] = True
+            log.info("丢弃过期播放确认：%s revision %s != %s",
+                     track.id, attempt["revision"], current.revision)
             return
         choice = attempt["choice"]
         if attempt.get("was_fallback") and choice.source_id != (track.source_id or ""):
@@ -815,6 +1041,8 @@ class PlayerController(QObject):
             )
         attempt["confirmed"] = True
         if not ok:
+            # manual 绑定永不被自动回退改写；这里静默失败是正确行为。
+            log.info("播放确认未写入 %s（来源 %s 未被采纳）", track.id, choice.source_id)
             return
         updated = self._binding.get_target(track.id)
         if updated is None:
@@ -827,32 +1055,38 @@ class PlayerController(QObject):
             self._binding.notify_updated(updated.id)
         except Exception:  # noqa: BLE001 - UI 刷新失败不影响播放
             pass
+        # 旧 JSON 记忆只在数据库确认之后同步，不能独立地更早确立身份。
+        self._commit_memory_pending()
 
-    def _resolve_cache_key(self, track: Track) -> str:
-        return f"{track.source_id}:{track.remote_id or track.id}:{self._quality}"
+    def _resolve_cache_key(self, track: Track, quality: str | None = None) -> str:
+        return f"{track.source_id}:{track.remote_id or track.id}:{quality or self._quality}"
 
     def _apply_resolved(self, track: Track, data: dict, generation: int,
-                        autoplay: bool, was_playing: bool,
-                        tried: set[str] | None = None, source_id: str = "") -> None:
+                        autoplay: bool, was_playing: bool, *,
+                        identity: PlaybackIdentity, quality: str,
+                        tried: set[str] | None = None) -> None:
         tried = tried if tried is not None else set()
         if generation != self._resolve_generation:
             return
         self._set_busy(False)
         url = str(data.get("url") or "")
         if not url:
-            self._online_failed(track, "音源没有返回播放地址", tried, autoplay)
+            self._online_failed(track, "音源没有返回播放地址", tried, autoplay,
+                                attempted=identity.target, kind="resolve")
             return
         headers = data.get("headers") or {}
         if not isinstance(headers, dict):
             headers = {}
         headers = {str(k): str(v) for k, v in headers.items() if isinstance(v, (str, int, float))}
         mime = str(data.get("mimeType") or "")
-        quality = str(data.get("quality") or self._quality)
+        resolved_quality = str(data.get("quality") or quality)
         try:
             expires = float(data.get("expiresAt") or 0)
         except (TypeError, ValueError):
             expires = 0.0
-        cache_key = f"{source_id or track.source_id}:{track.remote_id or track.id}:{quality}"
+        # 缓存键 = 实际播放目标 + 实际音质；不能用原队列歌曲的 remote_id。
+        cache_key = (f"{identity.source_id}:"
+                     f"{identity.remote_id or track.id}:{resolved_quality}")
         ext = self._guess_ext(url, mime)
         try:
             stream_url = self.proxy.register(
@@ -860,26 +1094,49 @@ class PlayerController(QObject):
             )
         except Exception as exc:
             log.exception("proxy register failed")
-            self._online_failed(track, f"本地缓存服务不可用：{exc}", tried, autoplay)
+            self._online_failed(track, f"本地缓存服务不可用：{exc}", tried, autoplay,
+                                attempted=identity.target, kind="media")
             return
-        health.record_ok(source_id or track.source_id or "")
+        health.record_ok(identity.source_id or track.source_id or "")
         self.active_source_changed.emit(
-            self._source_label(source_id or track.source_id or "")
+            self._source_label(identity.source_id or track.source_id or "")
         )
+        # 新流的第一拍位置不是「播放进度」，不能拿来确认播放成功。
+        self._last_position_value = 0
         self.engine.load(stream_url, duration_hint=track.duration_ms, autoplay=autoplay)
         self._apply_pending_position()
         if was_playing and not autoplay:
             self.engine.play()
 
-    def _online_failed(self, track: Track, error: str, tried: set[str], autoplay: bool) -> None:
+    def _online_failed(self, track: Track, error: str, tried: set[str], autoplay: bool,
+                       *, attempted: Track | None = None, kind: str = "resolve",
+                       failed_source: str = "") -> None:
+        """Record a failure against the source that *actually* failed.
+
+        ``attempted`` is the bound/fallback target that produced ``error``; the
+        queue row may point at a completely different source, and blaming it
+        used to poison the wrong plugin's health and the ``tried`` set.
+        ``failed_source`` carries an already-blamed source through a fallback
+        round without recording a second failure for it.
+        """
         self._set_busy(False)
-        health.record_fail(track.source_id or "", error)
-        log.info("resolve failed for %s: %s", track.title, error)
-        tried.add(track.source_id)
-        if self._online_fallback and len(tried) <= FALLBACK_MAX:
+        if kind == "cancelled":
+            return
+        blamed = str(attempted.source_id) if attempted is not None else str(failed_source or "")
+        failed_remote = str(attempted.remote_id) if attempted is not None else ""
+        failed_tried = set(tried)
+        if attempted is not None and blamed:
+            health.record_fail(blamed, error)
+            failed_tried.add(blamed)
+            log.info("resolve failed for %s via %s/%s (%s): %s",
+                     track.title, blamed, failed_remote, kind, error)
+        else:
+            log.info("resolve failed for %s (%s): %s", track.title, kind, error)
+        if self._online_fallback and len(failed_tried) <= FALLBACK_MAX:
             # Original HushPlayer behaviour: an unavailable source silently
             # falls back to any other enabled source that has the same song.
-            if self._fallback_all_sources(track, tried, autoplay, error):
+            if self._fallback_all_sources(track, failed_tried, autoplay, error,
+                                          failed_source=blamed):
                 return
         # Nothing else to try: surface it as a real error (toast) instead of a
         # transient status line, otherwise a failed resolve looks silent.
@@ -890,14 +1147,16 @@ class PlayerController(QObject):
         else:
             # The attempt is over: settle on a stopped, usable state instead of
             # leaving ``loading`` stuck for ever with dead transport controls.
-            self._resolve_generation += 1
+            self._next_generation()
+            self._attempt = None
             self._set_busy(False)
             self.engine.stop()
             self.error_message.emit("在线播放失败，已停止")
 
     def _fallback_all_sources(
         self, track: Track, tried: set[str], autoplay: bool, error: str,
-        *, only: str | None = None,
+        *, only: str | None = None, quality: str = "standard",
+        failed_source: str = "",
     ) -> bool:
         """Search every remaining playable source for the same recording.
 
@@ -927,10 +1186,12 @@ class PlayerController(QObject):
         generation = self._resolve_generation
         keyword = f"{track.title} {track.artist}".strip() or track.title
         pending = {source.id for source in sources}
+        searched = {source.id for source in sources}
         collected: list[MatchCandidate] = []
         names = "、".join(source.label for source in sources)
+        blamed = failed_source or track.source_id
         self.status_message.emit(
-            f"{self._source_label(track.source_id)} 暂时无法播放（{_short(error)}），正在其他音源中查找：{names}"
+            f"{self._source_label(blamed)} 暂时无法播放（{_short(error)}），正在其他音源中查找：{names}"
         )
         focused_only = bool(only) and {s.id for s in sources} == {only}
 
@@ -948,10 +1209,16 @@ class PlayerController(QObject):
                     # The remembered source has nothing: continue with the
                     # normal chain instead of giving up.
                     self._online_failed(
-                        track, "其他音源没有找到同一首歌", set(tried) | {only or ""}, autoplay
+                        track, "其他音源没有找到同一首歌",
+                        set(tried) | {only or ""}, autoplay,
+                        failed_source=failed_source,
                     )
                     return
-                self._online_failed(track, "其他音源没有找到同一首歌", tried, autoplay)
+                # Everything was already searched: do not fall back again in a
+                # loop (this used to re-search the same dead sources forever).
+                self._online_failed(track, "其他音源没有找到同一首歌",
+                                    set(tried) | searched, autoplay,
+                                    failed_source=failed_source)
                 return
             # Duplicates of the same recording (common in one source's result
             # list) must not shrink the margin against a *different* song.
@@ -969,14 +1236,16 @@ class PlayerController(QObject):
             margin = best.score - ordered[1].score if len(ordered) > 1 else best.score
             confident = best.score >= AUTO_MIN_SCORE and margin >= AUTO_MARGIN
             if not confident and best.score < CANDIDATE_MIN_SCORE:
-                self._online_failed(track, "其他音源没有找到同一首歌", tried, autoplay)
+                self._online_failed(track, "其他音源没有找到同一首歌",
+                                    set(tried) | searched, autoplay,
+                                    failed_source=failed_source)
                 return
             label = self._source_label(best.track.source_id)
             if confident:
                 self.status_message.emit(f"已切换到 {label} 音源播放")
             else:
                 self.status_message.emit(f"未找到完全一致的版本，已用 {label} 的最接近结果继续播放")
-            self._play_candidate(track, best.track, tried, autoplay)
+            self._play_candidate(track, best.track, tried, autoplay, quality)
 
         def on_search(source: SourceInfo, response: dict) -> None:
             if generation != self._resolve_generation:
@@ -992,6 +1261,9 @@ class PlayerController(QObject):
                     log.warning("解析回退搜索结果失败：%s", exc)
                     candidates = []
                 collected.extend(rank_candidates(track, candidates))
+            else:
+                # 搜索失败归于正在搜索的那个源，而不是原队列歌曲的源。
+                health.record_fail(source.id, str(response.get("error") or "搜索失败"))
             if not pending:
                 choose()
 
@@ -1008,18 +1280,26 @@ class PlayerController(QObject):
         QTimer.singleShot(FALLBACK_SEARCH_TIMEOUT_MS + 2500, choose)
         return True
 
-    def _play_candidate(self, track: Track, match: Track, tried: set[str], autoplay: bool) -> None:
-        self._resolve_generation += 1
-        generation = self._resolve_generation
+    def _play_candidate(self, track: Track, match: Track, tried: set[str],
+                        autoplay: bool, quality: str = "standard") -> None:
+        generation = self._next_generation()
         tried.add(match.source_id)
+        # The revision belongs to the moment this playback identity was chosen;
+        # the callback must not re-read a newer revision and pretend to be it.
+        revision = 0
+        if self._binding is not None:
+            try:
+                revision = int(self._binding.state(track.id).revision)
+            except Exception:  # noqa: BLE001
+                log.debug("read binding revision for %s failed", track.id, exc_info=True)
         self._set_busy(True, "正在获取播放地址…")
         self.client.resolve_playback(
             match.source_id,
-            runtime_track(match),
+            runtime_track(match, source_id=match.source_id),
             lambda response: self._on_fallback_resolved(
-                track, match, response, generation, autoplay, tried
+                track, match, response, generation, autoplay, tried, quality, revision
             ),
-            quality=self._quality_chain[0],
+            quality=quality,
         )
 
     def _pick_fallback(self, track: Track, tried: set[str]) -> SourceInfo | None:
@@ -1037,61 +1317,70 @@ class PlayerController(QObject):
             if generation != self._resolve_generation:
                 return
             if not response.get("ok"):
-                self._online_failed(track, str(response.get("error") or "搜索失败"), tried, autoplay)
+                error = str(response.get("error") or "搜索失败")
+                health.record_fail(source.id, error)
+                self._online_failed(track, error, tried, autoplay, attempted=source)
                 return
             candidates = tracks_from_items(response.get("data") or [], source=source)
             match = self._best_match(track, candidates)
             if match is None:
-                self._online_failed(track, "其他音源没有找到同一首歌", tried, autoplay)
+                self._online_failed(track, "其他音源没有找到同一首歌",
+                                    set(tried) | {source.id}, autoplay, attempted=source)
                 return
             # Reuse the current row: the queue keeps showing the original track,
             # but playback uses the matched stream.
-            self._resolve_generation += 1
-            generation2 = self._resolve_generation
-            self.client.resolve_playback(
-                source.id,
-                runtime_track(match),
-                lambda resp: self._on_fallback_resolved(track, match, resp, generation2, autoplay, tried),
-                quality=self._quality,
-            )
+            self._play_candidate(track, match, tried, autoplay, self._quality)
 
         self.client.search(source.id, keyword, 1, on_search)
 
     def _on_fallback_resolved(self, track: Track, match: Track, response: dict, generation: int,
-                              autoplay: bool, tried: set[str]) -> None:
+                              autoplay: bool, tried: set[str],
+                              quality: str = "standard", revision: int = 0) -> None:
         if generation != self._resolve_generation:
             return
+        self._set_busy(False)
         if not response.get("ok"):
-            self._online_failed(track, str(response.get("error") or "播放地址解析失败"), tried, autoplay)
+            self._online_failed(track, str(response.get("error") or "播放地址解析失败"),
+                                tried, autoplay, attempted=match, kind="resolve")
             return
         data = response.get("data") or {}
+        if not isinstance(data, dict):
+            data = {}
         url = str(data.get("url") or "")
         if not url:
-            self._online_failed(track, "音源没有返回播放地址", tried, autoplay)
+            self._online_failed(track, "音源没有返回播放地址", tried, autoplay,
+                                attempted=match, kind="resolve")
             return
         headers = data.get("headers") or {}
         headers = {str(k): str(v) for k, v in headers.items()} if isinstance(headers, dict) else {}
         mime = str(data.get("mimeType") or "")
-        quality = str(data.get("quality") or self._quality)
-        cache_key = f"{match.source_id}:{match.remote_id or match.id}:{quality}"
+        resolved_quality = str(data.get("quality") or quality)
+        try:
+            expires = float(data.get("expiresAt") or 0)
+        except (TypeError, ValueError):
+            expires = 0.0
+        # 键用实际匹配到的目标身份；原队列歌曲的 remote_id 不参与。
+        cache_key = f"{match.source_id}:{match.remote_id or match.id}:{resolved_quality}"
         try:
             stream_url = self.proxy.register(
-                cache_key, url, headers, mime=mime, ext=self._guess_ext(url, mime)
+                cache_key, url, headers, mime=mime, ext=self._guess_ext(url, mime),
+                expires_at=expires,
             )
         except Exception as exc:
             log.exception("proxy register failed")
-            self._online_failed(track, f"本地缓存服务不可用：{exc}", tried, autoplay)
+            self._online_failed(track, f"本地缓存服务不可用：{exc}", tried, autoplay,
+                                attempted=match, kind="media")
             return
         # A fallback that actually produced a URL is evidence the source works;
         # without this the alias source can stay "broken" from older failures
         # and get skipped on the next play, forcing another search.
-        # 回退成功后只记成功：旧的 record_fail 会让同一个源刚成功就被判坏。
         health.record_ok(match.source_id)
-        revision = 0
-        if self._binding is not None:
-            revision = int(self._binding.state(track.id).revision)
-        self._begin_attempt(track, match, revision, was_fallback=True)
+        self._resolve_cache[self._resolve_cache_key(match, resolved_quality)] = (
+            time.monotonic(), data
+        )
+        self._begin_attempt(track, match, revision, was_fallback=True, quality=quality)
         self.status_message.emit(f"已通过 {self._source_label(match.source_id)} 播放")
+        self.active_source_changed.emit(self._source_label(match.source_id))
         # Remember the pairing only once audio really starts (see _commit_memory_pending):
         # some plugins return a URL that then 404s on the stream.
         self._memory_pending = (track, match)
@@ -1101,6 +1390,7 @@ class PlayerController(QObject):
         # Leaving ``busy`` set would keep the UI on "loading" although the
         # fallback stream is already playing.
         self._set_busy(False)
+        self._last_position_value = 0
         self.engine.load(stream_url, duration_hint=self._duration or match.duration_ms, autoplay=autoplay)
         self._apply_pending_position()
 
@@ -1154,9 +1444,15 @@ class PlayerController(QObject):
 
     # ------------------------------------------------------------- signals
     def _on_position(self, value: int) -> None:
-        self._position = int(value)
-        self.position_changed.emit(self._position)
-        if self._position >= 1200 and self.state == "playing":
+        value = int(value)
+        previous = self._last_position_value
+        self._last_position_value = value
+        self._position = value
+        self.position_changed.emit(value)
+        # 只有「真实向前推进」才算播放成功：seek、恢复上次进度、回绕都会造成
+        # 单次巨大跳变，不能拿它当验证依据。
+        if (0 < value - previous <= 1200 and value >= 1200
+                and self.engine.state == "playing"):
             self._confirm_attempt()
 
     def _on_duration(self, value: int) -> None:
@@ -1188,7 +1484,10 @@ class PlayerController(QObject):
             log.debug("cannot persist source memory", exc_info=True)
     def _on_state(self, state: str) -> None:
         if state == "playing" and self._track is not None:
-            self._commit_memory_pending()
+            # 有数据库绑定时，旧 JSON 记忆只能跟着 _confirm_attempt 走；
+            # 只有完全没有绑定服务时它才作为兜底。
+            if self._binding is None:
+                self._commit_memory_pending()
             self._failures = 0
             self._paused_at = 0.0
             self.track_started.emit(self._track)
@@ -1219,11 +1518,20 @@ class PlayerController(QObject):
         log.warning("engine error: %s", message)
         track = self._track
         if track is not None and track.is_online and not fatal:
-            # Cached stream may have been truncated: drop the cache entry once.
-            if self._fallback_tried.isdisjoint({track.source_id}):
-                self._fallback_tried.add(track.source_id)
+            attempt = self._attempt or {}
+            # Attribute the media failure to what is actually playing, not to
+            # the queue row's original source.
+            source_id = str(attempt.get("source_id") or track.source_id or "")
+            remote_id = str(attempt.get("remote_id") or track.remote_id or "")
+            if self._fallback_tried.isdisjoint({source_id}):
+                self._fallback_tried.add(source_id)
+                # The cached URL is the suspect: drop it, keep the binding.
+                prefix = f"{source_id}:{remote_id}:" if remote_id else f"{source_id}:"
+                for key in [k for k in self._resolve_cache if k.startswith(prefix)]:
+                    self._resolve_cache.pop(key, None)
+                self._attempt = None
                 self.status_message.emit("在线音频读取失败，正在重新获取…")
-                self._resolve_generation += 1
+                self._next_generation()
                 self._load(track, position=self._position, autoplay=True, force_resolve=True)
                 return
         self.status_message.emit(message)
@@ -1233,7 +1541,8 @@ class PlayerController(QObject):
         else:
             # never leave the UI in a fake playing/loading state after a fatal
             # error: stop the pipeline and clear the busy flag
-            self._resolve_generation += 1
+            self._next_generation()
+            self._attempt = None
             self._set_busy(False)
             self.engine.stop()
             self.error_message.emit("播放出错，已停止")
@@ -1273,6 +1582,17 @@ def _normalise_text(value: str) -> str:
 def _short(text: str, limit: int = 80) -> str:
     text = (text or "").strip().replace("\n", " ")
     return text if len(text) <= limit else text[: limit - 1] + "…"
+
+
+def _next_quality(quality: str) -> str | None:
+    """Next quality tier for the *same* identity, or None when exhausted."""
+    try:
+        index = QUALITY_CHAIN.index(quality)
+    except ValueError:
+        return None
+    if index + 1 >= len(QUALITY_CHAIN):
+        return None
+    return QUALITY_CHAIN[index + 1]
 
 
 __all__ = ["PlayerController", "ResolvedStream"]

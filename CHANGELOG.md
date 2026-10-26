@@ -1,5 +1,24 @@
 # 更新日志
 
+## 1.3.18 — 2026-10-26
+
+### 音源记忆专项修复（同一首永远优先同一条正式绑定）
+
+- **正式绑定是唯一选源依据**：新增 `_resolve_identity()`，先读 `tracks` + `track_source_binding_state`；只要有有效在线绑定（`source_id` 与 `remote_id` 齐全），旧 `source_memory` 别名与 `source_map` 都不再参与单曲选源，只有完全没有正式绑定时才走旧记忆兼容。
+- **预加载不再绕过绑定**：新的 `PreloadedStream` 保存 `source_id / remote_id / quality / revision / request_id` 与完整请求 payload；消费时 `_take_preloaded()` 逐项校验，任何不一致直接丢弃并正常解析。预加载命中同样建立 `_begin_attempt()`，播放确认后照常更新 verified。
+- **`force=True` 只绕过 URL 缓存**：强制刷新不再跳过数据库绑定；换音质重试始终使用同一 `source_id + remote_id`，且不再把失败重试写进全局 `self._quality`。
+- **缓存 key 统一为实际播放身份**：`_resolve_cache_key()` / `proxy.register()` / `_resolve_cache` / 回退解析全部使用 `(source_id, remote_id, quality)`，不再混用「原队列歌曲的 remote_id + 实际音源」。
+- **旧别名不再复用原音源 raw**：`online/models.py` 新增 `sanitize_payload()` / `payload_matches_source()`，按插件身份字段（`id / songmid / mid / songId / musicId / hash…`）校验并重建最小合法请求；`runtime_track(track, source_id=…)` 保证传给插件的音源、歌曲 ID、raw 属于同一首。`source_memory.remember_track()` 只保存确实属于目标源的 raw。
+- **统一播放确认**：所有路径（正式绑定 / 旧别名 / 跨源回退 / 预加载）共用 `_begin_attempt()` / `_confirm_attempt()`；attempt 携带 `session`、`quality`、`revision` 与目标身份。只有引擎处于 `playing` 且位置**真实推进**（单次增量 ≤ 1200ms 并越过 1200ms）才确认；seek、暂停、切歌、手动换源、新播放会话都不会提交旧 attempt。
+- **失败归因修正**：`_online_failed(attempted=…)` 记录真正失败的 `(source_id, remote_id)`，不再把新音源失败记到原队列来源；回退搜索失败记到被搜索的源；回退成功仍在候选源自己的 revision 上晋升。
+- **重复导入保护**：`TrackBindingService.import_choice()` 拒绝覆盖 `manual` 绑定或有效的 `auto/verified` 绑定；`commit_binding()` / `_mark_state()` 的 revision guard 改为抛出内部 `_Rejected` 并在事务外返回，避免 guard 直接 `return` 卡在事务上下文里；导入时歌曲 ID 不完整会打警告，不再静默跳过。
+- **失效策略**：切歌、手动换源、停止时 `_invalidate_preloads()` 递增 epoch 并取消在途请求；迟到回调按 epoch / generation / session 丢弃，不会覆盖较新的缓存或播放状态。
+
+### 测试
+
+- 新增 `tests/test_binding_regressions.py` 14 项：正式绑定优先于旧别名、预加载身份不符丢弃、预加载命中后 verified、手动换源后迟到预加载、强制刷新保持身份、旧别名 raw 混用、回退成功落库、连续双击 10 次零搜索、重启后稳定、重复导入保护、A→B→A 迟到回调、失败归因、短暂 playing 不误判、seek/暂停/音质降级不改绑定。
+- 全量 `pytest -q`：**319 passed**。
+
 ## 1.3.16 — 2026-10-26
 
 - 列表高亮改为「视口整行绘制」：选中/悬停只画一条整行圆角带，不再逐格重复叠加，消除逐列深浅不一。
