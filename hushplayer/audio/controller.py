@@ -53,6 +53,9 @@ RESOLVE_CACHE_TTL_MS = 120_000       # re-resolve online streams after a long pa
 FALLBACK_MAX = 4                  # how many other sources to try
 #: Some plugins only expose one quality; try the common tiers before giving up.
 QUALITY_CHAIN = ("standard", "higher", "320k")
+#: 查找磁盘缓存时依次尝试的音质档：插件实际返回的档位不一定等于请求档位，
+#: 只按请求档位查会让「已经缓存过」的歌永远查不到。
+CACHE_QUALITY_TIERS = ("standard", "higher", "exhigh", "lossless", "320k", "128k")
 FALLBACK_SEARCH_TIMEOUT_MS = 14000
 FALLBACK_MAX_CANDIDATES = 3
 
@@ -215,6 +218,12 @@ class PlayerController(QObject):
         self._preload_epoch = 0
         self._replaygain: str = "off"
         self._online_fallback = True
+        #: 缓存优先播放开关（settings: cache.enabled）；关闭时完全不看磁盘缓存。
+        self._cache_enabled = True
+        #: 启动恢复阶段：队列的 current_changed 不得顺手发起在线解析。
+        self._restoring = False
+        #: 已恢复但尚未 load 的会话；用户第一次按播放才真正开流。
+        self._restored_pending = False
         # 绑定服务由 app 注入；None 时退化为 1.3.x 的 alias/回退行为。
         self._binding = binding
         self._attempt: dict | None = None
@@ -318,11 +327,17 @@ class PlayerController(QObject):
     # -------------------------------------------------------------- settings
     def configure(self, *, volume: float | None = None, quality: str = "standard",
                   online_fallback: bool = True, shuffle: bool | None = None,
-                  repeat: str | None = None, replaygain: str | None = None) -> None:
+                  repeat: str | None = None, replaygain: str | None = None,
+                  muted: bool | None = None,
+                  cache_enabled: bool | None = None) -> None:
         if replaygain is not None:
             self._replaygain = str(replaygain or "off")
         if volume is not None:
             self.set_volume(volume, emit=True)
+        if muted is not None:
+            self.set_muted(bool(muted))
+        if cache_enabled is not None:
+            self._cache_enabled = bool(cache_enabled)
         self._quality = quality or "standard"
         self._online_fallback = bool(online_fallback)
         if shuffle is not None:
@@ -355,12 +370,50 @@ class PlayerController(QObject):
             self._track = track
             self.track_changed.emit(track)
 
+    # -------------------------------------------------------------- restore
+    def begin_restore(self) -> None:
+        """标记「正在从会话恢复队列」，期间队列换 current 不得触发加载/解析。"""
+        self._restoring = True
+
+    def end_restore(self) -> None:
+        self._restoring = False
+
     def restore_current(self, position_ms: int = 0, *, autoplay: bool = False) -> None:
-        """Load the restored queue's current track at ``position_ms`` without starting."""
+        """恢复上次的当前曲目。
+
+        默认**不加载、不解析、不播放**：启动阶段音源可能还没起来，提前
+        resolve 会失败并触发自动跳歌。只把歌曲、时长和进度摆好，用户按下
+        播放时再由 ``play()/resume()`` 从该进度真正开流。
+        """
         track = self.queue.current
         if track is None:
             return
-        self._load(track, position=max(0, int(position_ms)), autoplay=autoplay)
+        position = max(0, int(position_ms))
+        if track.duration_ms:
+            position = min(position, max(0, int(track.duration_ms) - 1000))
+        if autoplay:
+            self._load(track, position=position, autoplay=True)
+            return
+        self._prime_restored(track, position)
+
+    def _prime_restored(self, track: Track, position: int) -> None:
+        self._set_busy(False)
+        self._paused_pending = False
+        self._memory_pending = None
+        self._session += 1
+        self._attempt = None
+        self._last_position_value = 0
+        self._invalidate_preloads()
+        self._restored_pending = True
+        self._track = track
+        self._position = int(position)
+        self._pending_resume = int(position)
+        self._duration = track.duration_ms or 0
+        self._active_online = track if track.is_online else None
+        self.track_changed.emit(track)
+        self.duration_changed.emit(self._duration)
+        self.position_changed.emit(self._position)
+        self.state_changed.emit("stopped")
 
     # ------------------------------------------------------------ transport
     def play_tracks(self, tracks: Iterable[Track], start_index: int = 0, *, context: str = "") -> None:
@@ -422,6 +475,10 @@ class PlayerController(QObject):
             if self.queue.count:
                 self._play_current(reset_position=True)
             return
+        if self._restored_pending:
+            # 恢复的会话第一次按下播放：从保存的进度真正开流。
+            self._load(self._track, position=self._position, autoplay=True)
+            return
         if self.engine.state == "paused":
             self.resume()
         elif self.engine.state in ("stopped", "error"):
@@ -453,6 +510,9 @@ class PlayerController(QObject):
     def resume(self) -> None:
         if self._track is None:
             return
+        if self._restored_pending:
+            self._load(self._track, position=self._position, autoplay=True)
+            return
         long_pause = (
             self._paused_at > 0
             and (time.monotonic() - self._paused_at) * 1000 > RESUME_RECHECK_MS
@@ -475,6 +535,11 @@ class PlayerController(QObject):
         self._invalidate_preloads()
         self._paused_pending = False
         self._set_busy(False)
+        # 停止后不再有「正在播放」的缓存条目：让容量清理可以回收它。
+        try:
+            self.proxy.note_playing(None)
+        except Exception:  # noqa: BLE001 - 代理替身可能没有该方法
+            log.debug("clear playing cache token failed", exc_info=True)
         self.engine.stop()
         self._position = 0
         self.position_changed.emit(0)
@@ -511,7 +576,14 @@ class PlayerController(QObject):
         self._play_current(reset_position=True)
 
     def seek(self, ms: int) -> None:
-        self._position = max(0, int(ms))
+        target = max(0, int(ms))
+        if self._restored_pending and self.engine.state == "stopped":
+            # 还没开流：只改保存的进度，等用户按播放时从这里开始。
+            self._position = target
+            self._pending_resume = target
+            self.position_changed.emit(target)
+            return
+        self._position = target
         self.engine.seek(self._position)
         self.position_changed.emit(self._position)
 
@@ -682,8 +754,8 @@ class PlayerController(QObject):
         self._load(track, position=position, autoplay=True)
 
     def _on_queue_current_changed(self, track: object) -> None:
-        # Queue changed the current row from the outside (e.g. restore); reload.
-        if self._silent_current:
+        # 队列从外部换了当前曲目（例如恢复会话）；恢复阶段只摆状态，不加载。
+        if self._restoring or self._silent_current:
             return
         if isinstance(track, Track) and track is not self._track:
             self._load(track, position=0, autoplay=self.engine.state == "playing")
@@ -787,6 +859,7 @@ class PlayerController(QObject):
         self._session += 1
         self._attempt = None
         self._last_position_value = 0
+        self._restored_pending = False
         self._invalidate_preloads(keep_track_id=track.id)
         self._track = track
         self._pending_resume = max(0, int(position))
@@ -800,7 +873,7 @@ class PlayerController(QObject):
             self._active_online = None
             path = track.path or ""
             if not path or not os.path.isfile(path):
-                self._handle_missing_local(track)
+                self._handle_missing_local(track, autoplay=autoplay)
                 return
             self._apply_replaygain(track, path)
             self.engine.load(path, duration_hint=track.duration_ms, autoplay=autoplay)
@@ -817,16 +890,26 @@ class PlayerController(QObject):
             self._pending_resume = 0
             QTimer.singleShot(120, lambda: self.seek(target))
 
-    def _handle_missing_local(self, track: Track) -> None:
+    def _handle_missing_local(self, track: Track, *, autoplay: bool = True) -> None:
         message = f"文件已不存在：{os.path.basename(track.path or track.title)}"
         log.warning(message)
         self.status_message.emit(message)
         self._failures += 1
-        if self._failures < MAX_CONSECUTIVE_FAILURES and self.queue.count > 1:
-            QTimer.singleShot(350, lambda: self.next(auto=True))
+        # 只有「本来就是用户要求开始播放」时才自动跳下一首；恢复会话时静默停在
+        # 这首歌，绝不能因为文件缺失就自行播放队列里的另一首。
+        if autoplay and self._failures < MAX_CONSECUTIVE_FAILURES and self.queue.count > 1:
+            self._schedule_auto_next(350)
         else:
             self.engine.stop()
             self.error_message.emit("本地文件不可用，播放已停止")
+
+    def _schedule_auto_next(self, delay_ms: int) -> None:
+        """延迟跳下一首，但只对发起它的那个播放会话生效。"""
+        generation = self._resolve_generation
+        QTimer.singleShot(
+            delay_ms,
+            lambda: self.next(auto=True) if generation == self._resolve_generation else None,
+        )
 
     def _resolve_online(self, track: Track, *, autoplay: bool, force: bool,
                         tried: set[str], was_playing: bool,
@@ -853,6 +936,19 @@ class PlayerController(QObject):
             self._online_failed(track, "该在线歌曲缺少音源信息", tried, autoplay,
                                 attempted=target, kind="source-unavailable")
             return
+
+        # 1) 完整磁盘缓存优先。这一步必须早于「音源是否可用」判断：插件被禁用、
+        #    断网或服务器故障时，已经缓存过的歌仍然必须能播。
+        if self._cache_enabled and self.proxy is not None:
+            hit = self._cached_stream(identity, quality)
+            if hit is not None:
+                path, hit_quality = hit
+                log.info("cache hit for %r (%s/%s @ %s)",
+                         track.title, identity.source_id, identity.remote_id, hit_quality)
+                self._begin_attempt(track, target, revision, quality=hit_quality)
+                self._apply_cached(track, path, generation, autoplay, was_playing,
+                                   identity=identity, quality=hit_quality)
+                return
 
         # 只有「源本身不可用」（插件缺失/被禁用）才允许换源；URL 失效留给
         # 同一身份的刷新/音质降级处理。
@@ -1061,6 +1157,57 @@ class PlayerController(QObject):
     def _resolve_cache_key(self, track: Track, quality: str | None = None) -> str:
         return f"{track.source_id}:{track.remote_id or track.id}:{quality or self._quality}"
 
+    def _cache_qualities(self, quality: str) -> list[str]:
+        """音质候选顺序：请求档位优先，再试其它常见档位（插件可能降级返回）。"""
+        order = [quality, self._quality, *QUALITY_CHAIN, *CACHE_QUALITY_TIERS]
+        seen: set[str] = set()
+        result: list[str] = []
+        for tier in order:
+            name = str(tier or "standard")
+            if name in seen:
+                continue
+            seen.add(name)
+            result.append(name)
+        return result
+
+    def _cached_stream(self, identity: PlaybackIdentity,
+                       quality: str) -> tuple[str, str] | None:
+        """按正式身份查完整磁盘缓存，返回 ``(本地路径, 命中的音质)``。"""
+        proxy = self.proxy
+        if proxy is None:
+            return None
+        remote_id = identity.remote_id
+        if not identity.source_id or not remote_id:
+            return None
+        for tier in self._cache_qualities(quality):
+            cache_key = f"{identity.source_id}:{remote_id}:{tier}"
+            path = proxy.local_path(cache_key)
+            if path:
+                try:
+                    proxy.note_playing(cache_key)
+                except Exception:  # noqa: BLE001 - 保护标记失败不影响播放
+                    log.debug("note playing cache token failed", exc_info=True)
+                return path, tier
+        return None
+
+    def _apply_cached(self, track: Track, path: str, generation: int,
+                      autoplay: bool, was_playing: bool, *,
+                      identity: PlaybackIdentity, quality: str) -> None:
+        """播放本地完整缓存：不联网、不标记源健康度，但仍保留正式绑定与会话。"""
+        if generation != self._resolve_generation:
+            return
+        self._set_busy(False)
+        log.info("离线缓存播放 %r（%s/%s @ %s）",
+                 track.title, identity.source_id, identity.remote_id, quality)
+        self.active_source_changed.emit(
+            self._source_label(identity.source_id or track.source_id or "")
+        )
+        self._last_position_value = 0
+        self.engine.load(path, duration_hint=track.duration_ms, autoplay=autoplay)
+        self._apply_pending_position()
+        if was_playing and not autoplay:
+            self.engine.play()
+
     def _apply_resolved(self, track: Track, data: dict, generation: int,
                         autoplay: bool, was_playing: bool, *,
                         identity: PlaybackIdentity, quality: str,
@@ -1090,13 +1237,18 @@ class PlayerController(QObject):
         ext = self._guess_ext(url, mime)
         try:
             stream_url = self.proxy.register(
-                cache_key, url, headers, mime=mime, ext=ext, expires_at=expires
+                cache_key, url, headers, mime=mime, ext=ext, expires_at=expires,
+                quality=resolved_quality,
             )
         except Exception as exc:
             log.exception("proxy register failed")
             self._online_failed(track, f"本地缓存服务不可用：{exc}", tried, autoplay,
                                 attempted=identity.target, kind="media")
             return
+        try:
+            self.proxy.note_playing(cache_key)
+        except Exception:  # noqa: BLE001 - 清理保护失败不影响播放
+            log.debug("note playing cache token failed", exc_info=True)
         health.record_ok(identity.source_id or track.source_id or "")
         self.active_source_changed.emit(
             self._source_label(identity.source_id or track.source_id or "")
@@ -1142,8 +1294,10 @@ class PlayerController(QObject):
         # transient status line, otherwise a failed resolve looks silent.
         self.error_message.emit(f"无法播放《{track.display_title}》：{_short(error)}")
         self._failures += 1
-        if self._failures < MAX_CONSECUTIVE_FAILURES and self.queue.count > 1:
-            QTimer.singleShot(600, lambda: self.next(auto=True))
+        # 只有本次加载本来就是「要求自动播放」时才跳下一首；否则（恢复会话、
+        # 后台预备）绝不能因为一次失败就自己换歌。
+        if autoplay and self._failures < MAX_CONSECUTIVE_FAILURES and self.queue.count > 1:
+            self._schedule_auto_next(600)
         else:
             # The attempt is over: settle on a stopped, usable state instead of
             # leaving ``loading`` stuck for ever with dead transport controls.
@@ -1364,13 +1518,17 @@ class PlayerController(QObject):
         try:
             stream_url = self.proxy.register(
                 cache_key, url, headers, mime=mime, ext=self._guess_ext(url, mime),
-                expires_at=expires,
+                expires_at=expires, quality=resolved_quality,
             )
         except Exception as exc:
             log.exception("proxy register failed")
             self._online_failed(track, f"本地缓存服务不可用：{exc}", tried, autoplay,
                                 attempted=match, kind="media")
             return
+        try:
+            self.proxy.note_playing(cache_key)
+        except Exception:  # noqa: BLE001
+            log.debug("note playing cache token failed", exc_info=True)
         # A fallback that actually produced a URL is evidence the source works;
         # without this the alias source can stay "broken" from older failures
         # and get skipped on the next play, forcing another search.
@@ -1537,7 +1695,7 @@ class PlayerController(QObject):
         self.status_message.emit(message)
         self._failures += 1
         if self._failures < MAX_CONSECUTIVE_FAILURES and self.queue.count > 1:
-            QTimer.singleShot(700, lambda: self.next(auto=True))
+            self._schedule_auto_next(700)
         else:
             # never leave the UI in a fake playing/loading state after a fatal
             # error: stop the pipeline and clear the busy flag

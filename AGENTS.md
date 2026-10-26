@@ -274,3 +274,26 @@ HushPlayer-<ver>-setup.exe /VERYSILENT /LOG=...
   `sanitize_payload / payload_matches_source / item_identity`；`binding.py` 事务 guard 改 `_Rejected` 且
   `import_choice` 拒绝降级；`source_memory` 保存并校验目标 raw；新增 `tests/test_binding_regressions.py` 14 项，
   全量 319 passed；版本号 1.3.18。
+## 会话持久化与离线缓存（1.3.19，2026-10-26）
+
+- 音量/静音的唯一真实来源是 `PlayerController`：`volume_changed` / `muted_changed` 由 `app.py` 写回 `settings.json`。
+  写回前必须比较当前设置值（容差 0.0005），否则「设置 → 播放器 → 设置」会互相触发；禁止在 `set_volume()` 里直接写设置。
+- 进度保存只认「跳变」：`PlaybackKeeper` 相邻位置差 > `SEEK_JUMP_MS(1500)` 才启动 `SEEK_SAVE_DELAY_MS(800)` 防抖保存；
+  正常播放推进走 5 秒周期保存。任何「每 100ms 写 JSON」的改法都是禁区。
+- `PlaybackKeeper.flush()` 之后 `_closed=True`：退出时引擎 `stop()` 会把 position 清零，那之后的 `save_now()` 必须直接返回，
+  否则用户真实进度会被覆盖成 0（1.3.19 修复）。
+- 启动恢复只摆状态：`restore_current(position, autoplay=False)` 不发 `engine.load()`、不 `resolve_playback()`、不 `search()`；
+  首次 `play()/resume()` 才从 `_position` 开流。恢复期 `_restoring` 屏蔽 `current_changed` 加载，`_schedule_auto_next()` 用
+  generation 隔离旧会话定时器。
+- `PlayQueue.restore()` 优先 `current_id`；缺失时才用 `current_row` 经 row_map 映射到原始行，并按最近行兜底——禁止直接
+  `tracks[current_row]`（队列丢歌会漂移到别的歌）。
+- 离线缓存是「音频来源」不是身份系统：`_cached_stream()` 只用正式身份 `(source_id, remote_id, quality)` 组键，
+  命中时直接 `engine.load(本地文件)`，禁止为此调用 search/resolve、也禁止改 `health`。手动绑定换源后不得命中旧源缓存。
+- `AudioProxy.local_path()` 必须走 `valid_cache_file()`（索引 complete + 实际大小一致 + key 匹配 + 目录内）；
+  新增缓存字段时同步更新 `_discard_invalid()` / `prune()` / `purge_unprotected()`，否则会留下「看起来有缓存」的假条目。
+- `cache.enabled` / `cache.max_mb` 通过 `AudioProxy.configure()` 生效；`prune()` 只删最旧的非保护条目，
+  `note_playing()` 标记的当前播放 token 与未完成下载永不删除。
+- 回归：`tests/test_session_restore.py` 11 项、`tests/test_offline_cache.py` 10 项；全量基线 **340 passed**。
+- 2026-10-26（1.3.19）：新增 `AudioProxy.configure/note_playing/protected_tokens/purge_unprotected/_after_download`、
+  `valid_cache_file/media_files`；`PlayerController.begin_restore/end_restore/restore_current/_prime_restored/_cached_stream/_apply_cached/_schedule_auto_next`；
+  `PlaybackKeeper` 增加 `_closed/_seek_timer/_on_position_changed`；`PlayQueue.restore` 改 `current_id` 优先；版本号 1.3.19。

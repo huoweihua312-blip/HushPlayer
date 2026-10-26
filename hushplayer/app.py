@@ -71,6 +71,7 @@ class HushApp(QObject):
         self.artwork = ArtworkStore()
 
         self.proxy = AudioProxy()
+        self._apply_cache_settings()
         self.client = OnlineSourceClient(self)
         self.player = PlayerController(
             self, client=self.client, proxy=self.proxy, binding=self.bindings
@@ -123,6 +124,52 @@ class HushApp(QObject):
     # ---------------------------------------------------------------- settings
     def _connect_settings(self) -> None:
         self.settings.changed.connect(self._on_setting_changed)
+        # 音量条、静音按钮、沉浸播放器和快捷键都直接改播放器；播放器才是
+        # 音量的真实来源，必须把它的变更写回设置，否则重启就回到默认值。
+        self.player.volume_changed.connect(self._on_player_volume_changed)
+        self.player.muted_changed.connect(self._on_player_muted_changed)
+
+    def _on_player_volume_changed(self, value: float) -> None:
+        try:
+            volume = max(0.0, min(1.0, float(value)))
+        except (TypeError, ValueError):
+            return
+        try:
+            current = float(self.settings.get("playback.volume", 0.72))
+        except (TypeError, ValueError):
+            current = -1.0
+        # 值相同就不再 set：设置回写播放器 → 播放器再 emit → 再回写设置的循环
+        # 在这里被切断（settings.set 本身也会忽略相同值）。
+        if abs(current - volume) < 0.0005:
+            return
+        try:
+            self.settings.set("playback.volume", round(volume, 4))
+        except Exception as exc:  # noqa: BLE001
+            log_exception("保存音量失败", exc)
+
+    def _on_player_muted_changed(self, muted: bool) -> None:
+        try:
+            current = bool(self.settings.get("playback.muted", False))
+        except Exception:  # noqa: BLE001
+            current = False
+        if current == bool(muted):
+            return
+        try:
+            self.settings.set("playback.muted", bool(muted))
+        except Exception as exc:  # noqa: BLE001
+            log_exception("保存静音状态失败", exc)
+
+    def _apply_cache_settings(self) -> None:
+        """把 cache.enabled / cache.max_mb 真正交给 AudioProxy。"""
+        try:
+            enabled = bool(self.settings.get("cache.enabled", True))
+            max_mb = int(self.settings.get("cache.max_mb", 2048) or 0)
+        except (TypeError, ValueError):
+            enabled, max_mb = True, 2048
+        try:
+            self.proxy.configure(enabled=enabled, max_bytes=max(0, max_mb) * 1024 * 1024)
+        except Exception as exc:  # noqa: BLE001
+            log_exception("应用缓存设置失败", exc)
 
     def _arm_sleep_timer(self, minutes: int) -> None:
         """Pause playback after N minutes; 0 disables the timer."""
@@ -160,6 +207,8 @@ class HushApp(QObject):
                 self.player.set_volume(float(value))
             except (TypeError, ValueError):
                 pass
+        elif key == "playback.muted":
+            self.player.set_muted(bool(value))
         elif key == "playback.sleep_timer_minutes":
             self._arm_sleep_timer(int(value or 0))
         elif key == "playback.shuffle":
@@ -178,6 +227,7 @@ class HushApp(QObject):
                 if not ok and self.window is not None:
                     self.window.toast(f"设置开机自启失败：{detail}", "error")
         elif key.startswith("cache."):
+            self._apply_cache_settings()
             if key == "cache.max_mb":
                 self.cache.prune(int(value or 0))
         window = self.window
@@ -417,23 +467,38 @@ class HushApp(QObject):
     def _configure_player(self) -> None:
         playback = {
             "volume": float(self.settings.get("playback.volume", 0.72)),
+            "muted": bool(self.settings.get("playback.muted", False)),
             "quality": str(self.settings.get("playback.quality", "standard")),
             "online_fallback": bool(self.settings.get("online.cross_source_fallback", True)),
             "shuffle": bool(self.settings.get("playback.shuffle", False)),
             "repeat": str(self.settings.get("playback.repeat", "off")),
             "replaygain": str(self.settings.get("playback.replaygain", "off")),
+            "cache_enabled": bool(self.settings.get("cache.enabled", True)),
         }
         self.player.configure(**playback)
+        self._apply_cache_settings()
+        try:
+            max_mb = int(self.settings.get("cache.max_mb", 2048) or 0)
+        except (TypeError, ValueError):
+            max_mb = 0
+        if max_mb > 0:
+            self.proxy.prune(max_mb * 1024 * 1024)
 
     def _restore_session(self) -> None:
+        if not bool(self.settings.get("playback.resume_on_start", True)):
+            log.info("设置未启用「恢复上次播放」，跳过会话恢复")
+            return
         try:
             position = self.keeper.restore()
         except Exception as exc:  # noqa: BLE001
             log_exception("恢复播放队列失败", exc)
             return
         if position or self.player.queue.count:
+            # 默认只恢复队列/曲目/进度，不自动出声；需要自动播放的用户
+            # 在设置里单独打开 playback.autoplay_on_start。
+            autoplay = bool(self.settings.get("playback.autoplay_on_start", False))
             try:
-                self.player.restore_current(position)
+                self.player.restore_current(position, autoplay=autoplay)
             except Exception as exc:  # noqa: BLE001
                 log_exception("恢复当前歌曲失败", exc)
 

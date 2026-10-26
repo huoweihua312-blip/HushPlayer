@@ -1,5 +1,20 @@
 # 更新日志
 
+## 1.3.19 — 2026-10-26
+
+### 会话持久化与离线缓存专项修复
+
+- **音量/静音真正落盘**：`volume_changed` / `muted_changed` 接回 `settings.json`（`playback.volume` / `playback.muted`），启动时 `_configure_player()` 恢复；写回前比较当前值并做 0.0005 容差，切断「设置 → 播放器 → 设置」循环；写盘失败写日志，不再静默。
+- **播放进度可靠保存**：`PlaybackKeeper` 监听 `position_changed`，只在相邻位置**跳变 >1500ms**（拖动 seek）时启动 800ms 防抖保存；正常播放仍走 5 秒周期保存，不会每 100ms 写 JSON。`flush()` 之后进入「已收尾」状态，退出时引擎 `stop()` 触发的位置归零不再覆盖刚保存的真实进度。
+- **恢复会话不自动播放**：`restore_current()` 默认只摆状态（歌曲/时长/进度/`stopped`），不 `engine.load()`、不 `resolve_playback()`、不 `search()`；`PlayQueue.restore()` 优先用 `current_id`，缺失时用 `current_row` 映射到原始行，队列里有歌丢失也不会漂移选到别的歌；首次点击播放才从保存位置开流。`playback.resume_on_start` 明确为「恢复进度」，另新增 `playback.autoplay_on_start`（默认关闭）。
+- **旧会话不再跳歌**：恢复期间 `_restoring` 屏蔽 `current_changed` 触发的加载；`_online_failed()` / `_handle_missing_local()` / `_on_engine_error()` 的自动下一首只在 `autoplay=True` 时发生，并用 `_schedule_auto_next()` 绑定 generation，旧会话的迟到定时器不会影响新会话；恢复失败保留上一次有效会话文件。
+- **离线缓存优先**：完整磁盘缓存命中时 `_resolve_online()` 直接 `engine.load(本地文件)`，**不调用 search / resolve_playback，也不看源健康度**——插件被禁用、断网也能播。缓存键严格使用正式身份 `(source_id, remote_id, quality)`，并按请求音质与常见音质档（standard/higher/exhigh/lossless/320k/128k）依次查找，插件实际返回音质与请求不同也能命中。
+- **缓存完整性校验**：`AudioProxy.local_path()` 改用 `valid_cache_file()`：索引 `complete=True`、实际文件大小与索引一致、索引里的 `key` 与请求缓存键一致、文件位于缓存目录内；截断/半截/坏索引会丢弃并重新联网，不再把半截文件当完整音频。
+- **缓存容量与开关真正生效**：`cache.enabled` / `cache.max_mb` 通过 `AudioProxy.configure()` 参与行为；下载完成后按预算清理、最旧优先，`note_playing()` 保护的当前播放条目与正在写入的条目不删除；关闭缓存时清理非保护条目；索引与下载失败都会留下可诊断日志。
+- **真实播放状态不被缓存改写**：缓存播放仍是正式绑定身份（手动换源后绝不会播旧音源缓存），不标记源健康度，照样走 `_begin_attempt()` / `_confirm_attempt()`、播放历史与来源徽章。
+
+测试：新增 `tests/test_session_restore.py`（11 项）与 `tests/test_offline_cache.py`（10 项，含真实临时文件与本地 HTTP 下载）。全量 `pytest`：**340 passed**。
+
 ## 1.3.18 — 2026-10-26
 
 ### 音源记忆专项修复（同一首永远优先同一条正式绑定）

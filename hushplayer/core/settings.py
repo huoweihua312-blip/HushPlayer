@@ -59,9 +59,12 @@ DEFAULTS: dict[str, Any] = {
         "muted": False,
         "repeat": "off",  # off | all | one
         "shuffle": False,
-        "quality": "higher",
+            "quality": "higher",
         "replaygain": "off",  # standard | higher | exhigh | lossless
+        # 「恢复上次进度」：重启后把歌单、当前曲目、播放位置摆回来。
         "resume_on_start": True,
+        # 「启动后直接播放」：与恢复进度分开，默认关闭，避免重启自行出声。
+        "autoplay_on_start": False,
         "audio_device": "",
         "fade_ms": 180,
         "skip_unavailable": True,

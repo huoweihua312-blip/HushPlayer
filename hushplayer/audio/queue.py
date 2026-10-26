@@ -394,7 +394,10 @@ class PlayQueue(QObject):
             return 0
         raw_tracks = payload.get("tracks") or []
         tracks: list[Track] = []
-        for item in raw_tracks:
+        #: 原始行号 → 恢复后的 Track。部分歌曲已不存在时，行号会整体前移，
+        #: 直接按 index 取当前曲会选到别的歌；这里保留原始行的映射。
+        row_map: dict[int, Track] = {}
+        for raw_index, item in enumerate(raw_tracks):
             if not isinstance(item, dict):
                 continue
             if resolver is not None:
@@ -405,6 +408,7 @@ class PlayQueue(QObject):
                 tracks.append(restored)
             else:
                 tracks.append(Track.from_dict(item))
+            row_map[raw_index] = tracks[-1]
         if not tracks:
             return 0
         self._items = tracks
@@ -418,10 +422,33 @@ class PlayQueue(QObject):
         if not order:
             order = [track.id for track in tracks]
         self._order = order
-        row = int(payload.get("current_row", 0))
-        row = max(0, min(row, len(tracks) - 1))
-        current = tracks[row]
-        self._pos = order.index(current.id) if current.id in order else 0
+        current = self._restored_current(payload, row_map, tracks)
+        if current.id in order:
+            self._pos = order.index(current.id)
+        else:
+            # 播放顺序里没有当前曲（旧快照缺少 order）：补到首位，别让
+            # current 变成另一首歌。
+            order.insert(0, current.id)
+            self._order = order
+            self._pos = 0
         self.changed.emit()
         self.current_changed.emit(self.current)
         return len(tracks)
+
+    def _restored_current(self, payload: dict, row_map: dict[int, Track],
+                          tracks: list[Track]) -> Track:
+        """决定恢复后的当前曲：优先 current_id，其次原始行号（含漂移映射）。"""
+        current_id = str(payload.get("current_id") or "")
+        if current_id and current_id in self._by_id:
+            return self._by_id[current_id]
+        try:
+            raw_row = int(payload.get("current_row", 0))
+        except (TypeError, ValueError):
+            raw_row = 0
+        if raw_row in row_map:
+            return row_map[raw_row]
+        if row_map:
+            # 原行对应的歌已缺失：取原始行号最近的一首，而不是把行号 clamp 到末尾。
+            nearest = min(row_map, key=lambda index: (abs(index - raw_row), index))
+            return row_map[nearest]
+        return tracks[0]

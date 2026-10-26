@@ -75,13 +75,71 @@ def _read_meta(path: Path) -> dict:
         return {}
 
 
+def _meta_path(cache_dir: Path, token: str) -> Path:
+    return cache_dir / f"{token}.meta.json"
+
+
+def media_files(cache_dir: Path, token: str) -> list[Path]:
+    """Audio files belonging to ``token`` (sidecars such as ``.meta.json`` excluded)."""
+    found: list[Path] = []
+    try:
+        for entry in os.scandir(cache_dir):
+            name = entry.name
+            if not name.startswith(f"{token}."):
+                continue
+            if Path(name).suffix.lower() not in _AUDIO_EXTS:
+                continue
+            found.append(Path(entry.path))
+    except OSError:
+        return []
+    return found
+
+
+def valid_cache_file(cache_dir: Path, cache_key: str) -> tuple[Path, dict] | None:
+    """Return ``(path, meta)`` only for a *complete and consistent* cache entry.
+
+    A file merely existing is not enough: a truncated download or a `.meta`
+    that disagrees with the bytes on disk used to be played as if it were the
+    whole song, which then surfaced as "audio stops halfway".  The cache key is
+    also compared when the index records it, so an entry can never be reused for
+    a different quality/source that happens to hash-collide.
+    """
+    token = token_for(cache_key)
+    meta = _read_meta(_meta_path(cache_dir, token))
+    if not meta.get("complete"):
+        return None
+    try:
+        expected = int(meta.get("size") or 0)
+    except (TypeError, ValueError):
+        return None
+    if expected <= 0:
+        return None
+    stored_key = str(meta.get("key") or "")
+    if stored_key and stored_key != cache_key:
+        log.info("缓存身份不匹配：%s != %s", stored_key, cache_key)
+        return None
+    for path in media_files(cache_dir, token):
+        try:
+            if not path.is_file():
+                continue
+            if path.stat().st_size == expected:
+                return path, meta
+        except OSError:
+            continue
+    return None
+
+
 def _write_meta(path: Path, data: dict) -> None:
     try:
         tmp = path.with_suffix(".json.tmp")
         tmp.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
         os.replace(tmp, path)
-    except OSError:
-        pass
+    except OSError as exc:
+        log.warning("写入缓存索引失败 %s: %s", path.name, exc)
+
+
+class _Cancelled(Exception):
+    """下载被主动取消（停止播放/退出），不是音源故障。"""
 
 
 class Download:
@@ -96,6 +154,9 @@ class Download:
         *,
         meta_path: Path | None = None,
         expires_at: float = 0.0,
+        key: str = "",
+        quality: str = "",
+        on_complete=None,
     ) -> None:
         self.token = token
         self.url = url
@@ -103,6 +164,10 @@ class Download:
         self.dest = dest
         self.meta_path = meta_path or dest.with_suffix(".meta.json")
         self.expires_at = expires_at
+        #: 缓存键与音质写进索引：校验时能证明这份文件就是这首歌、这一档音质。
+        self.key = key
+        self.quality = quality
+        self.on_complete = on_complete
         self.total = 0
         self.available = 0
         self.complete = False
@@ -165,7 +230,7 @@ class Download:
                 with open(self.dest, "wb") as handle:
                     for chunk in response.iter_content(_CHUNK):
                         if self.cancelled:
-                            return
+                            raise _Cancelled()
                         if not chunk:
                             continue
                         handle.write(chunk)
@@ -185,22 +250,41 @@ class Download:
                 {
                     "complete": True,
                     "size": written,
+                    "key": self.key,
+                    "quality": self.quality,
                     "url": self.url,
                     "created": self.started_at,
                     "expires_at": self.expires_at,
                 },
             )
             log.info("已缓存音频 %s (%.1f MB)", self.dest.name, written / 1048576)
+        except _Cancelled:
+            # 取消不是故障：删掉半截文件，别让它变成「看起来有缓存」的假条目。
+            self._discard_partial()
         except Exception as exc:
             if not self.cancelled:
                 log.warning("在线音频下载失败 %s: %s", self.url[:120], exc)
                 self.error = str(exc)
+                self._discard_partial()
                 try:
                     _write_meta(self.meta_path, {"complete": False, "error": str(exc)[:200]})
                 except Exception:
                     pass
         finally:
             self._notify()
+            hook = self.on_complete
+            if hook is not None:
+                try:
+                    hook()
+                except Exception:  # noqa: BLE001 - 清理失败不影响播放
+                    log.debug("cache post-download hook failed", exc_info=True)
+
+    def _discard_partial(self) -> None:
+        try:
+            if self.dest.exists():
+                self.dest.unlink()
+        except OSError:
+            pass
 
 
 class AudioProxy:
@@ -214,6 +298,29 @@ class AudioProxy:
         self._server: ThreadingHTTPServer | None = None
         self._thread: threading.Thread | None = None
         self.port = 0
+        #: 设置项 cache.enabled / cache.max_mb 真正参与缓存行为：
+        #: 关闭时不再复用旧缓存并在下载完成后清掉非播放中的条目；预算用于自动清理。
+        self.enabled = True
+        self.max_bytes = 0
+        self._playing_token = ""
+
+    # -- 设置 ------------------------------------------------------------
+    def configure(self, *, enabled: bool = True, max_bytes: int = 0) -> None:
+        self.enabled = bool(enabled)
+        self.max_bytes = max(0, int(max_bytes))
+
+    def note_playing(self, cache_key: str | None) -> None:
+        """记住当前正在播放的缓存条目，清理时绝不删除它。"""
+        self._playing_token = token_for(cache_key) if cache_key else ""
+
+    def protected_tokens(self) -> set[str]:
+        protected = {self._playing_token} if self._playing_token else set()
+        with self._lock:
+            for token, download in self._downloads.items():
+                # 正在写入的半成品不能被删，否则播放会读到消失的文件。
+                if not download.complete and not download.error:
+                    protected.add(token)
+        return protected
 
     # -- HTTP 服务 -------------------------------------------------------
     def ensure_server(self) -> int:
@@ -268,6 +375,7 @@ class AudioProxy:
         mime: str = "",
         ext: str = "",
         expires_at: float = 0.0,
+        quality: str = "",
     ) -> str:
         """注册远程资源，返回给播放器使用的本地 URL。"""
         self.ensure_server()
@@ -282,8 +390,12 @@ class AudioProxy:
         if download is None:
             meta = _read_meta(meta_path)
             size = dest.stat().st_size if dest.exists() else 0
-            if meta.get("complete") and size and int(meta.get("size", 0)) == size:
-                download = Download(token, url, headers, dest, meta_path=meta_path)
+            if (meta.get("complete") and size and int(meta.get("size", 0)) == size
+                    and not (meta.get("key") and meta.get("key") != cache_key)):
+                download = Download(
+                    token, url, headers, dest, meta_path=meta_path,
+                    key=cache_key, quality=str(meta.get("quality") or ""),
+                )
                 download.total = size
                 download.available = size
                 download.complete = True
@@ -294,7 +406,9 @@ class AudioProxy:
                     except OSError:
                         pass
                 download = Download(
-                    token, url, headers, dest, meta_path=meta_path, expires_at=expires_at
+                    token, url, headers, dest, meta_path=meta_path,
+                    expires_at=expires_at, key=cache_key,
+                    quality=quality, on_complete=self._after_download,
                 )
                 with self._lock:
                     self._downloads[token] = download
@@ -312,18 +426,69 @@ class AudioProxy:
         return f"http://127.0.0.1:{self.port}/audio/{token}"
 
     def local_path(self, cache_key: str) -> str:
-        """若缓存已完整，返回本地文件路径（下载功能复用同一份缓存）。"""
+        """若缓存已完整且校验通过，返回本地文件路径（下载功能复用同一份缓存）。
+
+        只判断「文件存在」会把截断文件、索引缺失的文件、甚至别的音质的文件
+        当成完整音频；这里改为元数据 + 实际大小 + 缓存键三者一致才算命中。
+        校验失败时会顺手清掉损坏条目（正在写入的任务除外），避免每次都重复检查。
+        """
+        hit = valid_cache_file(self.cache_dir, cache_key)
+        if hit is not None:
+            return str(hit[0])
+        self._discard_invalid(cache_key)
+        return ""
+
+    def _discard_invalid(self, cache_key: str) -> None:
         token = token_for(cache_key)
         with self._lock:
-            download = self._downloads.get(token)
-        if download is not None and download.complete and download.dest.exists():
-            return str(download.dest)
-        meta = _read_meta(self.cache_dir / f"{token}.meta.json")
-        if meta.get("complete"):
-            for candidate in self.cache_dir.glob(f"{token}.*"):
-                if candidate.suffix != ".json" and candidate.stat().st_size > 0:
-                    return str(candidate)
-        return ""
+            active = self._downloads.get(token)
+        if active is not None and not active.complete and not active.error:
+            return
+        meta = _read_meta(_meta_path(self.cache_dir, token))
+        files = media_files(self.cache_dir, token)
+        if not files:
+            return
+        log.warning("缓存条目不完整或损坏，已丢弃：%s", token)
+        for path in files:
+            try:
+                path.unlink()
+            except OSError:
+                pass
+        try:
+            _meta_path(self.cache_dir, token).unlink()
+        except OSError:
+            pass
+        with self._lock:
+            self._downloads.pop(token, None)
+
+    def _after_download(self) -> None:
+        """一次完整下载结束后执行容量/开关策略。"""
+        if not self.enabled:
+            self.purge_unprotected()
+            return
+        if self.max_bytes > 0:
+            self.prune(self.max_bytes)
+
+    def purge_unprotected(self) -> int:
+        """删除所有非播放中、非写入中的缓存（`cache.enabled=false` 时使用）。"""
+        protected = self.protected_tokens()
+        removed = 0
+        try:
+            entries = list(os.scandir(self.cache_dir))
+        except OSError:
+            return 0
+        for entry in entries:
+            if not entry.is_file():
+                continue
+            token = entry.name.split(".", 1)[0]
+            if token in protected:
+                continue
+            try:
+                os.unlink(entry.path)
+                removed += 1
+            except OSError:
+                pass
+        return removed
 
     def cancel_all(self) -> None:
         with self._lock:
@@ -361,35 +526,50 @@ class AudioProxy:
             pass
         return removed
 
-    def prune(self, max_bytes: int) -> int:
+    def prune(self, max_bytes: int, *, protect: set[str] | None = None) -> int:
+        """按「最旧优先」清理到预算内；正在播放/写入的条目不参与删除。"""
         if max_bytes <= 0:
             return 0
+        protected = self.protected_tokens()
+        if protect:
+            protected |= {str(token) for token in protect}
+        entries: list[tuple[float, int, str, str]] = []
+        total = 0
         try:
-            entries = [
-                (entry.stat().st_mtime, entry.stat().st_size, entry.path)
-                for entry in os.scandir(self.cache_dir)
-                if entry.is_file() and not entry.name.endswith(".json")
-            ]
+            for entry in os.scandir(self.cache_dir):
+                if not entry.is_file():
+                    continue
+                if entry.name.endswith(".json") or entry.name.endswith(".tmp"):
+                    continue
+                stat = entry.stat()
+                total += stat.st_size
+                token = entry.name.split(".", 1)[0]
+                if token in protected:
+                    continue
+                entries.append((stat.st_mtime, stat.st_size, entry.path, token))
         except OSError:
             return 0
-        total = sum(size for _, size, _ in entries)
         if total <= max_bytes:
             return 0
         entries.sort()
         removed = 0
-        for _, size, path in entries:
+        for _, size, path, token in entries:
             if total <= max_bytes:
                 break
             try:
                 os.unlink(path)
-                os.unlink(str(Path(path).with_suffix(".meta.json")))
-            except OSError:
-                pass
-            try:
+                try:
+                    os.unlink(str(Path(path).with_suffix(".meta.json")))
+                except OSError:
+                    pass
+                with self._lock:
+                    self._downloads.pop(token, None)
                 total -= size
                 removed += 1
-            except Exception:
-                pass
+            except OSError:
+                continue
+        if removed:
+            log.info("音频缓存清理 %d 个文件（预算 %.0f MB）", removed, max_bytes / 1048576)
         return removed
 
     # -- 请求处理 --------------------------------------------------------
@@ -403,13 +583,19 @@ class AudioProxy:
             download.last_access = time.time()
             return download
         meta = _read_meta(self.cache_dir / f"{token}.meta.json")
-        for candidate in self.cache_dir.glob(f"{token}.*"):
-            if candidate.suffix == ".json":
+        expected = int(meta.get("size") or 0)
+        for candidate in media_files(self.cache_dir, token):
+            try:
+                size = candidate.stat().st_size
+            except OSError:
                 continue
-            download = Download(token, "", {}, candidate, meta_path=self.cache_dir / f"{token}.meta.json")
-            download.total = candidate.stat().st_size
-            download.available = download.total
-            download.complete = bool(meta.get("complete"))
+            # 截断/大小不一致的文件不能当作完整音频提供。
+            complete = bool(meta.get("complete")) and (not expected or size == expected)
+            download = Download(token, "", {}, candidate,
+                                meta_path=self.cache_dir / f"{token}.meta.json")
+            download.total = size
+            download.available = size
+            download.complete = complete
             with self._lock:
                 self._downloads[token] = download
             return download

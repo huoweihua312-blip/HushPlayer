@@ -25,6 +25,10 @@ log = get_logger("services.state")
 STATE_VERSION = 1
 POSITION_SAVE_INTERVAL_MS = 5000
 SAVE_DEBOUNCE_MS = 1200
+#: 拖动进度条后尽快落盘一次（不必等周期保存，也不写 100ms 一次）。
+SEEK_SAVE_DELAY_MS = 800
+#: 位置跳变超过这个值就认为是 seek，而不是正常的播放推进。
+SEEK_JUMP_MS = 1500
 
 
 def queue_file() -> str:
@@ -47,11 +51,23 @@ class PlaybackKeeper(QObject):
         self._tracks = tracks
         self._dirty = False
         self._last_saved_position = -1
+        #: 上一次看到的位置，用来区分「播放推进」和「拖动/恢复」造成的跳变。
+        self._last_seen_position = -1
+        #: 恢复失败时不要用空队列覆盖用户上一次有效的会话文件。
+        self._suppress_clear = False
+        #: flush() 之后进入「已收尾」状态：退出时引擎 stop() 会把位置清零，
+        #: 那之后的保存只会把用户真实进度覆盖成 0。
+        self._closed = False
 
         self._save_timer = QTimer(self)
         self._save_timer.setSingleShot(True)
         self._save_timer.setInterval(SAVE_DEBOUNCE_MS)
         self._save_timer.timeout.connect(self.save_now)
+
+        self._seek_timer = QTimer(self)
+        self._seek_timer.setSingleShot(True)
+        self._seek_timer.setInterval(SEEK_SAVE_DELAY_MS)
+        self._seek_timer.timeout.connect(self.save_now)
 
         self._position_timer = QTimer(self)
         self._position_timer.setInterval(POSITION_SAVE_INTERVAL_MS)
@@ -63,6 +79,7 @@ class PlaybackKeeper(QObject):
         queue.mode_changed.connect(self.schedule_save)
         controller.track_started.connect(lambda _track: self.schedule_save())
         controller.state_changed.connect(self._on_state_changed)
+        controller.position_changed.connect(self._on_position_changed)
 
     # ------------------------------------------------------------------ api
     def restore(self) -> int:
@@ -83,11 +100,25 @@ class PlaybackKeeper(QObject):
             return track
 
         try:
-            self._controller.queue.restore(payload, resolver=resolve)
+            # 恢复阶段队列换 current 只摆状态：不能顺手 resolve 播放，否则
+            # 音源还没起来就会失败并自动跳到别的歌。
+            begin = getattr(self._controller, "begin_restore", None)
+            end = getattr(self._controller, "end_restore", None)
+            if begin is not None:
+                begin()
+            try:
+                self._controller.queue.restore(payload, resolver=resolve)
+            finally:
+                if end is not None:
+                    end()
         except Exception:
             log.exception("cannot restore play queue")
+            self._suppress_clear = True
             return 0
         if not self._controller.queue.count:
+            # 队列里的歌都没了：保留旧的会话文件，别让它被一次失败的恢复清掉。
+            self._suppress_clear = True
+            log.info("restored queue is empty; keeping the previous session file")
             return 0
         position = int(payload.get("position_ms") or 0)
         current = self._controller.queue.current
@@ -105,11 +136,16 @@ class PlaybackKeeper(QObject):
             self._save_timer.start()
 
     def save_now(self) -> None:
+        if self._closed:
+            return
         self._save_timer.stop()
         payload = self.payload()
         if not payload:
+            if self._suppress_clear:
+                return
             self._clear()
             return
+        self._suppress_clear = False
         self._write(payload)
         self._dirty = False
         self._last_saved_position = payload.get("position_ms", -1)
@@ -127,13 +163,37 @@ class PlaybackKeeper(QObject):
         return data
 
     def flush(self) -> None:
-        """Final save during shutdown (stops position tracking)."""
+        """退出前的最终保存；之后引擎 stop() 触发的位置归零不得覆盖它。"""
+        if self._closed:
+            return
         self._position_timer.stop()
-        self.save_now()
+        self._save_timer.stop()
+        self._seek_timer.stop()
+        payload = self.payload()
+        self._closed = True
+        if not payload:
+            if not self._suppress_clear:
+                self._clear()
+            return
+        self._suppress_clear = False
+        self._write(payload)
+        self._last_saved_position = payload.get("position_ms", -1)
 
     # ------------------------------------------------------------- internals
     def _on_current_changed(self, _track: object) -> None:
         self.schedule_save()
+
+    def _on_position_changed(self, position: int) -> None:
+        """拖动进度后尽快保存一次；正常播放推进只走 5 秒周期保存。"""
+        position = int(position)
+        previous = self._last_seen_position
+        self._last_seen_position = position
+        if previous < 0:
+            return
+        if abs(position - previous) > SEEK_JUMP_MS:
+            # 只在「跳变」时重启计时器：正常每 100ms 一次的位置更新不会把它
+            # 无限推迟，也就不会每 100ms 写一次 JSON。
+            self._seek_timer.start()
 
     def _on_state_changed(self, state: str) -> None:
         if state == "playing":
