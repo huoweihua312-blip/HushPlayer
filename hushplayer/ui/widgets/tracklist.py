@@ -726,6 +726,7 @@ class TrackTable(QTableView):
         self.bar_phase = 0.0
         self.favorite_hover_row = -1
         self._hover_row = -1
+        self._covers_connected = False
         self.selectionModel().selectionChanged.connect(lambda *_: self.viewport().update())
         self._reorder = False
         self._anim = QTimer(self)
@@ -864,6 +865,35 @@ class TrackTable(QTableView):
 
     def refresh_covers(self) -> None:
         self.viewport().update()
+
+    def _connect_covers(self) -> None:
+        """Repaint a row as soon as its cover finishes downloading.
+
+        Without this the delegate paints the 音符 placeholder on the first
+        frame and only the *next* incidental repaint (scroll, hover, the
+        playing equaliser) picks the loaded pixmap up — which is why covers
+        used to "pop in later" instead of appearing with the list.
+        """
+        if self._covers_connected:
+            return
+        try:
+            covers = ctx().covers
+        except Exception:
+            return
+        if covers is None:
+            return
+        covers.ready.connect(self._on_cover_ready)
+        self._covers_connected = True
+
+    def _on_cover_ready(self, track_id: str) -> None:
+        row = self._model.row_of(track_id)
+        if row < 0:
+            return
+        rect = self.visualRect(self._model.index(row, 0))
+        if not rect.isValid():
+            return
+        rect.setRight(self.viewport().width())
+        self.viewport().update(rect)
 
     def _update_anim(self) -> None:
         playing = self._model.playing and bool(self._model.current_id)
@@ -1016,6 +1046,7 @@ class TrackTable(QTableView):
 
     # ------------------------------------------------------------------ paint
     def paintEvent(self, event) -> None:  # noqa: N802
+        self._connect_covers()
         self._paint_row_bands()
         super().paintEvent(event)
         if self._model.rowCount() == 0:

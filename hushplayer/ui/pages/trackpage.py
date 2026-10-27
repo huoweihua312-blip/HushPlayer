@@ -59,6 +59,8 @@ class TrackListPage(Page):
     title = "歌曲"
     subtitle = ""
     show_count = True
+    #: 列表初始排序键；空串表示沿用数据层顺序（我喜欢按收藏时间、最近播放按播放时间）。
+    default_sort = ""
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -124,7 +126,7 @@ class TrackListPage(Page):
             holder.setLayout(actions)
             self.header.add_action(holder)
 
-        self._sort_key = "title"
+        self._sort_key = self.default_sort
         self._sort_asc = True
 
         library = ctx().library

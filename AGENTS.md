@@ -130,7 +130,7 @@ HushPlayer-<ver>-setup.exe /VERYSILENT /LOG=...
 
 ## 7. 验证纪律（每个改动都要过）
 
-1. `pytest -q`（当前基线 **397 passed**；只增不减，禁止放宽断言）。
+1. `pytest -q`（当前基线 **407 passed**；只增不减，禁止放宽断言）。
 2. 至少一个真实 GUI/离屏截图（`tools/probe_*.py` → `artifacts/qa/...`），不要只凭代码想象。
 3. 涉及打包：`packaging/build.ps1` + `tools/verify_package.ps1`。
 4. 涉及安装包：静默安装 → 版本/快捷方式/注册表 → 卸载 → 残留检查（见 6.1）。
@@ -336,3 +336,18 @@ HushPlayer-<ver>-setup.exe /VERYSILENT /LOG=...
 - `packaging/build.ps1` 里的检查是硬门槛：产物含个人目录或状态文件会删除产物并中止；Git 钩子只是便利，可被 `--no-verify` 跳过。
 - 不要重写历史 / 强推 / 删远程分支：历史里公开过的 `MUSIC_U` 需用户确认后单独处理（见 `docs/SECURITY.md` §5）。
 - 1.3.23 变更：新增 `hushplayer/online/source_migration.py`、`tools/security_scan.py`、`tools/security_allowlist.json`、`docs/SECURITY.md`、`tests/test_privacy_isolation.py`，`.githooks/pre-push`；基线 **397 passed**。
+## 新增歌曲置顶（1.3.24，2026-10-27）
+
+- 「我喜欢」与歌单的列表默认**不按标题排序**：`TrackListPage.default_sort = ""` 表示沿用数据层顺序，`SongsPage.default_sort = "title"` 单独保留歌曲页的标题排序。
+- `TrackRepository.favorites()` 固定 `ORDER BY favorited_at DESC, rowid DESC`；收藏时间相同用插入顺序兜底。
+- `PlaylistRepository.add_tracks()` 把新歌插到最前面：先 `UPDATE playlist_items SET position = position + N`，再把新条目写到 `0..N-1`，保证批次内顺序；重复添加返回 0 且不打乱现有顺序。
+- 「我喜欢」的系统歌单与 `favorites()` 共用同一套顺序，两个入口看到的第一行必须一致。
+- 回归：`tests/test_collection_order.py`；界面探针 `tools/probe_r97_order.py`（截图 `artifacts/qa/r97/`）。基线 **403 passed**。
+- 1.3.24 变更：`hushplayer/ui/pages/trackpage.py` 新增 `default_sort` 类属性；`hushplayer/ui/pages/songs.py` 覆盖为 `"title"`；`hushplayer/store/repository.py` 调整 `favorites()` 与 `add_tracks()`。
+## 列表封面与播放按钮（1.3.25，2026-10-27）
+
+- 封面是 `CoverProvider` 在线程池里下载的：任何「显示封面」的列表都必须连 `covers.ready`，命中后只重绘那一行（`TrackTable._on_cover_ready`），不要指望滚动/悬停顺带刷新。
+- `covers.ready(track_id)` 的 `track_id` 是曲目 id，不是缓存 key；行号要用 `TrackTableModel.row_of()` 现算，别缓存行号。
+- 播放/暂停按钮不再手绘图形，统一 `icons.draw(painter, "play"|"pause", ...)`；图标集字形是 24 网格、自带视觉重心的，手绘三角形在 40px 圆钮上怎么补位移都容易偏。
+- 用图标字形时目标矩形要留出字形自带的 padding（当前 `icon_size = 圆钮宽 * 0.80`），否则看起来偏小；`play` 再回拉约 5.5% 让左右留白相等。
+- 回归：`tests/test_covers_and_play_button.py`（4 项，含白像素重心居中断言）；探针 `tools/probe_r98_covers_button.py`；基线 **407 passed**。

@@ -396,31 +396,22 @@ class PlayButton(QAbstractButton):
         painter.setPen(Qt.NoPen)
         painter.setBrush(fill)
         painter.drawEllipse(rect)
-        icon_size = rect.width() * 0.46
+        # 播放/暂停直接用图标集里同一套 24 网格字形：它本身按视觉重心设计，
+        # 手绘三角形在 40px 上无论怎么补位移都容易显得偏右，切换时大小也会跳。
+        icon_size = rect.width() * 0.80
         target = QRectF(0, 0, icon_size, icon_size)
         target.moveCenter(rect.center())
-        if self._playing:
-            bar_width = icon_size * 0.20
-            gap = icon_size * 0.16
-            height = icon_size * 0.92
-            left = QRectF(rect.center().x() - gap / 2 - bar_width, rect.center().y() - height / 2, bar_width, height)
-            right = QRectF(rect.center().x() + gap / 2, rect.center().y() - height / 2, bar_width, height)
-            painter.setBrush(qcolor(palette.accent_text))
-            painter.drawRoundedRect(left, 1.4, 1.4)
-            painter.drawRoundedRect(right, 1.4, 1.4)
-        else:
-            # Optically centre the triangle: its centroid sits left of the
-            # bounding box, so the shape is nudged right instead of shrunk
-            # towards the left (which made it look off-centre).
-            target = QRectF(target)
-            target.translate(icon_size * 0.07, 0)
-            path = QPainterPath()
-            path.moveTo(target.left(), target.top())
-            path.lineTo(target.right(), target.center().y())
-            path.lineTo(target.left(), target.bottom())
-            path.closeSubpath()
-            painter.setBrush(qcolor(palette.accent_text))
-            painter.drawPath(path)
+        if not self._playing:
+            # 图标集里的三角形本身带 7% 的视觉补偿（包围盒偏右），40px 圆钮上
+            # 会明显偏右；这里回拉一点，让左右留白基本相等。
+            target.translate(-icon_size * 0.055, 0)
+        painter.setPen(Qt.NoPen)
+        icons.draw(
+            painter,
+            "pause" if self._playing else "play",
+            target,
+            qcolor(palette.accent_text),
+        )
         painter.end()
 
 

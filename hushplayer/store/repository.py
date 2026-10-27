@@ -603,7 +603,11 @@ class TrackRepository:
             )
 
     def favorites(self, limit: int = -1, offset: int = 0) -> list[Track]:
-        sql = f"SELECT {_TRACK_COLUMNS} FROM tracks WHERE favorite=1 ORDER BY favorited_at DESC"
+        # 最近收藏的排最前面；同一时刻收藏的多首用插入顺序倒序兜底。
+        sql = (
+            f"SELECT {_TRACK_COLUMNS} FROM tracks WHERE favorite=1 "
+            "ORDER BY favorited_at DESC, rowid DESC"
+        )
         if limit > 0:
             sql += f" LIMIT {int(limit)} OFFSET {int(offset)}"
         rows = self.db.connection().execute(sql).fetchall()
@@ -719,28 +723,36 @@ class PlaylistRepository:
             tx.execute("DELETE FROM playlists WHERE id=? AND system=0", (playlist_id,))
 
     def add_tracks(self, playlist_id: int, track_ids: Sequence[str]) -> int:
+        """把歌曲加入歌单；新加入的歌曲排在最前面（最近的在最顶层）。"""
         if not track_ids:
             return 0
         now = time.time()
         added = 0
         with self.db.transaction() as tx:
-            row = tx.execute(
-                "SELECT COALESCE(MAX(position), -1) FROM playlist_items WHERE playlist_id=?", (playlist_id,)
-            ).fetchone()
-            position = int(row[0]) + 1
+            existing = {
+                row["track_id"]
+                for row in tx.execute(
+                    "SELECT track_id FROM playlist_items WHERE playlist_id=?", (playlist_id,)
+                ).fetchall()
+            }
+            fresh: list[str] = []
             for track_id in track_ids:
-                exists = tx.execute(
-                    "SELECT 1 FROM playlist_items WHERE playlist_id=? AND track_id=?", (playlist_id, track_id)
-                ).fetchone()
-                if exists:
+                if track_id in existing or track_id in fresh:
                     continue
+                fresh.append(track_id)
+            if fresh:
+                # 先把已有条目整体后移，再把新条目写到 0..n-1，保证批次内的顺序不变。
                 tx.execute(
-                    "INSERT INTO playlist_items(playlist_id, track_id, position, added_at) VALUES(?,?,?,?)",
-                    (playlist_id, track_id, position, now),
+                    "UPDATE playlist_items SET position = position + ? WHERE playlist_id=?",
+                    (len(fresh), playlist_id),
                 )
-                position += 1
-                added += 1
-            tx.execute("UPDATE playlists SET updated_at=? WHERE id=?", (now, playlist_id))
+                for position, track_id in enumerate(fresh):
+                    tx.execute(
+                        "INSERT INTO playlist_items(playlist_id, track_id, position, added_at) VALUES(?,?,?,?)",
+                        (playlist_id, track_id, position, now),
+                    )
+                tx.execute("UPDATE playlists SET updated_at=? WHERE id=?", (now, playlist_id))
+                added = len(fresh)
         return added
 
     def remove_tracks(self, playlist_id: int, track_ids: Sequence[str]) -> int:

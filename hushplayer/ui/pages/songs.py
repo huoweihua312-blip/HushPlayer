@@ -15,6 +15,7 @@ from ..widgets.menu import themed_menu
 class SongsPage(TrackListPage):
     route = "songs"
     title = "歌曲"
+    default_sort = "title"
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)

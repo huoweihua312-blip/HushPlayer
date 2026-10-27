@@ -1,4 +1,21 @@
 # 更新日志
+## 1.3.25 — 2026-10-27
+
+- 歌曲列表的封面改为「下载完成即刻刷新」：`TrackTable` 监听 `covers.ready`，只重绘命中的那一行，不再需要滚动/悬停才显示封面。
+- 播放按钮不再手绘三角形/双竖条，统一使用图标集里同一套 24 网格的 `play`/`pause` 字形，切换时大小一致、三角左右留白居中。
+- 回归：`tests/test_covers_and_play_button.py`（4 项）；界面探针 `tools/probe_r98_covers_button.py`（截图 `artifacts/qa/r98/`）。
+
+全量 `pytest`：**407 passed**（基线 403）。
+
+## 1.3.24 — 2026-10-27
+
+- 新增歌曲置顶：「我喜欢」和普通歌单里，刚添加的歌曲固定出现在第一行（顶部）。
+- 修复「我喜欢」被默认按标题排序的问题：页面默认使用数据层顺序（按收藏时间倒序），表头点击排序仍可用。
+- 修复「最近播放」同样被默认标题排序覆盖的问题，恢复按播放时间倒序。
+- 歌单新增歌曲改为整体后移已有条目、新条目写入 0..n-1，批次内顺序保持不变，重复添加不会打乱现有顺序。
+- 「我喜欢」对应的系统歌单与新收藏顺序保持一致；取消收藏后重新收藏会重新回到最顶部。
+- 新增回归测试 `tests/test_collection_order.py`（6 项），全量 `pytest`：**403 passed**。
+- 真实界面探针：`tools/probe_r97_order.py` → `artifacts/qa/r97/favorites.png`、`artifacts/qa/r97/playlist.png`。
 ## 1.3.23 — 2026-10-27
 
 - 个人音源与公开仓库隔离：`source_runtime/sources`、`qq.js`、`source_registry.json` 停止跟踪（本地文件保留），`.gitignore` 覆盖数据库、设置、会话、缓存、日志与凭据。
