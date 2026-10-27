@@ -220,4 +220,4 @@ def adopt_track(self, track: Track) -> None:
 
 ## 9. 验收后的发布清单
 
-版本号 `hushplayer/version.py` → `CHANGELOG.md` 顶部新增小节 → `AGENTS.md` §9（PowerShell 写）→ `pytest -q` → `packaging/build.ps1` → `packaging/verify_package.ps1`（记录 window/instances/alive/`启动 HushPlayer x.y.z`）→ 复制 zip 到 `F:\HushPlayerBuild\out` → 计算 SHA256 → 提交并只推 `master:main`、`master:reimagined`。
+版本号 `hushplayer/version.py` → `CHANGELOG.md` 顶部新增小节 → `AGENTS.md` §9（PowerShell 写）→ `pytest -q` → `packaging/build.ps1` → `packaging/verify_package.ps1`（记录 window/instances/alive/`启动 HushPlayer x.y.z`）→ 复制 zip 到 `F:\HushPlayerBuild\out` → 计算 SHA256 → 提交并推 `main`（`git push origin main`；`main` 是唯一长期开发分支）。

@@ -72,8 +72,8 @@
   3. 产物 `F:\HushPlayerBuild\out\HushPlayer-<ver>-setup.exe`。
 - 验收脚本：`pwsh -File tools\verify_package.ps1`（要求 `window=…`、`instances=1`、`alive_after_close=False`）。
 - 版本号：`hushplayer/version.py` + 根 `CHANGELOG.md`（**正文在根目录**，`docs/CHANGELOG.md` 只是指针）+ `docs/INSTALL.md` 的版本与哈希。
-- Git：本地 `master`；推送只推 `master:main` 与 `master:reimagined` 到 `huoweihua312-blip/HushPlayer`。
-  **不要动旧标签、不要 force push 其他分支**；`main` 的历史已切到本项目（旧项目保存在 `legacy-main` 分支）。
+- Git：唯一长期开发分支是 `main`（本地与远端同名，`git push origin main`）；历史分支 `legacy-main`、`design/ui-v2-real-playback`、`codex/backup-20260917-214942` 只读保留。
+  **不要 force push、不要重写历史、不要删 Tag/Release**；推送前由 `.githooks/pre-push` 跑 `tools/security_scan.py --tracked`。
 
 ## 6. 已解决问题索引（先看这里，别重复造轮子）
 
@@ -351,3 +351,10 @@ HushPlayer-<ver>-setup.exe /VERYSILENT /LOG=...
 - 播放/暂停按钮不再手绘图形，统一 `icons.draw(painter, "play"|"pause", ...)`；图标集字形是 24 网格、自带视觉重心的，手绘三角形在 40px 圆钮上怎么补位移都容易偏。
 - 用图标字形时目标矩形要留出字形自带的 padding（当前 `icon_size = 圆钮宽 * 0.80`），否则看起来偏小；`play` 再回拉约 5.5% 让左右留白相等。
 - 回归：`tests/test_covers_and_play_button.py`（4 项，含白像素重心居中断言）；探针 `tools/probe_r98_covers_button.py`；基线 **407 passed**。
+## 分支治理（2026-10-27）
+
+- 长期开发分支只有 `main`：本地与远端同名，日常 `git push origin main`；不再维护 `master` / `reimagined` 镜像。
+- 历史分支 `legacy-main`、`design/ui-v2-real-playback`、`codex/backup-20260917-214942` 只读保留，不要修改或删除。
+- 远端兜底：`.github/workflows/privacy-scan.yml` 在 push / PR 到 `main` 时跑 `tools/security_scan.py --tracked`（最小权限、无密钥）；
+  它在推送之后运行，**不能替代**本地 pre-commit / pre-push / 构建前的强制扫描。
+- 分支治理的硬约束：不 force push、不重写历史、不删 Tag/Release、不删远端分支（除经用户明确授权）。

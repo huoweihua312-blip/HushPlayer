@@ -1,0 +1,44 @@
+name: privacy-scan
+
+# 远端兜底检查：只读扫描仓库跟踪的文件，防止个人音源插件、Cookie、数据库、
+# 用户配置等私人数据被推到公开仓库。
+#
+# 注意：本工作流在 push 之后才运行，不能替代本地推送前检查
+# （`.githooks/pre-commit`、`.githooks/pre-push` 与 `packaging/build.ps1` 的强制扫描）。
+# 发布包内容由本地 `tools/security_scan.py --path <dist> --release` 与 `--zip` 把关。
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+# 最小权限：只读仓库内容，不写入、不使用任何密钥。
+permissions:
+  contents: read
+
+concurrency:
+  group: privacy-scan-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  scan:
+    name: 敏感信息与个人文件扫描
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Scan tracked files
+        run: |
+          python tools/security_scan.py --tracked \
+            --allowlist tools/security_allowlist.json
